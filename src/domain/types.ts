@@ -93,6 +93,15 @@ export interface IntegrationStatus {
 export interface WorkflowRun {
   requestId: string;
   status: 'completed';
+  summary: {
+    outcome: 'completed' | 'partial' | 'failed' | 'review' | 'no_new_candidates' | 'unconfirmed';
+    message: string;
+    inserted?: number;
+    updated?: number;
+    failed?: number;
+    review?: number;
+    executionId?: string;
+  };
   result: unknown;
   completedAt: string;
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   ArrowDownToLine,
   ArrowRight,
@@ -25,6 +26,7 @@ import { useWorkspace } from '../app/WorkspaceProvider';
 import { Badge, ExternalLink, SectionTitle } from '../components/ui';
 import { workflowStages } from '../data/workflow';
 import { n8nApi, WORKFLOW_URL } from '../services/n8n';
+import type { LocationOptions } from '../services/n8n';
 import type { IntegrationStatus, WorkflowInput, WorkflowRun } from '../domain/types';
 
 const stageIcons = [Settings2, Search, FileText, Sparkles, Database];
@@ -36,12 +38,23 @@ const defaultInput: WorkflowInput = {
   customer_types: ['installer', 'distributor'],
   search_query: 'outdoor zip screens Miami Florida USA',
 };
+const basicQuery = (input: WorkflowInput) =>
+  [input.product.trim(), ...input.customer_types, input.city, input.region, input.country]
+    .filter(Boolean)
+    .join(' ');
 export function Automation() {
   const { notify } = useWorkspace();
   const [status, setStatus] = useState<IntegrationStatus | null>(null);
   const [statusError, setStatusError] = useState('');
   const [input, setInput] = useState<WorkflowInput>(defaultInput);
   const [running, setRunning] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [queryError, setQueryError] = useState('');
+  const [queryGenerated, setQueryGenerated] = useState(false);
+  const [locations, setLocations] = useState<LocationOptions | null>(null);
+  const [locationsLoading, setLocationsLoading] = useState(true);
+  const [locationsError, setLocationsError] = useState('');
+  const [locationAttempt, setLocationAttempt] = useState(0);
   const [result, setResult] = useState<WorkflowRun | null>(null);
   const [error, setError] = useState('');
   const [tab, setTab] = useState('发起任务');
@@ -61,23 +74,64 @@ export function Automation() {
   useEffect(() => {
     loadStatus();
   }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    setLocationsLoading(true);
+    setLocationsError('');
+    n8nApi
+      .locations(input.country, input.region, controller.signal)
+      .then((data) => {
+        if (!controller.signal.aborted) setLocations(data);
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) setLocationsError(error.message || '地区选项读取失败');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLocationsLoading(false);
+      });
+    return () => controller.abort();
+  }, [input.country, input.region, locationAttempt]);
   const activeStage = workflowStages.find((item) => item.id === stage)!;
-  const patch = (key: keyof WorkflowInput, value: string) =>
-    setInput((current) => ({ ...current, [key]: value }));
-  const searchQuery = () =>
-    setInput((current) => ({
-      ...current,
-      search_query: `${current.product} ${current.city} ${current.region} ${current.country === 'United States' ? 'USA' : 'Australia'}`,
-    }));
+  const updateTarget = (changes: Partial<WorkflowInput>) => {
+    setInput((current) => {
+      const next = { ...current, ...changes };
+      return { ...next, search_query: basicQuery(next) };
+    });
+    setQueryGenerated(false);
+    setQueryError('');
+  };
+  const patch = (key: keyof WorkflowInput, value: string) => {
+    if (key === 'search_query') {
+      setInput((current) => ({ ...current, search_query: value }));
+      setQueryGenerated(false);
+    } else updateTarget({ [key]: value });
+  };
+  async function searchQuery() {
+    if (generating || running) return;
+    setGenerating(true);
+    setQueryError('');
+    setQueryGenerated(false);
+    try {
+      const response = await n8nApi.searchQuery(input);
+      setInput((current) => ({ ...current, search_query: response.search_query }));
+      setQueryGenerated(true);
+      notify('DeepSeek 已生成搜索词，可编辑后运行');
+    } catch (error) {
+      setQueryError(error instanceof Error ? error.message : '搜索词生成失败，请稍后重试');
+    } finally {
+      setGenerating(false);
+    }
+  }
   async function run() {
-    if (running || !status?.configured) return;
+    if (running || generating || !status?.configured) return;
     setRunning(true);
     setError('');
     setResult(null);
     try {
       const response = await n8nApi.run(input, crypto.randomUUID());
       setResult(response);
-      notify('已收到 n8n 工作流的真实返回结果');
+      setTab('调用结果');
+      notify(response.summary.message);
     } catch (error) {
       setError(error instanceof Error ? error.message : '调用失败，请检查服务端和 n8n 执行记录');
     } finally {
@@ -206,20 +260,18 @@ export function Automation() {
                   </div>
                   <Badge>真实 API</Badge>
                 </div>
-                <div className="form-grid">
+                <fieldset className="form-grid target-fields" disabled={running || generating}>
                   <label>
                     目标国家
                     <select
                       aria-label="任务国家"
                       value={input.country}
                       onChange={(event) => {
-                        setInput((current) => ({
-                          ...current,
+                        updateTarget({
                           country: event.target.value,
-                          region:
-                            event.target.value === 'Australia' ? 'New South Wales' : 'Florida',
-                          city: event.target.value === 'Australia' ? 'Sydney' : 'Miami',
-                        }));
+                          region: '',
+                          city: '',
+                        });
                       }}
                     >
                       <option value="United States">🇺🇸 美国 · United States</option>
@@ -227,22 +279,43 @@ export function Automation() {
                     </select>
                   </label>
                   <label>
-                    州 / 地区
-                    <input
-                      required
-                      maxLength={100}
+                    州 / 地区（可选）
+                    <select
+                      aria-label="州 / 地区"
                       value={input.region}
-                      onChange={(event) => patch('region', event.target.value)}
-                    />
+                      disabled={locationsLoading || Boolean(locationsError)}
+                      onChange={(event) => updateTarget({ region: event.target.value, city: '' })}
+                    >
+                      <option value="">全部州 / 地区 · 全国范围</option>
+                      {(locations?.country === input.country ? locations.regions : []).map(
+                        (region) => (
+                          <option key={region.code} value={region.name}>
+                            {region.name} · {region.code}
+                          </option>
+                        ),
+                      )}
+                    </select>
                   </label>
                   <label>
-                    城市
-                    <input
-                      required
-                      maxLength={100}
+                    城市（可选）
+                    <select
+                      aria-label="城市"
                       value={input.city}
+                      disabled={!input.region || locationsLoading || Boolean(locationsError)}
                       onChange={(event) => patch('city', event.target.value)}
-                    />
+                    >
+                      <option value="">
+                        {!input.region ? '请先选择州 / 地区' : '全部城市 · 全州范围'}
+                      </option>
+                      {(locations?.country === input.country && locations.region === input.region
+                        ? locations.cities
+                        : []
+                      ).map((city) => (
+                        <option key={city} value={city}>
+                          {city}
+                        </option>
+                      ))}
+                    </select>
                   </label>
                   <label>
                     目标产品
@@ -269,24 +342,51 @@ export function Automation() {
                           type="checkbox"
                           checked={input.customer_types.includes(item.id)}
                           onChange={(event) =>
-                            setInput((current) => ({
-                              ...current,
+                            updateTarget({
                               customer_types: event.target.checked
-                                ? [...current.customer_types, item.id]
-                                : current.customer_types.filter((id) => id !== item.id),
-                            }))
+                                ? [...input.customer_types, item.id]
+                                : input.customer_types.filter((id) => id !== item.id),
+                            })
                           }
                         />
                         {item.name}
                       </label>
                     ))}
                   </fieldset>
+                  <div className="search-scope span-2" aria-live="polite">
+                    <Globe2 size={15} />
+                    <span>
+                      搜索范围：
+                      {input.city
+                        ? `${input.city} · ${input.region}`
+                        : input.region
+                          ? `${input.region} 全州 / 全地区`
+                          : `${input.country === 'United States' ? '美国' : '澳大利亚'}全国`}
+                    </span>
+                    {locationsLoading && <small>正在读取地区选项…</small>}
+                  </div>
                   <label className="span-2">
                     <span className="label-with-action">
                       搜索词
-                      <button type="button" aria-label="按当前条件组合搜索词" onClick={searchQuery}>
-                        <Sparkles size={12} />
-                        按当前条件组合
+                      <button
+                        type="button"
+                        aria-label="用 DeepSeek 生成搜索词"
+                        onClick={() => void searchQuery()}
+                        disabled={
+                          generating ||
+                          running ||
+                          !input.product.trim() ||
+                          !input.customer_types.length ||
+                          locationsLoading ||
+                          Boolean(locationsError)
+                        }
+                      >
+                        {generating ? (
+                          <LoaderCircle className="spin" size={12} />
+                        ) : (
+                          <Sparkles size={12} />
+                        )}
+                        {generating ? 'DeepSeek 正在生成…' : 'DeepSeek 生成搜索词'}
                       </button>
                     </span>
                     <textarea
@@ -297,8 +397,30 @@ export function Automation() {
                       value={input.search_query}
                       onChange={(event) => patch('search_query', event.target.value)}
                     />
+                    <small className="query-help" aria-live="polite">
+                      {queryGenerated
+                        ? 'DeepSeek 已生成 · 可继续编辑'
+                        : '按当前产品、客群与地理范围生成，可编辑后运行。'}
+                    </small>
                   </label>
-                </div>
+                </fieldset>
+                {locationsError && (
+                  <div className="error-message" role="alert">
+                    {locationsError}{' '}
+                    <button
+                      className="btn subtle"
+                      type="button"
+                      onClick={() => setLocationAttempt((value) => value + 1)}
+                    >
+                      重新读取地区
+                    </button>
+                  </div>
+                )}
+                {queryError && (
+                  <div className="error-message" role="alert">
+                    {queryError}
+                  </div>
+                )}
                 <div className="request-preview">
                   <span>
                     <Code2 size={14} />
@@ -348,7 +470,14 @@ export function Automation() {
                   <button
                     className="btn primary"
                     type="submit"
-                    disabled={!status?.configured || running || input.customer_types.length === 0}
+                    disabled={
+                      !status?.configured ||
+                      running ||
+                      generating ||
+                      locationsLoading ||
+                      Boolean(locationsError) ||
+                      input.customer_types.length === 0
+                    }
                   >
                     {running ? <LoaderCircle className="spin" size={15} /> : <Play size={15} />}{' '}
                     {running ? 'n8n 正在执行…' : '运行真实工作流'}
@@ -360,7 +489,19 @@ export function Automation() {
                 {result ? (
                   <>
                     <div className="result-title">
-                      <Badge tone="green">来自真实 n8n Webhook</Badge>
+                      <Badge tone={result.summary.outcome === 'completed' ? 'green' : 'orange'}>
+                        {result.summary.outcome === 'completed'
+                          ? '飞书写入完成'
+                          : result.summary.outcome === 'partial'
+                            ? '部分客户已写入'
+                            : result.summary.outcome === 'no_new_candidates'
+                              ? '没有新的候选客户'
+                              : result.summary.outcome === 'review'
+                                ? '需要人工查重'
+                                : result.summary.outcome === 'failed'
+                                  ? '本次未能完成入库'
+                                  : '写入状态待核实'}
+                      </Badge>
                       <span>{new Date(result.completedAt).toLocaleString('zh-CN')}</span>
                       <button
                         className="btn subtle"
@@ -380,6 +521,30 @@ export function Automation() {
                         <ArrowDownToLine size={14} />
                         导出结果
                       </button>
+                    </div>
+                    <div className="result-summary">
+                      <div>
+                        <strong>{result.summary.message}</strong>
+                        {result.summary.inserted !== undefined && (
+                          <p>
+                            新增 {result.summary.inserted} · 更新 {result.summary.updated} · 失败{' '}
+                            {result.summary.failed} · 待查重 {result.summary.review}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="result-actions">
+                      <Link className="btn secondary" to="/leads?dataset=real">
+                        查看飞书真实客户
+                        <ArrowRight size={14} />
+                      </Link>
+                      {result.summary.executionId && (
+                        <ExternalLink
+                          href={`${WORKFLOW_URL}/executions/${encodeURIComponent(result.summary.executionId)}`}
+                        >
+                          查看本次执行
+                        </ExternalLink>
+                      )}
                     </div>
                     <p className="muted">请求编号：{result.requestId}</p>
                     <pre>{JSON.stringify(result.result, null, 2)}</pre>
