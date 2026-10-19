@@ -5,6 +5,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFeishu } from './feishu.mjs';
 import { discoverBranding } from './branding.mjs';
 import { discoverContacts } from './contacts.mjs';
+import { summarizeRunOutput } from './run-outcome.mjs';
+import { validateTarget, locationOptions } from './search-target.mjs';
+import { generateSearchQuery } from './deepseek.mjs';
 
 class ApiError extends Error {
   constructor(status, message) {
@@ -21,27 +24,14 @@ const types = {
   '.ico': 'image/x-icon',
 };
 export function validateInput(input) {
-  if (!input || typeof input !== 'object' || Array.isArray(input))
-    throw new ApiError(400, '请提交有效的搜索参数');
-  const result = {};
-  for (const key of ['country', 'region', 'city', 'product', 'search_query']) {
-    if (typeof input[key] !== 'string' || !input[key].trim() || input[key].length > 500)
-      throw new ApiError(400, `参数 ${key} 不能为空且不能超过 500 字符`);
-    result[key] = input[key].trim();
-  }
-  if (!['United States', 'Australia'].includes(result.country))
-    throw new ApiError(400, '当前支持美国与澳大利亚');
+  const target = validateTarget(input);
   if (
-    !Array.isArray(input.customer_types) ||
-    input.customer_types.length < 1 ||
-    input.customer_types.length > 5 ||
-    !input.customer_types.every((value) =>
-      ['installer', 'distributor', 'retailer', 'contractor'].includes(value),
-    )
+    typeof input.search_query !== 'string' ||
+    !input.search_query.trim() ||
+    input.search_query.length > 500
   )
-    throw new ApiError(400, '请选择有效客户类型');
-  result.customer_types = [...new Set(input.customer_types)];
-  return result;
+    throw new ApiError(400, '参数 search_query 不能为空且不能超过 500 字符');
+  return { ...target, search_query: input.search_query.trim() };
 }
 async function readJson(request) {
   if (!request.headers['content-type']?.startsWith('application/json'))
@@ -87,6 +77,7 @@ export function createApp({
     return readingLeads;
   };
   let running = 0;
+  let generatingQuery = false;
   let validWebhook = false;
   try {
     const webhook = new URL(env.N8N_WEBHOOK_URL);
@@ -127,6 +118,25 @@ export function createApp({
         if (url.pathname === '/api/health' && request.method === 'GET')
           return json(response, 200, { ok: true });
         const prefix = '/api/v1/integrations/n8n';
+        if (url.pathname === `${prefix}/locations` && request.method === 'GET')
+          return json(
+            response,
+            200,
+            locationOptions(
+              url.searchParams.get('country') || 'United States',
+              url.searchParams.get('region') || '',
+            ),
+          );
+        if (url.pathname === `${prefix}/search-query` && request.method === 'POST') {
+          const target = validateTarget(await readJson(request));
+          if (generatingQuery) throw new ApiError(429, '正在生成搜索词，请稍候');
+          generatingQuery = true;
+          try {
+            return json(response, 200, await generateSearchQuery(target, { env, fetchImpl }));
+          } finally {
+            generatingQuery = false;
+          }
+        }
         if (url.pathname === '/api/v1/leads/real' && request.method === 'GET')
           return json(response, 200, await loadLeads());
         const contactRequest = url.pathname.match(/^\/api\/v1\/leads\/real\/([\w-]+)\/contacts$/);
@@ -234,9 +244,16 @@ export function createApp({
               output?.message === 'Workflow got started'
             )
               throw new ApiError(502, 'Webhook 仅返回了启动确认，请改为等待最后节点完成再响应。');
+            let summary;
+            try {
+              summary = summarizeRunOutput(output);
+            } catch (error) {
+              throw new ApiError(502, error.message);
+            }
             const result = {
               requestId,
               status: 'completed',
+              summary,
               result: output,
               completedAt: new Date().toISOString(),
             };

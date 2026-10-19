@@ -1,0 +1,92 @@
+// n8n Code 节点：Run Once for All Items。
+// 只筛选搜索候选；不代表客户已核实或已匹配。
+let config = {};
+try { config = $('配置搜索目标').first().json || {}; } catch (_) {}
+const MAX = 1;
+const known = $('整理已知域名').first().json;
+if (known.existing_customers_checked !== true || !Array.isArray(known.known_domains)) throw new Error('已有客户检查未完成，停止筛选');
+const knownDomains = new Set(known.known_domains);
+const skippedExisting = [];
+const includeSocial = config.include_social !== false && config.include_social !== 'false';
+
+const inputs = $input.all().map((item, index) => ({
+  data: item.json?.body ?? item.json ?? {}, index,
+}));
+const hits = inputs.flatMap(({ data, index }) =>
+  Array.isArray(data.results)
+    ? data.results.map(result => ({ result, index }))
+    : data.url ? [{ result: data, index }] : []
+);
+if (!hits.length) {
+  return [{ json: { found: false, stage: 'search', reason: '没有收到搜索结果，请检查 Tavily Search 输出。' } }];
+}
+
+const socialDomains = ['facebook.com', 'instagram.com', 'linkedin.com', 'youtube.com', 'youtu.be', 'tiktok.com', 'twitter.com', 'x.com', 'pinterest.com', 'reddit.com', 'quora.com'];
+const blockedDomains = ['wikipedia.org', 'abc.net.au', 'smh.com.au', 'news.com.au', 'dailytelegraph.com.au', 'theguardian.com', '9news.com.au', '7news.com.au', 'medium.com', 'alibaba.com', 'made-in-china.com'];
+const blockedBrands = ['seek', 'indeed', 'jora', 'glassdoor', 'careerone', 'adzuna', 'jobsora', 'jooble', 'talent', 'careerjet', 'simplyhired', 'ziprecruiter', 'workforceaustralia', 'hipages', 'oneflare', 'yellowpages', 'truelocal', 'localsearch', 'hotfrog', 'yelp', 'houzz', 'gumtree', 'airtasker', 'serviceseeking', 'startlocal', 'aussieweb', 'dlook', 'brownbook', 'boombusinessdirectory', 'cylex', 'yably', 'bark', 'google', 'bing', 'amazon', 'ebay'];
+const belongs = (host, domain) => host === domain || host.endsWith('.' + domain);
+const seen = new Set();
+const selected = [];
+
+for (const { result: r, index } of hits) {
+  if (!r || typeof r.url !== 'string') continue;
+  const url = r.url.trim();
+  const m = url.match(/^https?:\/\/([^\/?#:]+)(?::\d+)?([^?#]*)(\?[^#]*)?(?:#.*)?$/i);
+  if (!m) continue;
+  const host = m[1].toLowerCase().replace(/^www\./, '');
+  const path = m[2] || '/';
+  if (host === 'localhost' || !host.includes('.') || /^\d+(\.\d+){3}$/.test(host)) continue;
+  const platform = socialDomains.find(domain => belongs(host, domain));
+  if (platform && !includeSocial) continue;
+
+  if (platform) {
+    // 保留具体公开主页、帖子、群组等；排除平台首页、登录与搜索页。
+    if (path === '/' || /^\/(login|signin|signup|accounts|checkpoint|search|explore|feed|home)(\/|$|\.)/i.test(path)) continue;
+    if (platform === 'linkedin.com' && /^\/jobs(\/|$)/i.test(path)) continue;
+  } else {
+    if (blockedDomains.some(domain => belongs(host, domain))) continue;
+    if (host.split('.').some(label => blockedBrands.includes(label))) continue;
+    if (/directory|findglocal|word-of-mouth|superpages/i.test(host)) continue;
+    if (/\/(jobs?|careers?|vacanc[^/]*|employment|news|wiki|directory|listings?)(\/|$)/i.test(path)) continue;
+  }
+
+  // 社媒按具体页面去重；网站按域名去重。
+  // 保留 Facebook profile.php?id=...、YouTube watch?v=... 等身份参数。
+  const params = (m[3] || '').replace(/^\?/, '').split('&').filter(Boolean)
+    .filter(p => !/^(utm_[^=]*|fbclid|gclid|msclkid)=/i.test(p)).sort();
+  const pageKey = platform + path.replace(/\/+$/, '') + (params.length ? '?' + params.join('&') : '');
+  const key = platform ? 'social:' + pageKey : 'website:' + host;
+  if (knownDomains.has(host)) {
+    skippedExisting.push({domain:host,url});
+    continue;
+  }
+  if (seen.has(key)) continue;
+  seen.add(key);
+  selected.push({
+    json: {
+      found: true,
+      source_url: url,
+      source_title: r.title || '',
+      search_snippet: r.content || '',
+      source_kind: platform ? 'public_social' : 'website',
+      source_platform: platform || host,
+      candidate_key: key,
+      verification_status: '待核实',
+      selection_reason: '飞书中尚无此域名，优先调查新公司',
+      skipped_existing_count: skippedExisting.length,
+      skipped_existing: skippedExisting,
+      known_domain_count: knownDomains.size,
+    },
+    pairedItem: { item: index },
+  });
+  if (selected.length >= MAX) break;
+}
+
+return selected.length ? selected : [{ json: {
+  found: false, stage: 'select',
+  reason: skippedExisting.length ? '本次搜索中通过筛选的候选均已在飞书收录，已跳过；未调用正文提取和Dify。可更换搜索词或地区继续发现新公司。' : '没有筛选出可研究的具体网页；已排除招聘、新闻、目录及平台通用页面。',
+  skipped_existing_count: skippedExisting.length,
+  skipped_existing: skippedExisting,
+  known_domain_count: knownDomains.size,
+  checked_urls: hits.map(({ result }) => result?.url).filter(Boolean),
+} }];

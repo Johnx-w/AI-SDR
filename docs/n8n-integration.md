@@ -50,6 +50,25 @@ N8N_WEBHOOK_ENABLED=true
 
 ## 接口链路
 
+### 地区范围与 DeepSeek 搜索词
+
+工作流表单提供“国家 → 州 / 地区 → 城市”联动选择。城市为空时搜索整个选中州；州和城市均为空时搜索整个国家。切换国家会清空州和城市，切换州会清空城市，同时刷新基础搜索词，避免保留旧城市的查询限制。API 同样允许空地区，校验城市必须属于所选州。
+
+“DeepSeek 生成搜索词”通过本地 `POST /api/v1/integrations/n8n/search-query` 调用官方 Chat Completions API，只传产品、目标客群及所选范围。服务端默认使用 `deepseek-flash`，关闭思考模式、要求 JSON 输出。模型只生成产品关键词及其同义词；服务端固定追加所选客户类型和地名，并拒绝模型额外扩展客群。产品同义词和客群分别用括号分组，避免 OR 扩大为不受产品限制的查询。不选城市时不会由服务端补上默认城市。生成失败会保留原搜索词，余额、认证、限流与无效响应分别提示；不会自动重试，也不会自动运行获客或写飞书。
+
+服务端配置：
+
+```dotenv
+DEEPSEEK_API_KEY=你的密钥
+DEEPSEEK_MODEL=deepseek-flash
+```
+
+密钥保存在被忽略的 `.env`，不使用 `VITE_` 前缀，也不返回给浏览器。配置后重启 Node 服务。地区选项来自本地派生数据，通过只读 `/api/v1/integrations/n8n/locations` 返回，来源和许可见 [地理数据说明](geography-data.md)。
+
+API 依据：[DeepSeek 接入说明](https://api-docs.deepseek.com/)、[JSON Output](https://api-docs.deepseek.com/guides/json_mode/)、[Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/)。
+
+n8n“调用Dify Workflow”也已补传 `target_json.city`，未选中的 region / city 转为真正的 JSON null。原“配置搜索目标”使用空字符串默认值及 `??`，能保留网页传入的空范围；Tavily 使用网页最终确认的 search_query。此项只修改 Dify 请求体并发布为版本 `cc23c987-e3c4-42f6-81f1-6061a298b4a7`，原抓取容错、去重、联系方式提取及飞书写入连接保留。
+
 ```text
 浏览器 POST /api/v1/integrations/n8n/runs
   → Node 服务校验六个字段与客户类型
@@ -65,14 +84,24 @@ N8N_WEBHOOK_ENABLED=true
 
 - 第一次真实提交前核对搜索条件，原流程会产生外部 API 请求并按原逻辑写入飞书。
 - 本地同步调用等待上限 110 秒。超时或网络失败不能判断远端是否已完成，应先到 n8n Executions 核对。
-- 当前封装中的 `status: completed` 表示 Webhook 成功返回 JSON，不替代对 `result` 中业务状态和飞书写入结果的核对。
+- `status: completed` 表示 Webhook 已返回有效数据；`summary.outcome` 区分飞书写入完成、部分完成、无新候选、失败、人工查重及待核实。页面根据业务结果展示状态，空数组、空对象或 null 返回 502，并保留幂等保护。
 - 本地幂等记录仅保留到进程重启，最多 500 条；生产需持久化运行记录，n8n 侧也应基于 `request_id` 去重。
 - 长任务建议升级为 202 + 持久化任务 ID + 状态查询／签名回调，避免长期占用 HTTP 连接。
 - 已经在原流程新增 `ShadeFlow API Webhook` 并连接到“配置搜索目标”。后者已经按上述表达式读取请求体，原 Manual Trigger 保留。
 - 2026-10-19，用户亲自填写并保存了 Header Auth 凭证；随后发布了 `ShadeFlow Webhook API v1`。n8n 显示 Workflow published，生产 URL 为 `https://vynox.app.n8n.cloud/webhook/shadeflow-leads-api`。
-- 已使用不带认证头的 POST 请求验证生产入口返回 HTTP 403，证明入口存在且拒绝未认证请求；此检查不会进入业务节点。尚未进行带正确凭证的真实获客执行，因此不宣称 Tavily / Dify / 飞书全链路通过。
+- 已使用不带认证头的 POST 请求验证生产入口返回 HTTP 403；2026-10-19 又完成了带认证的真实全链路执行，详见下方修复记录。
 - 可运行 `node scripts/prepare-n8n-env.mjs` 生成未跟踪的本地 `.env` 与 32 字节随机密钥，脚本不会覆盖已有文件或在日志中显示密钥。
 
 官方依据：[Webhook API 与响应模式](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.webhook/)、[Respond to Webhook](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.respondtowebhook/)。
+
+## 2026-10-19：空结果与抓取容错修复
+
+执行 #122、#124、#125 均在 Tavily Extract 读取 Mirage 的同一页面时失败。原流程只尝试一个未收录候选，“可入库?”的 false 分支没有连接汇总，导致 n8n 执行状态为 success，但网页收到空数组，飞书没有写入。
+
+- 保留现有已收录域名排重和筛选规则；最多选三个新候选，一次 Tavily Extract 批量读取，按候选顺序选择首个有正文的网站研究。每次仍只调用一次 Dify、研究并按原规则入库一家公司。全部抓取失败时返回原因及检查过的 URL，不用搜索摘要代替正文。
+- “可入库?”的 false 分支连接到原“入库汇总”。所有业务结束路径输出 `outcome`、`execution_id`、新增/更新/失败/待人工查重计数、原因、研究结果和明细。HTTP/凭证等导致节点直接报错的情况仍返回上游错误，不伪造业务汇总。
+- 保留原联系方式提取、字段映射、匹配判断及飞书按域名去重写入。原规则会记录不匹配企业的研究结果，不能将写入数量理解为匹配客户数量。
+- 真实执行 #128 使用 United States / Florida / Miami / outdoor zip screens / installer、distributor 条件，首个 Mirage 页面仍抓取失败，随后成功研究 `https://clearviewdoor.com/miami`，飞书新增记录 `reczz28PINSCipyo`，回读确认客户总数从 11 变为 12。ClearView 被 Dify 判定为 `not_matched`，该结论原样保留。验证请求和返回保存在本地忽略文件 `artifacts/automation-repair-live-check.json`。
+- 发布版本：`040e7d7e-8ecc-4edf-8add-350bc915bcc2`。回归覆盖首个抓取失败后采用后续正文、来源对应、全部失败、没有新候选、飞书实际写入计数及空响应不误报成功。
 
 API key 与试用限制：[n8n Public API authentication](https://docs.n8n.io/connect/n8n-api/authentication/)。
