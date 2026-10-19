@@ -1,0 +1,46 @@
+function hostKey(u) {
+  const s = String(u || '').trim();
+  const m = /^https?:\/\/([^\/?#]+)(?:[\/?#]|$)/i.exec(s);
+  if (!m || m[1].includes('@')) return '';
+  const h = m[1].toLowerCase().replace(/:\d+$/, '').replace(/^www\./, '').replace(/\.$/, '');
+  if (!h.includes('.') || h === 'localhost' || /\.(local|internal)$/.test(h) || /^\d+(\.\d+){3}$/.test(h)) return '';
+  return h;
+}
+const results = $('最终结果').all().map(i => i.json).filter(r => r.ok === true);
+const failAll = reason => results.map(r => ({json:{ready:false,action:'failed',website_key:hostKey(r.source_url),source_url:r.source_url,company_name:r.company_name || null,reason}}));
+const tok = $('获取飞书Token').first().json || {};
+const tb = tok.body || tok;
+if ((tok.statusCode && tok.statusCode !== 200) || tb.code !== 0 || !tb.tenant_access_token) return failAll('获取飞书Token失败');
+const fr = $input.first().json || {};
+const fb = fr.body || fr;
+if ((fr.statusCode && fr.statusCode !== 200) || fb.code !== 0) return failAll('读取飞书字段失败：' + (fb.msg || '未知错误'));
+if (fb.data?.has_more) return failAll('字段列表未完整返回，请先核对分页');
+const types = Object.fromEntries((fb.data?.items || []).map(f => [f.field_name, f.type]));
+const required = ['customer_id','客户名称','来源链接','来源渠道','主体类型','国家','客户类型','相关产品','画像JSON','邮箱','电话','匹配状态','首次发现时间'];
+const missing = required.filter(n => !(n in types));
+if (missing.length) return failAll('现有表缺少字段：' + missing.join('、'));
+const cfg = $('配置搜索目标').first().json;
+const ex = $('Tavily Extract').first().json;
+const pages = (ex.body || ex).results || [];
+const text = v => Array.isArray(v) ? v.filter(x=>x != null).join('\n') : String(v ?? '').trim();
+const empty = v => v == null || v === '' || (Array.isArray(v) && !v.length);
+const statusMap = {matched:'匹配',review:'待核实',not_matched:'不匹配'};
+const now = Date.now();
+return results.map(r => {
+  const key = hostKey(r.source_url);
+  if (!key) return {json:{ready:false,action:'failed',source_url:r.source_url,reason:'来源链接不是有效公开网站URL'}};
+  const body = (pages.find(p => hostKey(p.url) === key)?.raw_content) || '';
+  const emails = [...new Set((body.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || []).filter(e => !/\.(png|jpg|jpeg|gif|svg|webp|css|js)$/i.test(e) && !/@(example\.(com|org)|domain\.com)$/i.test(e)))];
+  const phones = [...new Set((body.match(/(?:\+61[\s().-]*[23478](?:[\s().-]*\d){8}|\b0[23478](?:[\s().-]*\d){8}\b|\b1[38]00(?:[\s.-]*\d){6}\b)/g) || []))];
+  const contactEvidence = (values, kind) => values.map(value => {const i=body.indexOf(value); return {kind,value,source_url:r.source_url,quote:i<0?value:body.slice(Math.max(0,i-45),i+value.length+60),status:'公开未验证'};});
+  const target = {country:cfg.target_country || cfg.country || null,region:cfg.target_region || cfg.region || null,city:cfg.target_city || cfg.city || null,product:cfg.target_product || cfg.product || null,customer_type:cfg.target_customer_type || cfg.customer_type || cfg.customer_types || null};
+  const profile = {schema_version:'minimal-demo-20-fields-v1',website_key:key,company_name:r.company_name || null,actual_country:r.actual_country || null,customer_type:r.customer_type || null,products:r.products || [],fit_status:r.fit_status || 'review',match_reason:r.match_reason || '',facts:r.facts || [],task_target:target,latest_research:{at:now,source_url:r.source_url,workflow_run_id:r.workflow_run_id || null,query:cfg.search_query || cfg.query || '',status:'已研究',contact_evidence:[...contactEvidence(emails,'email'),...contactEvidence(phones,'phone')]}};
+  const raw = {'客户名称':r.company_name || '待核实企业','来源链接':r.source_url,'来源渠道':'Tavily公开搜索／企业官网','主体类型':r.company_name?'企业':'待核实','国家':r.actual_country,'客户类型':r.customer_type,'相关产品':r.products,'画像JSON':JSON.stringify(profile),'邮箱':emails,'电话':phones,'匹配状态':statusMap[r.fit_status] || '待核实'};
+  const fields={};
+  for (const [name,value] of Object.entries(raw)) {
+    if (!(name in types) || empty(value)) continue;
+    fields[name] = types[name]===15?{text:String(value),link:String(value)}:types[name]===5?Number(value):types[name]===4?(Array.isArray(value)?value:[value]):text(value);
+  }
+  const cid = 'web_' + key;
+  return {json:{ready:true,website_key:key,source_url:r.source_url,company_name:r.company_name || null,insert_fields:{...fields,customer_id:cid,'首次发现时间':now},update_fields:{...fields},new_customer_id:cid}};
+});
