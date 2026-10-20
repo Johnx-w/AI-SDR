@@ -36,9 +36,9 @@ import { Automation } from '../pages/Automation';
 
 const nav = [
   { path: '/', name: '运营总览', icon: LayoutDashboard },
-  { path: '/automation', name: '自动获客', icon: Workflow },
+  { path: '/automation', name: '获客任务', icon: Zap },
   { path: '/leads', name: '客户库', icon: UsersRound },
-  { path: '/tasks', name: '获客任务', icon: Zap },
+  { path: '/tasks', name: '自动获客', icon: Workflow },
   { path: '/inbox', name: '沟通中心', icon: MessageSquare },
   { path: '/followups', name: '跟进计划', icon: CalendarDays },
   { path: '/materials', name: '产品与资料', icon: FolderOpen },
@@ -248,17 +248,6 @@ export function App() {
             />
           </Routes>
         </main>
-        {location.pathname !== '/automation' && <footer className="page-footer">
-          <span>
-            ShadeFlow <span>·</span> 把每条线索，变成新的可能。
-          </span>
-          <span>
-            <span className="status-dot" />{' '}
-            {location.search.includes('dataset=real')
-              ? '飞书真实客户 · 只读同步'
-              : '演示工作区 · n8n 真实链路保留'}
-          </span>
-        </footer>}
       </div>
       {toast && (
         <div className="toast" role="status">

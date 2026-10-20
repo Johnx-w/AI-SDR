@@ -6,8 +6,6 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  Database,
-  Globe2,
   Plus,
   RefreshCw,
   Search,
@@ -105,7 +103,7 @@ function fromMock(l: Lead): Prospect {
 export function LeadLibrary() {
   const { data, update, notify } = useWorkspace();
   const [params, setParams] = useSearchParams();
-  const real = params.get('dataset') === 'real';
+  const real = true;
   const [remote, setRemote] = useState<{ leads: Prospect[]; syncedAt: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -163,17 +161,6 @@ export function LeadLibrary() {
   const current = Math.min(page, pages);
   const rows = filtered.slice((current - 1) * 8, current * 8);
   const viewed = leads.find((l) => l.id === params.get('lead'));
-  const switchDataset = (mode: string) => {
-    setParams(mode === 'real' ? { dataset: 'real' } : {});
-    setQuery('');
-    setMarket('');
-    setGrade('');
-    setProduct('');
-    setStatus('');
-    setSource('');
-    setPage(1);
-    setTab('客户画像');
-  };
   const open = (id: string) => {
     setParams(real ? { dataset: 'real', lead: id } : { lead: id });
     setTab('客户画像');
@@ -202,7 +189,6 @@ export function LeadLibrary() {
       <PageHeading
         eyebrow="CUSTOMER LIBRARY"
         title="客户库"
-        description="从发现线索到理解客户，把每一次开发建立在清晰的画像之上"
       >
         <button className="btn secondary" disabled={!filtered.length} onClick={download}>
           <ArrowDownToLine size={16} />
@@ -220,43 +206,6 @@ export function LeadLibrary() {
           </button>
         )}
       </PageHeading>
-      <div className="library-mode">
-        <div className="segmented">
-          <button className={!real ? 'active' : ''} onClick={() => switchDataset('mock')}>
-            <UsersIcon />
-            演示客户
-          </button>
-          <button className={real ? 'active' : ''} onClick={() => switchDataset('real')}>
-            <Database size={16} />
-            真实获客
-          </button>
-        </div>
-        <span>
-          {real ? (
-            <>
-              <span className="status-dot" />
-              {remote
-                ? '飞书客户表 · ' +
-                  new Date(remote.syncedAt).toLocaleTimeString('zh-CN', { hour12: false })
-                : '飞书客户表 · 只读'}
-            </>
-          ) : (
-            <>示例数据 · 本地保存</>
-          )}
-        </span>
-      </div>
-      {real && (
-        <div className="real-source-banner">
-          <Database size={21} />
-          <div>
-            <strong>真实获客 · 飞书客户表</strong>
-            <p>读取既有 n8n 获客结果，展示企业信息、主营产品、服务地区与公开联系方式。</p>
-          </div>
-          <Link to="/automation">
-            前往真实获客流程 <ArrowUpRight size={15} />
-          </Link>
-        </div>
-      )}
       {params.has('duplicates') && !real && (
         <div className="info-callout">
           <ShieldCheck size={18} />
@@ -305,10 +254,6 @@ export function LeadLibrary() {
               }}
             />
           </div>
-          <span>
-            <ShieldCheck size={15} />
-            {real ? '真实档案 · 公开联系方式未验证投递' : '客户研究 · 演示档案'}
-          </span>
         </div>
         <div className="library-filters">
           {[
@@ -527,11 +472,6 @@ export function LeadLibrary() {
           </div>
         </footer>
       </section>
-      <p className="page-note">
-        {real
-          ? '主营产品偏好概括官网经营重点，不代表实际采购意向。客户等级由人工维护。'
-          : '演示客户与飞书真实客户分别保存。切换页面不会触发真实搜索或发送。'}
-      </p>
       {viewed && (
         <Modal title={viewed.name} wide onClose={close}>
           <div className="modal-body prospect-detail">
@@ -766,13 +706,6 @@ export function LeadLibrary() {
           </form>
         </Modal>
       )}
-    </>
-  );
-}
-function UsersIcon() {
-  return (
-    <>
-      <Globe2 size={16} />
     </>
   );
 }
