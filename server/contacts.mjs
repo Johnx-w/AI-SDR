@@ -1,5 +1,6 @@
 import { readPublicHtml, websiteUrl } from './branding.mjs';
 import { extractContacts } from './contact-extractor.mjs';
+import { combineWebsiteEvidence } from './website-metadata.mjs';
 
 export async function discoverContacts(lead, { readPage = readPublicHtml } = {}) {
   const initial = websiteUrl(lead.website || (lead.domain ? 'https://' + lead.domain : ''));
@@ -10,6 +11,7 @@ export async function discoverContacts(lead, { readPage = readPublicHtml } = {})
   const checkedUrls = [];
   const failures = [];
   const contacts = [];
+  const pages = [];
   const signal = AbortSignal.timeout(22000);
   for (let page = 0; queue.length && page < 3; ) {
     let url = queue.shift();
@@ -32,6 +34,7 @@ export async function discoverContacts(lead, { readPage = readPublicHtml } = {})
       }
       if (!html) throw new Error('页面未返回可读取的 HTML');
       checkedUrls.push(url.href);
+      pages.push({ url: url.href, content: html });
       contacts.push(
         ...extractContacts({ content: html, sourceUrl: url.href, country: lead.market }),
       );
@@ -65,6 +68,7 @@ export async function discoverContacts(lead, { readPage = readPublicHtml } = {})
     if (!unique.has(key)) unique.set(key, c);
   }
   return {
+    ...combineWebsiteEvidence(pages, lead.market),
     contacts: [...unique.values()],
     checkedUrls,
     failures,

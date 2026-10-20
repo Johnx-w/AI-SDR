@@ -1,3 +1,4 @@
+import { websiteTextExcerpt } from './website-metadata.mjs';
 // Keep n8n Code helpers self-contained: their source is deployed into its sandbox.
 export function improveCandidateSelection(original) {
   if (original.includes('candidate_urls:')) return original;
@@ -38,12 +39,13 @@ export function checkExtractedCandidates(selection, responses) {
   for (const candidate of candidates) {
     const page = pages.find((item) => normalize(item.url) === normalize(candidate.source_url));
     const raw = typeof page?.raw_content === 'string' ? page.raw_content.trim() : '';
-    if (raw) {
+    const excerpt = websiteTextExcerpt(raw);
+    if (excerpt) {
       return {
         has_text: true,
         source_url: candidate.source_url,
         source_title: candidate.source_title,
-        page_text: raw.slice(0, 12000),
+        page_text: excerpt,
         page_text_length: raw.length,
         checked_urls: checkedUrls,
         extract_failures: failedPages,
@@ -114,7 +116,7 @@ export function summarizeAcquisition(inputs, research, selection, executionId) {
   };
 }
 
-export const extractCheckCode = `${checkExtractedCandidates.toString()}
+export const extractCheckCode = `${websiteTextExcerpt.toString()}\n${checkExtractedCandidates.toString()}
 return [{json: checkExtractedCandidates($('选择一个独立企业官网').first().json, $input.all().map(i => i.json))}];`;
 
 export const acquisitionSummaryCode = `${summarizeAcquisition.toString()}
