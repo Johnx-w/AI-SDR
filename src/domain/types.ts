@@ -78,9 +78,8 @@ export interface WorkspaceRepository {
 export interface WorkflowInput {
   country: string;
   region: string;
-  city: string;
   product: string;
-  customer_types: string[];
+  acquisition_channel: 'tavily_web';
   search_query: string;
 }
 export interface IntegrationStatus {

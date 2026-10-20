@@ -5,7 +5,7 @@ export const workflowStages = [
     id: 'target',
     title: '定义目标',
     en: 'TARGET',
-    description: '接收国家、州、城市、产品与客户类型',
+    description: '接收国家、州、城市、产品与获客渠道',
     nodes: ['Manual Trigger', 'ShadeFlow API Webhook', '配置搜索目标'],
   },
   {

@@ -5,10 +5,9 @@ import { createApp, validateInput } from '../server/app.mjs';
 const input = {
   country: 'United States',
   region: 'Florida',
-  city: 'Miami',
   product: 'outdoor zip screens',
-  customer_types: ['installer', 'distributor'],
-  search_query: 'outdoor zip screens Miami Florida USA',
+  acquisition_channel: 'tavily_web',
+  search_query: 'outdoor zip screens Florida USA',
 };
 const configured = {
   N8N_BASE_URL: 'https://vynox.app.n8n.cloud',
@@ -31,14 +30,60 @@ const post = (base, body = input, key = 'test-request-001', extra = {}) =>
     headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key, ...extra },
     body: JSON.stringify(body),
   });
-test('入口参数限制市场、字段与客户类型', () => {
+test('入口限制市场和已接入渠道，旧客户类型不参与搜索', () => {
   assert.deepEqual(validateInput(input), input);
   assert.throws(() => validateInput({ ...input, country: 'invalid' }), /支持美国与澳大利亚/);
-  assert.equal(validateInput({ ...input, city: '' }).city, '');
+  assert.equal('city' in validateInput({ ...input, city: 'Miami' }), false);
   assert.equal(validateInput({ ...input, region: '', city: '' }).region, '');
-  assert.throws(() => validateInput({ ...input, region: '' }), /先选择州/);
+  assert.equal(validateInput({ ...input, region: '' }).region, '');
   assert.throws(() => validateInput({ ...input, region: 'New South Wales' }), /该国家/);
-  assert.throws(() => validateInput({ ...input, customer_types: ['unknown'] }), /客户类型/);
+  assert.deepEqual(
+    validateInput({ ...input, customer_types: ['installer', 'distributor'] }),
+    input,
+  );
+  const { acquisition_channel, ...legacy } = input;
+  assert.equal(validateInput(legacy).acquisition_channel, acquisition_channel);
+  for (const channel of [
+    'google_web',
+    'google_maps',
+    'linkedin',
+    'facebook',
+    'instagram',
+    'local_directories',
+  ]) {
+    assert.throws(() => validateInput({ ...input, acquisition_channel: channel }), /渠道尚未接入/);
+  }
+});
+
+test('未接入渠道在运行和生成搜索词入口均被拒绝，不调用上游', async () => {
+  await withApp(
+    {
+      env: configured,
+      fetchImpl: async () => {
+        throw new Error('Unexpected upstream request');
+      },
+    },
+    async (base) => {
+      for (const channel of [
+        'google_web',
+        'google_maps',
+        'linkedin',
+        'facebook',
+        'instagram',
+        'local_directories',
+      ]) {
+        const body = { ...input, acquisition_channel: channel };
+        assert.equal((await post(base, body)).status, 400);
+        const response = await fetch(`${base}/api/v1/integrations/n8n/search-query`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        assert.equal(response.status, 400);
+        assert.match((await response.json()).error, /渠道尚未接入/);
+      }
+    },
+  );
 });
 test('无配置不伪造连接状态或运行成功，不向浏览器泄露凭证', async () => {
   await withApp({ env: {} }, async (base) => {
@@ -71,7 +116,7 @@ test('转发真实字段与认证头，相同幂等键仅调用一次', async ()
         count++;
         assert.equal(url, configured.N8N_WEBHOOK_URL);
         assert.equal(options.headers['X-Shadeflow-Key'], configured.N8N_WEBHOOK_SECRET);
-        assert.equal(JSON.parse(options.body).city, 'Miami');
+        assert.equal('city' in JSON.parse(options.body), false);
         assert.equal(options.redirect, 'error');
         return Response.json({ leads: [{ name: 'fixture' }], written: 1 });
       },
@@ -82,7 +127,7 @@ test('转发真实字段与认证头，相同幂等键仅调用一次', async ()
       assert.equal(first.status, 'completed');
       assert.deepEqual(first, second);
       assert.equal(count, 1);
-      assert.equal((await post(base, { ...input, city: 'Orlando' })).status, 409);
+      assert.equal((await post(base, { ...input, region: 'California' })).status, 409);
       const status = await (await fetch(`${base}/api/v1/integrations/n8n/status`)).text();
       assert.equal(status.includes('test-only-secret'), false);
     },

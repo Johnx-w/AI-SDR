@@ -419,12 +419,6 @@ p {
   color: #8b9878;
   font-size: 9px;
 }
-.nav-dot {
-  height: 5px;
-  width: 5px;
-  border-radius: 50%;
-  background: #769b61;
-}
 .sidebar-market {
   margin: 28px 12px;
   padding-top: 19px;
@@ -482,10 +476,6 @@ p {
   padding: 8px 0 0;
   color: #647a51;
   border-top: 1px solid #dde5d0 !important;
-}
-.sidebar-bottom .nav-item {
-  font-size: 11px;
-  height: 36px;
 }
 .sidebar-footer {
   display: flex;
@@ -564,22 +554,6 @@ p {
   padding: 3px;
   font-size: 9px;
   color: #a2ab97;
-}
-.demo-pill {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 9px;
-  color: #96a084;
-  background: #f4f6ee;
-  padding: 5px 8px;
-  border-radius: 4px;
-}
-.demo-pill span {
-  width: 4px;
-  height: 4px;
-  background: #a3b18d;
-  border-radius: 50%;
 }
 .notification-button {
   position: relative;
@@ -1489,16 +1463,6 @@ main {
   gap: 10px;
   margin-top: 26px;
 }
-.help-content > svg {
-  color: #8ca573;
-  margin-bottom: 20px;
-}
-.help-content p {
-  line-height: 1.9;
-}
-.help-content .muted {
-  margin-top: 23px;
-}
 .empty-state {
   text-align: center;
   padding: 65px 25px;
@@ -2258,8 +2222,8 @@ main {
 }
 .automation-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 265px;
-  gap: 22px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
 }
 .workflow-panel {
   margin-bottom: 22px;
@@ -2850,7 +2814,7 @@ main {
     padding-top: 20px;
   }
   .automation-layout {
-    grid-template-columns: minmax(0, 1fr) 290px;
+    grid-template-columns: minmax(0, 1fr);
   }
   .workflow-stages {
     padding: 30px;
@@ -2949,8 +2913,7 @@ main {
     font-size: 9px;
   }
   .automation-layout {
-    grid-template-columns: minmax(0, 1fr) 230px;
-    gap: 16px;
+    grid-template-columns: minmax(0, 1fr);
   }
   .workflow-stage strong {
     font-size: 9px;
@@ -3139,9 +3102,6 @@ main {
   }
   .topbar-right {
     gap: 10px;
-  }
-  .demo-pill {
-    font-size: 8px;
   }
   .breadcrumb {
     gap: 8px;
