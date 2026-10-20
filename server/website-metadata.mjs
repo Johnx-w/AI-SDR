@@ -86,6 +86,21 @@ export function extractWebsiteMetadata({ content, sourceUrl }) {
   };
   const countryName = (value) => {
     const raw = typeof value === 'object' ? value?.name || value?.['@id'] : value;
+    const code = String(raw || '')
+      .trim()
+      .toUpperCase();
+    if (
+      'DE FR IT ES NL BE CH AT SE NO DK FI IE PT PL CZ GR HU RO UA RU TR AL AD BY BA BG HR CY EE IS XK LV LI LT LU MT MD MC ME MK SM RS SK SI VA BN KH ID LA MY MM PH SG TH TL VN'
+        .split(' ')
+        .includes(code)
+    ) {
+      if (code === 'TR') return 'Turkey';
+      try {
+        return new Intl.DisplayNames(['en'], { type: 'region' }).of(code);
+      } catch {
+        return null;
+      }
+    }
     const countries = {
       US: 'United States',
       USA: 'United States',
@@ -148,28 +163,6 @@ export function extractWebsiteMetadata({ content, sourceUrl }) {
     ) {
       platform = 'LinkedIn';
       url = 'https://www.linkedin.com/' + parts.slice(0, 2).join('/');
-    } else if (
-      host === 'youtube.com' &&
-      (/^@/.test(parts[0] || '') || (/^(channel|c|user)$/.test(parts[0]) && parts[1]))
-    )
-      platform = 'YouTube';
-    else if (host === 'tiktok.com' && /^@/.test(parts[0] || '')) {
-      platform = 'TikTok';
-      url = 'https://www.tiktok.com/' + parts[0];
-    } else if (
-      ['x.com', 'twitter.com'].includes(host) &&
-      parts.length &&
-      !/^(intent|share|search|home|i|hashtag|login)$/i.test(parts[0])
-    ) {
-      platform = 'X';
-      url = 'https://x.com/' + parts[0];
-    } else if (
-      host === 'pinterest.com' &&
-      parts.length &&
-      !/^(pin|search|login|ideas)$/i.test(parts[0])
-    ) {
-      platform = 'Pinterest';
-      url = 'https://www.pinterest.com/' + parts[0];
     } else if (host === 'wa.me' && /^\d{7,15}$/.test(parts[0] || '')) {
       platform = 'WhatsApp';
       url = 'https://wa.me/' + parts[0];
@@ -270,7 +263,7 @@ export function extractWebsiteMetadata({ content, sourceUrl }) {
     addArea(m[1].trim(), 'service_statement', m[1]);
   const postal = (text, method, quote, mapUrl) => {
     for (const m of text.matchAll(
-      /\b(\d{1,6}[A-Z]?\s+[A-Za-z0-9 .#'-]{3,100}),\s*([A-Za-z .'-]{2,45}),\s*(AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)\s*,?\s*(\d{5}(?:-\d{4})?)(?:\s*,?\s*(USA|United States(?: of America)?))?(?=[\s.\])<]|$)/g,
+      /\b(\d{1,6}[A-Z]?[ \t]+[A-Za-z0-9 .#'-]{3,100}),\s*([A-Za-z .'-]{2,45}),\s*(AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)\s*,?\s*(\d{5}(?:-\d{4})?)(?:\s*,?\s*(USA|United States(?: of America)?))?(?=[\s.\])<]|$)/g,
     ))
       addAddress(
         {
@@ -306,7 +299,7 @@ export function extractWebsiteMetadata({ content, sourceUrl }) {
   // Only read lists inside an explicit coverage section; generic site navigation is not coverage evidence.
   for (const heading of html.matchAll(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi)) {
     if (
-      !/^(?:Cities\s+We\s+(?:Serve|Service)|Service\s+Areas?|Areas?\s+We\s+(?:Serve|Service)|Our\s+Service\s+Areas?)\s*:?$/i.test(
+      !/^(?:Cities\s+We\s+(?:Serve|Service)|Service\s+Areas?(?:\s+We\s+Cover)?|Areas?\s+We\s+(?:Serve|Service)|Our\s+Service\s+Areas?|Proudly\s+Serving\s+[A-Za-z .,-]{1,70}(?:For\s+Over\s+\d+\s+Years)?)\s*:?$/i.test(
         plain(heading[2]),
       )
     )
@@ -316,8 +309,11 @@ export function extractWebsiteMetadata({ content, sourceUrl }) {
       heading.index + heading[0].length + 24000,
     );
     const section = tail.split(/<h[1-6]\b/i)[0];
-    const list = /<(ul|ol)\b[^>]*>([\s\S]*?)<\/\1>/i.exec(section)?.[2] || '';
-    for (const item of list.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)) {
+    const list = /<(ul|ol)\b[^>]*>([\s\S]*?)<\/\1>/i.exec(section)?.[2];
+    const items = list
+      ? [...list.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)]
+      : [...section.matchAll(/<a\b[^>]*>([\s\S]*?)<\/a>/gi)];
+    for (const item of items) {
       const name = plain(item[1]);
       if (
         /^[A-Za-zÀ-ž][A-Za-zÀ-ž .,'’&()/-]{0,99}$/.test(name) &&
@@ -363,7 +359,9 @@ export function planWebsitePages(sourceUrl, content = '') {
   if (!base) return [];
   const urls = [base.url, base.origin + '/'];
   const links = [
-    ...String(content).matchAll(/(?:href\s*=\s*["']([^"']+)["']|\[[^\]]*\]\(([^\s)]+)\))/gi),
+    ...String(content)
+      .replace(/<(script|style|svg|noscript)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+      .matchAll(/(?:<a\b[^>]*?\bhref\s*=\s*["']([^"']+)["']|\[[^\]]*\]\(([^\s)]+)\))/gi),
   ];
   for (const m of links) {
     const raw = m[1] || m[2];
@@ -371,8 +369,12 @@ export function planWebsitePages(sourceUrl, content = '') {
     if (
       next &&
       next.domain === base.domain &&
-      /contact|about|联系我们|聯絡/i.test(m[0]) &&
-      !/\.(pdf|jpg|png|zip)$/i.test(next.path)
+      (/contact|about|联系我们|聯絡|service[-_/ ]?areas?|areas[-_/ ](?:we[-_/ ])?(?:serve|service)/i.test(
+        m[0],
+      ) ||
+        /^\/(?:cities|locations)\/?$/i.test(next.path)) &&
+      !/\/(?:wp-content|wp-includes|wp-json)\//i.test(next.path) &&
+      !/\.(pdf|jpe?g|png|gif|webp|svg|ico|zip|css|js|json|xml|woff2?)$/i.test(next.path)
     )
       urls.push(next.url);
   }
@@ -382,7 +384,39 @@ export function planWebsitePages(sourceUrl, content = '') {
     .sort(
       (a, b) => Number(/contact|联系我们|聯絡/i.test(b)) - Number(/contact|联系我们|聯絡/i.test(a)),
     );
-  return [...first, ...extra].slice(0, 3);
+  return [...first, ...extra].slice(0, 5);
+}
+
+export function extractCatalogProducts(content, sourceUrl) {
+  const html = String(content || '').replace(
+    /<(script|style|svg|noscript)\b[^>]*>[\s\S]*?<\/\1>/gi,
+    ' ',
+  );
+  const visible = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
+  if (/\b(?:do not|don't|no longer)\s+(?:install|sell|offer|supply|provide)/i.test(visible))
+    return [];
+  const base = websiteScope(sourceUrl);
+  if (!base) return [];
+  const found = [];
+  const pattern =
+    /^(?:(?:E[ -]?ZIP|Zip[ -]?Track|Ziptrak|Outdoor|Indoor|Motorized|Motorised|Roller|Venetian|Roman|Zebra(?: \(Combi\))?|Cellular|Honeycomb|Panel(?: Glide)?|Vertical|Cassette|Plantation|Wood|Faux Wood|PVC|Aluminum|Aluminium|Bamboo(?: Woven)?|Duo Sheer|Tri Sheer|Uni Vertical|Skylight|Retractable|Folding Arm|Full Cassette|Semi Cassette|Wire Guide|Straight Drop|Pivot Arm|Automatic)(?: [A-Za-z]+){0,2} (?:Blinds?|Shades?|Screens?|Shutters?|Awnings?|Curtains?|Drapes?)|Blinds|Shades|Curtains|Shutters|Awnings|Pergolas|Veri Shades)$/i;
+  for (const m of html.matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+    const link = websiteScope(m[1], sourceUrl);
+    const value = m[2]
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (
+      !link ||
+      link.domain !== base.domain ||
+      /blog|news|guide|privacy|terms|contact|career|cities|service-area|cost/i.test(link.path) ||
+      !pattern.test(value)
+    )
+      continue;
+    found.push({ value, quote: m[0], source_url: sourceUrl, method: 'catalog_link' });
+  }
+  return [...new Map(found.map((f) => [f.value.toLowerCase(), f])).values()].slice(0, 40);
 }
 
 export function combineWebsiteEvidence(pages, country = '') {
@@ -390,13 +424,15 @@ export function combineWebsiteEvidence(pages, country = '') {
     addresses = [],
     contacts = [],
     snippets = [],
-    serviceAreas = [];
+    serviceAreas = [],
+    products = [];
   for (const page of pages) {
     const meta = extractWebsiteMetadata({ content: page.content, sourceUrl: page.url });
     social.push(...meta.social);
     addresses.push(...meta.addresses);
     snippets.push(...meta.snippets);
     serviceAreas.push(...meta.service_areas);
+    products.push(...extractCatalogProducts(page.content, page.url));
     contacts.push(
       ...extractContacts({
         content: page.content,
@@ -409,6 +445,7 @@ export function combineWebsiteEvidence(pages, country = '') {
   const addressRank = (a) => (a.method === 'json_ld' ? 3 : a.method === 'map_address_link' ? 2 : 1);
   return {
     version: 'website-evidence-v4',
+    products: unique(products, (x) => x.value.toLowerCase()),
     social: unique(social, (x) => x.platform + ':' + x.url),
     addresses: unique(
       addresses.sort((a, b) => addressRank(a) - addressRank(b)),
@@ -465,7 +502,7 @@ export function enrichmentFields(profile, evidence, existing = {}) {
       contact_extraction_version: evidence.version,
     },
   };
-  const fields = { 画像JSON: JSON.stringify(next) };
+  const fields = {};
   for (const kind of ['phone', 'email']) {
     const label = kind === 'phone' ? '电话' : '邮箱';
     const merged = mergeLines(
@@ -490,34 +527,23 @@ export function enrichmentFields(profile, evidence, existing = {}) {
     const value = [...normalized.values()].join('\n');
     if (value) fields[label] = value;
   }
-  for (const platform of [
-    'Facebook',
-    'Instagram',
-    'LinkedIn',
-    'YouTube',
-    'TikTok',
-    'X',
-    'Pinterest',
-    'WhatsApp',
-  ]) {
+  for (const platform of ['Facebook', 'Instagram', 'LinkedIn', 'WhatsApp']) {
     const value = mergeLines(
       existing[platform],
       social.filter((x) => x.platform === platform).map((x) => x.url),
     );
     if (value) fields[platform] = value;
   }
-  if (social.length) fields['社媒JSON'] = JSON.stringify(social);
   if (areas.length) {
     fields['服务地区'] = mergeLines(
       existing['服务地区'],
       areas.map((x) => x.name),
     );
-    fields['服务地区JSON'] = JSON.stringify(areas);
   }
   if (address) {
     if (address.country) fields['国家'] = address.country;
-    if (address.region) fields['州'] = address.region;
-    if (address.city) fields['城市'] = address.city;
+    if (address.region || address.city)
+      fields['州 / 城市'] = [address.region, address.city].filter(Boolean).join(' · ');
     fields['详细地址'] = [
       address.street,
       address.city,

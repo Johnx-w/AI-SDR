@@ -37,6 +37,8 @@ interface Prospect {
   city: string;
   address?: string;
   serviceAreas?: string;
+  mainProductPreference?: string;
+  audience?: string;
   social?: { platform: string; url: string; quote: string; source_url: string }[];
   locationEvidence?: {
     name?: string;
@@ -85,7 +87,7 @@ function fromMock(l: Lead): Prospect {
   return {
     ...l,
     domain: l.website.replace(/^https?:\/\//, ''),
-    match: '匹配',
+    match: '',
     phone: '',
     facts: [{ field: '客户研究', value: l.type, quote: l.evidence }],
     contactEvidence: [],
@@ -113,7 +115,6 @@ export function LeadLibrary() {
   const [product, setProduct] = useState('');
   const [status, setStatus] = useState('');
   const [source, setSource] = useState('');
-  const [match, setMatch] = useState('');
   const [page, setPage] = useState(1);
   const [tab, setTab] = useState('客户画像');
   const [adding, setAdding] = useState(false);
@@ -156,7 +157,7 @@ export function LeadLibrary() {
       (!product || l.product === product) &&
       (!status || l.status === status) &&
       (!source || l.source === source) &&
-      (!match || l.match === match),
+      true,
   );
   const pages = Math.max(1, Math.ceil(filtered.length / 8));
   const current = Math.min(page, pages);
@@ -170,7 +171,6 @@ export function LeadLibrary() {
     setProduct('');
     setStatus('');
     setSource('');
-    setMatch('');
     setPage(1);
     setTab('客户画像');
   };
@@ -188,7 +188,7 @@ export function LeadLibrary() {
         产品: l.product,
         评分: l.score ?? '未评分',
         评级: l.grade,
-        匹配: l.match,
+        客户等级: l.grade,
         邮箱: l.email,
         电话: l.phone,
         来源: l.website,
@@ -250,7 +250,7 @@ export function LeadLibrary() {
           <Database size={21} />
           <div>
             <strong>真实获客 · 飞书客户表</strong>
-            <p>读取既有 n8n 获客结果，保留原始匹配结论、官网证据与公开联系方式。</p>
+            <p>读取既有 n8n 获客结果，展示企业信息、主营产品、服务地区与公开联系方式。</p>
           </div>
           <Link to="/automation">
             前往真实获客流程 <ArrowUpRight size={15} />
@@ -270,12 +270,12 @@ export function LeadLibrary() {
         {[
           { name: '全部客户', value: leads.length },
           {
-            name: real ? '匹配客户' : 'A 级客户',
-            value: leads.filter((l) => (real ? l.match === '匹配' : l.grade === 'A')).length,
+            name: 'A 级客户',
+            value: leads.filter((l) => l.grade === 'A').length,
           },
           {
-            name: real ? '待核实' : '跟进中',
-            value: leads.filter((l) => (real ? l.match === '待核实' : l.status === '跟进中'))
+            name: real ? '未评级' : '跟进中',
+            value: leads.filter((l) => (real ? l.grade === '未评级' : l.status === '跟进中'))
               .length,
           },
           { name: '可用邮箱记录', value: leads.filter((l) => l.email).length },
@@ -336,13 +336,16 @@ export function LeadLibrary() {
               set: setStatus,
               options: [...new Set(leads.map((l) => l.status))],
             },
-            {
-              label: '来源',
-              val: source,
-              set: setSource,
-              options: [...new Set(leads.map((l) => l.source))],
-            },
-            { label: '匹配', val: match, set: setMatch, options: ['匹配', '待核实', '不匹配'] },
+            ...(!real
+              ? [
+                  {
+                    label: '来源',
+                    val: source,
+                    set: setSource,
+                    options: [...new Set(leads.map((l) => l.source))],
+                  },
+                ]
+              : []),
           ].map((f) => (
             <select
               aria-label={f.label + '筛选'}
@@ -369,7 +372,6 @@ export function LeadLibrary() {
               setProduct('');
               setStatus('');
               setSource('');
-              setMatch('');
               setQuery('');
               setPage(1);
             }}
@@ -399,7 +401,7 @@ export function LeadLibrary() {
                 <tr>
                   <th>客户／来源</th>
                   <th>市场与客户类型</th>
-                  <th>匹配评分</th>
+                  <th>客户等级</th>
                   <th>证据状态</th>
                   <th>联系状态</th>
                   <th />
@@ -450,7 +452,7 @@ export function LeadLibrary() {
                         </span>
                         <div>
                           <strong>
-                            {l.score === null ? '未评分' : l.score}
+                            {real ? l.grade : l.score === null ? '未评分' : l.score}
                             <small>{l.score === null ? '' : ' / 100'}</small>
                           </strong>
                           {l.score !== null ? (
@@ -458,18 +460,14 @@ export function LeadLibrary() {
                               <i style={{ width: l.score + '%' }} />
                             </div>
                           ) : (
-                            <span className="subtext">原始数据未提供</span>
+                            <span className="subtext">{real ? '人工评级' : '原始数据未提供'}</span>
                           )}
                         </div>
                       </div>
                     </td>
                     <td>
-                      <Badge
-                        tone={
-                          l.match === '匹配' ? 'green' : l.match === '不匹配' ? 'neutral' : 'amber'
-                        }
-                      >
-                        {real ? l.match : '示例证据'}
+                      <Badge tone={l.grade === 'A' ? 'green' : 'neutral'}>
+                        {real ? l.grade : '示例证据'}
                       </Badge>
                       <span className="subtext">
                         {real ? `${l.facts.length} 条官网事实` : '演示画像'}
@@ -531,7 +529,7 @@ export function LeadLibrary() {
       </section>
       <p className="page-note">
         {real
-          ? '匹配只表示产品、市场与客群适配，不代表采购意向。未核实的企业所在地保留为“待核实”。'
+          ? '主营产品偏好概括官网经营重点，不代表实际采购意向。客户等级由人工维护。'
           : '演示客户与飞书真实客户分别保存。切换页面不会触发真实搜索或发送。'}
       </p>
       {viewed && (
@@ -571,9 +569,11 @@ export function LeadLibrary() {
               <>
                 <div className="profile-kv">
                   {[
-                    ['匹配结论', viewed.match],
+                    ['客户等级', viewed.grade],
                     ['客户类型', typeNames[viewed.type] || viewed.type],
                     ['相关产品', viewed.product],
+                    ['主营产品偏好', viewed.mainProductPreference || '尚未分析'],
+                    ['服务客群', viewed.audience || '待核实'],
                     [
                       '企业实际地址',
                       viewed.address ||
@@ -584,7 +584,6 @@ export function LeadLibrary() {
                       '评分',
                       viewed.score === null ? '未评分' : viewed.grade + '级 · ' + viewed.score,
                     ],
-                    ['来源渠道', viewed.source],
                     [
                       '最近研究',
                       viewed.updatedAt
@@ -601,7 +600,7 @@ export function LeadLibrary() {
                 <div className="profile-reason">
                   <Sparkles size={18} />
                   <div>
-                    <h3>匹配判断与研究结论</h3>
+                    <h3>主营产品分析</h3>
                     <p>{viewed.evidence}</p>
                   </div>
                 </div>

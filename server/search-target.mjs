@@ -1,15 +1,18 @@
 import geography from './data/geography.json' with { type: 'json' };
+import { markets, groupedMarkets, canadaRegions } from './markets.mjs';
 
 const invalid = (message) => Object.assign(new Error(message), { status: 400 });
 export function locationOptions(country, region = '') {
-  const regions = geography[country];
-  if (!regions) throw invalid('当前支持美国与澳大利亚');
+  if (!markets.some((m) => m.value === country)) throw invalid('请选择支持的国家 / 市场');
+  const regions = country === 'Canada' ? canadaRegions : geography[country] || [];
   const selected = regions.find((item) => item.name === region);
   if (region && !selected) throw invalid('请选择该国家有效的州 / 地区');
   return {
     country,
     region,
-    regions: regions.map(({ name, code }) => ({ name, code })),
+    regions: regions.map(({ name, code, label }) => ({ name, code, ...(label ? { label } : {}) })),
+    markets,
+    countries: groupedMarkets[country] || [country],
   };
 }
 
@@ -29,5 +32,9 @@ export function validateTarget(input) {
   const channel = input.acquisition_channel ?? 'tavily_web';
   if (channel !== 'tavily_web') throw invalid('该获客渠道尚未接入，当前仅支持 Tavily 网页搜索');
   result.acquisition_channel = channel;
+  const audience = input.audience ?? 'BC';
+  if (!['B', 'C', 'BC'].includes(audience)) throw invalid('客群选项必须是 B、C 或 BC');
+  result.audience = audience;
+  result.market_countries = groupedMarkets[result.country] || [result.country];
   return result;
 }

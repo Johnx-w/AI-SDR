@@ -8,6 +8,7 @@ import { discoverContacts } from './contacts.mjs';
 import { summarizeRunOutput } from './run-outcome.mjs';
 import { validateTarget, locationOptions } from './search-target.mjs';
 import { generateSearchQuery } from './deepseek.mjs';
+import { BatchJobs, validateCount } from './batch-jobs.mjs';
 
 class ApiError extends Error {
   constructor(status, message) {
@@ -78,6 +79,52 @@ export function createApp({
   };
   let running = 0;
   let generatingQuery = false;
+  let batch;
+  const batchCall = async (body) => {
+    const response = await fetchImpl(env.N8N_WEBHOOK_URL, {
+      method: 'POST',
+      redirect: 'error',
+      signal: AbortSignal.timeout(600000),
+      headers: { 'Content-Type': 'application/json', 'X-Shadeflow-Key': env.N8N_WEBHOOK_SECRET },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) throw new Error(`n8n HTTP ${response.status}`);
+    const raw = await response.json();
+    const output = Array.isArray(raw) && raw.length === 1 ? raw[0] : raw;
+    if (!output || typeof output !== 'object') throw new Error('n8n 返回格式异常');
+    return output;
+  };
+  const jobs = () =>
+    (batch ??= new BatchJobs({
+      path: env.BATCH_DB_PATH || ':memory:',
+      discover: (input, search, seen) =>
+        batchCall({
+          ...input,
+          batch_mode: 'discover',
+          search_query: search.query,
+          search_country: search.country,
+          exclude_domains: seen.slice(-150),
+        }),
+      research: async (input, item) => {
+        try {
+          return await batchCall({ ...input, ...item, batch_mode: 'research' });
+        } catch {
+          // A gateway timeout does not cancel n8n. Only query the same operation;
+          // never repeat its paid research or write request.
+          for (let attempt = 0; attempt < 12; attempt++) {
+            const result = await batchCall({
+              batch_mode: 'status',
+              operation_id: item.operation_id,
+            }).catch(() => null);
+            if (result?.settled) return result.output;
+            await new Promise((resolve) => setTimeout(resolve, 10000));
+          }
+          throw new Error('当前企业执行结果尚未确认');
+        }
+      },
+      status: (operation_id) => batchCall({ batch_mode: 'status', operation_id }),
+      readLeads: async () => (await readFeishu({ env, fetchImpl })).leads,
+    }));
   let validWebhook = false;
   try {
     const webhook = new URL(env.N8N_WEBHOOK_URL);
@@ -101,7 +148,7 @@ export function createApp({
     });
     response.end(JSON.stringify(body));
   };
-  return createServer(async (request, response) => {
+  const server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url, 'http://127.0.0.1');
       if (url.pathname.startsWith('/api/')) {
@@ -189,6 +236,32 @@ export function createApp({
               ? 'Webhook 调用参数已配置；尚不代表已通过真实运行验证。'
               : '尚未配置生产 Webhook 与 Header Auth；Codex MCP OAuth 不自动授权本应用。',
           });
+        if (url.pathname === `${prefix}/jobs` || url.pathname.startsWith(`${prefix}/jobs/`)) {
+          if (!configured) throw new ApiError(503, 'n8n Webhook 尚未配置');
+          const suffix = url.pathname.slice(`${prefix}/jobs`.length).split('/').filter(Boolean);
+          const manager = jobs();
+          if (!suffix.length && request.method === 'GET')
+            return json(response, 200, { jobs: manager.list().map((j) => manager.view(j)) });
+          if (!suffix.length && request.method === 'POST') {
+            if (running) throw new ApiError(409, '单次任务正在执行');
+            const body = await readJson(request);
+            const input = {
+              ...validateInput(body),
+              target_count: validateCount(body.target_count),
+            };
+            const job = manager.create(input, request.headers['idempotency-key']);
+            return json(response, 202, manager.view(job));
+          }
+          if (suffix.length === 1 && request.method === 'GET')
+            return json(response, 200, manager.view(manager.get(suffix[0])));
+          if (suffix.length === 2 && request.method === 'POST') {
+            if (suffix[1] === 'stop')
+              return json(response, 200, manager.view(manager.stop(suffix[0])));
+            if (suffix[1] === 'resume')
+              return json(response, 200, manager.view(await manager.resume(suffix[0])));
+          }
+          throw new ApiError(404, '任务接口不存在');
+        }
         if (url.pathname === `${prefix}/runs` && request.method === 'POST') {
           if (!configured)
             throw new ApiError(503, 'n8n Webhook 尚未配置，请先完成自动化中心中的接入步骤。');
@@ -208,7 +281,8 @@ export function createApp({
                 : '该任务正在执行，请勿重复提交。',
             );
           }
-          if (running >= 1) throw new ApiError(429, '已有一个 n8n 任务正在执行，请稍后再提交。');
+          if (running >= 1 || jobs().active())
+            throw new ApiError(429, '已有一个 n8n 任务正在执行，请稍后再提交。');
           // 不自动重试：此工作流会调用付费搜索并写入飞书。
           // 为防止不确定结果被自动重复执行，本地幂等记录保留到服务重启。
           if (runs.size >= 500)
@@ -326,4 +400,8 @@ export function createApp({
       });
     }
   });
+  server.on('close', () => {
+    if (batch && !batch.busy) batch.close();
+  });
+  return server;
 }

@@ -31,16 +31,21 @@ const post = (base, body = input, key = 'test-request-001', extra = {}) =>
     body: JSON.stringify(body),
   });
 test('入口限制市场和已接入渠道，旧客户类型不参与搜索', () => {
-  assert.deepEqual(validateInput(input), input);
-  assert.throws(() => validateInput({ ...input, country: 'invalid' }), /支持美国与澳大利亚/);
+  assert.deepEqual(validateInput(input), {
+    ...input,
+    audience: 'BC',
+    market_countries: ['United States'],
+  });
+  assert.throws(() => validateInput({ ...input, country: 'invalid' }), /支持的国家/);
   assert.equal('city' in validateInput({ ...input, city: 'Miami' }), false);
   assert.equal(validateInput({ ...input, region: '', city: '' }).region, '');
   assert.equal(validateInput({ ...input, region: '' }).region, '');
   assert.throws(() => validateInput({ ...input, region: 'New South Wales' }), /该国家/);
-  assert.deepEqual(
-    validateInput({ ...input, customer_types: ['installer', 'distributor'] }),
-    input,
-  );
+  assert.deepEqual(validateInput({ ...input, customer_types: ['installer', 'distributor'] }), {
+    ...input,
+    audience: 'BC',
+    market_countries: ['United States'],
+  });
   const { acquisition_channel, ...legacy } = input;
   assert.equal(validateInput(legacy).acquisition_channel, acquisition_channel);
   for (const channel of [

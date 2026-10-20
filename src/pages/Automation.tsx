@@ -1,11 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import {
   ArrowDownToLine,
   ArrowRight,
   BookOpen,
   CheckCircle2,
-  Code2,
   Facebook,
   Globe2,
   Instagram,
@@ -24,7 +22,9 @@ import { useWorkspace } from '../app/WorkspaceProvider';
 import { Badge, ExternalLink, SectionTitle } from '../components/ui';
 import { n8nApi, WORKFLOW_URL } from '../services/n8n';
 import type { LocationOptions } from '../services/n8n';
-import type { IntegrationStatus, WorkflowInput, WorkflowRun } from '../domain/types';
+import type { IntegrationStatus, WorkflowInput } from '../domain/types';
+import type { AcquisitionJob } from '../domain/types';
+import { BatchProgress } from '../components/BatchProgress';
 
 const acquisitionChannels = [
   {
@@ -137,13 +137,56 @@ const regionNamesZh: Record<string, string> = {
   VIC: '维多利亚州',
 };
 const productGroups = [
-  { name: 'Blindselements · 户外遮阳', url: 'https://blindselements.com', products: [['outdoor zip screens', '防风帘 / 户外拉链帘'], ['pergolas', '凉亭'], ['awnings', '天幕 / 遮阳篷']] },
-  { name: 'Sampling Worldwide · 样品与面料', url: 'https://samplingworldwide.com', products: [['sample books', '样品册'], ['window fabrics', '窗饰面料']] },
-  { name: 'Duraroll Blinds · 窗帘配件', url: 'https://durarollblinds.com', products: [['headrails', '制头 / 上轨'], ['bottom rails', '制尾 / 下轨'], ['springs', '弹簧'], ['motors', '电机'], ['installation brackets', '安装码'], ['end plugs', '尾塞'], ['aluminum profiles', '铝材']] },
-  { name: 'Decormax Group · 室内窗饰', url: 'https://decormaxgroup.com', products: [['Roman blinds', '罗马帘'], ['zebra blinds', '斑马帘'], ['cellular blinds', '蜂巢帘'], ['Venetian blinds', '百叶帘'], ['shutters', 'Shutter 百叶窗 / 板式百叶'], ['fabric curtains', '布艺帘']] },
+  {
+    name: 'Blindselements · 户外遮阳',
+    url: 'https://blindselements.com',
+    products: [
+      ['outdoor zip screens', '防风帘 / 户外拉链帘'],
+      ['pergolas', '凉亭'],
+      ['awnings', '天幕 / 遮阳篷'],
+    ],
+  },
+  {
+    name: 'Sampling Worldwide · 样品与面料',
+    url: 'https://samplingworldwide.com',
+    products: [
+      ['sample books', '样品册'],
+      ['window fabrics', '窗饰面料'],
+    ],
+  },
+  {
+    name: 'Duraroll Blinds · 窗帘配件',
+    url: 'https://durarollblinds.com',
+    products: [
+      ['headrails', '制头 / 上轨'],
+      ['bottom rails', '制尾 / 下轨'],
+      ['springs', '弹簧'],
+      ['motors', '电机'],
+      ['installation brackets', '安装码'],
+      ['end plugs', '尾塞'],
+      ['aluminum profiles', '铝材'],
+    ],
+  },
+  {
+    name: 'Decormax Group · 室内窗饰',
+    url: 'https://decormaxgroup.com',
+    products: [
+      ['Roman blinds', '罗马帘'],
+      ['zebra blinds', '斑马帘'],
+      ['cellular blinds', '蜂巢帘'],
+      ['Venetian blinds', '百叶帘'],
+      ['shutters', 'Shutter 百叶窗 / 板式百叶'],
+      ['fabric curtains', '布艺帘'],
+    ],
+  },
 ] as const;
-const selectedProducts = (value: string) => value.split(',').map((item) => item.trim()).filter(Boolean);
+const selectedProducts = (value: string) =>
+  value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
 const defaultInput: WorkflowInput = {
+  audience: 'BC',
   country: 'United States',
   region: 'Florida',
   product: 'outdoor zip screens',
@@ -151,13 +194,29 @@ const defaultInput: WorkflowInput = {
   search_query: 'outdoor zip screens Florida USA',
 };
 const basicQuery = (input: WorkflowInput) =>
-  [input.product.trim(), input.region, input.country].filter(Boolean).join(' ');
+  [
+    input.product.trim(),
+    input.audience === 'B'
+      ? '(wholesale OR trade OR commercial)'
+      : input.audience === 'C'
+        ? '(residential OR homeowners)'
+        : '',
+    input.region,
+    input.country,
+  ]
+    .filter(Boolean)
+    .join(' ');
 export function Automation() {
   const { notify } = useWorkspace();
   const [status, setStatus] = useState<IntegrationStatus | null>(null);
   const [statusError, setStatusError] = useState('');
   const [input, setInput] = useState<WorkflowInput>(defaultInput);
   const [running, setRunning] = useState(false);
+  const [job, setJob] = useState<AcquisitionJob | null>(null);
+  const [targetCount, setTargetCount] = useState(20);
+  const [quantityChoice, setQuantityChoice] = useState('20');
+  const [controlBusy, setControlBusy] = useState(false);
+  const [submissionKey, setSubmissionKey] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [queryError, setQueryError] = useState('');
   const [queryGenerated, setQueryGenerated] = useState(false);
@@ -165,12 +224,9 @@ export function Automation() {
   const [locationsLoading, setLocationsLoading] = useState(true);
   const [locationsError, setLocationsError] = useState('');
   const [locationAttempt, setLocationAttempt] = useState(0);
-  const [result, setResult] = useState<WorkflowRun | null>(null);
   const [error, setError] = useState('');
   const [tab, setTab] = useState('发起任务');
-  const [history, setHistory] = useState<
-    { id: string; status: string; startedAt: string; stoppedAt: string | null }[]
-  >([]);
+  const [history, setHistory] = useState<AcquisitionJob[]>([]);
   const [historyError, setHistoryError] = useState('');
   const [loadingHistory, setLoadingHistory] = useState(false);
   const loadStatus = () => {
@@ -182,7 +238,51 @@ export function Automation() {
   };
   useEffect(() => {
     loadStatus();
+    n8nApi
+      .jobs()
+      .then((data) => {
+        const latest =
+          data.jobs.find((j) => ['running', 'stopping', 'paused'].includes(j.status)) ||
+          data.jobs[0];
+        if (latest) {
+          setJob(latest);
+          if (['running', 'stopping', 'paused'].includes(latest.status)) {
+            setInput(latest.input);
+            setTargetCount(latest.target);
+            setQuantityChoice(
+              [5, 10, 20, 50, 100, 200].includes(latest.target) ? String(latest.target) : 'custom',
+            );
+          }
+        }
+      })
+      .catch(() => {});
   }, []);
+  useEffect(() => {
+    if (!job || !['running', 'stopping'].includes(job.status)) return;
+    const timer = setInterval(
+      () =>
+        n8nApi
+          .job(job.id)
+          .then(setJob)
+          .catch((e) => setError(e.message)),
+      5000,
+    );
+    return () => clearInterval(timer);
+  }, [job?.id, job?.status]);
+  const taskActive =
+    running || Boolean(job && ['running', 'stopping', 'paused'].includes(job.status));
+  async function controlJob(action: 'stop' | 'resume') {
+    if (!job || controlBusy) return;
+    setControlBusy(true);
+    setError('');
+    try {
+      setJob(await n8nApi.controlJob(job.id, action));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '任务操作失败');
+    } finally {
+      setControlBusy(false);
+    }
+  }
   useEffect(() => {
     const controller = new AbortController();
     setLocationsLoading(true);
@@ -231,15 +331,16 @@ export function Automation() {
     }
   }
   async function run() {
-    if (running || generating || !status?.configured) return;
+    if (taskActive || generating || !status?.configured) return;
     setRunning(true);
     setError('');
-    setResult(null);
     try {
-      const response = await n8nApi.run(input, crypto.randomUUID());
-      setResult(response);
-      setTab('调用结果');
-      notify(response.summary.message);
+      const key = submissionKey || crypto.randomUUID();
+      setSubmissionKey(key);
+      const response = await n8nApi.createJob(input, targetCount, key);
+      setJob(response);
+      setSubmissionKey(null);
+      notify('批量任务已开始，可离开页面后返回查看进度');
     } catch (error) {
       setError(error instanceof Error ? error.message : '调用失败，请检查服务端和 n8n 执行记录');
     } finally {
@@ -250,8 +351,8 @@ export function Automation() {
     setLoadingHistory(true);
     setHistoryError('');
     try {
-      const response = await n8nApi.executions();
-      setHistory(response.data);
+      const response = await n8nApi.jobs();
+      setHistory(response.jobs);
     } catch (error) {
       setHistoryError(error instanceof Error ? error.message : '读取失败');
     } finally {
@@ -260,10 +361,7 @@ export function Automation() {
   }
   return (
     <>
-      <PageHeading
-        eyebrow="AUTOMATION STUDIO"
-        title="自动获客"
-      >
+      <PageHeading eyebrow="AUTOMATION STUDIO" title="自动获客">
         <ExternalLink href={WORKFLOW_URL}>查看 n8n 工作流</ExternalLink>
         <button className="btn secondary" onClick={loadStatus}>
           <RefreshCw size={15} />
@@ -284,10 +382,15 @@ export function Automation() {
                   }}
                 >
                   {name}
-                  {name === '调用结果' && result && <span className="status-dot" />}
+                  {name === '调用结果' && job && <span className="status-dot" />}
                 </button>
               ))}
             </div>
+            {tab !== '发起任务' && error && (
+              <div className="error-message" role="alert">
+                {error}
+              </div>
+            )}
             {tab === '发起任务' ? (
               <form
                 className="task-form"
@@ -296,7 +399,41 @@ export function Automation() {
                   void run();
                 }}
               >
-                <fieldset className="form-grid target-fields" disabled={running || generating}>
+                <fieldset className="form-grid target-fields" disabled={taskActive || generating}>
+                  <label className="span-2 batch-quantity">
+                    本次新增客户目标
+                    <select
+                      aria-label="本次新增客户目标"
+                      value={quantityChoice}
+                      onChange={(event) => {
+                        setQuantityChoice(event.target.value);
+                        if (event.target.value !== 'custom')
+                          setTargetCount(Number(event.target.value));
+                      }}
+                    >
+                      {[5, 10, 20, 50, 100, 200].map((n) => (
+                        <option key={n} value={n}>
+                          {n} 家{n === 20 ? ' · 默认' : ''}
+                        </option>
+                      ))}
+                      <option value="custom">自定义</option>
+                    </select>
+                    {quantityChoice === 'custom' && (
+                      <input
+                        aria-label="自定义客户数量"
+                        type="number"
+                        required
+                        min={1}
+                        max={200}
+                        step={1}
+                        value={Number.isNaN(targetCount) ? '' : targetCount}
+                        onChange={(event) => setTargetCount(event.target.valueAsNumber)}
+                      />
+                    )}
+                    <small className="query-help">
+                      按成功新增到飞书的独立企业计数，重复和失败不占名额；实际数量可能不足。
+                    </small>
+                  </label>
                   <label>
                     目标国家
                     <select
@@ -309,8 +446,16 @@ export function Automation() {
                         });
                       }}
                     >
-                      <option value="United States">🇺🇸 美国 · United States</option>
-                      <option value="Australia">🇦🇺 澳大利亚 · Australia</option>
+                      {(
+                        locations?.markets || [
+                          { value: 'United States', label: '🇺🇸 美国 · United States' },
+                          { value: 'Australia', label: '🇦🇺 澳大利亚 · Australia' },
+                        ]
+                      ).map((m) => (
+                        <option key={m.value} value={m.value}>
+                          {m.label}
+                        </option>
+                      ))}
                     </select>
                   </label>
                   <label>
@@ -318,22 +463,40 @@ export function Automation() {
                     <select
                       aria-label="州 / 地区"
                       value={input.region}
-                      disabled={locationsLoading || Boolean(locationsError)}
+                      disabled={
+                        locationsLoading || Boolean(locationsError) || !locations?.regions.length
+                      }
                       onChange={(event) => updateTarget({ region: event.target.value })}
                     >
                       <option value="">全部州 / 地区 · 全国范围 / All states · Nationwide</option>
                       {(locations?.country === input.country ? locations.regions : []).map(
                         (region) => (
                           <option key={region.code} value={region.name}>
-                            {(input.country === 'Australia' && region.code === 'WA'
-                              ? '西澳大利亚州'
-                              : input.country === 'United States' && region.code === 'WA'
-                                ? '华盛顿州'
-                                : regionNamesZh[region.code]) || '地区'}{' '}
+                            {region.label ||
+                              (input.country === 'Australia' && region.code === 'WA'
+                                ? '西澳大利亚州'
+                                : input.country === 'United States' && region.code === 'WA'
+                                  ? '华盛顿州'
+                                  : regionNamesZh[region.code]) ||
+                              '地区'}{' '}
                             · {region.name} ({region.code})
                           </option>
                         ),
                       )}
+                    </select>
+                  </label>
+                  <label className="span-2">
+                    目标企业服务客群
+                    <select
+                      aria-label="目标企业服务客群"
+                      value={input.audience}
+                      onChange={(event) =>
+                        updateTarget({ audience: event.target.value as WorkflowInput['audience'] })
+                      }
+                    >
+                      <option value="BC">B+C · 不限客群</option>
+                      <option value="B">B 端 · 面向企业 / 经销商</option>
+                      <option value="C">C 端 · 面向家庭消费者</option>
                     </select>
                   </label>
                   <fieldset className="product-selector span-2">
@@ -341,19 +504,30 @@ export function Automation() {
                     <div className="product-group-grid">
                       {productGroups.map((group) => (
                         <section className="product-group" key={group.name}>
-                          <h4><a href={group.url} target="_blank" rel="noreferrer">{group.name}</a></h4>
+                          <h4>
+                            <a href={group.url} target="_blank" rel="noreferrer">
+                              {group.name}
+                            </a>
+                          </h4>
                           <div className="product-options">
                             {group.products.map(([product, label]) => {
                               const checked = selectedProducts(input.product).includes(product);
                               return (
                                 <label className={checked ? 'selected' : ''} key={product}>
-                                  <input type="checkbox" checked={checked} onChange={(event) => {
-                                    const next = new Set(selectedProducts(input.product));
-                                    if (event.target.checked) next.add(product);
-                                    else next.delete(product);
-                                    updateTarget({ product: [...next].join(', ') });
-                                  }} />
-                                  <span>{label}<small>{product}</small></span>
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={(event) => {
+                                      const next = new Set(selectedProducts(input.product));
+                                      if (event.target.checked) next.add(product);
+                                      else next.delete(product);
+                                      updateTarget({ product: [...next].join(', ') });
+                                    }}
+                                  />
+                                  <span>
+                                    {label}
+                                    <small>{product}</small>
+                                  </span>
                                 </label>
                               );
                             })}
@@ -415,8 +589,8 @@ export function Automation() {
                     <span>
                       搜索范围：
                       {input.region
-                          ? `${input.region} 全州 / 全地区`
-                          : `${input.country === 'United States' ? '美国' : '澳大利亚'}全国`}
+                        ? `${input.region} 全州 / 全地区`
+                        : `${locations?.markets.find((m) => m.value === input.country)?.label || input.country} · 全部范围`}
                     </span>
                     {locationsLoading && <small>正在读取地区选项…</small>}
                   </div>
@@ -475,14 +649,6 @@ export function Automation() {
                     {queryError}
                   </div>
                 )}
-                <div className="request-preview">
-                  <span>
-                    <Code2 size={14} />
-                    请求预览
-                  </span>
-                  <code>POST /api/v1/integrations/n8n/runs</code>
-                  <small>JSON 参数 · 服务端转发 · Header Auth</small>
-                </div>
                 {(statusError || !status?.configured) && (
                   <div className="connection-notice">
                     <KeyRound size={18} />
@@ -502,7 +668,7 @@ export function Automation() {
                     {error}
                   </div>
                 )}
-                {result && (
+                {job?.status === 'completed' && (
                   <div className="success-message">
                     <CheckCircle2 size={17} />
                     <span>n8n 已返回真实结果。</span>
@@ -518,7 +684,7 @@ export function Automation() {
                     type="submit"
                     disabled={
                       !status?.configured ||
-                      running ||
+                      taskActive ||
                       generating ||
                       locationsLoading ||
                       Boolean(locationsError)
@@ -531,87 +697,53 @@ export function Automation() {
               </form>
             ) : tab === '调用结果' ? (
               <div className="result-pane">
-                {result ? (
+                {job ? (
                   <>
-                    <div className="result-title">
-                      <Badge tone={result.summary.outcome === 'completed' ? 'green' : 'orange'}>
-                        {result.summary.outcome === 'completed'
-                          ? '飞书写入完成'
-                          : result.summary.outcome === 'partial'
-                            ? '部分客户已写入'
-                            : result.summary.outcome === 'no_new_candidates'
-                              ? '没有新的候选客户'
-                              : result.summary.outcome === 'review'
-                                ? '需要人工查重'
-                                : result.summary.outcome === 'failed'
-                                  ? '本次未能完成入库'
-                                  : '写入状态待核实'}
-                      </Badge>
-                      <span>{new Date(result.completedAt).toLocaleString('zh-CN')}</span>
-                      <button
-                        className="btn subtle"
-                        onClick={() => {
-                          const url = URL.createObjectURL(
-                            new Blob([JSON.stringify(result, null, 2)], {
-                              type: 'application/json',
-                            }),
-                          );
-                          const anchor = document.createElement('a');
-                          anchor.href = url;
-                          anchor.download = `n8n-${result.requestId}.json`;
-                          anchor.click();
-                          setTimeout(() => URL.revokeObjectURL(url), 1000);
-                        }}
-                      >
-                        <ArrowDownToLine size={14} />
-                        导出结果
-                      </button>
-                    </div>
-                    <div className="result-summary">
-                      <div>
-                        <strong>{result.summary.message}</strong>
-                        {result.summary.inserted !== undefined && (
-                          <p>
-                            新增 {result.summary.inserted} · 更新 {result.summary.updated} · 失败{' '}
-                            {result.summary.failed} · 待查重 {result.summary.review}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    <div className="result-actions">
-                      <Link className="btn secondary" to="/leads?dataset=real">
-                        查看飞书真实客户
-                        <ArrowRight size={14} />
-                      </Link>
-                      {result.summary.executionId && (
-                        <ExternalLink
-                          href={`${WORKFLOW_URL}/executions/${encodeURIComponent(result.summary.executionId)}`}
-                        >
-                          查看本次执行
-                        </ExternalLink>
-                      )}
-                    </div>
-                    <p className="muted">请求编号：{result.requestId}</p>
-                    <pre>{JSON.stringify(result.result, null, 2)}</pre>
-                    <p className="muted">返回数据独立展示，不自动混入本地演示客户列表。</p>
+                    <BatchProgress
+                      job={job}
+                      control={(action) => void controlJob(action)}
+                      busy={controlBusy}
+                    />
+                    <h3>
+                      {job.status === 'completed'
+                        ? '目标已完成'
+                        : job.status === 'partial'
+                          ? '部分完成'
+                          : '任务进行中'}
+                    </h3>
+                    <p>
+                      {job.message} · 实际新增 {job.inserted} / {job.target} 家
+                    </p>
+                    <button
+                      className="btn secondary"
+                      onClick={() => {
+                        const url = URL.createObjectURL(
+                          new Blob([JSON.stringify(job, null, 2)], { type: 'application/json' }),
+                        );
+                        const anchor = document.createElement('a');
+                        anchor.href = url;
+                        anchor.download = `acquisition-${job.id}.json`;
+                        anchor.click();
+                        setTimeout(() => URL.revokeObjectURL(url), 1000);
+                      }}
+                    >
+                      <ArrowDownToLine size={14} />
+                      导出任务结果
+                    </button>
                   </>
                 ) : (
                   <div className="empty-state">
-                    <Code2 size={34} />
-                    <h3>等待第一次真实返回</h3>
-                    <p>成功提交并收到 n8n 响应后，结果会显示在这里。</p>
-                    <button className="btn secondary" onClick={() => setTab('发起任务')}>
-                      返回任务表单
-                      <ArrowRight size={14} />
-                    </button>
+                    <Workflow size={28} />
+                    <h3>暂无任务结果</h3>
+                    <p>提交任务后可在这里查看进度与收录结果。</p>
                   </div>
                 )}
               </div>
             ) : tab === '运行记录' ? (
               <div className="history-pane">
                 <SectionTitle
-                  title="n8n 运行记录"
-                  subtitle="从 Public API 读取，不用 mock 记录替代真实日志。"
+                  title="批量收录记录"
+                  subtitle="查看本机保存的任务进度与实际收录数量。"
                   action={
                     <button
                       className="btn subtle"
@@ -643,18 +775,31 @@ export function Automation() {
                         <tr key={row.id}>
                           <td>#{row.id}</td>
                           <td>
-                            <Badge tone={row.status === 'success' ? 'green' : 'neutral'}>
-                              {row.status}
+                            <Badge tone={row.status === 'completed' ? 'green' : 'neutral'}>
+                              {
+                                {
+                                  running: '正在收录',
+                                  stopping: '正在停止',
+                                  paused: '已暂停',
+                                  completed: '已完成',
+                                  partial: '部分完成',
+                                }[row.status]
+                              }{' '}
+                              · {row.inserted}/{row.target}
                             </Badge>
                           </td>
-                          <td>{new Date(row.startedAt).toLocaleString('zh-CN')}</td>
+                          <td>{new Date(row.createdAt).toLocaleString('zh-CN')}</td>
                           <td>
-                            <ExternalLink
-                              href={`https://vynox.app.n8n.cloud/workflow/EycE9OmaPkRFUDSq/executions/${encodeURIComponent(row.id)}`}
+                            <button
                               className="text-link"
+                              disabled={taskActive && row.id !== job?.id}
+                              onClick={() => {
+                                setJob(row);
+                                setTab('调用结果');
+                              }}
                             >
                               详情
-                            </ExternalLink>
+                            </button>
                           </td>
                         </tr>
                       ))}

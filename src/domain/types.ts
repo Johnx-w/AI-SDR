@@ -76,6 +76,7 @@ export interface WorkspaceRepository {
   reset(): Promise<Workspace>;
 }
 export interface WorkflowInput {
+  audience: 'B' | 'C' | 'BC';
   country: string;
   region: string;
   product: string;
@@ -103,4 +104,31 @@ export interface WorkflowRun {
   };
   result: unknown;
   completedAt: string;
+}
+
+export interface AcquisitionJob {
+  input: WorkflowInput & { target_count: number };
+  id: string;
+  status: 'running' | 'stopping' | 'paused' | 'completed' | 'partial';
+  target: number;
+  inserted: number;
+  updated: number;
+  skipped: number;
+  rejected: number;
+  failed: number;
+  pending: number;
+  searches: number;
+  researched: number;
+  message: string;
+  createdAt: string;
+  completedAt?: string;
+  rows: {
+    domain: string;
+    source_url: string;
+    result: string;
+    name?: string;
+    reason?: string;
+    record_id?: string;
+    executionId?: string;
+  }[];
 }

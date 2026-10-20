@@ -26,7 +26,7 @@ export function extractContacts({ content, sourceUrl, country = '' }) {
     )
       .replace(/\s+/g, ' ')
       .trim();
-  const region = /^(US|USA|United States|美国)$/i.test(country)
+  const region = /^(US|USA|United States|美国|CA|Canada|加拿大)$/i.test(country)
     ? 'US'
     : /^(AU|Australia|澳大利亚)$/i.test(country)
       ? 'AU'

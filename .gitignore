@@ -5,3 +5,4 @@ dist/
 *.tsbuildinfo
 artifacts/
 *.log
+.data/

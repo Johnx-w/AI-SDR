@@ -1,4 +1,9 @@
-import type { IntegrationStatus, WorkflowInput, WorkflowRun } from '../domain/types';
+import type {
+  AcquisitionJob,
+  IntegrationStatus,
+  WorkflowInput,
+  WorkflowRun,
+} from '../domain/types';
 
 export const WORKFLOW_URL = 'https://vynox.app.n8n.cloud/workflow/EycE9OmaPkRFUDSq';
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -11,6 +16,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 export const n8nApi = {
+  jobs: () => request<{ jobs: AcquisitionJob[] }>('/jobs'),
+  job: (id: string) => request<AcquisitionJob>(`/jobs/${encodeURIComponent(id)}`),
+  createJob: (input: WorkflowInput, target_count: number, requestId: string) =>
+    request<AcquisitionJob>('/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': requestId },
+      body: JSON.stringify({ ...input, target_count }),
+    }),
+  controlJob: (id: string, action: 'stop' | 'resume') =>
+    request<AcquisitionJob>(`/jobs/${encodeURIComponent(id)}/${action}`, { method: 'POST' }),
   status: () => request<IntegrationStatus>('/status'),
   locations: (country: string, region: string, signal?: AbortSignal) =>
     request<LocationOptions>(`/locations?${new URLSearchParams({ country, region })}`, { signal }),
@@ -34,7 +49,9 @@ export const n8nApi = {
 };
 
 export interface LocationOptions {
+  markets: { value: string; label: string }[];
+  countries: string[];
   country: string;
   region: string;
-  regions: { name: string; code: string }[];
+  regions: { name: string; code: string; label?: string }[];
 }
