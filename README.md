@@ -1,6 +1,6 @@
 # ShadeFlow · 外贸窗饰获客工作台
 
-本地长期维护项目，路径 `D:\CodeX\ai获客`。采用 React 19、TypeScript、Vite、React Router、Lucide 图标与独立 Node.js API 服务。不依赖前一个 `ai获客系统` 项目。
+本地长期维护项目，路径 `D:\CodeX\ai获客`。采用 React 19、TypeScript、Vite、React Router、Lucide 图标与独立 Node.js API 服务。
 
 ## 启动
 
