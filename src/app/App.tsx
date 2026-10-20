@@ -3,13 +3,11 @@ import { NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-d
 import {
   ArrowUpRight,
   Bell,
-  BookOpen,
   Building2,
   CalendarDays,
   Check,
   ChevronDown,
   ChevronRight,
-  CircleHelp,
   Command,
   Globe2,
   LayoutDashboard,
@@ -35,10 +33,10 @@ import {
 } from '../pages/Workbench';
 import { LeadLibrary } from '../pages/LeadLibrary';
 import { Automation } from '../pages/Automation';
-import { Modal } from '../components/ui';
 
 const nav = [
   { path: '/', name: '运营总览', icon: LayoutDashboard },
+  { path: '/automation', name: '自动获客', icon: Workflow },
   { path: '/leads', name: '客户库', icon: UsersRound },
   { path: '/tasks', name: '获客任务', icon: Zap },
   { path: '/inbox', name: '沟通中心', icon: MessageSquare },
@@ -63,7 +61,6 @@ export function App() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [mobile, setMobile] = useState(false);
-  const [help, setHelp] = useState(false);
   const [notifications, setNotifications] = useState(false);
   const current = nav.find((item) => item.path === location.pathname);
   const unread = data?.conversations.filter((item) => item.unread).length || 0;
@@ -116,8 +113,6 @@ export function App() {
               <span>{name}</span>
               {path === '/inbox' && unread > 0 ? (
                 <b className="nav-count">{unread}</b>
-              ) : path === '/automation' ? (
-                <span className="nav-dot" />
               ) : null}
             </NavLink>
           ))}
@@ -145,15 +140,6 @@ export function App() {
               创建获客任务 <ArrowUpRight size={15} />
             </button>
           </div>
-          <NavLink className="nav-item" to="/automation">
-            <Workflow size={18} />
-            <span>真实 n8n 工作流</span>
-          </NavLink>
-          <button className="nav-item" onClick={() => setHelp(true)}>
-            <CircleHelp size={18} />
-            <span>使用指南</span>
-            <ArrowUpRight size={14} />
-          </button>
           <div className="sidebar-footer">
             <span className="team-avatar">J</span> 外贸团队 <ChevronDown size={14} />
           </div>
@@ -195,12 +181,6 @@ export function App() {
                 <Command size={10} /> K
               </kbd>
             </form>
-            <span className="demo-pill">
-              <span />{' '}
-              {location.pathname === '/leads' && location.search.includes('dataset=real')
-                ? '飞书真实客户'
-                : '概念设计 · 示例数据'}
-            </span>
             <button
               className="icon-button notification-button"
               aria-label="通知"
@@ -268,7 +248,7 @@ export function App() {
             />
           </Routes>
         </main>
-        <footer className="page-footer">
+        {location.pathname !== '/automation' && <footer className="page-footer">
           <span>
             ShadeFlow <span>·</span> 把每条线索，变成新的可能。
           </span>
@@ -278,7 +258,7 @@ export function App() {
               ? '飞书真实客户 · 只读同步'
               : '演示工作区 · n8n 真实链路保留'}
           </span>
-        </footer>
+        </footer>}
       </div>
       {toast && (
         <div className="toast" role="status">
@@ -288,33 +268,6 @@ export function App() {
             <X size={13} />
           </button>
         </div>
-      )}
-      {help && (
-        <Modal title="开始使用 ShadeFlow" onClose={() => setHelp(false)}>
-          <div className="modal-body help-content">
-            <BookOpen size={30} />
-            <p>1. 在客户线索中筛选、查看画像，或添加虚构客户进行演示。</p>
-            <p>2. 在多渠道触达中创建演示计划；在收件箱中保存回复草稿。</p>
-            <p>
-              3. 自动化中心调用真实 n8n
-              Webhook。先按项目文档配置入口和认证，再从任务表单提交搜索条件。
-            </p>
-            <p className="muted">
-              业务演示数据保存在当前浏览器中。n8n
-              运行可能产生搜索费用并写入飞书，请核对参数后再提交。
-            </p>
-            <button
-              className="btn primary"
-              onClick={() => {
-                setHelp(false);
-                navigate('/automation');
-              }}
-            >
-              前往自动化中心
-              <ArrowUpRight size={16} />
-            </button>
-          </div>
-        </Modal>
       )}
     </div>
   );

@@ -10,10 +10,9 @@
 {
   "country": "United States",
   "region": "Florida",
-  "city": "Miami",
   "product": "outdoor zip screens",
-  "customer_types": ["installer", "distributor"],
-  "search_query": "outdoor zip screens Miami Florida USA"
+  "acquisition_channel": "tavily_web",
+  "search_query": "outdoor zip screens Florida USA"
 }
 ```
 
@@ -27,11 +26,15 @@
 ```text
 {{ JSON.stringify({
   country: $json.body?.country ?? "United States",
-  region: $json.body?.region ?? "Florida",
-  city: $json.body?.city ?? "Miami",
+  region: $json.body?.region ?? "",
   product: $json.body?.product ?? "outdoor zip screens",
-  customer_types: $json.body?.customer_types ?? ["installer", "distributor"],
-  search_query: $json.body?.search_query ?? "outdoor zip screens Miami Florida USA",
+  acquisition_channel: "tavily_web",
+  customer_types: [],
+  search_query: $json.body?.search_query ?? [
+    $json.body?.product ?? "outdoor zip screens",
+    $json.body?.region ?? "",
+    $json.body?.country ?? "United States"
+  ].filter(Boolean).join(" "),
   request_id: $json.body?.request_id ?? "manual"
 }) }}
 ```
@@ -54,7 +57,15 @@ N8N_WEBHOOK_ENABLED=true
 
 工作流表单提供“国家 → 州 / 地区 → 城市”联动选择。城市为空时搜索整个选中州；州和城市均为空时搜索整个国家。切换国家会清空州和城市，切换州会清空城市，同时刷新基础搜索词，避免保留旧城市的查询限制。API 同样允许空地区，校验城市必须属于所选州。
 
-“DeepSeek 生成搜索词”通过本地 `POST /api/v1/integrations/n8n/search-query` 调用官方 Chat Completions API，只传产品、目标客群及所选范围。服务端默认使用 `deepseek-flash`，关闭思考模式、要求 JSON 输出。模型只生成产品关键词及其同义词；服务端固定追加所选客户类型和地名，并拒绝模型额外扩展客群。产品同义词和客群分别用括号分组，避免 OR 扩大为不受产品限制的查询。不选城市时不会由服务端补上默认城市。生成失败会保留原搜索词，余额、认证、限流与无效响应分别提示；不会自动重试，也不会自动运行获客或写飞书。
+“DeepSeek 生成搜索词”通过本地 `POST /api/v1/integrations/n8n/search-query` 调用官方 Chat Completions API，只传产品、已接入渠道及所选范围。服务端默认使用 `deepseek-flash`，关闭思考模式、要求 JSON 输出。模型只生成产品关键词及其同义词；服务端固定追加地名，产品同义词用括号分组。不追加安装商、经销商、工厂等客户类型限制词；旧客户端传入的 customer_types 会被忽略。不选城市时不会由服务端补上默认城市。生成失败会保留原搜索词，余额、认证、限流与无效响应分别提示；不会自动重试，也不会自动运行获客或写飞书。
+
+### 获客渠道与客户类型
+
+2026-10-20 核对现有 n8n：使用 Tavily Search / Extract，未直连 Google 搜索、Google 地图、LinkedIn、Facebook、Instagram 或各国本地黄页。页面显示当前可用的 Tavily 渠道，以及六个置灰的待接入渠道；两个 POST 接口均拒绝未接入渠道，不会静默改用 Tavily。当前 acquisition_channel 为 tavily_web，旧客户端缺省该字段时兼容此渠道。
+
+客户类型仅在研究后识别，并继续通过既有 customer_type → 飞书“客户类型”写入。配置搜索目标清空 customer_types 默认条件，Dify target_json 明确传 customer_type_filter: false 和归档说明，避免按客户类型筛选。安装商、经销商、制造商等仍使用现有 Dify 分类规则与飞书字段映射，本次不新增客户类型枚举。可部署表达式在 server/n8n-search-target.mjs。
+
+上述两处节点参数已发布为版本 `273e8c3f-c3c1-4456-8cd5-6139dca314cb`，核对 activeVersionId 与草稿版本一致；节点连接及其他 25 个节点配置保持原样。本次未执行真实搜索或飞书写入。
 
 服务端配置：
 
@@ -71,7 +82,7 @@ n8n“调用Dify Workflow”也已补传 `target_json.city`，未选中的 regio
 
 ```text
 浏览器 POST /api/v1/integrations/n8n/runs
-  → Node 服务校验六个字段与客户类型
+  → Node 服务校验地理范围、产品、搜索词和已接入渠道
   → 服务端附加 X-Shadeflow-Key 和 X-Request-ID
   → n8n Production Webhook
   → 现有业务节点
@@ -105,3 +116,10 @@ n8n“调用Dify Workflow”也已补传 `target_json.city`，未选中的 regio
 - 发布版本：`040e7d7e-8ecc-4edf-8add-350bc915bcc2`。回归覆盖首个抓取失败后采用后续正文、来源对应、全部失败、没有新候选、飞书实际写入计数及空响应不误报成功。
 
 API key 与试用限制：[n8n Public API authentication](https://docs.n8n.io/connect/n8n-api/authentication/)。
+
+## 2026-10-20：移除城市筛选，核对产品传参
+
+- 自动获客页仅按国家和可选州 / 地区限定范围；不选州则搜索全国。移除城市控件、城市名称映射和任务中的 city 字段。服务端不再返回城市选项，也不再转发旧客户端的 city 参数；默认搜索词和 DeepSeek 请求不包含默认 Miami。
+- 原 n8n 的“配置搜索目标”“调用Dify Workflow”“构建飞书记录”同步移除城市目标字段。客户实际所在国家、网页事实、联系方式提取、去重和写入分流保留；原有 27 个节点的连接与凭证未变。
+- 产品选择已接入：勾选产品以现有逗号分隔字符串写入 product；搜索词更新后经 search_query 交给 Tavily Search，Dify 的 target_json.product 接收同一组所选产品。四家官网分组是前端目录，沿用同一条获客流程。
+- 已发布并回读核对版本 c55dde9b-78ea-4608-850a-96646ae46983。完成浏览器多选联动检查、节点参数校验与本地回归；本次未触发真实获客或新增飞书记录。此前记录的城市筛选行为由本节替代。

@@ -37,5 +37,4 @@ export interface LocationOptions {
   country: string;
   region: string;
   regions: { name: string; code: string }[];
-  cities: string[];
 }

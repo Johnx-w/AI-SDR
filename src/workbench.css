@@ -233,6 +233,7 @@ textarea:focus {
 }
 .notification-button {
   order: 0;
+  margin-left: auto;
 }
 .topbar-divider,
 .user-avatar {

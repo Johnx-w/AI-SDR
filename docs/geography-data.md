@@ -6,4 +6,4 @@
 
 该数据集按 [Open Database License 1.0](https://opendatacommons.org/licenses/odbl/1-0/) 提供，本派生数据也按 ODbL 1.0 开放。许可全文保存于 server/data/GEOGRAPHY-LICENSE.txt。应用代码的许可不因该独立数据文件而改变。
 
-数据在服务端读取，只把所选国家的州名称及所选州的城市列表返回浏览器，无需外部地理 API 密钥。
+数据在服务端读取。2026-10-20 起接口只返回所选国家的州 / 地区名称，不再返回城市列表；原始参考数据中的城市不再参与获客范围筛选，无需外部地理 API 密钥。

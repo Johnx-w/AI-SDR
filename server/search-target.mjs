@@ -10,7 +10,6 @@ export function locationOptions(country, region = '') {
     country,
     region,
     regions: regions.map(({ name, code }) => ({ name, code })),
-    cities: selected?.cities || [],
   };
 }
 
@@ -18,26 +17,17 @@ export function validateTarget(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input))
     throw invalid('请提交有效的搜索参数');
   const result = {};
-  for (const key of ['country', 'product', 'region', 'city']) {
-    const value = input[key] ?? (['region', 'city'].includes(key) ? '' : undefined);
+  for (const key of ['country', 'product', 'region']) {
+    const value = input[key] ?? (key === 'region' ? '' : undefined);
     if (typeof value !== 'string' || value.length > 500)
       throw invalid(`参数 ${key} 必须是字符串且不能超过 500 字符`);
     result[key] = value.trim();
     if (['country', 'product'].includes(key) && !result[key]) throw invalid(`参数 ${key} 不能为空`);
   }
-  const locations = locationOptions(result.country, result.region);
-  if (result.city && !result.region) throw invalid('选择城市前请先选择州 / 地区');
-  if (result.city && !locations.cities.includes(result.city))
-    throw invalid('请选择该州 / 地区的有效城市');
-  if (
-    !Array.isArray(input.customer_types) ||
-    input.customer_types.length < 1 ||
-    input.customer_types.length > 5 ||
-    !input.customer_types.every((value) =>
-      ['installer', 'distributor', 'retailer', 'contractor'].includes(value),
-    )
-  )
-    throw invalid('请选择有效客户类型');
-  result.customer_types = [...new Set(input.customer_types)];
+  locationOptions(result.country, result.region);
+  // Legacy customer_types are deliberately ignored: classify the company after discovery.
+  const channel = input.acquisition_channel ?? 'tavily_web';
+  if (channel !== 'tavily_web') throw invalid('该获客渠道尚未接入，当前仅支持 Tavily 网页搜索');
+  result.acquisition_channel = channel;
   return result;
 }

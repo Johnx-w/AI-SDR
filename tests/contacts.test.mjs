@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import { extractContacts } from '../server/contact-extractor.mjs';
 import { discoverContacts } from '../server/contacts.mjs';
 import { improveContactNode } from '../server/n8n-contacts.mjs';
+import { removeCityTarget } from '../server/n8n-search-target.mjs';
 import { mapFeishuRecord } from '../server/feishu.mjs';
 import { createApp } from '../server/app.mjs';
 
@@ -185,7 +186,7 @@ test('n8n 入库节点回归：修复美国漏采，保持原画像、去重键�
     new URL('./fixtures/n8n-build-record-original.txt', import.meta.url),
     'utf8',
   );
-  const improved = improveContactNode(original);
+  const improved = removeCityTarget(improveContactNode(original));
   const fieldNames = [
     'customer_id',
     '客户名称',
@@ -215,7 +216,7 @@ test('n8n 入库节点回归：修复美国漏采，保持原画像、去重键�
       },
     ],
     获取飞书Token: { body: { code: 0, tenant_access_token: 'test-token' } },
-    配置搜索目标: { country: 'United States', search_query: 'zip screens Miami' },
+    配置搜索目标: { country: 'United States', region: 'Florida', city: 'Miami', product: 'pergolas, motors', search_query: 'pergolas, motors Florida' },
     'Tavily Extract': {
       results: [
         { url: sourceUrl, raw_content: markdown },
@@ -263,6 +264,10 @@ test('n8n 入库节点回归：修复美国漏采，保持原画像、去重键�
   assert.equal(output.insert_fields['匹配状态'], '匹配');
   assert.equal(output.insert_fields['电话'].split('\n').length, 2);
   const profile = JSON.parse(output.insert_fields['画像JSON']);
+  assert.equal('city' in profile.task_target, false);
+  assert.equal(profile.task_target.region, 'Florida');
+  assert.equal(profile.task_target.product, 'pergolas, motors');
+  assert.equal(profile.actual_country, 'United States');
   assert.equal(profile.latest_research.contact_extraction_version, 'multi-market-v2');
   assert.equal(
     profile.latest_research.contact_evidence.every((c) => c.source_url === sourceUrl),
