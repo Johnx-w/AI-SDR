@@ -111,7 +111,7 @@ test('DeepSeek 只在服务端调用，按选中范围追加地名，不为全�
           const body = JSON.parse(options.body);
           assert.equal(body.model, 'deepseek-flash');
           assert.equal(body.thinking.type, 'disabled');
-          const expected = { ...selected };
+          const expected = { ...selected, audience: 'BC' };
           delete expected.city;
           assert.deepEqual(JSON.parse(body.messages[1].content), expected);
           return completion();
@@ -120,11 +120,7 @@ test('DeepSeek 只在服务端调用，按选中范围追加地名，不为全�
     );
     assert.equal(
       result.search_query,
-      [
-        '("outdoor zip screens" OR "zip screen systems")',
-        selected.region,
-        selected.country,
-      ]
+      ['("outdoor zip screens" OR "zip screen systems")', selected.region, selected.country]
         .filter(Boolean)
         .join(' '),
     );
@@ -268,38 +264,46 @@ test('多选产品通过 API、n8n 配置进入 Dify，旧城市字段不再透�
   const product = 'pergolas, sample books, motors, Roman blinds';
   const search_query = product + ' Florida United States';
   let calls = 0;
-  await withApp({
-    env: {
-      N8N_BASE_URL: 'https://vynox.app.n8n.cloud',
-      N8N_WEBHOOK_URL: 'https://vynox.app.n8n.cloud/webhook/fixture',
-      N8N_WEBHOOK_SECRET: 'fixture',
-      N8N_WEBHOOK_ENABLED: 'true',
+  await withApp(
+    {
+      env: {
+        N8N_BASE_URL: 'https://vynox.app.n8n.cloud',
+        N8N_WEBHOOK_URL: 'https://vynox.app.n8n.cloud/webhook/fixture',
+        N8N_WEBHOOK_SECRET: 'fixture',
+        N8N_WEBHOOK_ENABLED: 'true',
+      },
+      fetchImpl: async (_, options) => {
+        calls++;
+        const body = JSON.parse(options.body);
+        assert.equal(body.product, product);
+        assert.equal(body.search_query, search_query);
+        assert.equal('city' in body, false);
+        const config = JSON.parse(
+          vm.runInNewContext(searchTargetConfig.slice(3, -2), { $json: { body } }),
+        );
+        assert.equal(config.product, product);
+        assert.equal(config.search_query, search_query);
+        const dify = JSON.parse(
+          vm.runInNewContext(difyResearchBody.slice(3, -2), {
+            $json: { source_url: 'https://fixture.example/', page_text: 'Verified website text' },
+            $: () => ({ first: () => ({ json: config }) }),
+          }),
+        );
+        const researchTarget = JSON.parse(dify.inputs.target_json);
+        assert.equal(researchTarget.product, product);
+        assert.equal(researchTarget.region, 'Florida');
+        assert.equal('city' in researchTarget, false);
+        return Response.json({ outcome: 'no_new_candidates', reason: 'fixture' });
+      },
     },
-    fetchImpl: async (_, options) => {
-      calls++;
-      const body = JSON.parse(options.body);
-      assert.equal(body.product, product);
-      assert.equal(body.search_query, search_query);
-      assert.equal('city' in body, false);
-      const config = JSON.parse(vm.runInNewContext(searchTargetConfig.slice(3, -2), { $json: { body } }));
-      assert.equal(config.product, product);
-      assert.equal(config.search_query, search_query);
-      const dify = JSON.parse(vm.runInNewContext(difyResearchBody.slice(3, -2), {
-        $json: { source_url: 'https://fixture.example/', page_text: 'Verified website text' },
-        $: () => ({ first: () => ({ json: config }) }),
-      }));
-      const researchTarget = JSON.parse(dify.inputs.target_json);
-      assert.equal(researchTarget.product, product);
-      assert.equal(researchTarget.region, 'Florida');
-      assert.equal('city' in researchTarget, false);
-      return Response.json({ outcome: 'no_new_candidates', reason: 'fixture' });
+    async (base) => {
+      const response = await fetch(`${base}/api/v1/integrations/n8n/runs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...target, product, search_query, city: 'Miami' }),
+      });
+      assert.equal(response.status, 200);
+      assert.equal(calls, 1);
     },
-  }, async (base) => {
-    const response = await fetch(`${base}/api/v1/integrations/n8n/runs`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...target, product, search_query, city: 'Miami' }),
-    });
-    assert.equal(response.status, 200);
-    assert.equal(calls, 1);
-  });
+  );
 });

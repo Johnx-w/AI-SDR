@@ -1,9 +1,11 @@
+import { audienceTerms } from './markets.mjs';
 const fail = (status, message) => Object.assign(new Error(message), { status });
 export async function generateSearchQuery(target, { env = process.env, fetchImpl = fetch } = {}) {
   const searchTarget = {
     country: target.country,
     region: target.region,
     product: target.product,
+    audience: target.audience ?? 'BC',
     acquisition_channel: target.acquisition_channel ?? 'tavily_web',
   };
   if (!env.DEEPSEEK_API_KEY?.trim())
@@ -73,7 +75,12 @@ country、region 只用于理解语境；搜索范围为所选国家及可选州
   } catch {
     throw fail(502, 'DeepSeek 未返回有效搜索词，请重试；原搜索词已保留。');
   }
-  const searchQuery = [`(${keywords})`, target.region, target.country]
+  const searchQuery = [
+    `(${keywords})`,
+    audienceTerms[target.audience ?? 'BC'],
+    target.region,
+    target.country,
+  ]
     .filter(Boolean)
     .join(' ');
   return {

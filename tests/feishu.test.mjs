@@ -27,8 +27,8 @@ test('真实客户不使用目标国家代替企业所在地，不伪造评分',
   assert.equal(lead.market, '待核实');
   assert.equal(lead.city, '');
   assert.equal(lead.score, null);
-  assert.equal(lead.grade, '未评分');
-  assert.equal(lead.match, '待核实');
+  assert.equal(lead.grade, '未评级');
+  assert.equal(lead.match, '');
   assert.equal(lead.facts[0].quote, 'We supply screens');
 });
 test('飞书富文本和异常画像可读取，原始字段被保留', () => {

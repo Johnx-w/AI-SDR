@@ -3859,3 +3859,37 @@ main {
     scroll-behavior: auto !important;
   }
 }
+/* Batch acquisition uses the existing panel language. */
+.batch-progress {
+  padding: 24px;
+  border-bottom: 1px solid var(--border, #e1e7dc);
+}
+.batch-progress h3 {
+  margin: 18px 0 12px;
+}
+.batch-progress progress {
+  width: 100%;
+  height: 10px;
+  accent-color: #285641;
+}
+.batch-progress p {
+  margin: 12px 0;
+}
+.batch-details {
+  overflow-x: auto;
+  margin-top: 20px;
+  max-height: 340px;
+}
+.batch-details summary {
+  cursor: pointer;
+  padding: 6px 0 14px;
+  color: var(--green);
+}
+.batch-details td small {
+  display: block;
+  max-width: 480px;
+  margin-top: 6px;
+}
+.batch-quantity {
+  gap: 10px;
+}

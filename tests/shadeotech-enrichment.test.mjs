@@ -50,7 +50,7 @@ test('Shadeotech 页尾三个社媒、地图地址和明确城市列表均可提
   );
   assert.ok(!e.service_areas.some((x) => /Stock|Price|Hide similarities/.test(x.name)));
   const out = enrichmentFields({ company_name: 'Shadeotech' }, e).fields;
-  assert.equal(out['城市'], 'Carrollton');
+  assert.equal(out['州 / 城市'], 'TX · Carrollton');
   assert.equal(out.WhatsApp, 'https://wa.me/14694993322');
   assert.equal(out.Facebook, 'https://www.facebook.com/shadeotech');
   assert.equal(out.Instagram, 'https://www.instagram.com/shadeotech');

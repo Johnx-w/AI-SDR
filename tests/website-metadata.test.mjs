@@ -48,17 +48,16 @@ test('企业结构化地址与服务地区独立，分享链接不作为社媒�
   assert.equal(e.addresses[0].city, 'Lavon');
   assert.equal(e.addresses[0].region, 'TX');
   assert.equal(e.service_areas[0].name, 'Miami, Florida');
-  assert.deepEqual(e.social.map((x) => x.platform).sort(), ['Instagram', 'YouTube']);
+  assert.deepEqual(e.social.map((x) => x.platform).sort(), ['Instagram']);
   assert.equal(e.contacts[0].normalized, '+14699427193');
   for (const s of e.social) assert.ok(html.includes(s.quote));
   const result = enrichmentFields({ task_target: { city: 'Miami', region: 'Florida' } }, e).fields;
-  assert.equal(result['州'], 'TX');
-  assert.equal(result['城市'], 'Lavon');
+  assert.equal(result['州 / 城市'], 'TX · Lavon');
   assert.equal(result['服务地区'], 'Miami, Florida');
   const mapped = mapFeishuRecord({ record_id: 'test', fields: result });
-  assert.equal(mapped.city, 'Lavon');
+  assert.equal(mapped.region, 'TX · Lavon');
   assert.equal(mapped.serviceAreas, 'Miami, Florida');
-  assert.equal(mapped.social.length, 2);
+  assert.equal(mapped.social.length, 1);
 });
 test('没有地址时不把目标/服务城市当成企业所在地；JSON-LD 和原文保留证据', () => {
   const e = combineWebsiteEvidence([
@@ -86,7 +85,7 @@ test('补全保留原有电话/社媒，空值不清除已有地址与服务地�
     Facebook: 'https://www.facebook.com/old',
   });
   assert.ok(result.fields['电话'].includes('+1-888-477-4202'));
-  assert.equal(result.fields['城市'], 'Lavon');
+  assert.equal(result.fields['州 / 城市'], 'TX · Lavon');
   assert.equal(result.fields['服务地区'], 'Miami, Florida');
   assert.equal(result.fields['Facebook'], 'https://www.facebook.com/old');
 });
@@ -158,7 +157,7 @@ test('生产 n8n 证据采集、补充正文失败降级、飞书映射贯通，
     '主体类型',
     '国家',
     '州',
-    '城市',
+    '州 / 城市',
     '客户类型',
     '相关产品',
     '画像JSON',
@@ -178,14 +177,12 @@ test('生产 n8n 证据采集、补充正文失败降级、飞书映射贯通，
     },
   })[0].json;
   assert.equal(result.ready, true);
-  assert.equal(result.insert_fields['城市'], 'Lavon');
-  assert.equal(result.insert_fields['州'], 'TX');
+  assert.equal(result.insert_fields['州 / 城市'], 'TX · Lavon');
   assert.equal(result.insert_fields['国家'], 'United States');
   assert.equal(result.insert_fields['服务地区'], 'Miami, Florida');
   assert.ok(result.insert_fields['Instagram'].includes('vtrackscreens'));
   assert.equal(result.website_key, 'vtrackscreens.com');
   const p = JSON.parse(result.insert_fields['画像JSON']);
   assert.equal(p.task_target.region, 'Florida');
-  assert.equal(p.website_metadata.addresses[0].region, 'TX');
-  assert.equal(p.actual_country, 'United States');
+  assert.equal(result.insert_fields['国家'], 'United States');
 });

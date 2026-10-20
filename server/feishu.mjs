@@ -25,17 +25,32 @@ export function mapFeishuRecord(record) {
     name: read('客户名称') || profile.company_name || '未命名客户',
     domain: profile.website_key || '',
     market: read('国家') || '待核实',
-    type: read('客户类型') || 'unknown',
+    type:
+      {
+        installer: '安装商',
+        distributor: '经销商 / 批发商',
+        retailer: '零售商',
+        contractor: '工程承包商',
+        manufacturer: '制造商',
+        unknown: '待核实',
+      }[read('客户类型')] ||
+      read('客户类型') ||
+      '待核实',
     product: read('相关产品'),
-    match: read('匹配状态') || '待核实',
+    match: '',
     score: null,
-    grade: '未评分',
+    grade: ['A', 'B', 'C'].includes(read('客户等级')) ? read('客户等级') : '未评级',
     status: read('开发状态') || '未记录',
-    region: read('州'),
-    city: read('城市'),
+    region: read('州 / 城市'),
+    city: '',
     address: read('详细地址'),
     serviceAreas: read('服务地区'),
-    social: Array.isArray(profile.website_metadata?.social) ? profile.website_metadata.social : [],
+    social: ['Facebook', 'Instagram', 'LinkedIn', 'WhatsApp'].flatMap((platform) =>
+      read(platform)
+        .split('\n')
+        .filter(Boolean)
+        .map((url) => ({ platform, url, source_url: read('来源链接'), quote: '官网公开链接' })),
+    ),
     locationEvidence: [
       ...(profile.website_metadata?.addresses || []),
       ...(profile.website_metadata?.service_areas || []),
@@ -44,8 +59,10 @@ export function mapFeishuRecord(record) {
     email: read('邮箱') || values('email'),
     phone: read('电话') || values('phone'),
     website: read('来源链接'),
-    source: read('来源渠道'),
-    evidence: profile.match_reason || '尚无研究结论',
+    source: '',
+    mainProductPreference: read('主营产品偏好'),
+    audience: read('服务客群'),
+    evidence: read('主营产品偏好') || '尚无主营产品分析',
     facts: profile.facts || [],
     contactEvidence,
     updatedAt: profile.latest_research?.at || null,

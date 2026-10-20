@@ -1,6 +1,7 @@
 import { extractContacts } from './contact-extractor.mjs';
 import {
   websiteScope,
+  extractCatalogProducts,
   extractWebsiteMetadata,
   planWebsitePages,
   combineWebsiteEvidence,
@@ -10,6 +11,7 @@ import {
 
 export const enrichmentHelpers = [
   websiteScope,
+  extractCatalogProducts,
   extractContacts,
   extractWebsiteMetadata,
   planWebsitePages,
@@ -19,19 +21,7 @@ export const enrichmentHelpers = [
 ]
   .map((fn) => fn.toString())
   .join('\n');
-export const newFeishuFields = [
-  '详细地址',
-  '服务地区',
-  '服务地区JSON',
-  'Facebook',
-  'Instagram',
-  'LinkedIn',
-  'YouTube',
-  'TikTok',
-  'X',
-  'Pinterest',
-  '社媒JSON',
-];
+export const newFeishuFields = ['详细地址', '服务地区', 'Facebook', 'Instagram', 'LinkedIn'];
 export const websiteFetchParameters = {
   url: '={{ $json.url }}',
   options: {
