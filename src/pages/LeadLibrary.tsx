@@ -35,6 +35,17 @@ interface Prospect {
   status: string;
   region: string;
   city: string;
+  address?: string;
+  serviceAreas?: string;
+  social?: { platform: string; url: string; quote: string; source_url: string }[];
+  locationEvidence?: {
+    name?: string;
+    street?: string;
+    city?: string;
+    region?: string;
+    quote: string;
+    source_url: string;
+  }[];
   contact: string;
   email: string;
   phone: string;
@@ -563,6 +574,12 @@ export function LeadLibrary() {
                     ['匹配结论', viewed.match],
                     ['客户类型', typeNames[viewed.type] || viewed.type],
                     ['相关产品', viewed.product],
+                    [
+                      '企业实际地址',
+                      viewed.address ||
+                        [viewed.city, viewed.region, viewed.market].filter(Boolean).join(', '),
+                    ],
+                    ['服务地区', viewed.serviceAreas || '未确认'],
                     [
                       '评分',
                       viewed.score === null ? '未评分' : viewed.grade + '级 · ' + viewed.score,

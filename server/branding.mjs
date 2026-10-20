@@ -83,6 +83,36 @@ export function parseBranding(html, base, companyName) {
     if (!unique.has(mark.url)) unique.set(mark.url, mark);
   return [...unique.values()].slice(0, 6);
 }
+// Never treat a truncated prefix as a complete page: contact links often live in the footer.
+export function readHtmlResponse(response, maxBytes = 4 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    let done = false;
+    const fail = (e) => {
+      if (done) return;
+      done = true;
+      reject(e);
+    };
+    response.on('data', (chunk) => {
+      if (done) return;
+      size += chunk.length;
+      if (size > maxBytes) {
+        fail(new Error('官网 HTML 超过读取上限，未使用截断页面'));
+        response.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    response.on('end', () => {
+      if (done) return;
+      done = true;
+      resolve({ html: Buffer.concat(chunks).toString('utf8') });
+    });
+    response.on('aborted', () => fail(new Error('官网 HTML 未完整返回')));
+    response.on('error', fail);
+  });
+}
 export async function readPublicHtml(url, signal) {
   const addresses = await lookup(url.hostname, { all: true });
   if (!addresses.length || addresses.some((a) => !publicAddress(a.address)))
@@ -114,26 +144,7 @@ export async function readPublicHtml(url, signal) {
           response.resume();
           return resolve({ html: '' });
         }
-        const chunks = [];
-        let size = 0;
-        let done = false;
-        const finish = () => {
-          if (done) return;
-          done = true;
-          resolve({ html: Buffer.concat(chunks).toString('utf8') });
-        };
-        response.on('data', (chunk) => {
-          chunks.push(chunk.subarray(0, Math.max(0, 512000 - size)));
-          size += chunk.length;
-          if (size >= 512000) {
-            finish();
-            response.destroy();
-          }
-        });
-        response.on('end', finish);
-        response.on('error', (e) => {
-          if (!done) reject(e);
-        });
+        readHtmlResponse(response).then(resolve, reject);
       },
     );
     req.on('error', reject);

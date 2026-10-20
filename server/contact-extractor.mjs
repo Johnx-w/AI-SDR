@@ -73,6 +73,8 @@ export function extractContacts({ content, sourceUrl, country = '' }) {
   const found = [];
   const html = String(content || '');
   const pageVisible = visible(html);
+  const faxPrefix = (s) =>
+    /(?:fax(?:\s*(?:number|no\.?))?|传真(?:号码)?)\s*[:：]?\s*\[?\s*$/i.test(s);
   const add = (kind, value, method, quote) => {
     if (kind === 'phone') {
       const parsed = phone(value);
@@ -120,6 +122,11 @@ export function extractContacts({ content, sourceUrl, country = '' }) {
     const context =
       index >= 0 ? pageVisible.slice(Math.max(0, index - 90), index + label.length + 160) : href;
     if (/^(tel|callto):/i.test(href)) {
+      if (
+        /^fax\b|^传真/i.test(label) ||
+        (index >= 0 && faxPrefix(pageVisible.slice(Math.max(0, index - 45), index)))
+      )
+        continue;
       add(
         'phone',
         phone(label)?.normalized === phone(href)?.normalized ? label : href,
@@ -129,13 +136,21 @@ export function extractContacts({ content, sourceUrl, country = '' }) {
     }
     if (/^mailto:/i.test(href)) add('email', href, 'mailto_link', context);
   }
-  for (const m of html.matchAll(/\]\(\s*((?:tel|callto|mailto):[^\s<>]+)\s*\)/gi))
+  for (const m of html.matchAll(/\]\(\s*((?:tel|callto|mailto):[^\s<>]+)\s*\)/gi)) {
+    if (
+      !/^mailto/i.test(m[1]) &&
+      /(?:fax(?:\s*(?:number|no\.?))?|传真(?:号码)?)\s*[:：]?\s*\[[^\]]*$/i.test(
+        visible(html.slice(Math.max(0, m.index - 100), m.index)),
+      )
+    )
+      continue;
     add(
       /^mailto/i.test(m[1]) ? 'email' : 'phone',
       m[1],
       'markdown_link',
       html.slice(Math.max(0, m.index - 70), m.index + m[0].length + 100),
     );
+  }
   // JSON-LD 中的 telephone / email 是显式联系字段，不扫描普通脚本中的数字。
   const walk = (v, depth = 0) => {
     if (!v || typeof v !== 'object' || depth > 15) return;
@@ -184,13 +199,15 @@ export function extractContacts({ content, sourceUrl, country = '' }) {
   if (region === 'AU') patterns.push(/\b(?:0[23478](?:[\s().-]*\d){8}|1[38]00(?:[\s.-]*\d){6})\b/g);
   if (['GB', 'AE'].includes(region)) patterns.push(/\b0(?:[\s().-]*\d){8,10}\b/g);
   for (const pattern of patterns)
-    for (const m of text.matchAll(pattern))
+    for (const m of text.matchAll(pattern)) {
+      if (faxPrefix(text.slice(Math.max(0, m.index - 45), m.index))) continue;
       add(
         'phone',
         m[0],
         'visible_text',
         text.slice(Math.max(0, m.index - 90), m.index + m[0].length + 120),
       );
+    }
   return [...new Map(found.map((c) => [c.kind + ':' + c.normalized, c])).values()]
     .map((c) => {
       const first = found.find((f) => f.kind === c.kind && f.normalized === c.normalized);

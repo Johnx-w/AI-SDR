@@ -18,6 +18,17 @@ interface ContactLead {
   phone: string;
   website: string;
   contactEvidence: Contact[];
+  address?: string;
+  serviceAreas?: string;
+  social?: { platform: string; url: string; quote: string; source_url: string }[];
+  locationEvidence?: {
+    name?: string;
+    street?: string;
+    city?: string;
+    region?: string;
+    quote: string;
+    source_url: string;
+  }[];
 }
 interface WebsiteContacts {
   contacts: Contact[];
@@ -180,6 +191,48 @@ export function ContactPanel({ lead, real }: { lead: ContactLead; real: boolean 
           )}
         </strong>
       </div>
+      <div className="detail-contact">
+        <span>企业实际地址</span>
+        <strong>{lead.address || '未确认'}</strong>
+      </div>
+      <div className="detail-contact">
+        <span>服务地区</span>
+        <strong>{lead.serviceAreas || '未确认'}</strong>
+      </div>
+      {(lead.social || []).map((s) => (
+        <div className="detail-contact" key={s.platform + s.url}>
+          <span>{s.platform}</span>
+          <strong>
+            {webUrl(s.url) ? (
+              <a
+                className="contact-value-link"
+                href={webUrl(s.url)}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {s.url} <ArrowUpRight size={13} />
+              </a>
+            ) : (
+              s.url
+            )}
+          </strong>
+        </div>
+      ))}
+      {[...(lead.locationEvidence || []), ...(lead.social || [])].map((e, i) => (
+        <article className="evidence-fact" key={'metadata-' + i}>
+          <strong>
+            {'platform' in e
+              ? e.platform
+              : e.name || [e.street, e.city, e.region].filter(Boolean).join(', ')}
+          </strong>
+          <blockquote>{e.quote}</blockquote>
+          {webUrl(e.source_url) && (
+            <a href={webUrl(e.source_url)} target="_blank" rel="noopener noreferrer">
+              原始来源 <ArrowUpRight size={14} />
+            </a>
+          )}
+        </article>
+      ))}
       {contacts.length > 0 && (
         <div className="contact-evidence-heading">
           <h3>本次官网发现</h3>
