@@ -21,7 +21,6 @@ import {
   Save,
   Search,
   Send,
-  ShieldCheck,
   Sparkles,
   Target,
   UsersRound,
@@ -788,20 +787,13 @@ export function AcquisitionTasks() {
       <PageHeading
         eyebrow="ACQUISITION TASKS"
         title="获客任务"
-        description="从目标市场出发，演示多来源发现、去重与客户画像流程"
+        description="选择获客方向，设置执行周期，自动发现潜在客户"
       >
-        <Link className="btn secondary" to="/automation">
-          真实 n8n 工作流 <ArrowRight size={16} />
-        </Link>
         <button className="btn primary" onClick={() => setAdding(true)}>
           <Plus size={16} />
           新建演示任务
         </button>
       </PageHeading>
-      <div className="info-callout">
-        <ShieldCheck size={18} />
-        <p>当前为演示任务。真实搜索与飞书写入请进入“真实 n8n 工作流”。</p>
-      </div>
       <div className="demo-task-grid">
         {tasks.map((t: Run) => (
           <section className="panel demo-task-card" key={t.id}>
