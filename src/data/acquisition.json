@@ -1,0 +1,81 @@
+{
+  "customerTypes": [
+    { "value": "manufacturer", "label": "工厂", "terms": "manufacturer factory" },
+    { "value": "contractor", "label": "工程承包商", "terms": "contractor commercial projects" },
+    { "value": "wholesaler", "label": "批发商", "terms": "wholesaler wholesale" },
+    { "value": "service_provider", "label": "服务商", "terms": "installation service provider" },
+    { "value": "distributor", "label": "经销商", "terms": "distributor dealer" },
+    { "value": "retailer", "label": "零售商", "terms": "retailer showroom" },
+    { "value": "other", "label": "其他行业", "terms": "window furnishings business" }
+  ],
+  "profiles": [
+    {
+      "value": "all",
+      "label": "不限画像",
+      "description": "按官网事实识别企业行业与业务方向",
+      "terms": ""
+    },
+    {
+      "value": "trade",
+      "label": "品牌与渠道经营",
+      "description": "经营窗饰品牌、批发、经销或零售渠道的企业",
+      "terms": "blinds shades distributor retailer wholesale"
+    },
+    {
+      "value": "project",
+      "label": "工程项目配套",
+      "description": "承接建筑、酒店、办公或商业空间遮阳项目的企业",
+      "terms": "commercial shading construction projects"
+    },
+    {
+      "value": "service",
+      "label": "安装与维保服务",
+      "description": "提供窗饰测量、安装、维修或维护服务的企业",
+      "terms": "blinds installation maintenance repair"
+    },
+    {
+      "value": "manufacturing",
+      "label": "生产加工配套",
+      "description": "生产、组装或加工窗帘、遮阳系统及配件的企业",
+      "terms": "blinds manufacturing assembly components"
+    }
+  ],
+  "productGroups": [
+    {
+      "name": "室外成品窗帘",
+      "selectAll": true,
+      "products": [
+        ["outdoor zip screens", "双层/防风帘 / 户外拉链帘"],
+        ["pergolas", "凉亭"],
+        ["awnings", "天幕 / 遮阳篷"],
+        ["full cassette folding arm awnings", "全盒曲臂篷"]
+      ]
+    },
+    {
+      "name": "室内成品窗帘",
+      "selectAll": true,
+      "products": [
+        ["Roman blinds", "罗马帘"],
+        ["zebra blinds", "斑马帘"],
+        ["cellular blinds", "蜂巢帘"],
+        ["Venetian blinds", "百叶帘"],
+        ["shutters", "百叶窗 / 板式百叶"],
+        ["fabric curtains", "布艺帘"],
+        ["roller blinds", "卷帘"],
+        ["Shangri-La sheer shades", "香格里拉帘"],
+        ["dream curtains sheer vertical blinds", "梦幻帘"],
+        ["vertical blinds", "垂直帘"]
+      ]
+    },
+    {
+      "name": "室外半成品窗帘",
+      "selectAll": false,
+      "products": [["outdoor blinds awnings components and parts", "室外窗帘配件零件"]]
+    },
+    {
+      "name": "室内半成品窗帘",
+      "selectAll": false,
+      "products": [["indoor blinds curtains components and parts", "室内窗帘配件零件"]]
+    }
+  ]
+}

@@ -13,7 +13,6 @@ import {
   MapPinned,
   Play,
   RefreshCw,
-  Search,
   Sparkles,
   Workflow,
 } from 'lucide-react';
@@ -25,21 +24,16 @@ import type { LocationOptions } from '../services/n8n';
 import type { IntegrationStatus, WorkflowInput } from '../domain/types';
 import type { AcquisitionJob } from '../domain/types';
 import { BatchProgress } from '../components/BatchProgress';
+import acquisition from '../data/acquisition.json';
+const { productGroups, customerTypes, profiles } = acquisition;
 
 const acquisitionChannels = [
   {
     id: 'tavily_web',
-    name: 'Tavily 网页搜索',
+    name: '网页搜索',
     detail: '搜索公开网页，提取企业官网并研究入库',
     icon: Globe2,
     available: true,
-  },
-  {
-    id: 'google_web',
-    name: 'Google 网页搜索获客',
-    detail: 'Google 搜索结果采集',
-    icon: Search,
-    available: false,
   },
   {
     id: 'google_maps',
@@ -136,50 +130,6 @@ const regionNamesZh: Record<string, string> = {
   TAS: '塔斯马尼亚州',
   VIC: '维多利亚州',
 };
-const productGroups = [
-  {
-    name: 'Blindselements · 户外遮阳',
-    url: 'https://blindselements.com',
-    products: [
-      ['outdoor zip screens', '防风帘 / 户外拉链帘'],
-      ['pergolas', '凉亭'],
-      ['awnings', '天幕 / 遮阳篷'],
-    ],
-  },
-  {
-    name: 'Sampling Worldwide · 样品与面料',
-    url: 'https://samplingworldwide.com',
-    products: [
-      ['sample books', '样品册'],
-      ['window fabrics', '窗饰面料'],
-    ],
-  },
-  {
-    name: 'Duraroll Blinds · 窗帘配件',
-    url: 'https://durarollblinds.com',
-    products: [
-      ['headrails', '制头 / 上轨'],
-      ['bottom rails', '制尾 / 下轨'],
-      ['springs', '弹簧'],
-      ['motors', '电机'],
-      ['installation brackets', '安装码'],
-      ['end plugs', '尾塞'],
-      ['aluminum profiles', '铝材'],
-    ],
-  },
-  {
-    name: 'Decormax Group · 室内窗饰',
-    url: 'https://decormaxgroup.com',
-    products: [
-      ['Roman blinds', '罗马帘'],
-      ['zebra blinds', '斑马帘'],
-      ['cellular blinds', '蜂巢帘'],
-      ['Venetian blinds', '百叶帘'],
-      ['shutters', 'Shutter 百叶窗 / 板式百叶'],
-      ['fabric curtains', '布艺帘'],
-    ],
-  },
-] as const;
 const selectedProducts = (value: string) =>
   value
     .split(',')
@@ -187,6 +137,8 @@ const selectedProducts = (value: string) =>
     .filter(Boolean);
 const defaultInput: WorkflowInput = {
   audience: 'BC',
+  customer_type: '',
+  customer_profile: 'all',
   country: 'United States',
   region: 'Florida',
   product: 'outdoor zip screens',
@@ -196,6 +148,8 @@ const defaultInput: WorkflowInput = {
 const basicQuery = (input: WorkflowInput) =>
   [
     input.product.trim(),
+    customerTypes.find((t) => t.value === input.customer_type)?.terms,
+    profiles.find((p) => p.value === input.customer_profile)?.terms,
     input.audience === 'B'
       ? '(wholesale OR trade OR commercial)'
       : input.audience === 'C'
@@ -361,7 +315,7 @@ export function Automation() {
   }
   return (
     <>
-      <PageHeading eyebrow="AUTOMATION STUDIO" title="自动获客">
+      <PageHeading eyebrow="ACQUISITION TASKS" title="获客任务">
         <ExternalLink href={WORKFLOW_URL}>查看 n8n 工作流</ExternalLink>
         <button className="btn secondary" onClick={loadStatus}>
           <RefreshCw size={15} />
@@ -499,17 +453,75 @@ export function Automation() {
                       <option value="C">C 端 · 面向家庭消费者</option>
                     </select>
                   </label>
+                  <label>
+                    客户类型
+                    <select
+                      aria-label="客户类型"
+                      value={input.customer_type || ''}
+                      onChange={(event) => updateTarget({ customer_type: event.target.value })}
+                    >
+                      <option value="">全部客户类型</option>
+                      {customerTypes.map((type) => (
+                        <option key={type.value} value={type.value}>
+                          {type.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    客户画像
+                    <select
+                      aria-label="客户画像"
+                      value={input.customer_profile || 'all'}
+                      onChange={(event) => updateTarget({ customer_profile: event.target.value })}
+                    >
+                      {profiles.map((profile) => (
+                        <option key={profile.value} value={profile.value}>
+                          {profile.label}
+                        </option>
+                      ))}
+                    </select>
+                    <small className="query-help">
+                      {
+                        profiles.find((p) => p.value === (input.customer_profile || 'all'))
+                          ?.description
+                      }
+                    </small>
+                  </label>
                   <fieldset className="product-selector span-2">
                     <legend>目标产品（可多选）</legend>
                     <div className="product-group-grid">
                       {productGroups.map((group) => (
                         <section className="product-group" key={group.name}>
-                          <h4>
-                            <a href={group.url} target="_blank" rel="noreferrer">
-                              {group.name}
-                            </a>
-                          </h4>
+                          <h4>{group.name}</h4>
                           <div className="product-options">
+                            {group.selectAll && (
+                              <label
+                                className={
+                                  group.products.every(([value]) =>
+                                    selectedProducts(input.product).includes(value),
+                                  )
+                                    ? 'selected'
+                                    : ''
+                                }
+                              >
+                                <input
+                                  type="checkbox"
+                                  aria-label={group.name + '全部'}
+                                  checked={group.products.every(([value]) =>
+                                    selectedProducts(input.product).includes(value),
+                                  )}
+                                  onChange={(event) => {
+                                    const next = new Set(selectedProducts(input.product));
+                                    group.products.forEach(([value]) =>
+                                      event.target.checked ? next.add(value) : next.delete(value),
+                                    );
+                                    updateTarget({ product: [...next].join(', ') });
+                                  }}
+                                />
+                                <span>全部</span>
+                              </label>
+                            )}
                             {group.products.map(([product, label]) => {
                               const checked = selectedProducts(input.product).includes(product);
                               return (
@@ -538,9 +550,7 @@ export function Automation() {
                   </fieldset>
                   <fieldset className="acquisition-channels span-2">
                     <legend>获客渠道</legend>
-                    <p className="channel-help">
-                      当前已接入 Tavily 网页搜索。以下六个渠道接入后即可选择。
-                    </p>
+                    <p className="channel-help">当前已接入网页搜索。其余渠道接入后即可选择。</p>
                     <div className="channel-options" role="radiogroup" aria-label="获客渠道">
                       {acquisitionChannels.map((channel) => {
                         const Icon = channel.icon;
@@ -555,7 +565,7 @@ export function Automation() {
                             disabled={!channel.available}
                             title={
                               channel.available
-                                ? '当前 n8n 使用 Tavily，未直连 Google 搜索'
+                                ? '搜索公开网页并研究企业官网'
                                 : '尚未接入，暂不可选择'
                             }
                             onClick={() => {

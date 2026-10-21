@@ -5,6 +5,8 @@ export const searchTargetConfig = `={{ JSON.stringify({
   region: $json.body?.region ?? "",
   product: $json.body?.product ?? "outdoor zip screens",
   acquisition_channel: "tavily_web",
+  customer_type: $json.body?.customer_type ?? "",
+  customer_profile: $json.body?.customer_profile ?? "all",
   customer_types: [],
   search_query: $json.body?.search_query ?? [
     $json.body?.product ?? "outdoor zip screens",

@@ -42,7 +42,7 @@ test('支持 HTML tel、JSON-LD、公开邮件编码，忽略脚本、SVG及传�
   const html = `<a href="tel:8884774202"><svg>1234567890</svg><span>888-477-4202</span></a><script type="application/ld+json">{"@graph":[{"telephone":"+1-888-477-4202","email":"sales@shadeboys.com","faxNumber":"+1-555-222-3344"}]}</script><span data-cfemail="${encoded}">[email protected]</span><script>const tracking='310-444-5555';</script><style>.x{width:310-444-5555}</style>`;
   const result = extractContacts({ content: html, sourceUrl, country: 'US' });
   assert.equal(result.filter((c) => c.kind === 'phone').length, 1);
-  assert.equal(result[0].value, '888-477-4202');
+  assert.equal(result[0].value, '+1 8884774202');
   assert.equal(result[0].method, 'tel_link');
   assert.equal(
     result.some((c) => c.quote.includes('<svg')),
@@ -216,7 +216,13 @@ test('n8n 入库节点回归：修复美国漏采，保持原画像、去重键�
       },
     ],
     获取飞书Token: { body: { code: 0, tenant_access_token: 'test-token' } },
-    配置搜索目标: { country: 'United States', region: 'Florida', city: 'Miami', product: 'pergolas, motors', search_query: 'pergolas, motors Florida' },
+    配置搜索目标: {
+      country: 'United States',
+      region: 'Florida',
+      city: 'Miami',
+      product: 'pergolas, motors',
+      search_query: 'pergolas, motors Florida',
+    },
     'Tavily Extract': {
       results: [
         { url: sourceUrl, raw_content: markdown },

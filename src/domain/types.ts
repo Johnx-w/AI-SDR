@@ -77,6 +77,8 @@ export interface WorkspaceRepository {
 }
 export interface WorkflowInput {
   audience: 'B' | 'C' | 'BC';
+  customer_type?: string;
+  customer_profile?: string;
   country: string;
   region: string;
   product: string;

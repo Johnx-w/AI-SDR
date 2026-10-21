@@ -1,4 +1,25 @@
 import { extractContacts } from './contact-extractor.mjs';
+import { phoneHelpers } from './phone-format.mjs';
+import { mergeResearchFields } from './company-research.mjs';
+
+export function upgradePhoneWriteDecision(original) {
+  const start = original.lastIndexOf("const rec=$('可查询?')");
+  if (start < 0) throw new Error('未找到预期的飞书写入判定节点');
+  let code = original
+    .slice(start)
+    .replace(
+      'const old=exact[0],fields={...rec.update_fields};',
+      'const old=exact[0];const fields={...rec.update_fields};',
+    );
+  const fieldsStart = code.indexOf('const fields=');
+  const updateStart = code.lastIndexOf("return result('update'");
+  if (fieldsStart < 0 || updateStart <= fieldsStart) throw new Error('飞书合并节点结构已变化');
+  code =
+    code.slice(0, fieldsStart) +
+    'const fields=mergeResearchFields(old.fields,rec.update_fields);' +
+    code.slice(updateStart);
+  return phoneHelpers + '\n' + mergeResearchFields.toString() + '\n' + code;
+}
 
 // 只替换既有入库节点的联系提取段，不改业务画像、分流、去重及写入逻辑。
 export function improveContactNode(original) {
@@ -24,7 +45,7 @@ export function improveContactNode(original) {
     /\[\.\.\.contactEvidence\(emails,\s*['"]email['"]\),\s*\.\.\.contactEvidence\(phones,\s*['"]phone['"]\)\]/;
   if (!evidencePattern.test(improved)) throw new Error('原始联系证据结构不符合预期');
   return (
-    `const CONTACT_EXTRACTION_RULE_VERSION = 'multi-market-v2';\n${extractContacts.toString()}\n` +
+    `const CONTACT_EXTRACTION_RULE_VERSION = 'multi-market-v2';\n${phoneHelpers}\n${extractContacts.toString()}\n` +
     improved
       .replace(evidencePattern, 'contacts')
       .replace(

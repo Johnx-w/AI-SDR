@@ -27,11 +27,14 @@ export function mapFeishuRecord(record) {
     market: read('国家') || '待核实',
     type:
       {
-        installer: '安装商',
-        distributor: '经销商 / 批发商',
+        installer: '服务商',
+        service_provider: '服务商',
+        distributor: '经销商',
+        wholesaler: '批发商',
         retailer: '零售商',
         contractor: '工程承包商',
-        manufacturer: '制造商',
+        manufacturer: '工厂',
+        other: '其他行业',
         unknown: '待核实',
       }[read('客户类型')] ||
       read('客户类型') ||
@@ -61,6 +64,9 @@ export function mapFeishuRecord(record) {
     website: read('来源链接'),
     source: '',
     mainProductPreference: read('主营产品偏好'),
+    advertisingCodes: read('广告代码'),
+    demandProducts: read('需求产品'),
+    industryProfile: read('客户行业画像'),
     audience: read('服务客群'),
     evidence: read('主营产品偏好') || '尚无主营产品分析',
     facts: profile.facts || [],

@@ -84,7 +84,7 @@ test('补全保留原有电话/社媒，空值不清除已有地址与服务地�
     电话: '+1-888-477-4202',
     Facebook: 'https://www.facebook.com/old',
   });
-  assert.ok(result.fields['电话'].includes('+1-888-477-4202'));
+  assert.ok(result.fields['电话'].includes('+1 8884774202'));
   assert.equal(result.fields['州 / 城市'], 'TX · Lavon');
   assert.equal(result.fields['服务地区'], 'Miami, Florida');
   assert.equal(result.fields['Facebook'], 'https://www.facebook.com/old');
