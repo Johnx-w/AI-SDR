@@ -1,3 +1,6 @@
+import { normalizePhone, normalizePhoneLines } from './phone-format.mjs';
+import { formatRelatedProducts } from './product-format.mjs';
+
 export const fieldText = (value) => {
   if (value == null) return '';
   if (Array.isArray(value)) return value.map(fieldText).filter(Boolean).join('\n');
@@ -39,7 +42,7 @@ export function mapFeishuRecord(record) {
       }[read('客户类型')] ||
       read('客户类型') ||
       '待核实',
-    product: read('相关产品'),
+    product: formatRelatedProducts(read('相关产品')),
     match: '',
     score: null,
     grade: ['A', 'B', 'C'].includes(read('客户等级')) ? read('客户等级') : '未评级',
@@ -60,7 +63,7 @@ export function mapFeishuRecord(record) {
     ],
     contact: read('联系人'),
     email: read('邮箱') || values('email'),
-    phone: read('电话') || values('phone'),
+    phone: normalizePhoneLines(read('电话') || values('phone'), read('国家')),
     website: read('来源链接'),
     source: '',
     mainProductPreference: read('主营产品偏好'),
@@ -70,7 +73,14 @@ export function mapFeishuRecord(record) {
     audience: read('服务客群'),
     evidence: read('主营产品偏好') || '尚无主营产品分析',
     facts: profile.facts || [],
-    contactEvidence,
+    contactEvidence: contactEvidence.flatMap((c) =>
+      c.kind !== 'phone'
+        ? [c]
+        : (() => {
+            const phone = normalizePhone(c.value, read('国家'));
+            return phone ? [{ ...c, ...phone }] : [];
+          })(),
+    ),
     updatedAt: profile.latest_research?.at || null,
     fields: Object.fromEntries(Object.entries(f).map(([k, v]) => [k, fieldText(v)])),
   };

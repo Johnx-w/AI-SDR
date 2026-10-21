@@ -64,7 +64,7 @@ test('入口限制市场和已接入渠道，旧客户类型不参与搜索', ()
   }
 });
 
-test('未接入渠道在运行和生成搜索词入口均被拒绝，不调用上游', async () => {
+test('未接入渠道在运行入口被拒绝，不调用上游', async () => {
   await withApp(
     {
       env: configured,
@@ -83,13 +83,6 @@ test('未接入渠道在运行和生成搜索词入口均被拒绝，不调用�
       ]) {
         const body = { ...input, acquisition_channel: channel };
         assert.equal((await post(base, body)).status, 400);
-        const response = await fetch(`${base}/api/v1/integrations/n8n/search-query`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        assert.equal(response.status, 400);
-        assert.match((await response.json()).error, /渠道尚未接入/);
       }
     },
   );

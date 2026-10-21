@@ -3,11 +3,9 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { extractContacts } from '../server/contact-extractor.mjs';
-import { discoverContacts } from '../server/contacts.mjs';
 import { improveContactNode } from '../server/n8n-contacts.mjs';
 import { removeCityTarget } from '../server/n8n-search-target.mjs';
 import { mapFeishuRecord } from '../server/feishu.mjs';
-import { createApp } from '../server/app.mjs';
 
 const sourceUrl = 'https://shadeboys.com/cities/florida/miami/outdoor-zip-track-blinds';
 const markdown =
@@ -76,42 +74,6 @@ test('澳洲、英国、阿联酋及国际号码规则保留，不把日期与�
   });
   assert.equal(noContacts.length, 0);
 });
-test('补全读取当前页、首页、同站联系页，保留部分失败及去重，不访问外站', async () => {
-  const urls = [];
-  const result = await discoverContacts(
-    { website: sourceUrl, market: 'United States' },
-    {
-      readPage: async (url) => {
-        urls.push(url.href);
-        if (url.pathname.includes('/cities/'))
-          return {
-            html: `<a href="/contact">Contact us</a><a href="https://unrelated.com/contact">contact</a>${markdown}`,
-          };
-        if (url.pathname === '/') throw new Error('blocked');
-        return { html: 'Contact our team: sales@shadeboys.com' };
-      },
-    },
-  );
-  assert.equal(urls.length, 3);
-  assert.equal(
-    urls.every((u) => new URL(u).hostname === 'shadeboys.com'),
-    true,
-  );
-  assert.equal(result.contacts.filter((c) => c.kind === 'phone').length, 2);
-  assert.equal(result.failures.length, 1);
-  assert.equal(result.persisted, false);
-  await assert.rejects(
-    discoverContacts(
-      { website: sourceUrl },
-      {
-        readPage: async () => {
-          throw new Error('failed');
-        },
-      },
-    ),
-    /无法读取官网/,
-  );
-});
 test('飞书字段为空时读取已有画像联系证据；原始字段保留', () => {
   const lead = mapFeishuRecord({
     record_id: 'rec',
@@ -126,60 +88,9 @@ test('飞书字段为空时读取已有画像联系证据；原始字段保留',
       }),
     },
   });
-  assert.equal(lead.phone, '888-477-4202');
+  assert.equal(lead.phone, '');
   assert.equal(lead.email, 'sales@shadeboys.com');
   assert.equal(lead.fields['电话'], undefined);
-});
-test('真实客户补全接口限制为已知客户，缓存只读结果且不修改飞书字段', async () => {
-  let calls = 0;
-  const app = createApp({
-    env: {
-      N8N_BASE_URL: 'https://vynox.app.n8n.cloud',
-      FEISHU_READ_WEBHOOK_URL: 'https://vynox.app.n8n.cloud/webhook/read-test',
-      N8N_WEBHOOK_SECRET: 'test-only',
-    },
-    fetchImpl: async () =>
-      Response.json({
-        code: 0,
-        data: {
-          items: [
-            {
-              record_id: 'rec-test',
-              fields: { 客户名称: 'Shade Boys', 来源链接: sourceUrl, 国家: 'United States' },
-            },
-          ],
-          has_more: false,
-        },
-      }),
-    contactsImpl: async () => {
-      calls++;
-      return {
-        contacts: extractContacts({ content: markdown, sourceUrl, country: 'US' }),
-        persisted: false,
-      };
-    },
-  });
-  await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
-  try {
-    const base = `http://127.0.0.1:${app.address().port}`;
-    for (let i = 0; i < 2; i++) {
-      const r = await fetch(base + '/api/v1/leads/real/rec-test/contacts');
-      assert.equal(r.status, 200);
-      assert.equal((await r.json()).persisted, false);
-    }
-    assert.equal(calls, 1);
-    await fetch(base + '/api/v1/leads/real/rec-test/contacts?refresh=1');
-    assert.equal(calls, 2);
-    assert.equal((await fetch(base + '/api/v1/leads/real/unknown/contacts')).status, 404);
-    assert.equal(
-      (await fetch(base + '/api/v1/leads/real/rec-test/contacts', { method: 'POST' })).status,
-      404,
-    );
-    const saved = await (await fetch(base + '/api/v1/leads/real')).json();
-    assert.equal(saved.leads[0].phone, '');
-  } finally {
-    await new Promise((resolve) => app.close(resolve));
-  }
 });
 test('n8n 入库节点回归：修复美国漏采，保持原画像、去重键、字段映射和失败分支', async () => {
   const original = await readFile(

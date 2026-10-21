@@ -1,4 +1,3 @@
-
 :root {
   --green: #285340;
   --green-dark: #193c32;
@@ -24,31 +23,6 @@ body {
 .contact-value-link:hover {
   color: #285340;
 }
-.contact-research-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 15px;
-  padding: 14px 16px;
-  background: #f6f8f1;
-  border: 1px solid #e0e7d6;
-  border-radius: 7px;
-  margin-bottom: 8px;
-}
-.contact-research-bar strong {
-  font-size: 12px;
-  color: #4a6c3e;
-}
-.contact-research-bar p {
-  font-size: 11px;
-  color: #87967b;
-  margin: 5px 0 0;
-}
-.contact-research-bar .btn {
-  font-size: 11px;
-  min-height: 32px;
-  padding: 7px 10px;
-}
 .detail-contact .contact-value-link {
   display: flex;
   align-items: center;
@@ -63,13 +37,6 @@ body {
 .contact-value-link + .contact-value-link {
   margin-top: 8px;
 }
-.contact-evidence-heading {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 25px 0 8px;
-}
-.contact-evidence-heading h3,
 .contact-history-heading {
   font-size: 13px;
   margin: 0;
@@ -77,41 +44,7 @@ body {
 .contact-history-heading {
   margin-top: 25px;
 }
-.contact-method {
-  font-size: 10px;
-  color: #839677;
-  margin-left: 12px;
-}
-.contact-checked-pages {
-  font-size: 11px;
-  color: #778c69;
-  padding: 12px 0;
-}
-.contact-checked-pages summary {
-  cursor: pointer;
-}
-.contact-checked-pages a {
-  display: block;
-  overflow-wrap: anywhere;
-  text-decoration: underline;
-  margin-top: 8px;
-}
-.contact-research-error {
-  font-size: 11px;
-  color: #9b7745;
-  line-height: 1.8;
-  margin: 12px 0;
-}
-@media (max-width: 600px) {
-  .contact-research-bar {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-  .contact-method {
-    display: block;
-    margin: 8px 0 0;
-  }
-}
+
 .sidebar {
   background: #193c32;
   color: #d9e7dd;

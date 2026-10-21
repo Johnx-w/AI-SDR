@@ -599,7 +599,7 @@ export function LeadLibrary() {
                 )}
               </>
             )}
-            {tab === '联系方式' && <ContactPanel key={viewed.id} lead={viewed} real={real} />}
+            {tab === '联系方式' && <ContactPanel key={viewed.id} lead={viewed} />}
             {tab === '沟通与跟进' &&
               (real ? (
                 <Empty
@@ -621,9 +621,6 @@ export function LeadLibrary() {
                     ))}
                   <Link className="btn primary" to={'/inbox?lead=' + viewed.id}>
                     前往沟通中心 <ArrowUpRight size={15} />
-                  </Link>
-                  <Link className="btn secondary" to="/followups">
-                    查看跟进计划
                   </Link>
                 </>
               ))}

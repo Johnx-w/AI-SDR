@@ -38,6 +38,54 @@ function harness(extra = {}) {
   });
   return { manager, leads };
 }
+
+test('全局淘汰和证据不足的候选不占新增名额，队列继续补找', async () => {
+  let count = 0;
+  const { manager } = harness({
+    research: async () => ({
+      新增: 0,
+      更新: 0,
+      reason: '客户未通过准入',
+      research: {
+        ok: false,
+        eligibility: { status: count++ % 2 ? 'insufficient_evidence' : 'rejected' },
+      },
+    }),
+  });
+  try {
+    const job = manager.create({ ...input, target_count: 1 }, 'policy-batch-01');
+    await manager.work(job.id);
+    const result = manager.get(job.id);
+    assert.equal(result.inserted, 0);
+    assert.equal(result.rejected, 3);
+    assert.equal(result.pending, 0);
+    assert.equal(result.reason, 'research_limit');
+    assert.ok(result.rows.every((row) => row.result === 'rejected'));
+  } finally {
+    manager.close();
+  }
+});
+
+test('旧市场任务禁止重新规划或恢复，已有记录不删除', async () => {
+  const { manager } = harness();
+  try {
+    assert.throws(() => searchPlan({ ...input, country: 'Southeast Asia' }), /支持的国家/);
+    assert.throws(
+      () => manager.create({ ...input, country: 'Southeast Asia' }, 'retired-batch-01'),
+      /支持的国家/,
+    );
+    const job = manager.create(input, 'retired-batch-02');
+    job.status = 'paused';
+    job.input.country = 'Southeast Asia';
+    manager.save(job);
+    await assert.rejects(manager.resume(job.id), /支持的国家/);
+    assert.equal(manager.get(job.id).status, 'paused');
+    assert.equal(manager.get(job.id).researched, 0);
+    assert.equal(manager.get(job.id).searches, 0);
+  } finally {
+    manager.close();
+  }
+});
 test('数量仅接受1–200整数，域名规范化，客群与地域保留', () => {
   for (const n of [1, 20, 200]) assert.equal(validateCount(n), n);
   for (const n of [0, 201, 1.5, '20', null, NaN]) assert.throws(() => validateCount(n), /整数/);

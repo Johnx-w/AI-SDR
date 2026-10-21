@@ -1,5 +1,7 @@
 import { extractContacts } from './contact-extractor.mjs';
-import { normalizePhoneLines } from './phone-format.mjs';
+import { normalizePhoneLines, selectBusinessPhones } from './phone-format.mjs';
+import { productsRelevant, countryMatches } from './relevance.mjs';
+import { customerEligibility } from './customer-eligibility.mjs';
 
 // Shared, evidence-checked business research used by the production and replay workflows.
 export function companyResearchRequest(page, target = {}) {
@@ -11,6 +13,9 @@ export function companyResearchRequest(page, target = {}) {
 输出符合 JSON Schema 的对象。每个标量字段都是 null 或 {value,quote,source_url}，products、service_areas、demand_products、profile_tags 是此证据对象的数组。value 为提取值，quote 为对应 pages.text 中逐字原文，source_url 为对应页面 URL。必须给 main_product_preference 单独附带产品介绍原文证据，不能遗漏。标量字段有 company_name,actual_country,customer_type,audience,main_product_preference,industry_profile,address。address 的 value 为 {country,region,city,street,postal_code}，其他 value 为字符串。无依据使用 null 或空数组，不编造。
 quote 必须是单段连续短引文，不得把不同句子或段落拼接，不写省略号。每个产品尽量独立列出，避免在同一 value 合并多个未共同获得证据的产品。公司名称选一种官网名称，不拼接别名。
 customer_type 是企业自身角色，audience 是其服务的客群：B=企业/经销商/商用项目，C=家庭消费者，BC=明确两者都有，unknown=无法确认。面向住宅的安装商仍是企业，不能识别成个人。target.audience=BC 表示不限客群，绝不要求企业必须两者兼营。企业兼营时也符合单独B或C筛选。
+全局准入研究（每项也必须独立附连续原文 quote 和 source_url）：entity_type=business（企业、商户、个体经营者等真实经营主体）、individual（仅以个人身份消费、装修、求购的个人消费者）、unknown。C 是企业服务的市场端，绝不是个人消费者标记；个人社交账号也可能实际经营企业，不能按账号名称或账号类型判定，必须看业务证据。
+production_model=own_factory（明确自有工厂、自己生产/制造）、no_own_factory（明确采购、进口、代理其他生产商产品或外包生产的经营模式）、unknown。不能仅凭未出现 factory 字样就断言无工厂，不能把经销或安装当成制造。manufactured_products 逐项列出企业明确自行生产的实际产品品类，每项附制造语境的引文；销售目录不可冒充自产清单。同品类自有工厂将淘汰，但生产其他品类或采购零件的企业应按实际自产产品比较，不可仅看 manufacturer 角色淘汰。
+operating_model=local_only（经营事实表明仅本地安装/维修/零售门店，无供货渠道或跨地区经营）、beyond_local（明确进口采购、批发供货/经销网络、跨地区项目、全国/跨国配送或经营）、unknown。仅有服务城市、联系方式、住宅客群或一个门店地址不能证明“纯本地”；同样不可凭网站可访问就推断全国经营。兼营本地安装但有上述供货/进口/跨地区业务的企业选 beyond_local。证据不足返回 unknown 或 null，不为通过准入猜测事实。必须区分经营范围和服务客群，不得因 audience=C 淘汰经营主体。
 customer_type 只选一种主要经营角色：manufacturer=工厂，contractor=工程承包商，wholesaler=批发商，service_provider=服务商（含安装维修），distributor=经销商，retailer=零售商，other=有明确证据的其他行业；未知为 unknown。批发与经销需区分，不能为了满足 target.customer_type 修改事实。industry_profile 用中文概括实际行业、主营业务、经营方式和服务对象。profile_tags 可为 trade（品牌/渠道经营）、project（工程项目）、service（安装维保）、manufacturing（生产加工），每项必须有官网原文证据。target.customer_profile 是搜索画像，不是客户事实。
 demand_products 只提取企业自身明确公开的采购、求购、寻找供应商/生产商等需求，附逐字原文和来源。产品目录、销售介绍、面向访客的“looking for blinds?”或询价表单均不是企业采购需求；不得把 products、主营产品或 target.product 复制为 demand_products。没有明确采购依据必须返回空数组。广告追踪代码由独立 HTML 解析器提取，不生成或猜测广告 ID。
 main_product_preference 用一两句中文概括网站主营产品/产品线侧重，是分析而非实际采购偏好。必须基于产品介绍证据，禁止采购量、预算、周期、意向、决策人等推测。不得重复搜索目标当成主营产品。区分 zip screens、Venetian blinds、plantation shutters、roller shutters。如最新可见正文明确说不经营某产品，应剔除该产品；不可沿用旧记录或旧 JSON-LD 的过时产品。
@@ -47,6 +52,10 @@ export function parseCompanyResearch(response, page, target = {}) {
   if (
     [
       'company_name',
+      'entity_type',
+      'production_model',
+      'operating_model',
+      'manufactured_products',
       'main_product_preference',
       'industry_profile',
       'customer_type',
@@ -67,6 +76,10 @@ export function parseCompanyResearch(response, page, target = {}) {
     const facts = [];
     for (const key of [
       'company_name',
+      'entity_type',
+      'production_model',
+      'operating_model',
+      'manufactured_products',
       'actual_country',
       'customer_type',
       'audience',
@@ -103,7 +116,16 @@ export function parseCompanyResearch(response, page, target = {}) {
         return p.text.match(new RegExp(pattern, 'u'))?.[0];
       };
       if (!quote) quote = locate(f.quote);
-      if (!quote)
+      if (
+        !quote &&
+        ![
+          'entity_type',
+          'production_model',
+          'operating_model',
+          'manufactured_products',
+          'products',
+        ].includes(f.field)
+      )
         for (const line of f.quote
           .split(/\r?\n/)
           .map((x) => x.trim())
@@ -199,6 +221,20 @@ export function parseCompanyResearch(response, page, target = {}) {
           ? 'matched'
           : 'not_matched';
   const products = list('products');
+  // Relevance audits: the researched company must actually sell products related
+  // to the search target, and be located in the target market when evidence exists.
+  // Explicit, source-verified procurement can establish component demand even
+  // when a finished-goods factory does not sell those components itself.
+  const product_match = productsRelevant([...products, ...demand_products], target);
+  const country_match = countryMatches(scalar('actual_country'), target.market_countries);
+  const entity_type = scalar('entity_type', 'unknown');
+  const production_model = scalar('production_model', 'unknown');
+  const operating_model = scalar('operating_model', 'unknown');
+  const manufactured_products = list('manufactured_products');
+  const eligibility = customerEligibility(
+    { entity_type, production_model, operating_model, manufactured_products },
+    target,
+  );
   let preference = scalar('main_product_preference');
   if (products.length && (!preference || !/[\u4e00-\u9fff]/.test(preference))) {
     preference = '依据官网产品介绍，产品线主要包括：' + products.slice(0, 8).join('、') + '。';
@@ -218,17 +254,23 @@ export function parseCompanyResearch(response, page, target = {}) {
   )
     preference = preference.replace(/太阳能遮阳(?:网|屏)/g, '户外遮阳纱网');
   const reason =
-    audience_match === 'not_matched'
-      ? '官网服务客群与本次筛选不符'
-      : customer_type_match === 'not_matched'
-        ? '官网客户类型与本次筛选不符'
-        : customer_type_match === 'unknown'
-          ? '官网未能核实本次指定的客户类型'
-          : profile_match === 'not_matched'
-            ? '官网业务画像与本次筛选不符'
-            : profile_match === 'unknown'
-              ? '官网未能核实本次指定的客户画像'
-              : null;
+    product_match === 'not_matched'
+      ? '官网产品与本次搜索目标不相关'
+      : product_match === 'unknown'
+        ? '官网未能核实与目标产品相关的产品线'
+        : country_match === 'not_matched'
+          ? '官网所在国家与目标市场不符'
+          : audience_match === 'not_matched'
+            ? '官网服务客群与本次筛选不符'
+            : customer_type_match === 'not_matched'
+              ? '官网客户类型与本次筛选不符'
+              : customer_type_match === 'unknown'
+                ? '官网未能核实本次指定的客户类型'
+                : profile_match === 'not_matched'
+                  ? '官网业务画像与本次筛选不符'
+                  : profile_match === 'unknown'
+                    ? '官网未能核实本次指定的客户画像'
+                    : eligibility.reason;
   return {
     ok: !reason,
     stage: 'done',
@@ -238,6 +280,13 @@ export function parseCompanyResearch(response, page, target = {}) {
     actual_country: scalar('actual_country'),
     customer_type,
     customer_type_match,
+    country_match,
+    product_match,
+    entity_type,
+    production_model,
+    operating_model,
+    manufactured_products,
+    eligibility,
     industry_profile: scalar('industry_profile'),
     demand_products,
     profile_tags,
@@ -268,6 +317,16 @@ export const companyResearchSchema = {
   type: 'object',
   properties: {
     company_name: scalarSchema({ type: 'string' }),
+    entity_type: scalarSchema({ type: 'string', enum: ['business', 'individual', 'unknown'] }),
+    production_model: scalarSchema({
+      type: 'string',
+      enum: ['own_factory', 'no_own_factory', 'unknown'],
+    }),
+    operating_model: scalarSchema({
+      type: 'string',
+      enum: ['local_only', 'beyond_local', 'unknown'],
+    }),
+    manufactured_products: { type: 'array', items: evidenceSchema({ type: 'string' }) },
     actual_country: scalarSchema({ type: 'string' }),
     customer_type: scalarSchema({
       type: 'string',
@@ -310,6 +369,10 @@ export const companyResearchSchema = {
   },
   required: [
     'company_name',
+    'entity_type',
+    'production_model',
+    'operating_model',
+    'manufactured_products',
     'actual_country',
     'customer_type',
     'audience',
@@ -408,13 +471,20 @@ export function researchFields(research, evidence, existing = {}, researchPages 
     ['phone', '电话'],
   ]) {
     const lines = join(
-      existing[label],
+      kind === 'phone' ? '' : existing[label],
       contacts.filter((c) => c.kind === kind).map((c) => c.value),
     )
       .split('\n')
       .filter(Boolean);
     if (kind === 'phone') {
-      const formatted = normalizePhoneLines(lines, contactCountry, Boolean(existing[label]));
+      const selected = selectBusinessPhones(
+        contacts,
+        contactCountry,
+        research.source_url || researchPages[0]?.source_url || '',
+      );
+      const formatted = selected.length
+        ? selected.map((c) => c.value).join('\n')
+        : normalizePhoneLines(existing[label], contactCountry);
       if (formatted) fields[label] = formatted;
       continue;
     }
@@ -460,9 +530,9 @@ export function mergeResearchFields(existing, incoming) {
   }
   if (fields['电话'] || text(existing['电话'])) {
     const formatted = normalizePhoneLines(
-      [existing['电话'], fields['电话']],
+      fields['电话'] || existing['电话'],
       text(fields['国家'] || existing['国家']),
-      true,
+      false,
     );
     if (formatted) fields['电话'] = formatted;
   }

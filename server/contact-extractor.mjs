@@ -65,10 +65,11 @@ export function extractContacts({ content, sourceUrl, country = '' }) {
   };
   const found = [];
   const html = String(content || '');
+  const lowerHtml = html.toLowerCase();
   const pageVisible = visible(html);
   const faxPrefix = (s) =>
     /(?:fax(?:\s*(?:number|no\.?))?|传真(?:号码)?)\s*[:：]?\s*\[?\s*$/i.test(s);
-  const add = (kind, value, method, quote) => {
+  const add = (kind, value, method, quote, primary = false) => {
     if (kind === 'phone') {
       const parsed = phone(value);
       if (!parsed) return;
@@ -78,6 +79,7 @@ export function extractContacts({ content, sourceUrl, country = '' }) {
         source_url: sourceUrl,
         quote: visible(quote).slice(0, 320),
         method,
+        primary,
         status: '公开未验证',
       });
     } else {
@@ -125,6 +127,11 @@ export function extractContacts({ content, sourceUrl, country = '' }) {
         phone(label)?.normalized === phone(href)?.normalized ? label : href,
         'tel_link',
         context,
+        ['header', 'nav', 'footer'].some((tag) => {
+          return (
+            lowerHtml.lastIndexOf('<' + tag, a.index) > lowerHtml.lastIndexOf('</' + tag, a.index)
+          );
+        }),
       );
     }
     if (/^mailto:/i.test(href)) add('email', href, 'mailto_link', context);
@@ -152,7 +159,16 @@ export function extractContacts({ content, sourceUrl, country = '' }) {
         if (k.toLowerCase() === 'faxnumber') continue;
         for (const value of Array.isArray(x) ? x : [x])
           if (typeof value === 'string')
-            add(k === 'email' ? 'email' : 'phone', value, 'json_ld', k + ': ' + value);
+            add(
+              k === 'email' ? 'email' : 'phone',
+              value,
+              'json_ld',
+              k + ': ' + value,
+              depth <= 2 &&
+                /Organization|LocalBusiness|Corporation|Store|Business/.test(
+                  String(v['@type'] || ''),
+                ),
+            );
       } else if (x && typeof x === 'object') walk(x, depth + 1);
     }
   };

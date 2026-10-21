@@ -1,26 +1,12 @@
-// Grouped markets expand to explicit countries in n8n; actual company countries remain evidence-based.
+// Acquisition markets; actual company countries remain evidence-based.
 export const markets = [
   ['United States', '🇺🇸 美国 · United States'],
   ['Australia', '🇦🇺 澳大利亚 · Australia'],
   ['Canada', '🇨🇦 加拿大 · Canada'],
   ['United Kingdom', '🇬🇧 英国 · United Kingdom'],
   ['Europe', '🇪🇺 欧洲（不含英国）· Europe'],
-  ['Southeast Asia', '东南亚全区 · Southeast Asia'],
 ].map(([value, label]) => ({ value, label }));
 export const groupedMarkets = {
-  'Southeast Asia': [
-    'Brunei',
-    'Cambodia',
-    'Indonesia',
-    'Laos',
-    'Malaysia',
-    'Myanmar',
-    'Philippines',
-    'Singapore',
-    'Thailand',
-    'Timor-Leste',
-    'Vietnam',
-  ],
   Europe: [
     'Germany',
     'France',

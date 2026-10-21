@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { groupedMarkets, audienceTerms } from './markets.mjs';
+import { locationOptions } from './search-target.mjs';
 import acquisition from '../src/data/acquisition.json' with { type: 'json' };
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -32,11 +33,15 @@ export function domainKey(value) {
   }
 }
 export function searchPlan(input) {
+  locationOptions(input.country, input.region);
   const countries = groupedMarkets[input.country] || [input.country];
+  // Quote multi-word product phrases so Tavily matches them as exact phrases
+  // instead of scattering generic words (e.g. "awnings") across unrelated sites.
   const products = input.product
     .split(',')
     .map((p) => p.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .map((p) => (p.includes(' ') ? '"' + p + '"' : p));
   const variants = input.customer_type
     ? ['', 'company', 'contact', 'showroom']
     : ['', 'supplier', 'installation', 'dealer', 'manufacturer', 'company', 'contact', 'showroom'];
@@ -82,6 +87,7 @@ export class BatchJobs {
     readLeads,
     now = Date.now,
     schedule = true,
+    provider = 'n8n',
   }) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
@@ -94,6 +100,7 @@ export class BatchJobs {
     this.readLeads = readLeads;
     this.now = now;
     this.schedule = schedule;
+    this.provider = provider;
     this.busy = false;
     for (const job of this.list())
       if (['running', 'stopping'].includes(job.status)) {
@@ -123,6 +130,7 @@ export class BatchJobs {
     return this.list().find((j) => ['running', 'stopping', 'paused'].includes(j.status));
   }
   create(input, key) {
+    locationOptions(input.country, input.region);
     input = { ...input, target_count: validateCount(input.target_count) };
     if (typeof key !== 'string' || !/^[\w-]{8,100}$/.test(key))
       throw fail(400, '无效的 Idempotency-Key');
@@ -135,6 +143,7 @@ export class BatchJobs {
     if (this.active()) throw fail(409, '已有未结束任务，请先继续或停止该任务');
     const job = {
       id: randomUUID(),
+      provider: this.provider,
       input,
       status: 'running',
       reason: '',
@@ -185,7 +194,7 @@ export class BatchJobs {
   async reconcile(job) {
     if (!job.current) return;
     const result = await this.remoteStatus(job.current.operation_id);
-    if (!result?.settled) throw fail(409, 'n8n 尚未确认当前企业的执行结果，请稍后继续；未重复执行');
+    if (!result?.settled) throw fail(409, '尚未确认当前企业的执行结果，请稍后继续；未重复执行');
     await this.accept(job, result.output);
   }
   async resume(id) {
@@ -194,8 +203,12 @@ export class BatchJobs {
     try {
       let job = this.get(id);
       if (job.status !== 'paused') throw fail(409, '只有暂停任务可以继续');
+      if ((job.provider || 'n8n') !== this.provider)
+        throw fail(409, '该任务由其他执行引擎创建，请切回原引擎核对后继续');
       await this.reconcile(job);
       job = this.get(id);
+      // Reconcile any prior write first, then forbid new work in retired markets.
+      locationOptions(job.input.country, job.input.region);
       job.status = 'running';
       job.reason = '';
       this.save(job);
@@ -238,11 +251,18 @@ export class BatchJobs {
       job.rows.push({ ...item, result: 'duplicate', reason: output.reason });
     } else if (
       output?.research &&
-      ['audience_match', 'customer_type_match', 'profile_match'].some(
-        (key) =>
-          ['not_matched', 'unknown'].includes(output.research[key]) &&
-          (key !== 'audience_match' || output.research[key] === 'not_matched'),
-      )
+      (['rejected', 'insufficient_evidence'].includes(output.research.eligibility?.status) ||
+        [
+          'product_match',
+          'country_match',
+          'audience_match',
+          'customer_type_match',
+          'profile_match',
+        ].some(
+          (key) =>
+            ['not_matched', 'unknown'].includes(output.research[key]) &&
+            (key !== 'audience_match' || output.research[key] === 'not_matched'),
+        ))
     ) {
       job.rejected++;
       job.rows.push({ ...item, result: 'rejected', reason: output.reason });
@@ -281,6 +301,7 @@ export class BatchJobs {
           this.finish(j, 'stopped');
           return;
         }
+        locationOptions(j.input.country, j.input.region);
         if (j.elapsedMs >= j.limits.timeMs) {
           this.finish(j, 'time_limit');
           return;

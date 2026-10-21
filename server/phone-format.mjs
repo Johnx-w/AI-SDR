@@ -83,6 +83,48 @@ export function normalizePhoneLines(values, country = '', preserveUnparsed = fal
   return [...unique.values()].join('\n');
 }
 
-export const phoneHelpers = [phoneMetadata, normalizePhone, normalizePhoneLines]
+export function selectBusinessPhones(contacts, country = '', sourceUrl = '') {
+  const key = (url) =>
+    String(url || '')
+      .replace(/^https?:\/\/(?:www\.)?/i, '')
+      .replace(/[?#].*$/, '')
+      .replace(/\/+$/, '');
+  const unique = new Map();
+  for (const contact of contacts) {
+    if (contact.kind !== 'phone') continue;
+    const parsed = normalizePhone(contact.value, country);
+    if (!parsed) continue;
+    const ownPage = Boolean(sourceUrl) && key(contact.source_url) === key(sourceUrl);
+    const priority =
+      (ownPage ? 100 : 0) +
+      (contact.primary ? 30 : 0) +
+      (contact.method === 'json_ld'
+        ? 10
+        : ['tel_link', 'markdown_link'].includes(contact.method)
+          ? 8
+          : 0);
+    const prior = unique.get(parsed.normalized);
+    if (!prior || priority > prior.priority)
+      unique.set(parsed.normalized, { ...contact, ...parsed, ownPage, priority });
+  }
+  const ranked = [...unique.values()].sort((a, b) => b.priority - a.priority);
+  const local = ranked.filter((c) => c.ownPage);
+  // A location/product page identifies the relevant contact. Supplemental pages
+  // may contribute the company switchboard, rather than every branch number.
+  const candidates =
+    local.length >= 2
+      ? local
+      : local.length
+        ? [...local, ...ranked.filter((c) => !c.ownPage && c.primary)]
+        : ranked;
+  return candidates.slice(0, 3).map(({ ownPage, priority, ...contact }) => contact);
+}
+
+export const phoneHelpers = [
+  phoneMetadata,
+  normalizePhone,
+  normalizePhoneLines,
+  selectBusinessPhones,
+]
   .map((fn) => fn.toString())
   .join('\n');

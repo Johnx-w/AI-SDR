@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { researchPolicyCode } from './research-policy-code.mjs';
 import {
   parseCompanyResearch,
   researchFields,
@@ -45,6 +46,8 @@ replace('AI企业研究', ai);
 replace('解析结果', {
   mode: 'runOnceForAllItems',
   jsCode:
+    researchPolicyCode +
+    '\n' +
     parseCompanyResearch.toString() +
     '\nconst page=$("汇总官网证据").first().json;return [{json:parseCompanyResearch($input.first().json,page,$("配置搜索目标").first().json)}];',
 });
@@ -59,6 +62,11 @@ const checkedBuilder = builderTail.includes('客户类型必须为单选字段')
       'const key=/^https?',
       "for(const name of ['广告代码','需求产品','客户行业画像'])if(types[name]!==1)throw new Error('客户表缺少文本字段：'+name);if(types['客户类型']!==3)throw new Error('客户类型必须为单选字段');const key=/^https?",
     );
+const gatedBuilder = checkedBuilder.replace(
+  'const evidence=',
+  "if(!r.ok || r.eligibility?.status!=='eligible')throw new Error('客户未通过全局准入判断');const evidence=",
+);
+if (gatedBuilder === checkedBuilder) throw new Error('无法定位入库准入关口');
 replace('构建飞书记录', {
   mode: 'runOnceForAllItems',
   jsCode:
@@ -68,7 +76,7 @@ replace('构建飞书记录', {
     '\n' +
     researchFields.toString() +
     '\n' +
-    checkedBuilder.replace(
+    gatedBuilder.replace(
       'researchFields(r,evidence)',
       "researchFields(r,evidence,{},$('汇总官网证据').first().json.research_pages||[])",
     ),

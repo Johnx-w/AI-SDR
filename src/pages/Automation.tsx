@@ -13,18 +13,18 @@ import {
   MapPinned,
   Play,
   RefreshCw,
-  Sparkles,
   Workflow,
 } from 'lucide-react';
 import { PageHeading } from '../components/PageHeading';
 import { useWorkspace } from '../app/WorkspaceProvider';
 import { Badge, ExternalLink, SectionTitle } from '../components/ui';
-import { n8nApi, WORKFLOW_URL } from '../services/n8n';
-import type { LocationOptions } from '../services/n8n';
+import { acquisitionApi, WORKFLOW_URL } from '../services/acquisition';
+import type { LocationOptions } from '../services/acquisition';
 import type { IntegrationStatus, WorkflowInput } from '../domain/types';
 import type { AcquisitionJob } from '../domain/types';
 import { BatchProgress } from '../components/BatchProgress';
-import acquisition from '../data/acquisition.json';
+import acquisition from '../data/acquisition.json' with { type: 'json' };
+import { buildSearchQuery } from '../domain/search-query.mjs';
 const { productGroups, customerTypes, profiles } = acquisition;
 
 const acquisitionChannels = [
@@ -145,21 +145,7 @@ const defaultInput: WorkflowInput = {
   acquisition_channel: 'tavily_web',
   search_query: 'outdoor zip screens Florida USA',
 };
-const basicQuery = (input: WorkflowInput) =>
-  [
-    input.product.trim(),
-    customerTypes.find((t) => t.value === input.customer_type)?.terms,
-    profiles.find((p) => p.value === input.customer_profile)?.terms,
-    input.audience === 'B'
-      ? '(wholesale OR trade OR commercial)'
-      : input.audience === 'C'
-        ? '(residential OR homeowners)'
-        : '',
-    input.region,
-    input.country,
-  ]
-    .filter(Boolean)
-    .join(' ');
+defaultInput.search_query = buildSearchQuery(defaultInput);
 export function Automation() {
   const { notify } = useWorkspace();
   const [status, setStatus] = useState<IntegrationStatus | null>(null);
@@ -171,9 +157,6 @@ export function Automation() {
   const [quantityChoice, setQuantityChoice] = useState('20');
   const [controlBusy, setControlBusy] = useState(false);
   const [submissionKey, setSubmissionKey] = useState<string | null>(null);
-  const [generating, setGenerating] = useState(false);
-  const [queryError, setQueryError] = useState('');
-  const [queryGenerated, setQueryGenerated] = useState(false);
   const [locations, setLocations] = useState<LocationOptions | null>(null);
   const [locationsLoading, setLocationsLoading] = useState(true);
   const [locationsError, setLocationsError] = useState('');
@@ -185,14 +168,14 @@ export function Automation() {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const loadStatus = () => {
     setStatusError('');
-    n8nApi
+    acquisitionApi
       .status()
       .then(setStatus)
       .catch((error) => setStatusError(error.message || '服务端连接失败'));
   };
   useEffect(() => {
     loadStatus();
-    n8nApi
+    acquisitionApi
       .jobs()
       .then((data) => {
         const latest =
@@ -215,7 +198,7 @@ export function Automation() {
     if (!job || !['running', 'stopping'].includes(job.status)) return;
     const timer = setInterval(
       () =>
-        n8nApi
+        acquisitionApi
           .job(job.id)
           .then(setJob)
           .catch((e) => setError(e.message)),
@@ -230,7 +213,7 @@ export function Automation() {
     setControlBusy(true);
     setError('');
     try {
-      setJob(await n8nApi.controlJob(job.id, action));
+      setJob(await acquisitionApi.controlJob(job.id, action));
     } catch (e) {
       setError(e instanceof Error ? e.message : '任务操作失败');
     } finally {
@@ -241,7 +224,7 @@ export function Automation() {
     const controller = new AbortController();
     setLocationsLoading(true);
     setLocationsError('');
-    n8nApi
+    acquisitionApi
       .locations(input.country, input.region, controller.signal)
       .then((data) => {
         if (!controller.signal.aborted) setLocations(data);
@@ -257,46 +240,27 @@ export function Automation() {
   const updateTarget = (changes: Partial<WorkflowInput>) => {
     setInput((current) => {
       const next = { ...current, ...changes };
-      return { ...next, search_query: basicQuery(next) };
+      return { ...next, search_query: buildSearchQuery(next) };
     });
-    setQueryGenerated(false);
-    setQueryError('');
   };
   const patch = (key: keyof WorkflowInput, value: string) => {
     if (key === 'search_query') {
       setInput((current) => ({ ...current, search_query: value }));
-      setQueryGenerated(false);
     } else updateTarget({ [key]: value });
   };
-  async function searchQuery() {
-    if (generating || running) return;
-    setGenerating(true);
-    setQueryError('');
-    setQueryGenerated(false);
-    try {
-      const response = await n8nApi.searchQuery(input);
-      setInput((current) => ({ ...current, search_query: response.search_query }));
-      setQueryGenerated(true);
-      notify('DeepSeek 已生成搜索词，可编辑后运行');
-    } catch (error) {
-      setQueryError(error instanceof Error ? error.message : '搜索词生成失败，请稍后重试');
-    } finally {
-      setGenerating(false);
-    }
-  }
   async function run() {
-    if (taskActive || generating || !status?.configured) return;
+    if (taskActive || !status?.configured) return;
     setRunning(true);
     setError('');
     try {
       const key = submissionKey || crypto.randomUUID();
       setSubmissionKey(key);
-      const response = await n8nApi.createJob(input, targetCount, key);
+      const response = await acquisitionApi.createJob(input, targetCount, key);
       setJob(response);
       setSubmissionKey(null);
       notify('批量任务已开始，可离开页面后返回查看进度');
     } catch (error) {
-      setError(error instanceof Error ? error.message : '调用失败，请检查服务端和 n8n 执行记录');
+      setError(error instanceof Error ? error.message : '调用失败，请检查服务端和任务记录');
     } finally {
       setRunning(false);
     }
@@ -305,7 +269,7 @@ export function Automation() {
     setLoadingHistory(true);
     setHistoryError('');
     try {
-      const response = await n8nApi.jobs();
+      const response = await acquisitionApi.jobs();
       setHistory(response.jobs);
     } catch (error) {
       setHistoryError(error instanceof Error ? error.message : '读取失败');
@@ -316,7 +280,11 @@ export function Automation() {
   return (
     <>
       <PageHeading eyebrow="ACQUISITION TASKS" title="获客任务">
-        <ExternalLink href={WORKFLOW_URL}>查看 n8n 工作流</ExternalLink>
+        {status?.provider === 'native' ? (
+          <Badge tone="green">Node.js 直连执行</Badge>
+        ) : (
+          <ExternalLink href={WORKFLOW_URL}>查看 n8n 工作流</ExternalLink>
+        )}
         <button className="btn secondary" onClick={loadStatus}>
           <RefreshCw size={15} />
           刷新连接
@@ -353,7 +321,7 @@ export function Automation() {
                   void run();
                 }}
               >
-                <fieldset className="form-grid target-fields" disabled={taskActive || generating}>
+                <fieldset className="form-grid target-fields" disabled={taskActive}>
                   <label className="span-2 batch-quantity">
                     本次新增客户目标
                     <select
@@ -452,6 +420,7 @@ export function Automation() {
                       <option value="B">B 端 · 面向企业 / 经销商</option>
                       <option value="C">C 端 · 面向家庭消费者</option>
                     </select>
+                    <small>C 端指面向个人消费者经营的企业，个人消费者不入库。</small>
                   </label>
                   <label>
                     客户类型
@@ -605,28 +574,7 @@ export function Automation() {
                     {locationsLoading && <small>正在读取地区选项…</small>}
                   </div>
                   <label className="span-2">
-                    <span className="label-with-action">
-                      搜索词
-                      <button
-                        type="button"
-                        aria-label="用 DeepSeek 生成搜索词"
-                        onClick={() => void searchQuery()}
-                        disabled={
-                          generating ||
-                          running ||
-                          !input.product.trim() ||
-                          locationsLoading ||
-                          Boolean(locationsError)
-                        }
-                      >
-                        {generating ? (
-                          <LoaderCircle className="spin" size={12} />
-                        ) : (
-                          <Sparkles size={12} />
-                        )}
-                        {generating ? 'DeepSeek 正在生成…' : 'DeepSeek 生成搜索词'}
-                      </button>
-                    </span>
+                    搜索词
                     <textarea
                       aria-label="搜索词"
                       required
@@ -635,10 +583,8 @@ export function Automation() {
                       value={input.search_query}
                       onChange={(event) => patch('search_query', event.target.value)}
                     />
-                    <small className="query-help" aria-live="polite">
-                      {queryGenerated
-                        ? 'DeepSeek 已生成 · 可继续编辑'
-                        : '按当前产品与地理范围生成；通过所选渠道搜索，可编辑后运行。'}
+                    <small className="query-help">
+                      根据产品、客户类型、画像和地区自动生成，可直接编辑。
                     </small>
                   </label>
                 </fieldset>
@@ -654,21 +600,13 @@ export function Automation() {
                     </button>
                   </div>
                 )}
-                {queryError && (
-                  <div className="error-message" role="alert">
-                    {queryError}
-                  </div>
-                )}
                 {(statusError || !status?.configured) && (
                   <div className="connection-notice">
                     <KeyRound size={18} />
                     <div>
-                      <strong>
-                        {statusError ? '本地 API 服务未连接' : '先完成 n8n Webhook 接入'}
-                      </strong>
+                      <strong>{statusError ? 'API 服务未连接' : '先完成获客引擎配置'}</strong>
                       <p>
-                        {statusError ||
-                          'Webhook 的认证、发布与本地启用尚未全部完成。完成接入配置后，即可从这里运行。'}
+                        {statusError || status?.note || '完成服务端接入配置后，即可从这里运行。'}
                       </p>
                     </div>
                   </div>
@@ -681,7 +619,7 @@ export function Automation() {
                 {job?.status === 'completed' && (
                   <div className="success-message">
                     <CheckCircle2 size={17} />
-                    <span>n8n 已返回真实结果。</span>
+                    <span>客户入库结果已核实。</span>
                     <button type="button" onClick={() => setTab('调用结果')}>
                       查看结果
                       <ArrowRight size={13} />
@@ -695,13 +633,12 @@ export function Automation() {
                     disabled={
                       !status?.configured ||
                       taskActive ||
-                      generating ||
                       locationsLoading ||
                       Boolean(locationsError)
                     }
                   >
                     {running ? <LoaderCircle className="spin" size={15} /> : <Play size={15} />}{' '}
-                    {running ? 'n8n 正在执行…' : '运行工作流'}
+                    {running ? '正在执行…' : '开始获客'}
                   </button>
                 </div>
               </form>
@@ -819,10 +756,12 @@ export function Automation() {
                   <div className="empty-state">
                     <Workflow size={28} />
                     <h3>{loadingHistory ? '正在读取…' : '暂无执行记录'}</h3>
-                    <p>也可以在 n8n 的 Executions 页面查看历史。</p>
+                    <p>提交获客任务后，可在这里查看进度与结果。</p>
                   </div>
                 )}
-                <ExternalLink href={WORKFLOW_URL}>在 n8n 查看</ExternalLink>
+                {status?.provider !== 'native' && (
+                  <ExternalLink href={WORKFLOW_URL}>在 n8n 查看</ExternalLink>
+                )}
               </div>
             ) : null}
           </section>

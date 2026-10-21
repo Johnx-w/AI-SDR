@@ -1,5 +1,7 @@
 # 架构与 API 契约
 
+2026-10-21：获客链路新增 Node.js 直连引擎，原 n8n 接口保留兼容。最新配置、数据持久化、写入恢复与回退见 [迁移说明](native-migration.md)。下方 Webhook 契约描述 n8n 模式；统一业务入口为 /api/v1/acquisition。
+
 ## 业务数据
 
 UI 通过 `useWorkspace()` 访问状态，由 `WorkspaceRepository` 承担读写。默认 `MockWorkspaceRepository` 使用 `shadeflow:workspace:v1` 浏览器存储键。业务模型统一放在 `src/domain/types.ts`，样本与页面分离。
@@ -43,4 +45,4 @@ POST body 为六个 WorkflowInput 字段。浏览器传入 `Idempotency-Key`；�
 
 ## 实现取舍
 
-无需将 n8n 编辑器嵌入业务软件，也不需要重写已存在的搜索与 Dify 节点。MCP 是开发协助通道，业务运行使用常规 HTTP。当前没有复制平台凭证、自动外发消息或向原项目迁移数据。
+MCP 是开发协助通道，业务运行使用服务端 HTTP。native 模式由 Node.js 直接调用 Tavily、DeepSeek 和飞书；原 n8n 仍可作为回退引擎。平台凭证仅保存于服务端环境，不进入前端或 Git。任务队列与操作日志已持久化到本机 SQLite，云端认证、定时计划、PostgreSQL 和多来源采集将在后续阶段建设。
