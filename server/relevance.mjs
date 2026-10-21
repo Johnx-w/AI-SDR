@@ -133,6 +133,8 @@ const categories = [
 const partsPattern =
   /\b(?:components?|parts?|motors?|brackets?|headrails?|springs?)\b|配件|零件|电机|制头|弹簧|安装码/i;
 function productCategories(text) {
+  // Catalogs often coordinate two styles before the shared noun.
+  text = String(text).replace(/\broller\s*(?:&|and|\/)\s*solar\s+shades?\b/gi, 'roller shades solar shades');
   let found = categories.filter(([, pattern]) => pattern.test(text)).map(([id]) => id);
   if (/roller\s+shutter|rolling\s+shutter|卷闸|卷门/i.test(text))
     found = found.filter((id) => id !== 'shutter');

@@ -15,6 +15,8 @@ import { useWorkspace } from '../app/WorkspaceProvider';
 import { Badge, Empty, Modal } from '../components/ui';
 import { CompanyLogo } from '../components/CompanyLogo';
 import { ContactPanel } from '../components/ContactPanel';
+import { AssessmentPanel } from '../components/AssessmentPanel';
+import type { AssessmentSummary } from '../components/AssessmentPanel';
 import { exportCsv } from '../services/workspace';
 
 interface Prospect {
@@ -27,6 +29,8 @@ interface Prospect {
   match: string;
   score: number | null;
   grade: string;
+  ratingReason?: string;
+  assessment?: AssessmentSummary | null;
   status: string;
   region: string;
   city: string;
@@ -52,7 +56,7 @@ interface Prospect {
   website: string;
   source: string;
   evidence: string;
-  facts: { field: string; value: string; quote: string }[];
+  facts: { field: string; value: string; quote: string; source_url?: string }[];
   contactEvidence: { kind: string; value: string; quote: string; source_url: string }[];
   updatedAt: number | null;
   fields: Record<string, string>;
@@ -148,8 +152,9 @@ export function LeadLibrary() {
         类型: typeNames[l.type] || l.type,
         产品: l.product,
         评分: l.score ?? '未评分',
-        评级: l.grade,
-        客户等级: l.grade,
+        用户评级: l.grade,
+        评级依据: l.ratingReason || '',
+        开发状态: l.status,
         广告代码: l.advertisingCodes || '',
         需求产品: l.demandProducts || '',
         客户行业画像: l.industryProfile || '',
@@ -292,7 +297,7 @@ export function LeadLibrary() {
                 <tr>
                   <th>客户／来源</th>
                   <th>市场与客户类型</th>
-                  <th>客户等级</th>
+                  <th>用户评级</th>
                   <th>证据状态</th>
                   <th>联系状态</th>
                   <th />
@@ -344,14 +349,16 @@ export function LeadLibrary() {
                         <div>
                           <strong>
                             {l.grade}
-                            <small>{l.score === null ? '' : ' / 100'}</small>
+                            <small>{l.score === null ? '' : ' · 已支持' + l.score + '分'}</small>
                           </strong>
                           {l.score !== null ? (
                             <div className="tiny-track">
                               <i style={{ width: l.score + '%' }} />
                             </div>
                           ) : (
-                            <span className="subtext">人工评级</span>
+                            <span className="subtext">
+                              {l.grade === '未评级' ? '尚未自动评级' : '手工记录'}
+                            </span>
                           )}
                         </div>
                       </div>
@@ -433,17 +440,20 @@ export function LeadLibrary() {
               <Badge tone="green">飞书真实客户</Badge>
             </div>
             <div className="detail-tabs">
-              {['客户画像', '官网证据', '联系方式', '沟通与跟进', '原始字段'].map((t) => (
-                <button className={tab === t ? 'active' : ''} onClick={() => setTab(t)} key={t}>
-                  {t}
-                </button>
-              ))}
+              {['客户画像', '评分与历史', '官网证据', '联系方式', '沟通与跟进', '原始字段'].map(
+                (t) => (
+                  <button className={tab === t ? 'active' : ''} onClick={() => setTab(t)} key={t}>
+                    {t}
+                  </button>
+                ),
+              )}
             </div>
             {tab === '客户画像' && (
               <>
                 <div className="profile-kv">
                   {[
-                    ['客户等级', viewed.grade],
+                    ['用户评级', viewed.grade],
+                    ['评级依据', viewed.ratingReason || '尚无评级依据'],
                     ['客户类型', typeNames[viewed.type] || viewed.type],
                     ['相关产品', viewed.product],
                     ['主营产品偏好', viewed.mainProductPreference || '尚未分析'],
@@ -459,7 +469,9 @@ export function LeadLibrary() {
                     ['服务地区', viewed.serviceAreas || '未确认'],
                     [
                       '评分',
-                      viewed.score === null ? '未评分' : viewed.grade + '级 · ' + viewed.score,
+                      viewed.score === null
+                        ? '未评分'
+                        : '已支持' + viewed.score + '/100 · ' + viewed.grade,
                     ],
                     [
                       '最近研究',
@@ -483,12 +495,22 @@ export function LeadLibrary() {
                 </div>
               </>
             )}
+            {tab === '评分与历史' && (
+              <AssessmentPanel
+                key={viewed.id}
+                recordId={viewed.id}
+                country={viewed.market}
+                product={viewed.product}
+                assessment={viewed.assessment}
+                onChanged={() => load()}
+              />
+            )}
             {tab === '官网证据' && (
               <>
                 <div className="info-callout">
                   <ShieldCheck size={18} />
                   <p>
-                    以下为原始记录累积的官网事实。记录未提供逐条来源，链接仅指向最近研究页，历史引文需逐项核对。
+                    以下为已有官网研究事实。自动评估保留逐条引文和来源；旧记录缺少逐条来源时，链接指向最近研究页，需结合原文核对。
                   </p>
                 </div>
                 {viewed.facts.map((f, i) => (
@@ -496,9 +518,13 @@ export function LeadLibrary() {
                     <Badge>{f.field}</Badge>
                     <strong>{f.value}</strong>
                     <blockquote>{f.quote}</blockquote>
-                    {safeUrl(viewed.website) && (
-                      <a href={safeUrl(viewed.website)} target="_blank" rel="noreferrer">
-                        最近研究页 <ArrowUpRight size={14} />
+                    {safeUrl(f.source_url || viewed.website) && (
+                      <a
+                        href={safeUrl(f.source_url || viewed.website)}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        证据来源 <ArrowUpRight size={14} />
                       </a>
                     )}
                   </article>

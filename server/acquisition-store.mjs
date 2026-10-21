@@ -71,6 +71,14 @@ export class AcquisitionStore {
         stoppedAt: o.state === 'completed' ? o.updatedAt : null,
       }));
   }
+  byAssessment(id) {
+    const row = this.db
+      .prepare(
+        "SELECT data FROM acquisition_operations WHERE json_extract(data,'$.assessment.id')=? AND json_extract(data,'$.scope')=? LIMIT 1",
+      )
+      .get(id, this.scope);
+    return row ? JSON.parse(row.data) : null;
+  }
   close() {
     this.db.close();
   }

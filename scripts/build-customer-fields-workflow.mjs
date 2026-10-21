@@ -56,12 +56,17 @@ const builderTail = get('构建飞书记录').parameters.jsCode.slice(
 );
 if (!builderTail || !builderTail.includes('researchFields(r,evidence'))
   throw new Error('入库节点结构已变化');
-const checkedBuilder = builderTail.includes('客户类型必须为单选字段')
-  ? builderTail
-  : builderTail.replace(
-      'const key=/^https?',
-      "for(const name of ['广告代码','需求产品','客户行业画像'])if(types[name]!==1)throw new Error('客户表缺少文本字段：'+name);if(types['客户类型']!==3)throw new Error('客户类型必须为单选字段');const key=/^https?",
-    );
+const checkedBuilder = (
+  builderTail.includes('客户类型必须为单选字段')
+    ? builderTail
+    : builderTail.replace(
+        'const key=/^https?',
+        "for(const name of ['广告代码','需求产品','客户行业画像'])if(types[name]!==1)throw new Error('客户表缺少文本字段：'+name);if(types['客户类型']!==3)throw new Error('客户类型必须为单选字段');const key=/^https?",
+      )
+).replace(
+  "if(types['客户类型']!==3)throw new Error('客户类型必须为单选字段');",
+  "if(![1,3].includes(types['客户类型']))throw new Error('客户类型必须为文本字段（兼容旧单选）');",
+);
 const gatedBuilder = checkedBuilder.replace(
   'const evidence=',
   "if(!r.ok || r.eligibility?.status!=='eligible')throw new Error('客户未通过全局准入判断');const evidence=",

@@ -17,6 +17,10 @@ import {
 } from './company-research.mjs';
 import { pageRelevance } from './relevance.mjs';
 import { validateTarget } from './search-target.mjs';
+import { normalizeCountry } from './relevance.mjs';
+import { markets } from './markets.mjs';
+import { assessCompany, assessmentId, ASSESSMENT_RULE_VERSION } from './customer-assessment.mjs';
+import { AssessmentService } from './assessment-service.mjs';
 
 const conflict = (message) => Object.assign(new Error(message), { status: 409 });
 const blockedHosts =
@@ -69,7 +73,14 @@ export function selectWebsiteCandidates(results, knownDomains = [], limit = 20) 
 }
 
 export class NativeAcquisition {
-  constructor({ env, fetchImpl = fetch, readPage = readPublicHtml, feishu, store } = {}) {
+  constructor({
+    env,
+    fetchImpl = fetch,
+    readPage = readPublicHtml,
+    feishu,
+    store,
+    assessments,
+  } = {}) {
     this.env = env;
     this.fetch = fetchImpl;
     this.readPage = readPage;
@@ -81,6 +92,112 @@ export class NativeAcquisition {
         String(env.FEISHU_APP_TOKEN) + '/' + String(env.FEISHU_TABLE_ID),
       );
     this.active = new Set();
+    this.assessments = assessments || new AssessmentService({ env, feishu: this.feishu });
+  }
+  assessmentInfo() {
+    return { ruleVersion: ASSESSMENT_RULE_VERSION, markets, customs: 'not_connected' };
+  }
+  decorateLeads(data) {
+    this.assessments.start();
+    return {
+      ...data,
+      leads: data.leads.map((lead) => {
+        if (!lead.assessment?.id) return lead;
+        const stored = this.assessments.summary(lead.assessment.id);
+        if (!stored || stored.recordId !== lead.id || stored.reason !== lead.ratingReason)
+          return lead;
+        const readable = (fact) => ({
+          ...fact,
+          value:
+            typeof fact.value === 'object' && fact.value !== null
+              ? Object.values(fact.value).filter(Boolean).join(', ')
+              : String(fact.value ?? ''),
+        });
+        const facts = [
+          ...stored.facts,
+          ...stored.opportunities.flatMap((o) => o.facts.map((f) => ({ ...f, field: f.kind }))),
+        ].map(readable);
+        const manualOverride = (stored.grade || '未评级') !== lead.grade;
+        return {
+          ...lead,
+          facts,
+          assessment: {
+            id: stored.id,
+            ruleVersion: stored.ruleVersion,
+            evaluatedAt: stored.evaluatedAt,
+            score: stored.score,
+            grade: manualOverride ? (lead.grade === '未评级' ? null : lead.grade) : stored.grade,
+            status: manualOverride ? '主表评级已修改；原自动结果保留在历史中' : stored.status,
+            complete: stored.complete,
+            manualOverride,
+            product: stored.product,
+            direction: stored.direction,
+            missing: stored.missing,
+            dimensions: Object.fromEntries(
+              Object.entries(stored.dimensions).map(([k, d]) => [
+                k,
+                { score: d.score, maximum: d.maximum, missing: d.missing },
+              ]),
+            ),
+            sync: stored.sync,
+          },
+        };
+      }),
+    };
+  }
+  async assessRecord(recordId, body, operationId) {
+    const definitions = await this.feishu.fields();
+    for (const [name, type] of [
+      ['用户评级', 3],
+      ['评级依据', 1],
+      ['最近研究时间', 5],
+    ])
+      if (!definitions.some((field) => field.field_name === name && field.type === type))
+        throw Object.assign(new Error('请先完成T2评分字段配置：' + name), { status: 503 });
+    await this.assessments.table();
+    const pending = this.assessments.store
+      .history(recordId)
+      .find((entry) => entry.historyStatus !== 'synced');
+    if (pending && pending.id !== assessmentId(this.assessments.scope, operationId))
+      throw Object.assign(new Error('该客户上次T12历史尚待同步，请在评估历史中先核对'), {
+        status: 409,
+      });
+    const record = await this.feishu.record(recordId);
+    const countryValue = body.country || fieldText(record.fields?.['国家']);
+    const country = markets.find(
+      (m) => normalizeCountry(m.value) === normalizeCountry(countryValue),
+    )?.value;
+    if (!country)
+      throw Object.assign(new Error('请在研究评级表单中选择已支持的企业国家'), { status: 400 });
+    const product =
+      body.product ||
+      fieldText(record.fields?.['相关产品']).split('\n').filter(Boolean).slice(0, 4).join(', ');
+    if (!product) throw Object.assign(new Error('请填写本次评价的具体产品'), { status: 400 });
+    const input = validateTarget({
+      country,
+      region: '',
+      product,
+      audience: 'BC',
+      customer_type: '',
+      customer_profile: 'all',
+      acquisition_channel: 'tavily_web',
+    });
+    const source_url = fieldText(record.fields?.['来源链接']);
+    return this.research(input, {
+      source_url,
+      operation_id: operationId,
+      target_record_id: recordId,
+    });
+  }
+  assessmentHistory(recordId) {
+    return { assessments: this.assessments.history(recordId) };
+  }
+  async retryAssessment(recordId, id) {
+    const result = await this.assessments.retry(recordId, id);
+    const operation = this.store.byAssessment(id);
+    if (operation && operation.recordId === recordId && operation.state !== 'completed')
+      await this.status(operation.id);
+    return result;
   }
   ensureConfigured() {
     const config = acquisitionConfig(this.env);
@@ -234,6 +351,16 @@ export class NativeAcquisition {
       skipped_existing_count: skipped.length,
       skipped_existing: skipped,
       research,
+      assessment: operation.assessment
+        ? {
+            id: operation.assessment.id,
+            score: operation.assessment.score,
+            grade: operation.assessment.grade,
+            status: operation.assessment.status,
+            complete: operation.assessment.complete,
+            ruleVersion: operation.assessment.ruleVersion,
+          }
+        : null,
       checked_urls: research.checked_urls || [],
       明细: row ? [row] : [],
     };
@@ -331,15 +458,21 @@ export class NativeAcquisition {
         },
         'DeepSeek',
       );
+      op.research_response = response;
+      this.store.save(op);
       const research = {
         ...parseCompanyResearch(response, page, input),
         checked_urls: page.checked_urls,
       };
       op.research = research;
       op.evidence = page.website_metadata;
+      op.research_pages = page.research_pages;
       op.usage = response.usage;
       this.store.save(op);
-      if (!research.ok || research.eligibility?.status !== 'eligible' || !research.company_name) {
+      if (
+        (!research.ok || research.eligibility?.status !== 'eligible' || !research.company_name) &&
+        !item.target_record_id
+      ) {
         const output = this.output(op, {
           research,
           reason: research.reason || '官网企业名称缺乏可验证证据',
@@ -379,15 +512,35 @@ export class NativeAcquisition {
       let raw = {
         ...researchFields(research, page.website_metadata, old?.fields || {}, page.research_pages),
         来源链接: item.source_url,
-        主体类型: '企业',
+        最近研究时间: Date.now(),
       };
       if (old) raw = mergeResearchFields(old.fields, raw);
-      else Object.assign(raw, { customer_id: 'web_' + domain, 首次发现时间: Date.now() });
+      else
+        Object.assign(raw, {
+          customer_id: 'web_' + domain,
+          首次发现时间: Date.now(),
+          开发状态: '待开发',
+        });
       if (item.phone_only) {
         if (!old) throw new Error('仅更新电话需要明确的已有记录');
         raw = raw['电话'] ? { 电话: raw['电话'] } : {};
       }
       const definitions = await this.feishu.fields();
+      if (
+        !item.phone_only &&
+        definitions.some((f) => f.field_name === '用户评级' && f.type === 3) &&
+        definitions.some((f) => f.field_name === '评级依据' && f.type === 1)
+      ) {
+        await this.assessments.table();
+        op.assessment = assessCompany({
+          research,
+          target: input,
+          id: assessmentId(this.assessments.scope, op.id),
+        });
+        raw['评级依据'] = op.assessment.reason;
+        // Unknown assessments clear an obsolete grade; they are never coerced to C.
+        raw['用户评级'] = op.assessment.grade;
+      }
       const fields = item.phone_only
         ? Object.fromEntries(
             Object.entries(raw).filter(([key]) =>
@@ -395,6 +548,7 @@ export class NativeAcquisition {
             ),
           )
         : encodeResearchFields(raw, definitions);
+      if (op.assessment) fields['用户评级'] = op.assessment.grade;
       if (!Object.keys(fields).length) throw new Error('没有可更新字段');
       // Persist intent before the remote side effect. Never auto-repeat an uncertain write.
       op.stage = 'persist';
@@ -408,12 +562,16 @@ export class NativeAcquisition {
       this.store.save(op);
       const verified = await this.verify(op);
       if (!verified) throw new Error('飞书写入后读回不一致');
-      return this.finishWritten(op);
+      return await this.finishWritten(op);
     } catch (error) {
-      if (op.stage === 'persist') {
+      if (['persist', 'assessment'].includes(op.stage)) {
         op.state = 'uncertain';
         this.store.save(op);
-        throw conflict('飞书写入结果待核对，已暂停且未自动重试');
+        throw conflict(
+          op.stage === 'assessment'
+            ? 'T2已更新，T12历史同步待核对；完整评估已保存，勿重复研究'
+            : '飞书写入结果待核对，已暂停且未自动重试',
+        );
       }
       const output = this.output(op, {
         research: op.research || {},
@@ -431,12 +589,20 @@ export class NativeAcquisition {
     if (domainKey(fieldText(record.fields?.['来源链接'])) !== domainKey(op.source_url))
       return false;
     return Object.entries(op.fields).every(([key, value]) => {
+      if (value === null) return fieldText(record.fields?.[key]) === '';
       const expected = typeof value === 'object' ? value.link || value.text : value;
       if (typeof expected === 'number') return Number(record.fields?.[key]) === expected;
       return fieldText(record.fields?.[key]) === expected;
     });
   }
-  finishWritten(op) {
+  async finishWritten(op) {
+    op.recordVerifiedAt ||= new Date().toISOString();
+    if (op.assessment) {
+      op.stage = 'assessment';
+      this.store.save(op);
+      this.assessments.start();
+      await this.assessments.sync(op.assessment, op.recordId);
+    }
     const output = this.output(op, {
       research: op.research,
       row: {
@@ -444,7 +610,11 @@ export class NativeAcquisition {
         source_url: op.source_url,
         record_id: op.recordId,
       },
-      reason: op.action === 'insert' ? '飞书新增并读回核验成功' : '飞书更新并读回核验成功',
+      reason: op.assessment
+        ? '企业研究、T2评级与T12评估历史均已完成并读回'
+        : op.action === 'insert'
+          ? '飞书新增并读回核验成功'
+          : '飞书更新并读回核验成功',
     });
     this.store.complete(op, output);
     return output;
@@ -459,9 +629,21 @@ export class NativeAcquisition {
       if (result.settled) this.store.complete(op, result.output);
       return result;
     }
-    if (op.stage === 'persist') {
+    if (['persist', 'assessment'].includes(op.stage)) {
       try {
-        if (await this.verify(op)) return { settled: true, output: this.finishWritten(op) };
+        if (op.stage === 'assessment' && op.recordVerifiedAt)
+          return { settled: true, output: await this.finishWritten(op) };
+        if (!op.recordId && op.action === 'insert') {
+          const candidates = recordsForDomain(
+            await this.feishu.records(),
+            domainKey(op.source_url),
+          );
+          if (candidates.length === 1) {
+            op.recordId = candidates[0].record_id;
+            this.store.save(op);
+          }
+        }
+        if (await this.verify(op)) return { settled: true, output: await this.finishWritten(op) };
       } catch {
         /* Preserve uncertainty when the read-back service is unavailable. */
       }
@@ -501,6 +683,7 @@ export class NativeAcquisition {
     }
   }
   close() {
+    this.assessments.close();
     this.store.close();
   }
 }

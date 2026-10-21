@@ -215,6 +215,51 @@ export function createApp({
           );
         if (url.pathname === '/api/v1/leads/real' && request.method === 'GET')
           return json(response, 200, await loadLeads());
+        if (url.pathname === '/api/v1/assessments/rules' && request.method === 'GET') {
+          if (!provider.assessmentInfo) throw new ApiError(503, '自动评级目前需要后端直连引擎');
+          return json(response, 200, provider.assessmentInfo());
+        }
+        const assessmentRoute = url.pathname.match(
+          /^\/api\/v1\/leads\/real\/([\w-]+)\/assessments(?:\/(ev_[a-f0-9]{36})\/retry)?$/,
+        );
+        if (assessmentRoute) {
+          if (!provider.assessRecord) throw new ApiError(503, '自动评级目前需要后端直连引擎');
+          const [, recordId, evaluationId] = assessmentRoute;
+          if (!realLeads.size) await loadLeads();
+          if (!realLeads.has(recordId)) throw new ApiError(404, '客户不存在，请刷新客户库');
+          if (request.method === 'GET' && !evaluationId)
+            return json(response, 200, provider.assessmentHistory(recordId));
+          if (request.method === 'POST' && evaluationId)
+            return json(response, 200, await provider.retryAssessment(recordId, evaluationId));
+          if (request.method === 'POST' && !evaluationId) {
+            if (!provider.info.configured) throw new ApiError(503, '请先配置企业研究所需API');
+            if (running || jobs().active())
+              throw new ApiError(409, '请先完成当前获客任务或核对其写入结果');
+            const body = await readJson(request);
+            if (
+              !body ||
+              typeof body !== 'object' ||
+              Array.isArray(body) ||
+              Object.keys(body).some((key) => !['product', 'country'].includes(key))
+            )
+              throw new ApiError(400, '评级只接收产品与国家，不接受客户端分数或证据');
+            for (const value of Object.values(body))
+              if (typeof value !== 'string' || value.length > 500)
+                throw new ApiError(400, '产品和国家必须为500字以内文本');
+            const key = request.headers['idempotency-key'];
+            if (typeof key !== 'string' || !/^[\w-]{8,100}$/.test(key))
+              throw new ApiError(400, '研究评级需要有效Idempotency-Key');
+            running++;
+            try {
+              const output = await provider.assessRecord(recordId, body, 'rating-' + key);
+              realLeads.clear();
+              return json(response, 200, output);
+            } finally {
+              running--;
+            }
+          }
+          throw new ApiError(405, '不支持的评估操作');
+        }
         const branding = url.pathname.match(/^\/api\/v1\/leads\/real\/([\w-]+)\/branding$/);
         if (branding && request.method === 'GET') {
           if (!realLeads.size) await loadLeads();
