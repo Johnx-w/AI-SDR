@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { AssessmentStore } from './assessment-store.mjs';
 import { fieldText } from './feishu.mjs';
-import { assertAssessmentIdentity } from './customer-assessment.mjs';
+import {
+  assertAssessmentIdentity,
+  formatAssessmentEvidence,
+  assessmentRating,
+  ASSESSMENT_HISTORY_FORMAT,
+} from './customer-assessment.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const containsRecord = (value, id) => {
@@ -82,6 +87,10 @@ export class AssessmentService {
     const entry = this.store.get(assessmentId);
     return entry ? publicEntry(entry) : null;
   }
+  latest(recordId) {
+    const entry = this.store.history(recordId, 1)[0];
+    return entry ? publicEntry(entry) : null;
+  }
   async sync(snapshot, recordId) {
     const entry = this.store.prepare(snapshot, recordId);
     return this.syncEntry(entry.id);
@@ -101,9 +110,15 @@ export class AssessmentService {
       评估ID: entry.id,
       客户: [entry.recordId],
       评估时间: Date.parse(entry.snapshot.evaluatedAt),
-      用户评级: entry.snapshot.grade,
+      用户评级:
+        entry.historyReasonFormat === ASSESSMENT_HISTORY_FORMAT
+          ? assessmentRating(entry.snapshot)
+          : entry.snapshot.grade,
       评分: entry.snapshot.score,
-      评级依据: entry.snapshot.reason,
+      评级依据:
+        entry.historyReasonFormat === ASSESSMENT_HISTORY_FORMAT
+          ? formatAssessmentEvidence(entry.snapshot)
+          : entry.snapshot.reason,
       规则版本: entry.snapshot.ruleVersion,
     };
   }
@@ -114,10 +129,10 @@ export class AssessmentService {
       fieldText(fields['评估ID']) === entry.id &&
       containsRecord(fields['客户'], entry.recordId) &&
       Number(fields['评估时间']) === expected['评估时间'] &&
-      fieldText(fields['用户评级']) === (entry.snapshot.grade || '') &&
+      fieldText(fields['用户评级']) === (expected['用户评级'] || '') &&
       fieldText(fields['评分']).trim() !== '' &&
       Number(fieldText(fields['评分'])) === entry.snapshot.score &&
-      fieldText(fields['评级依据']) === entry.snapshot.reason &&
+      fieldText(fields['评级依据']) === expected['评级依据'] &&
       fieldText(fields['规则版本']) === entry.snapshot.ruleVersion
     );
   }
@@ -187,6 +202,30 @@ export class AssessmentService {
     const entry = this.store.get(assessmentId);
     if (!entry || entry.recordId !== recordId) throw fail(404, '客户评估记录不存在');
     return this.syncEntry(entry.id);
+  }
+  async simplifyHistoryEvidence(id) {
+    const entry = this.store.get(id);
+    if (!entry || entry.historyStatus !== 'synced' || !entry.historyRecordId)
+      throw fail(409, '仅清理已确认同步的历史依据');
+    const { tableId } = await this.table();
+    if (entry.historyTableId !== tableId) throw fail(409, 'T12已变更，停止清理');
+    assertAssessmentIdentity(entry.snapshot, await this.feishu.record(entry.recordId));
+    const next = { ...entry, historyReasonFormat: ASSESSMENT_HISTORY_FORMAT };
+    let remote = await this.feishu.record(entry.historyRecordId, tableId);
+    if (!this.matches(next, remote)) {
+      if (!this.matches(entry, remote)) throw fail(409, '历史内容已改变，停止覆盖');
+      await this.feishu.write(
+        'update',
+        { 评级依据: this.expected(next)['评级依据'], 用户评级: this.expected(next)['用户评级'] },
+        entry.historyRecordId,
+        null,
+        tableId,
+      );
+      remote = await this.feishu.record(entry.historyRecordId, tableId);
+      if (!this.matches(next, remote)) throw fail(409, '历史依据清理后读回不一致');
+    }
+    this.store.save(next);
+    return publicEntry(next);
   }
   async recoverPending() {
     if (this.recovering) return;

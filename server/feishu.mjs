@@ -50,7 +50,7 @@ export function mapFeishuRecord(record) {
     match: '',
     score: assessment?.score ?? null,
     assessment,
-    grade: ['A', 'B', 'C'].includes(grade) ? grade : '未评级',
+    grade: ['A', 'B', 'C', '待核实', '待补全', '暂不开发'].includes(grade) ? grade : '未评级',
     ratingReason: read('评级依据'),
     status: read('开发状态') || '未记录',
     region: read('州 / 城市'),

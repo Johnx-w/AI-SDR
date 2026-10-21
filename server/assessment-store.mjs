@@ -37,6 +37,7 @@ export class AssessmentStore {
       recordId,
       snapshot,
       historyStatus: 'pending',
+      historyReasonFormat: 'evidence-v1',
       createdAt: new Date().toISOString(),
     };
     this.db

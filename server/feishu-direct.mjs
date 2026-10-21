@@ -50,16 +50,31 @@ export class FeishuClient {
   }
   async request(path, { method = 'GET', body } = {}) {
     const token = await this.accessToken();
-    const data = await platformJson(
-      this.fetch,
-      base + path,
-      {
-        method,
-        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-        ...(body ? { body: JSON.stringify(body) } : {}),
-      },
-      '飞书',
-    );
+    let data;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        data = await platformJson(
+          this.fetch,
+          base + path,
+          {
+            method,
+            headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+            ...(body ? { body: JSON.stringify(body) } : {}),
+          },
+          '飞书',
+        );
+        break;
+      } catch (error) {
+        // Reads can be retried; an uncertain remote write must be reconciled by its owner.
+        if (
+          method !== 'GET' ||
+          attempt >= 2 ||
+          (error.upstreamStatus && error.upstreamStatus < 500 && error.upstreamStatus !== 429)
+        )
+          throw error;
+        await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+      }
+    }
     if (data.code !== 0) {
       if ([99991661, 99991663, 99991664, 99991668].includes(data.code)) this.token = null;
       throw Object.assign(

@@ -19,7 +19,12 @@ import { pageRelevance } from './relevance.mjs';
 import { validateTarget } from './search-target.mjs';
 import { normalizeCountry } from './relevance.mjs';
 import { markets } from './markets.mjs';
-import { assessCompany, assessmentId, ASSESSMENT_RULE_VERSION } from './customer-assessment.mjs';
+import {
+  assessCompany,
+  assessmentId,
+  assessmentRating,
+  ASSESSMENT_RULE_VERSION,
+} from './customer-assessment.mjs';
 import { AssessmentService } from './assessment-service.mjs';
 
 const conflict = (message) => Object.assign(new Error(message), { status: 409 });
@@ -102,9 +107,17 @@ export class NativeAcquisition {
     return {
       ...data,
       leads: data.leads.map((lead) => {
-        if (!lead.assessment?.id) return lead;
-        const stored = this.assessments.summary(lead.assessment.id);
-        if (!stored || stored.recordId !== lead.id || stored.reason !== lead.ratingReason)
+        const stored = lead.assessment?.id
+          ? this.assessments.summary(lead.assessment.id)
+          : !lead.ratingReason
+            ? this.assessments.latest(lead.id)
+            : null;
+        if (
+          !stored ||
+          stored.recordId !== lead.id ||
+          domainKey(stored.website) !== domainKey(lead.website) ||
+          (lead.ratingReason && stored.reason !== lead.ratingReason)
+        )
           return lead;
         const readable = (fact) => ({
           ...fact,
@@ -117,9 +130,11 @@ export class NativeAcquisition {
           ...stored.facts,
           ...stored.opportunities.flatMap((o) => o.facts.map((f) => ({ ...f, field: f.kind }))),
         ].map(readable);
-        const manualOverride = (stored.grade || '未评级') !== lead.grade;
+        const manualOverride = assessmentRating(stored) !== lead.grade;
         return {
           ...lead,
+          score: stored.score,
+          ratingReason: lead.ratingReason || stored.reason,
           facts,
           assessment: {
             id: stored.id,
@@ -149,7 +164,6 @@ export class NativeAcquisition {
     const definitions = await this.feishu.fields();
     for (const [name, type] of [
       ['用户评级', 3],
-      ['评级依据', 1],
       ['最近研究时间', 5],
     ])
       if (!definitions.some((field) => field.field_name === name && field.type === type))
@@ -404,16 +418,34 @@ export class NativeAcquisition {
         this.store.complete(op, output);
         return output;
       }
+      if (item.target_record_id && blockedHosts.test(new URL(item.source_url).hostname))
+        return await this.persistIncompleteAssessment(
+          op,
+          input,
+          item,
+          '现有来源为第三方平台页面，尚未核实企业独立官网，本轮不据此判定高等级',
+          [],
+        );
       op.stage = 'extract';
       this.store.save(op);
       const page = await this.collect(item.source_url);
       op.stage = 'research';
       op.checked_urls = page.checked_urls;
+      op.research_pages = page.research_pages;
+      op.evidence = page.website_metadata;
       this.store.save(op);
       // Cheap keyword screen before the paid model call: keep only pages that
       // actually mention the target products or the window-shading industry.
       const relevance = pageRelevance(page.page_text, input);
       if (!relevance.relevant) {
+        if (item.target_record_id)
+          return await this.persistIncompleteAssessment(
+            op,
+            input,
+            item,
+            '本轮官网正文未取得目标品类的评分依据',
+            page.checked_urls,
+          );
         const research = {
           ok: false,
           stage: 'done',
@@ -439,12 +471,13 @@ export class NativeAcquisition {
             Authorization: 'Bearer ' + this.env.DEEPSEEK_API_KEY,
             'Content-Type': 'application/json',
           },
-          signal: AbortSignal.timeout(120000),
+          signal: AbortSignal.timeout(180000),
           body: JSON.stringify({
             model: this.env.DEEPSEEK_MODEL || 'deepseek-flash',
             input: prompt.messages,
-            max_output_tokens: 10000,
-            reasoning: { effort: 'low' },
+            max_output_tokens: 16000,
+            reasoning: { effort: 'none' },
+            temperature: 0,
             store: false,
             text: {
               format: {
@@ -480,6 +513,15 @@ export class NativeAcquisition {
         this.store.complete(op, output);
         return output;
       }
+      if (item.target_record_id && !research.company_name)
+        return await this.persistIncompleteAssessment(
+          op,
+          input,
+          item,
+          '当前官网未取得可验证的企业名称，主体身份待核实',
+          page.checked_urls,
+          research,
+        );
       op.stage = 'prepare';
       this.store.save(op);
       // Recheck identity immediately before writing, including all record pages.
@@ -528,8 +570,7 @@ export class NativeAcquisition {
       const definitions = await this.feishu.fields();
       if (
         !item.phone_only &&
-        definitions.some((f) => f.field_name === '用户评级' && f.type === 3) &&
-        definitions.some((f) => f.field_name === '评级依据' && f.type === 1)
+        definitions.some((f) => f.field_name === '用户评级' && f.type === 3)
       ) {
         await this.assessments.table();
         op.assessment = assessCompany({
@@ -537,9 +578,10 @@ export class NativeAcquisition {
           target: input,
           id: assessmentId(this.assessments.scope, op.id),
         });
-        raw['评级依据'] = op.assessment.reason;
-        // Unknown assessments clear an obsolete grade; they are never coerced to C.
-        raw['用户评级'] = op.assessment.grade;
+        if (definitions.some((f) => f.field_name === '评级依据' && f.type === 1))
+          raw['评级依据'] = op.assessment.reason;
+        // Unknowns have an explicit status rather than a blank or a fabricated C grade.
+        raw['用户评级'] = assessmentRating(op.assessment);
       }
       const fields = item.phone_only
         ? Object.fromEntries(
@@ -548,7 +590,7 @@ export class NativeAcquisition {
             ),
           )
         : encodeResearchFields(raw, definitions);
-      if (op.assessment) fields['用户评级'] = op.assessment.grade;
+      if (op.assessment) fields['用户评级'] = assessmentRating(op.assessment);
       if (!Object.keys(fields).length) throw new Error('没有可更新字段');
       // Persist intent before the remote side effect. Never auto-repeat an uncertain write.
       op.stage = 'persist';
@@ -556,13 +598,7 @@ export class NativeAcquisition {
       op.recordId = old?.record_id;
       op.fields = fields;
       op.source_url = item.source_url;
-      this.store.save(op);
-      const written = await this.feishu.write(op.action, fields, op.recordId, op.clientToken);
-      op.recordId = written.record_id;
-      this.store.save(op);
-      const verified = await this.verify(op);
-      if (!verified) throw new Error('飞书写入后读回不一致');
-      return await this.finishWritten(op);
+      return await this.writePreparedAssessment(op);
     } catch (error) {
       if (['persist', 'assessment'].includes(op.stage)) {
         op.state = 'uncertain';
@@ -573,6 +609,18 @@ export class NativeAcquisition {
             : '飞书写入结果待核对，已暂停且未自动重试',
         );
       }
+      if (item.target_record_id && ['extract', 'research'].includes(op.stage))
+        return await this.persistIncompleteAssessment(
+          op,
+          input,
+          item,
+          op.research_response?.status === 'incomplete'
+            ? 'AI研究输出达到长度上限，未取得完整可验证结果'
+            : error.status
+              ? error.message
+              : '官网采集或研究未完成，本轮未取得足够评分依据',
+          op.checked_urls || [],
+        );
       const output = this.output(op, {
         research: op.research || {},
         reason: error.status ? error.message : '官网采集或研究失败，未写入飞书',
@@ -581,6 +629,61 @@ export class NativeAcquisition {
       return output;
     } finally {
       this.active.delete(id);
+    }
+  }
+  async persistIncompleteAssessment(op, input, item, reason, checkedUrls, partialResearch = {}) {
+    const customer = await this.feishu.record(item.target_record_id);
+    if (
+      !domainKey(item.source_url) ||
+      domainKey(fieldText(customer.fields?.['来源链接'])) !== domainKey(item.source_url)
+    )
+      throw conflict('未完成研究的客户主体不一致，停止写入');
+    await this.assessments.table();
+    op.research = {
+      ...partialResearch,
+      ok: false,
+      source_url: item.source_url,
+      company_name: null,
+      entity_type: 'unknown',
+      assessment_opportunities: partialResearch.assessment_opportunities || [],
+      facts: partialResearch.facts || [],
+      checked_urls: checkedUrls,
+      incomplete_reason: reason,
+    };
+    op.assessment = assessCompany({
+      research: op.research,
+      target: input,
+      id: assessmentId(this.assessments.scope, op.id),
+    });
+    op.action = 'update';
+    op.recordId = item.target_record_id;
+    op.source_url = item.source_url;
+    op.fields = {
+      用户评级: assessmentRating(op.assessment),
+      最近研究时间: Date.parse(op.assessment.evaluatedAt),
+    };
+    const fields = await this.feishu.fields();
+    if (fields.some((f) => f.field_name === '评级依据' && f.type === 1))
+      op.fields['评级依据'] = op.assessment.reason;
+    return this.writePreparedAssessment(op);
+  }
+  async writePreparedAssessment(op) {
+    op.stage = 'persist';
+    this.store.save(op);
+    try {
+      const written = await this.feishu.write(op.action, op.fields, op.recordId, op.clientToken);
+      op.recordId = written.record_id;
+      this.store.save(op);
+      if (!(await this.verify(op))) throw new Error('飞书写入后读回不一致');
+      return await this.finishWritten(op);
+    } catch (error) {
+      op.state = 'uncertain';
+      this.store.save(op);
+      throw conflict(
+        op.stage === 'assessment'
+          ? 'T2已更新，T12历史同步待核对；勿重复研究'
+          : '飞书写入结果待核对，未自动重复写入',
+      );
     }
   }
   async verify(op) {
@@ -611,7 +714,9 @@ export class NativeAcquisition {
         record_id: op.recordId,
       },
       reason: op.assessment
-        ? '企业研究、T2评级与T12评估历史均已完成并读回'
+        ? op.assessment.incompleteReason
+          ? '研究资料不足，已记录待核实评级与T12历史并读回'
+          : '企业研究、T2评级与T12评估历史均已完成并读回'
         : op.action === 'insert'
           ? '飞书新增并读回核验成功'
           : '飞书更新并读回核验成功',

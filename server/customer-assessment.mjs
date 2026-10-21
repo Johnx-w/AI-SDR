@@ -3,6 +3,13 @@ import { domainKey } from './website-identity.mjs';
 
 export const ASSESSMENT_RULE_VERSION = 'acquisition-v2.1';
 export const directionNames = { finished: '成品', materials: '材料配件', samples: '样本展示' };
+export const ASSESSMENT_HISTORY_FORMAT = 'evidence-v1';
+export function assessmentRating(snapshot) {
+  return (
+    snapshot.grade ||
+    (['待核实', '待补全', '暂不开发'].includes(snapshot.status) ? snapshot.status : '待核实')
+  );
+}
 const labels = {
   P: '产品契合',
   R: '采购角色',
@@ -198,7 +205,7 @@ export function assessCompany({ research, target, at = Date.now(), id }) {
     id,
     ruleVersion: ASSESSMENT_RULE_VERSION,
     evaluatedAt: new Date(at).toISOString(),
-    source: 'verified_website_research',
+    source: research.incomplete_reason ? 'research_incomplete' : 'verified_website_research',
     website: research.source_url,
     companyName: research.company_name,
     target: { product: target.product, country: target.country },
@@ -228,6 +235,7 @@ export function assessCompany({ research, target, at = Date.now(), id }) {
     entityType: research.entity_type,
     checkedUrls: research.checked_urls || [],
     assumed: false,
+    incompleteReason: research.incomplete_reason || null,
   };
   snapshot.reason = formatAssessmentReason(snapshot);
   return snapshot;
@@ -239,7 +247,7 @@ export function formatAssessmentReason(snapshot) {
     '规则版本：' + snapshot.ruleVersion,
     '评估时间：' + snapshot.evaluatedAt,
     '拟供方向：' + (directionNames[snapshot.direction] || '待核实') + ' · ' + snapshot.product,
-    '用户评级：' + (snapshot.grade || '未评级') + '；' + snapshot.status,
+    '用户评级：' + assessmentRating(snapshot) + '；' + snapshot.status,
     '已支持分数：' +
       snapshot.score +
       '/100；' +
@@ -250,6 +258,7 @@ export function formatAssessmentReason(snapshot) {
     ),
     '海关：规模5/频率6/新近性4；当前未接入或未关联，不假设15分。',
   ];
+  if (snapshot.incompleteReason) lines.push('本轮研究限制：' + snapshot.incompleteReason);
   if (snapshot.missing.length) lines.push('待补充：' + snapshot.missing.join('；'));
   const facts = snapshot.opportunities[0]?.facts || [];
   const used = new Set();
@@ -274,6 +283,55 @@ export function formatAssessmentReason(snapshot) {
           '分',
       );
   }
+  return lines.join('\n');
+}
+
+export function formatAssessmentEvidence(snapshot) {
+  const factLabels = {
+    core_product: '主营产品',
+    secondary_product: '明确经营品类',
+    adjacent_product: '邻近品类',
+    unrelated_product: '不匹配依据',
+    specialist_supply: '专业供货角色',
+    general_supply: '综合供货角色',
+    installation_only: '仅安装服务',
+    no_supply_role: '无适用采购角色',
+    current_supply_process: '当前供货流程',
+    custom_made: '定制能力需求',
+    motorized_system: '电动系统需求',
+    commercial_specification: '工程规格需求',
+    company_since: '企业经营起始',
+    company_years: '企业持续经营',
+    operating_outlet: '现营网点',
+    active_dealer: '实际经销商',
+    completed_project: '已交付项目',
+    completed_commercial_project: '已交付商业项目',
+    identity_conflict: '主体冲突',
+    mandatory_requirement: '强制条件',
+  };
+  const lines = [];
+  if (snapshot.incompleteReason) lines.push('研究限制：' + snapshot.incompleteReason);
+  const seen = new Set();
+  for (const opportunity of snapshot.opportunities || []) {
+    lines.push(
+      (directionNames[opportunity.direction] || opportunity.direction) +
+        ' · ' +
+        opportunity.product,
+    );
+    for (const fact of opportunity.facts || []) {
+      const key = fact.kind + '\n' + fact.source_url + '\n' + fact.quote;
+      if (seen.has(key) || seen.size >= 30) continue;
+      seen.add(key);
+      lines.push(
+        (factLabels[fact.kind] || '业务事实') + '：' + fact.value,
+        '原文：' + fact.quote,
+        '来源：' + fact.source_url,
+      );
+    }
+  }
+  if (!seen.size) lines.push('本轮未取得足以确定产品契合和供货角色的可验证依据。');
+  if (snapshot.missing?.length)
+    lines.push('待补充依据：' + [...new Set(snapshot.missing)].join('；'));
   return lines.join('\n');
 }
 

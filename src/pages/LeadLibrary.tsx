@@ -186,8 +186,8 @@ export function LeadLibrary() {
             value: leads.filter((l) => l.grade === 'A').length,
           },
           {
-            name: '未评级',
-            value: leads.filter((l) => l.grade === '未评级').length,
+            name: '待补资料',
+            value: leads.filter((l) => ['未评级', '待核实', '待补全'].includes(l.grade)).length,
           },
           { name: '可用邮箱记录', value: leads.filter((l) => l.email).length },
         ].map((x) => (
@@ -344,7 +344,7 @@ export function LeadLibrary() {
                     <td>
                       <div className="reference-score">
                         <span className={'grade-box grade-' + l.grade}>
-                          {l.score === null ? '—' : l.grade}
+                          {l.score === null || !['A', 'B', 'C'].includes(l.grade) ? '—' : l.grade}
                         </span>
                         <div>
                           <strong>
