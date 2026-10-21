@@ -1,3 +1,6 @@
+import { normalizePhone } from './phone-format.mjs';
+import { phoneMetadata } from './phone-metadata.mjs';
+
 // 此纯函数同时用于本地官网补全与 n8n 入库节点，避免两条链路使用不同规则。
 export function extractContacts({ content, sourceUrl, country = '' }) {
   const decode = (s) =>
@@ -39,35 +42,25 @@ export function extractContacts({ content, sourceUrl, country = '' }) {
     const raw = unescape(decode(s))
       .replace(/^(?:tel|callto):/i, '')
       .trim();
+    const formatted = normalizePhone(raw, country);
+    if (formatted) return formatted;
+    const metadata = phoneMetadata();
+    const knownCountry =
+      metadata.regions[String(country).trim().toUpperCase()] ||
+      metadata.names[String(country).trim().toLowerCase()];
+    // Explicit contact fields can supply a national candidate before the company country
+    // is known. The record builder formats it only after evidence confirms that country.
+    if (knownCountry || /^(?:\+|00)/.test(raw)) return null;
     const ext = raw.match(/(?:;ext=|\bext\.?\s*|\bx\s*)(\d{1,6})\s*$/i)?.[1] || '';
-    let base = raw.replace(/(?:;ext=|\bext\.?\s*|\bx\s*)\d{1,6}\s*$/i, '').trim();
+    const base = raw.replace(/(?:;ext=|\bext\.?\s*|\bx\s*)\d{1,6}\s*$/i, '').trim();
     if (!/^[+\d\s().-]+$/.test(base)) return null;
-    let n = base.replace(/\D/g, '');
+    const n = base.replace(/\D/g, '');
     if (n.length < 7 || n.length > 15 || /^(\d)\1+$/.test(n)) return null;
-    if (base.startsWith('00')) {
-      n = n.slice(2);
-      base = '+' + n;
-    }
-    let normalized;
-    if (base.startsWith('+')) normalized = '+' + n;
-    else if (region === 'US' && n.length === 10 && /^[2-9]\d{2}[2-9]\d{6}$/.test(n))
-      normalized = '+1' + n;
-    else if (region === 'US' && n.length === 11 && /^1[2-9]\d{2}[2-9]\d{6}$/.test(n))
-      normalized = '+' + n;
-    else if (region === 'AU' && /^0[23478]\d{8}$/.test(n)) normalized = '+61' + n.slice(1);
-    else if (region === 'AU' && /^1[38]00\d{6}$/.test(n)) normalized = n;
-    else if (region === 'GB' && /^0\d{9,10}$/.test(n)) normalized = '+44' + n.slice(1);
-    else if (region === 'AE' && /^0[234679]\d{7}$/.test(n)) normalized = '+971' + n.slice(1);
-    else if (region === 'AE' && /^05\d{8}$/.test(n)) normalized = '+971' + n.slice(1);
-    else if (!region && !base.startsWith('+')) normalized = n;
-    else return null;
-    if (normalized.startsWith('+1') && !/^\+1[2-9]\d{2}[2-9]\d{6}$/.test(normalized)) return null;
-    if (normalized.startsWith('+61') && !/^\+61[23478]\d{8}$/.test(normalized)) return null;
-    if (normalized.startsWith('+44') && !/^\+44\d{9,10}$/.test(normalized)) return null;
-    if (normalized.startsWith('+971') && !/^\+971\d{8,9}$/.test(normalized)) return null;
+    if (/^\d{4}[-.]\d{2}[-.]\d{2}$/.test(base)) return null;
     return {
       value: base + (ext ? ' ext. ' + ext : ''),
-      normalized: normalized + (ext ? ';ext=' + ext : ''),
+      normalized: 'national:' + n + (ext ? ';ext=' + ext : ''),
+      raw_value: raw,
     };
   };
   const found = [];
@@ -194,10 +187,23 @@ export function extractContacts({ content, sourceUrl, country = '' }) {
   const patterns = [/(?<![\w\d])\+[1-9](?:[\s().-]*\d){6,14}(?!\d)/g];
   if (region === 'US')
     patterns.push(
-      /(?<![\w\d])(?:1[\s.-]+)?(?:\([2-9]\d{2}\)|[2-9]\d{2})[\s.-]+[2-9]\d{2}[\s.-]+\d{4}(?!\d)/g,
+      /(?<![\w\d])(?:1[\s.-]+)?(?:\([2-9]\d{2}\)[\s.-]*|[2-9]\d{2}[\s.-]+)[2-9]\d{2}[\s.-]+\d{4}(?!\d)/g,
     );
   if (region === 'AU') patterns.push(/\b(?:0[23478](?:[\s().-]*\d){8}|1[38]00(?:[\s.-]*\d){6})\b/g);
   if (['GB', 'AE'].includes(region)) patterns.push(/\b0(?:[\s().-]*\d){8,10}\b/g);
+  for (const m of text.matchAll(
+    /(?:\b(?:phone|telephone|tel|mobile|call(?:\s+us)?|toll[- ]?free)(?:\s+(?:number|no\.?))?|电话|聯絡電話)\s*[:：@]?\s*(?:\*\*|\[)?(\+?[\d(][\d\s().-]{5,30}\d(?:\s*(?:ext\.?|x)\s*\d{1,6})?)/gi,
+  )) {
+    // Markdown tel URIs have already passed the link-specific fax checks above.
+    if (/^tel\s*:/i.test(m[0]) && /[("'=]$/.test(text.slice(0, m.index))) continue;
+    if (faxPrefix(text.slice(Math.max(0, m.index - 45), m.index))) continue;
+    add(
+      'phone',
+      m[1],
+      'labeled_text',
+      text.slice(Math.max(0, m.index - 60), m.index + m[0].length + 100),
+    );
+  }
   for (const pattern of patterns)
     for (const m of text.matchAll(pattern)) {
       if (faxPrefix(text.slice(Math.max(0, m.index - 45), m.index))) continue;

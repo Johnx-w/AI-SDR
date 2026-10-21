@@ -1,4 +1,6 @@
 import { extractContacts } from './contact-extractor.mjs';
+import { extractAdvertisingCodes } from './advertising-codes.mjs';
+import { normalizePhoneLines } from './phone-format.mjs';
 // These helpers are also embedded in n8n Code nodes; keep them dependency-free.
 export function websiteTextExcerpt(content, limit = 12000) {
   const text = String(content || '')
@@ -426,18 +428,27 @@ export function combineWebsiteEvidence(pages, country = '') {
     snippets = [],
     serviceAreas = [],
     products = [];
-  for (const page of pages) {
-    const meta = extractWebsiteMetadata({ content: page.content, sourceUrl: page.url });
+  const advertisingCodes = [];
+  const parsed = pages.map((page) => ({
+    page,
+    meta: extractWebsiteMetadata({ content: page.content, sourceUrl: page.url }),
+  }));
+  const confirmedCountry =
+    country ||
+    parsed.flatMap(({ meta }) => meta.addresses).find((address) => address.country)?.country ||
+    '';
+  for (const { page, meta } of parsed) {
     social.push(...meta.social);
     addresses.push(...meta.addresses);
     snippets.push(...meta.snippets);
     serviceAreas.push(...meta.service_areas);
     products.push(...extractCatalogProducts(page.content, page.url));
+    advertisingCodes.push(...extractAdvertisingCodes(page.content, page.url));
     contacts.push(
       ...extractContacts({
         content: page.content,
         sourceUrl: page.url,
-        country: meta.addresses[0]?.country || country,
+        country: meta.addresses[0]?.country || confirmedCountry,
       }),
     );
   }
@@ -446,6 +457,7 @@ export function combineWebsiteEvidence(pages, country = '') {
   return {
     version: 'website-evidence-v4',
     products: unique(products, (x) => x.value.toLowerCase()),
+    advertising_codes: unique(advertisingCodes, (x) => x.platform + ':' + x.id),
     social: unique(social, (x) => x.platform + ':' + x.url),
     addresses: unique(
       addresses.sort((a, b) => addressRank(a) - addressRank(b)),
@@ -509,19 +521,18 @@ export function enrichmentFields(profile, evidence, existing = {}) {
       existing[label],
       contacts.filter((c) => c.kind === kind).map((c) => c.value),
     );
+    if (kind === 'phone') {
+      const value = normalizePhoneLines(
+        merged,
+        address?.country || profile.actual_country || existing['国家'] || '',
+        Boolean(existing[label]),
+      );
+      if (value) fields[label] = value;
+      continue;
+    }
     const normalized = new Map();
     for (const line of merged.split('\n').filter(Boolean)) {
-      const key =
-        kind === 'email'
-          ? line.toLowerCase()
-          : extractContacts({
-              content:
-                '<script type="application/ld+json">' +
-                JSON.stringify({ telephone: line }) +
-                '</script>',
-              sourceUrl: '',
-              country: address?.country || profile.actual_country || '',
-            })[0]?.normalized || line;
+      const key = line.toLowerCase();
       if (!normalized.has(key)) normalized.set(key, line);
     }
     const value = [...normalized.values()].join('\n');

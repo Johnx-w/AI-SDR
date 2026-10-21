@@ -5,7 +5,7 @@ export const workflowStages = [
     id: 'target',
     title: '定义目标',
     en: 'TARGET',
-    description: '接收国家、州、城市、产品与获客渠道',
+    description: '接收市场、州、产品、客户类型、客户画像与获客渠道',
     nodes: ['Manual Trigger', 'ShadeFlow API Webhook', '配置搜索目标'],
   },
   {
@@ -31,10 +31,10 @@ export const workflowStages = [
   },
   {
     id: 'qualify',
-    title: '画像评级',
+    title: '客户研究',
     en: 'QUALIFY',
-    description: '调用 Dify 处理并解析结构化研究结果',
-    nodes: ['调用Dify Workflow', '解析结果', '最终结果', '可入库?'],
+    description: '提取行业画像、公开采购需求和广告代码，并核对事实证据',
+    nodes: ['AI企业研究', '解析结果', '最终结果', '可入库?'],
   },
   {
     id: 'sync',
@@ -48,7 +48,6 @@ export const workflowStages = [
       '按身份键查询',
       '判定写入方式',
       '写入分流',
-      '逐条写入',
       '新增飞书记录',
       '更新飞书记录',
       '核对写入结果',

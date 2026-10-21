@@ -1,4 +1,6 @@
 import { extractContacts } from './contact-extractor.mjs';
+import { phoneHelpers } from './phone-format.mjs';
+import { extractAdvertisingCodes } from './advertising-codes.mjs';
 import {
   websiteScope,
   extractCatalogProducts,
@@ -9,18 +11,22 @@ import {
   websiteTextExcerpt,
 } from './website-metadata.mjs';
 
-export const enrichmentHelpers = [
-  websiteScope,
-  extractCatalogProducts,
-  extractContacts,
-  extractWebsiteMetadata,
-  planWebsitePages,
-  combineWebsiteEvidence,
-  enrichmentFields,
-  websiteTextExcerpt,
-]
-  .map((fn) => fn.toString())
-  .join('\n');
+export const enrichmentHelpers =
+  phoneHelpers +
+  '\n' +
+  [
+    websiteScope,
+    extractCatalogProducts,
+    extractContacts,
+    extractAdvertisingCodes,
+    extractWebsiteMetadata,
+    planWebsitePages,
+    combineWebsiteEvidence,
+    enrichmentFields,
+    websiteTextExcerpt,
+  ]
+    .map((fn) => fn.toString())
+    .join('\n');
 export const newFeishuFields = ['详细地址', '服务地区', 'Facebook', 'Instagram', 'LinkedIn'];
 export const websiteFetchParameters = {
   url: '={{ $json.url }}',

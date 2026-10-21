@@ -785,8 +785,8 @@ export function AcquisitionTasks() {
   return (
     <>
       <PageHeading
-        eyebrow="ACQUISITION TASKS"
-        title="获客任务"
+        eyebrow="AUTOMATION STUDIO"
+        title="自动获客"
         description="选择获客方向，设置执行周期，自动发现潜在客户"
       >
         <button className="btn primary" onClick={() => setAdding(true)}>

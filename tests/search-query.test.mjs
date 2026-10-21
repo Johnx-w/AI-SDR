@@ -111,7 +111,12 @@ test('DeepSeek 只在服务端调用，按选中范围追加地名，不为全�
           const body = JSON.parse(options.body);
           assert.equal(body.model, 'deepseek-flash');
           assert.equal(body.thinking.type, 'disabled');
-          const expected = { ...selected, audience: 'BC' };
+          const expected = {
+            ...selected,
+            audience: 'BC',
+            customer_type: '',
+            customer_profile: 'all',
+          };
           delete expected.city;
           assert.deepEqual(JSON.parse(body.messages[1].content), expected);
           return completion();

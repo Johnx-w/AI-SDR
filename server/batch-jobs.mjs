@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { groupedMarkets, audienceTerms } from './markets.mjs';
+import acquisition from '../src/data/acquisition.json' with { type: 'json' };
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 export function validateCount(value = 20) {
@@ -36,23 +37,24 @@ export function searchPlan(input) {
     .split(',')
     .map((p) => p.trim())
     .filter(Boolean);
-  const variants = [
-    '',
-    'supplier',
-    'installation',
-    'dealer',
-    'manufacturer',
-    'company',
-    'contact',
-    'showroom',
-  ];
+  const variants = input.customer_type
+    ? ['', 'company', 'contact', 'showroom']
+    : ['', 'supplier', 'installation', 'dealer', 'manufacturer', 'company', 'contact', 'showroom'];
   const result = [];
   for (const suffix of variants)
     for (const product of products)
       for (const country of countries) {
         result.push({
           country,
-          query: [product, audienceTerms[input.audience], input.region, country, suffix]
+          query: [
+            product,
+            audienceTerms[input.audience],
+            acquisition.customerTypes.find((t) => t.value === input.customer_type)?.terms,
+            acquisition.profiles.find((p) => p.value === input.customer_profile)?.terms,
+            input.region,
+            country,
+            suffix,
+          ]
             .filter(Boolean)
             .join(' ')
             .slice(0, 395),
@@ -234,7 +236,14 @@ export class BatchJobs {
       job.skipped++;
       if (output?.更新 === 1) job.updated++;
       job.rows.push({ ...item, result: 'duplicate', reason: output.reason });
-    } else if (output?.research?.audience_match === 'not_matched') {
+    } else if (
+      output?.research &&
+      ['audience_match', 'customer_type_match', 'profile_match'].some(
+        (key) =>
+          ['not_matched', 'unknown'].includes(output.research[key]) &&
+          (key !== 'audience_match' || output.research[key] === 'not_matched'),
+      )
+    ) {
       job.rejected++;
       job.rows.push({ ...item, result: 'rejected', reason: output.reason });
     } else if (output?.outcome === 'failed' && output.stage !== 'persist') {

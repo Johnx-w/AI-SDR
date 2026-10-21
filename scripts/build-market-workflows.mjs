@@ -1,6 +1,9 @@
 import fs from 'node:fs/promises';
 import { groupedMarkets, audienceTerms } from '../server/markets.mjs';
 import { enrichmentHelpers, websiteFetchParameters } from '../server/n8n-enrichment.mjs';
+import { phoneHelpers } from '../server/phone-format.mjs';
+import { extractContacts } from '../server/contact-extractor.mjs';
+import { upgradePhoneWriteDecision } from '../server/n8n-contacts.mjs';
 import { researchPageText } from '../server/research-pages.mjs';
 import {
   companyResearchRequest,
@@ -178,7 +181,10 @@ const aiParameters = {
     },
   },
 };
-const researchHelpers = [parseCompanyResearch, researchFields].map((f) => f.toString()).join('\n');
+const researchHelpers =
+  phoneHelpers +
+  '\n' +
+  [extractContacts, parseCompanyResearch, researchFields].map((f) => f.toString()).join('\n');
 const evidenceJs =
   enrichmentHelpers +
   '\n' +
@@ -209,7 +215,7 @@ const updates = {
   解析结果: { mode: 'runOnceForAllItems', jsCode: parseJs },
   最终结果: { mode: 'raw', jsonOutput: '={{ JSON.stringify($json) }}', options: {} },
   构建飞书记录: { mode: 'runOnceForAllItems', jsCode: builderJs },
-  判定写入方式: { mode: 'runOnceForAllItems', jsCode: mergeJs },
+  判定写入方式: { mode: 'runOnceForAllItems', jsCode: upgradePhoneWriteDecision(mergeJs) },
 };
 const marketPlan = code(
   '展开市场国家',

@@ -36,6 +36,9 @@ interface Prospect {
   address?: string;
   serviceAreas?: string;
   mainProductPreference?: string;
+  advertisingCodes?: string;
+  demandProducts?: string;
+  industryProfile?: string;
   audience?: string;
   social?: { platform: string; url: string; quote: string; source_url: string }[];
   locationEvidence?: {
@@ -176,6 +179,9 @@ export function LeadLibrary() {
         评分: l.score ?? '未评分',
         评级: l.grade,
         客户等级: l.grade,
+        广告代码: l.advertisingCodes || '',
+        需求产品: l.demandProducts || '',
+        客户行业画像: l.industryProfile || '',
         邮箱: l.email,
         电话: l.phone,
         来源: l.website,
@@ -186,10 +192,7 @@ export function LeadLibrary() {
   };
   return (
     <>
-      <PageHeading
-        eyebrow="CUSTOMER LIBRARY"
-        title="客户库"
-      >
+      <PageHeading eyebrow="CUSTOMER LIBRARY" title="客户库">
         <button className="btn secondary" disabled={!filtered.length} onClick={download}>
           <ArrowDownToLine size={16} />
           导出客户
@@ -513,6 +516,9 @@ export function LeadLibrary() {
                     ['客户类型', typeNames[viewed.type] || viewed.type],
                     ['相关产品', viewed.product],
                     ['主营产品偏好', viewed.mainProductPreference || '尚未分析'],
+                    ['需求产品', viewed.demandProducts || '未发现公开采购需求'],
+                    ['客户行业画像', viewed.industryProfile || '尚未分析'],
+                    ['广告代码', viewed.advertisingCodes || '未检出公开广告代码'],
                     ['服务客群', viewed.audience || '待核实'],
                     [
                       '企业实际地址',

@@ -15,7 +15,10 @@ const target = { country: 'Southeast Asia', region: '', product: 'screens', audi
 test('加拿大省区和东南亚全区有效；分组范围不可混入州或城市', () => {
   assert.equal(locationOptions('Canada').regions.length, 13);
   assert.equal(validateTarget(target).market_countries.length, 11);
-  assert.equal(locationOptions('Germany').regions.length, 0);
+  assert.equal(locationOptions('Europe').regions.length, 0);
+  assert.ok(locationOptions('Europe').countries.includes('Germany'));
+  assert.ok(!locationOptions('Europe').countries.includes('United Kingdom'));
+  assert.throws(() => locationOptions('Germany'));
   assert.throws(() => validateTarget({ ...target, region: 'Florida' }));
   assert.throws(() => validateTarget({ ...target, audience: 'both' }));
 });

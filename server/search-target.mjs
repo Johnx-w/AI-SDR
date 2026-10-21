@@ -1,5 +1,6 @@
 import geography from './data/geography.json' with { type: 'json' };
 import { markets, groupedMarkets, canadaRegions } from './markets.mjs';
+import acquisition from '../src/data/acquisition.json' with { type: 'json' };
 
 const invalid = (message) => Object.assign(new Error(message), { status: 400 });
 export function locationOptions(country, region = '') {
@@ -28,9 +29,18 @@ export function validateTarget(input) {
     if (['country', 'product'].includes(key) && !result[key]) throw invalid(`参数 ${key} 不能为空`);
   }
   locationOptions(result.country, result.region);
-  // Legacy customer_types are deliberately ignored: classify the company after discovery.
+  const customerType = input.customer_type ?? '';
+  if (
+    typeof customerType !== 'string' ||
+    (customerType && !acquisition.customerTypes.some((t) => t.value === customerType))
+  )
+    throw invalid('请选择有效的客户类型');
+  const profile = input.customer_profile ?? 'all';
+  if (!acquisition.profiles.some((p) => p.value === profile)) throw invalid('请选择有效的客户画像');
+  result.customer_type = customerType;
+  result.customer_profile = profile;
   const channel = input.acquisition_channel ?? 'tavily_web';
-  if (channel !== 'tavily_web') throw invalid('该获客渠道尚未接入，当前仅支持 Tavily 网页搜索');
+  if (channel !== 'tavily_web') throw invalid('该获客渠道尚未接入，当前仅支持网页搜索');
   result.acquisition_channel = channel;
   const audience = input.audience ?? 'BC';
   if (!['B', 'C', 'BC'].includes(audience)) throw invalid('客群选项必须是 B、C 或 BC');

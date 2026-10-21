@@ -34,6 +34,8 @@ test('入口限制市场和已接入渠道，旧客户类型不参与搜索', ()
   assert.deepEqual(validateInput(input), {
     ...input,
     audience: 'BC',
+    customer_type: '',
+    customer_profile: 'all',
     market_countries: ['United States'],
   });
   assert.throws(() => validateInput({ ...input, country: 'invalid' }), /支持的国家/);
@@ -44,6 +46,8 @@ test('入口限制市场和已接入渠道，旧客户类型不参与搜索', ()
   assert.deepEqual(validateInput({ ...input, customer_types: ['installer', 'distributor'] }), {
     ...input,
     audience: 'BC',
+    customer_type: '',
+    customer_profile: 'all',
     market_countries: ['United States'],
   });
   const { acquisition_channel, ...legacy } = input;
