@@ -697,17 +697,17 @@ export function Settings() {
               <SectionTitle title="服务集成" subtitle="开发工具授权与业务系统运行凭证相互独立。" />
               {[
                 {
-                  name: 'n8n 工作流',
+                  name: '获客执行引擎',
                   icon: Workflow,
-                  description: '真实工作流已指定，运行需配置受认证的 Webhook。',
+                  description: '支持 Node.js 直连或 n8n，当前引擎与配置状态见获客任务。',
                   status: '查看配置',
                   href: '/automation',
                 },
                 {
-                  name: 'Tavily / Dify / 飞书',
+                  name: 'Tavily / DeepSeek / 飞书',
                   icon: Sparkles,
-                  description: '由你的 n8n 工作流编排，本应用不保存这些平台的密钥。',
-                  status: '由 n8n 管理',
+                  description: '平台凭证由服务端环境或 n8n 凭证管理，浏览器不保存密钥。',
+                  status: '服务端管理',
                   href: null,
                 },
                 {

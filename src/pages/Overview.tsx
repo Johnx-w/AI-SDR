@@ -403,9 +403,9 @@ export function Overview() {
         </div>
         <div>
           <strong>你的获客流程，可以自己运转。</strong>
-          <p>Tavily 发现客户 → Dify 研究评级 → 飞书去重入库</p>
+          <p>Tavily 发现客户 → DeepSeek 企业研究 → 飞书去重入库</p>
         </div>
-        <Badge tone="green">n8n 工作流</Badge>
+        <Badge tone="green">自动获客</Badge>
         <Link to="/automation" className="btn secondary">
           配置 API 调用
           <ArrowUpRight size={15} />
@@ -413,7 +413,7 @@ export function Overview() {
       </div>
       <div className="workspace-note">
         <Globe2 size={13} />
-        客户与统计均为虚构演示数据，真实 n8n 调用状态请见自动化中心。
+        客户与统计均为虚构演示数据，真实获客状态请见获客任务。
         <CalendarDays size={13} />
         <span>本地工作空间</span>
         <ChevronDown size={11} />

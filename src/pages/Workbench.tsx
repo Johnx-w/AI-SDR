@@ -2,13 +2,11 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowUp,
-  ArrowRight,
   Building2,
   CalendarDays,
   Check,
   CheckCircle2,
   ChevronRight,
-  Clock3,
   Download,
   FileText,
   Mail,
@@ -80,14 +78,7 @@ export function Dashboard() {
       <div className="dashboard-columns">
         <div className="dashboard-stack">
           <section className="panel decision-panel">
-            <SectionTitle
-              title="待你处理"
-              action={
-                <Link className="text-link" to="/followups">
-                  查看全部 <ChevronRight size={14} />
-                </Link>
-              }
-            />
+            <SectionTitle title="待你处理" />
             {[
               {
                 icon: Mail,
@@ -592,13 +583,6 @@ export function Communication() {
                 </div>
               </section>
               <section>
-                <h3>下次跟进计划</h3>
-                <Link to="/followups">
-                  <CalendarDays size={18} />{' '}
-                  {message.reviewed ? '确认需求后安排跟进' : '确认样品后安排跟进'}
-                </Link>
-              </section>
-              <section>
                 <h3>其他信息</h3>
                 <p>
                   <MessageCircle size={17} /> WhatsApp：
@@ -652,83 +636,6 @@ export function Communication() {
           </div>
         </Modal>
       )}
-    </>
-  );
-}
-
-export function Followups() {
-  const { data, update, notify } = useWorkspace();
-  const [filter, setFilter] = useState('待跟进');
-  if (!data) return null;
-  const tasks = data.tasks.filter(
-    (t) => filter === '全部' || (filter === '已完成' ? t.done : !t.done),
-  );
-  return (
-    <>
-      <PageHeading
-        eyebrow="FOLLOW-UP PLAN"
-        title="跟进计划"
-        description="每一次触达之后，都有明确的下一步"
-      >
-        <Link className="btn secondary" to="/campaigns">
-          管理触达序列 <ArrowRight size={16} />
-        </Link>
-      </PageHeading>
-      <div className="panel sequence-banner">
-        <div>
-          <h3>递进跟进序列</h3>
-          <p>真人回复后暂停原序列，转入需求跟进；拒绝联系后停止触达。</p>
-        </div>
-        <div className="sequence-days">
-          {['1', '3', '5', '7', '14'].map((n, i) => (
-            <span key={n}>
-              <b>Day {n}</b>
-              <small>{['首次接洽', '产品资料', '需求深挖', '进度确认', '长线唤醒'][i]}</small>
-            </span>
-          ))}
-        </div>
-      </div>
-      <div className="segmented page-segment">
-        {['待跟进', '已完成', '全部'].map((v) => (
-          <button className={filter === v ? 'active' : ''} onClick={() => setFilter(v)} key={v}>
-            {v}
-          </button>
-        ))}
-      </div>
-      <section className="panel followup-list">
-        {tasks.map((t) => (
-          <div className={'followup-row ' + (t.done ? 'done' : '')} key={t.id}>
-            <button
-              className="check-task"
-              aria-label={(t.done ? '恢复' : '完成') + t.title}
-              onClick={() => {
-                update((d) => ({
-                  ...d,
-                  tasks: d.tasks.map((x) => (x.id === t.id ? { ...x, done: !x.done } : x)),
-                }));
-                notify(t.done ? '已恢复待办' : '跟进已完成');
-              }}
-            >
-              {t.done && <Check size={17} />}
-            </button>
-            <div>
-              <Badge>{t.kind}</Badge>
-              <strong>{t.title}</strong>
-              <p>{t.detail}</p>
-            </div>
-            <span>
-              <Clock3 size={15} />
-              {t.time}
-            </span>
-            <Link className="btn secondary" to={t.kind === '研究' ? '/leads' : '/inbox'}>
-              查看详情 <ChevronRight size={14} />
-            </Link>
-          </div>
-        ))}
-        {!tasks.length && (
-          <Empty title="暂无跟进事项" detail="审核回复后，新的跟进事项会出现在这里。" />
-        )}
-      </section>
     </>
   );
 }

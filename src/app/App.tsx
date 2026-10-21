@@ -4,7 +4,6 @@ import {
   ArrowUpRight,
   Bell,
   Building2,
-  CalendarDays,
   Check,
   ChevronDown,
   ChevronRight,
@@ -24,23 +23,16 @@ import {
 } from 'lucide-react';
 import { useWorkspace } from './WorkspaceProvider';
 import { Campaigns, Reports, Settings } from '../pages/Business';
-import {
-  Dashboard,
-  Communication,
-  Followups,
-  AcquisitionTasks,
-  Materials,
-} from '../pages/Workbench';
+import { Dashboard, Communication, AcquisitionTasks, Materials } from '../pages/Workbench';
 import { LeadLibrary } from '../pages/LeadLibrary';
 import { Automation } from '../pages/Automation';
 
 const nav = [
   { path: '/', name: '运营总览', icon: LayoutDashboard },
+  { path: '/automation', name: '获客任务', icon: Zap },
   { path: '/tasks', name: '自动获客', icon: Workflow },
   { path: '/leads', name: '客户库', icon: UsersRound },
-  { path: '/automation', name: '获客任务', icon: Zap },
   { path: '/inbox', name: '沟通中心', icon: MessageSquare },
-  { path: '/followups', name: '跟进计划', icon: CalendarDays },
   { path: '/materials', name: '产品与资料', icon: FolderOpen },
   { path: '/settings', name: '策略设置', icon: Settings2 },
 ];
@@ -226,7 +218,6 @@ export function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/leads" element={<LeadLibrary />} />
             <Route path="/tasks" element={<AcquisitionTasks />} />
-            <Route path="/followups" element={<Followups />} />
             <Route path="/materials" element={<Materials />} />
             <Route path="/campaigns" element={<Campaigns />} />
             <Route path="/inbox" element={<Communication />} />

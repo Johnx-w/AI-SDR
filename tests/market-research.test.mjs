@@ -1,7 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { validateTarget, locationOptions } from '../server/search-target.mjs';
-import { generateSearchQuery } from '../server/deepseek.mjs';
 import { parseCompanyResearch, researchFields } from '../server/company-research.mjs';
 import {
   extractWebsiteMetadata,
@@ -11,10 +10,12 @@ import {
 import { recoveryPlanCode } from '../server/n8n-recovery.mjs';
 import vm from 'node:vm';
 import { extractContacts } from '../server/contact-extractor.mjs';
-const target = { country: 'Southeast Asia', region: '', product: 'screens', audience: 'BC' };
-test('加拿大省区和东南亚全区有效；分组范围不可混入州或城市', () => {
+const target = { country: 'Europe', region: '', product: 'screens', audience: 'BC' };
+test('加拿大省区和欧洲有效；移除的市场和分组下的州不可使用', () => {
   assert.equal(locationOptions('Canada').regions.length, 13);
-  assert.equal(validateTarget(target).market_countries.length, 11);
+  assert.ok(validateTarget(target).market_countries.length > 30);
+  assert.throws(() => locationOptions('Southeast Asia'), /支持的国家/);
+  assert.throws(() => validateTarget({ ...target, country: 'Singapore' }), /支持的国家/);
   assert.equal(locationOptions('Europe').regions.length, 0);
   assert.ok(locationOptions('Europe').countries.includes('Germany'));
   assert.ok(!locationOptions('Europe').countries.includes('United Kingdom'));
@@ -22,27 +23,16 @@ test('加拿大省区和东南亚全区有效；分组范围不可混入州或�
   assert.throws(() => validateTarget({ ...target, region: 'Florida' }));
   assert.throws(() => validateTarget({ ...target, audience: 'both' }));
 });
-test('B+C 不加客群限制，B/C 搜索限定由服务端追加', async () => {
-  const make = (audience) =>
-    generateSearchQuery(
-      { ...target, audience },
-      {
-        env: { DEEPSEEK_API_KEY: 'test' },
-        fetchImpl: async () =>
-          Response.json({
-            choices: [{ finish_reason: 'stop', message: { content: '{"keywords":"screens"}' } }],
-          }),
-      },
-    );
-  assert.doesNotMatch((await make('BC')).search_query, /wholesale|homeowners/);
-  assert.match((await make('B')).search_query, /wholesale/);
-  assert.match((await make('C')).search_query, /homeowners/);
-});
 test('AI 逐字证据校验会剔除无依据事实；BC 目标不要求企业兼营', () => {
   const source_url = 'https://business.example.org/';
   const page = {
     source_url,
-    research_pages: [{ source_url, text: 'Acme supplies residential shades to homeowners.' }],
+    research_pages: [
+      {
+        source_url,
+        text: 'Acme imports residential shades from other factories and supplies homeowners nationwide, without its own factory.',
+      },
+    ],
   };
   const raw = {
     company_name: 'Acme',
@@ -51,14 +41,32 @@ test('AI 逐字证据校验会剔除无依据事实；BC 目标不要求企业�
     products: ['shades', 'motors'],
     main_product_preference: '以住宅遮阳帘为主',
     facts: [
+      {
+        field: 'entity_type',
+        value: 'business',
+        quote: 'Acme imports residential shades',
+        source_url,
+      },
+      {
+        field: 'production_model',
+        value: 'no_own_factory',
+        quote: 'without its own factory',
+        source_url,
+      },
+      {
+        field: 'operating_model',
+        value: 'beyond_local',
+        quote: 'supplies homeowners nationwide',
+        source_url,
+      },
       { field: 'company_name', value: 'Acme', quote: 'Acme', source_url },
-      { field: 'audience', value: 'C', quote: 'residential shades to homeowners', source_url },
+      { field: 'audience', value: 'C', quote: 'supplies homeowners nationwide', source_url },
       { field: 'products', value: 'shades', quote: 'residential shades', source_url },
       { field: 'products', value: 'motors', quote: 'invented quote', source_url },
       {
         field: 'main_product_preference',
         value: '以住宅遮阳帘为主',
-        quote: 'supplies residential shades',
+        quote: 'imports residential shades',
         source_url,
       },
     ],

@@ -87,9 +87,12 @@ export interface WorkflowInput {
 }
 export interface IntegrationStatus {
   configured: boolean;
+  provider?: 'n8n' | 'native';
+  nativeReady?: boolean;
+  missing?: string[];
   workflowId: string;
   editorUrl: string;
-  transport: 'webhook';
+  transport: 'webhook' | 'direct';
   note: string;
 }
 export interface WorkflowRun {

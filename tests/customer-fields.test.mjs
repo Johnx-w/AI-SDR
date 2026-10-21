@@ -19,19 +19,25 @@ test('广告代码只从追踪配置提取；去重并保留来源，不读取�
   assert.deepEqual(extractAdvertisingCodes('fbq init 123456789', url), []);
 });
 const text =
-  'Acme is a wholesale distributor of shades. We are seeking suppliers of blind motors. Looking for blinds? Shop our range.';
+  'Acme is a wholesale distributor of imported shades, with no own factory. We supply dealers nationwide. We are seeking suppliers of blind motors. Looking for blinds? Shop our range.';
 const fact = (value, quote) => ({ value, quote, source_url: url });
 const raw = {
   company_name: fact('Acme', 'Acme'),
-  customer_type: fact('wholesaler', 'wholesale distributor of shades'),
-  industry_profile: fact('面向渠道批发窗饰的企业', 'Acme is a wholesale distributor of shades.'),
-  profile_tags: [fact('trade', 'wholesale distributor of shades')],
+  entity_type: fact(
+    'business',
+    'Acme is a wholesale distributor of imported shades, with no own factory.',
+  ),
+  production_model: fact('no_own_factory', 'imported shades, with no own factory'),
+  operating_model: fact('beyond_local', 'We supply dealers nationwide.'),
+  customer_type: fact('wholesaler', 'wholesale distributor of imported shades'),
+  industry_profile: fact('面向渠道批发窗饰的企业', 'wholesale distributor of imported shades'),
+  profile_tags: [fact('trade', 'wholesale distributor of imported shades')],
   demand_products: [
     fact('blind motors', 'We are seeking suppliers of blind motors.'),
     fact('blinds', 'Looking for blinds? Shop our range.'),
     fact('fabric', 'We buy fabric, invented text'),
   ],
-  products: [fact('shades', 'wholesale distributor of shades')],
+  products: [fact('shades', 'wholesale distributor of imported shades')],
 };
 const response = (data) => ({
   choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(data) } }],
