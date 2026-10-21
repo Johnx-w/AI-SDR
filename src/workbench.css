@@ -1518,85 +1518,10 @@ main {
 .page-segment {
   margin: 22px 0 16px;
 }
-.demo-task-grid,
 .resource-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 19px;
-}
-.demo-task-card {
-  padding: 22px;
-}
-.demo-task-card > div:first-child {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 24px;
-}
-.task-target {
-  padding: 12px;
-  border-radius: 10px;
-  background: #ecf4ee;
-  display: grid;
-  place-items: center;
-  color: #306b3c;
-}
-.demo-task-card h2 {
-  font-size: 17px;
-  margin: 0 0 9px;
-}
-.demo-task-card > p,
-.demo-task-card > small {
-  font-size: 11px;
-  color: #8ba991;
-}
-.task-progress {
-  height: 6px;
-  background: #edf4ee;
-  border-radius: 5px;
-  margin: 24px 0 10px;
-  overflow: hidden;
-}
-.task-progress > i {
-  background: #347541;
-  display: block;
-  height: 100%;
-}
-.task-stages {
-  display: grid;
-  gap: 16px;
-  margin: 25px 0;
-}
-.task-stages > span {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 12px;
-  color: #97b39d;
-}
-.task-stages > span.complete {
-  color: #316d3d;
-}
-.stage-circle {
-  width: 14px;
-  height: 14px;
-  border: 1px solid #dce8de;
-  border-radius: 50%;
-}
-.demo-task-card footer {
-  display: flex;
-  gap: 8px;
-  border-top: 1px solid var(--border);
-  padding-top: 17px;
-  flex-wrap: wrap;
-}
-.demo-task-card footer .btn {
-  font-size: 11px;
-  padding: 8px 10px;
-  min-height: 32px;
-}
-.demo-task-card footer > a {
-  margin-left: auto;
 }
 .resources-toolbar {
   display: flex;
@@ -1877,7 +1802,6 @@ main {
   .comm-scroll {
     max-height: 640px;
   }
-  .demo-task-grid,
   .resource-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -2184,7 +2108,6 @@ main {
   .modal-body {
     padding: 20px;
   }
-  .demo-task-grid,
   .resource-grid {
     grid-template-columns: 1fr;
   }

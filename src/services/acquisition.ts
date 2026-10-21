@@ -3,6 +3,9 @@ import type {
   IntegrationStatus,
   WorkflowInput,
   WorkflowRun,
+  AcquisitionSchedule,
+  ScheduleTiming,
+  ConnectionSettings,
 } from '../domain/types';
 
 export const WORKFLOW_URL = 'https://vynox.app.n8n.cloud/workflow/EycE9OmaPkRFUDSq';
@@ -16,6 +19,23 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 export const acquisitionApi = {
+  schedules: () => request<{ schedules: AcquisitionSchedule[] }>('/schedules'),
+  createSchedule: (
+    name: string,
+    input: WorkflowInput,
+    target_count: number,
+    timing: ScheduleTiming,
+    key: string,
+  ) =>
+    request<AcquisitionSchedule>('/schedules', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+      body: JSON.stringify({ name, input: { ...input, target_count }, timing }),
+    }),
+  controlSchedule: (id: string, action: 'pause' | 'resume' | 'close') =>
+    request<AcquisitionSchedule>(`/schedules/${encodeURIComponent(id)}/${action}`, {
+      method: 'POST',
+    }),
   jobs: () => request<{ jobs: AcquisitionJob[] }>('/jobs'),
   job: (id: string) => request<AcquisitionJob>(`/jobs/${encodeURIComponent(id)}`),
   createJob: (input: WorkflowInput, target_count: number, requestId: string) =>
@@ -39,6 +59,25 @@ export const acquisitionApi = {
     request<{
       data: { id: string; status: string; startedAt: string; stoppedAt: string | null }[];
     }>('/executions'),
+};
+
+async function connectionsRequest(init?: RequestInit): Promise<ConnectionSettings> {
+  const response = await fetch('/api/v1/connections', {
+    ...init,
+    signal: AbortSignal.timeout(15000),
+  });
+  const body = await response.json().catch(() => ({ error: '服务未返回有效 JSON' }));
+  if (!response.ok) throw new Error(body.error || '连接设置读取失败');
+  return body;
+}
+export const connectionsApi = {
+  get: () => connectionsRequest(),
+  save: (values: Record<string, string>, clear: string[]) =>
+    connectionsRequest({
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values, clear }),
+    }),
 };
 
 export interface LocationOptions {

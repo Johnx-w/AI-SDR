@@ -4,6 +4,8 @@
 
 2026-10-21 开始迁移 Node.js 直连获客：服务端支持 Tavily → 官网补全 → DeepSeek → 飞书，保留 n8n 回退入口。通过 ACQUISITION_PROVIDER 选择引擎，接入、核验与恢复说明见 [迁移说明](docs/native-migration.md)。以下旧版 n8n 说明仅适用于 n8n 模式。
 
+现在可在“API 连接”页填写并更新直连凭证，在“获客任务”选择单次、每天或每周定时运行，并在“自动获客”页暂停、恢复或关闭计划。时间统一使用北京时间，本机后端需保持启动。配置与调度的存储、恢复规则见 [API 连接与定时获客](docs/connections-and-schedules.md)。
+
 ## 启动
 
 要求 Node.js 24+，批量任务使用内置 SQLite 持久化队列。

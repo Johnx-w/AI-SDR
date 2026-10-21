@@ -4,6 +4,8 @@ import { fieldText } from '../server/feishu.mjs';
 import { websiteUrl } from '../server/branding.mjs';
 import { writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import { connectionEnvironment } from '../server/api-connections.mjs';
+const env = connectionEnvironment();
 
 // This check uses real search/model credits, and blocks all Feishu writes at the network boundary.
 const readonlyFetch = (url, options = {}) => {
@@ -16,7 +18,7 @@ const readonlyFetch = (url, options = {}) => {
     throw new Error('验收脚本禁止真实飞书写入');
   return fetch(url, options);
 };
-const client = new FeishuClient({ env: process.env, fetchImpl: readonlyFetch });
+const client = new FeishuClient({ env, fetchImpl: readonlyFetch });
 const records = await client.records();
 const usable = records.filter((record) => {
   const url = websiteUrl(fieldText(record.fields?.['来源链接']));
@@ -40,7 +42,7 @@ const feishu = {
   record: async () => proposed,
 };
 const service = new NativeAcquisition({
-  env: { ...process.env, ACQUISITION_DB_PATH: '.data/native-verification.sqlite' },
+  env: { ...env, ACQUISITION_DB_PATH: '.data/native-verification.sqlite' },
   fetchImpl: readonlyFetch,
   feishu,
 });

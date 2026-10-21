@@ -5,7 +5,9 @@ import { fieldText } from '../server/feishu.mjs';
 import { normalizePhoneLines, selectBusinessPhones } from '../server/phone-format.mjs';
 import { extractContacts } from '../server/contact-extractor.mjs';
 import { readPublicHtml, websiteUrl } from '../server/branding.mjs';
-const client = new FeishuClient({ env: process.env });
+import { connectionEnvironment } from '../server/api-connections.mjs';
+const env = connectionEnvironment();
+const client = new FeishuClient({ env });
 const path = '.data/customer-phone-cleanup-plan.json';
 if (!process.argv.includes('--apply')) {
   const records = await client.records();
@@ -63,7 +65,7 @@ if (!process.argv.includes('--apply')) {
   await fs.mkdir('.data', { recursive: true });
   const plan = {
     createdAt: new Date().toISOString(),
-    table: process.env.FEISHU_APP_TOKEN + '/' + process.env.FEISHU_TABLE_ID,
+    table: env.FEISHU_APP_TOKEN + '/' + env.FEISHU_TABLE_ID,
     total: records.length,
     changes,
     unresolved,
@@ -79,7 +81,7 @@ if (!process.argv.includes('--apply')) {
   );
 } else {
   const plan = JSON.parse(await fs.readFile(path, 'utf8'));
-  if (plan.table !== process.env.FEISHU_APP_TOKEN + '/' + process.env.FEISHU_TABLE_ID)
+  if (plan.table !== env.FEISHU_APP_TOKEN + '/' + env.FEISHU_TABLE_ID)
     throw new Error('表格与计划不符');
   const applied = [];
   for (const change of plan.changes) {

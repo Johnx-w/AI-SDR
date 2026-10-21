@@ -1,6 +1,6 @@
 import { platformJson } from './acquisition-config.mjs';
 import { fieldText, mapFeishuRecord } from './feishu.mjs';
-import { domainKey } from './batch-jobs.mjs';
+import { domainKey } from './website-identity.mjs';
 
 const base = 'https://open.feishu.cn/open-apis';
 const fail = (message) => Object.assign(new Error(message), { status: 502 });

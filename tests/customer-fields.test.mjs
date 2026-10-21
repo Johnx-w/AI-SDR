@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { extractAdvertisingCodes } from '../server/advertising-codes.mjs';
 import { parseCompanyResearch, researchFields } from '../server/company-research.mjs';
 import { validateTarget } from '../server/search-target.mjs';
-import { searchPlan } from '../server/batch-jobs.mjs';
+import { searchPlan } from '../server/search-plan.mjs';
 import { mapFeishuRecord } from '../server/feishu.mjs';
 const url = 'https://company.example.org/';
 test('广告代码只从追踪配置提取；去重并保留来源，不读取查询参数或普通正文', () => {
