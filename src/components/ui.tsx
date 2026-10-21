@@ -101,21 +101,3 @@ export function Modal({
     </dialog>
   );
 }
-export function Sparkline({ variant = 0 }: { variant?: number }) {
-  const paths = [
-    'M0 35L12 31 24 33 36 22 48 25 60 13 72 16 84 7 96 9 112 0',
-    'M0 34L12 31 24 32 36 27 48 23 60 25 72 14 84 17 96 6 112 2',
-    'M0 37L12 36 24 25 36 28 48 23 60 14 72 18 84 7 96 12 112 1',
-  ];
-  return (
-    <svg className="sparkline" viewBox="0 0 115 43" fill="none" aria-hidden="true">
-      <path
-        d={paths[variant % 3]}
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}

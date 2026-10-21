@@ -1,6 +1,4 @@
 import type { ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Plus } from 'lucide-react';
 
 export function PageHeading({
   eyebrow,
@@ -22,14 +20,5 @@ export function PageHeading({
       </div>
       <div className="heading-actions">{children}</div>
     </div>
-  );
-}
-export function NewTaskButton() {
-  const navigate = useNavigate();
-  return (
-    <button className="btn primary" onClick={() => navigate('/automation?new=1')}>
-      <Plus size={16} />
-      新建获客任务
-    </button>
   );
 }

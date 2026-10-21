@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BatchJobs, validateCount, domainKey, searchPlan } from '../server/batch-jobs.mjs';
+import { BatchJobs, validateCount } from '../server/batch-jobs.mjs';
+import { domainKey } from '../server/website-identity.mjs';
+import { searchPlan } from '../server/search-plan.mjs';
 const input = {
   country: 'United States',
   region: 'Florida',

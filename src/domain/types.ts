@@ -137,3 +137,33 @@ export interface AcquisitionJob {
     executionId?: string;
   }[];
 }
+
+export interface ConnectionSettings {
+  provider: string;
+  ready: boolean;
+  fields: { key: string; label: string; secret: boolean; configured: boolean; value: string }[];
+}
+
+export interface ScheduleTiming {
+  repeat: 'once' | 'daily' | 'weekly';
+  startDate: string;
+  times: string[];
+  time?: string;
+  timezone: 'Asia/Shanghai';
+}
+
+export interface AcquisitionSchedule {
+  id: string;
+  name: string;
+  input: WorkflowInput & { target_count: number };
+  timing: ScheduleTiming;
+  status: 'enabled' | 'paused' | 'closed' | 'completed';
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  lastScheduledAt?: string | null;
+  lastJobId: string | null;
+  lastJob: AcquisitionJob | null;
+  lastError: string;
+  createdAt: string;
+  runs: number;
+}

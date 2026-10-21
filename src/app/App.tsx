@@ -22,8 +22,10 @@ import {
   Zap,
 } from 'lucide-react';
 import { useWorkspace } from './WorkspaceProvider';
-import { Campaigns, Reports, Settings } from '../pages/Business';
-import { Dashboard, Communication, AcquisitionTasks, Materials } from '../pages/Workbench';
+import { Campaigns, Reports } from '../pages/Business';
+import { Dashboard, Communication, Materials } from '../pages/Workbench';
+import { ApiConnections } from '../pages/ApiConnections';
+import { ScheduledAcquisition } from '../pages/ScheduledAcquisition';
 import { LeadLibrary } from '../pages/LeadLibrary';
 import { Automation } from '../pages/Automation';
 
@@ -34,7 +36,7 @@ const nav = [
   { path: '/leads', name: '客户库', icon: UsersRound },
   { path: '/inbox', name: '沟通中心', icon: MessageSquare },
   { path: '/materials', name: '产品与资料', icon: FolderOpen },
-  { path: '/settings', name: '策略设置', icon: Settings2 },
+  { path: '/settings', name: 'API 连接', icon: Settings2 },
 ];
 export function App() {
   const { data, toast, notify } = useWorkspace();
@@ -217,13 +219,13 @@ export function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/leads" element={<LeadLibrary />} />
-            <Route path="/tasks" element={<AcquisitionTasks />} />
+            <Route path="/tasks" element={<ScheduledAcquisition />} />
             <Route path="/materials" element={<Materials />} />
             <Route path="/campaigns" element={<Campaigns />} />
             <Route path="/inbox" element={<Communication />} />
             <Route path="/automation" element={<Automation />} />
             <Route path="/reports" element={<Reports />} />
-            <Route path="/settings" element={<Settings />} />
+            <Route path="/settings" element={<ApiConnections />} />
             <Route
               path="*"
               element={

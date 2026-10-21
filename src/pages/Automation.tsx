@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowDownToLine,
   ArrowRight,
   BookOpen,
   CheckCircle2,
+  CalendarDays,
   Facebook,
   Globe2,
   Instagram,
@@ -22,6 +24,7 @@ import { acquisitionApi, WORKFLOW_URL } from '../services/acquisition';
 import type { LocationOptions } from '../services/acquisition';
 import type { IntegrationStatus, WorkflowInput } from '../domain/types';
 import type { AcquisitionJob } from '../domain/types';
+import type { ScheduleTiming } from '../domain/types';
 import { BatchProgress } from '../components/BatchProgress';
 import acquisition from '../data/acquisition.json' with { type: 'json' };
 import { buildSearchQuery } from '../domain/search-query.mjs';
@@ -31,42 +34,36 @@ const acquisitionChannels = [
   {
     id: 'tavily_web',
     name: '网页搜索',
-    detail: '搜索公开网页，提取企业官网并研究入库',
     icon: Globe2,
     available: true,
   },
   {
     id: 'google_maps',
     name: 'Google 地图商家挖掘',
-    detail: '按地区发现地图商家',
     icon: MapPinned,
     available: false,
   },
   {
     id: 'linkedin',
     name: 'LinkedIn 企业 & 决策人挖掘',
-    detail: '企业主页与决策人线索',
     icon: Linkedin,
     available: false,
   },
   {
     id: 'facebook',
     name: 'Facebook 商家主页挖掘',
-    detail: '公开商家主页与经营信息',
     icon: Facebook,
     available: false,
   },
   {
     id: 'instagram',
     name: 'Instagram 商家主页挖掘',
-    detail: '公开商家账号与产品内容',
     icon: Instagram,
     available: false,
   },
   {
     id: 'local_directories',
     name: '各国本地行业黄页',
-    detail: '各国行业目录与企业名录',
     icon: BookOpen,
     available: false,
   },
@@ -148,6 +145,16 @@ const defaultInput: WorkflowInput = {
 defaultInput.search_query = buildSearchQuery(defaultInput);
 export function Automation() {
   const { notify } = useWorkspace();
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const [runMode, setRunMode] = useState(params.get('mode') === 'scheduled' ? 'scheduled' : 'now');
+  const [scheduleName, setScheduleName] = useState('');
+  const [timing, setTiming] = useState<ScheduleTiming>({
+    repeat: 'daily',
+    startDate: new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10),
+    times: ['09:00'],
+    timezone: 'Asia/Shanghai',
+  });
   const [status, setStatus] = useState<IntegrationStatus | null>(null);
   const [statusError, setStatusError] = useState('');
   const [input, setInput] = useState<WorkflowInput>(defaultInput);
@@ -249,12 +256,25 @@ export function Automation() {
     } else updateTarget({ [key]: value });
   };
   async function run() {
-    if (taskActive || !status?.configured) return;
+    if (running || (runMode === 'now' && taskActive) || !status?.configured) return;
     setRunning(true);
     setError('');
     try {
       const key = submissionKey || crypto.randomUUID();
       setSubmissionKey(key);
+      if (runMode === 'scheduled') {
+        await acquisitionApi.createSchedule(
+          scheduleName.trim() || `${input.country} · ${input.product.split(',')[0]}`.slice(0, 80),
+          input,
+          targetCount,
+          timing,
+          key,
+        );
+        setSubmissionKey(null);
+        notify('定时计划已保存，可在自动获客页面管理');
+        navigate('/tasks');
+        return;
+      }
       const response = await acquisitionApi.createJob(input, targetCount, key);
       setJob(response);
       setSubmissionKey(null);
@@ -280,9 +300,7 @@ export function Automation() {
   return (
     <>
       <PageHeading eyebrow="ACQUISITION TASKS" title="获客任务">
-        {status?.provider === 'native' ? (
-          <Badge tone="green">Node.js 直连执行</Badge>
-        ) : (
+        {status?.provider === 'n8n' && (
           <ExternalLink href={WORKFLOW_URL}>查看 n8n 工作流</ExternalLink>
         )}
         <button className="btn secondary" onClick={loadStatus}>
@@ -321,7 +339,33 @@ export function Automation() {
                   void run();
                 }}
               >
-                <fieldset className="form-grid target-fields" disabled={taskActive}>
+                <fieldset className="run-mode-selector" disabled={running}>
+                  <legend>执行方式</legend>
+                  <label>
+                    <input
+                      type="radio"
+                      name="run-mode"
+                      value="now"
+                      checked={runMode === 'now'}
+                      onChange={() => setRunMode('now')}
+                    />
+                    立即获客
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="run-mode"
+                      value="scheduled"
+                      checked={runMode === 'scheduled'}
+                      onChange={() => setRunMode('scheduled')}
+                    />
+                    定时自动获客
+                  </label>
+                </fieldset>
+                <fieldset
+                  className="form-grid target-fields"
+                  disabled={running || (taskActive && runMode === 'now')}
+                >
                   <label className="span-2 batch-quantity">
                     本次新增客户目标
                     <select
@@ -335,7 +379,7 @@ export function Automation() {
                     >
                       {[5, 10, 20, 50, 100, 200].map((n) => (
                         <option key={n} value={n}>
-                          {n} 家{n === 20 ? ' · 默认' : ''}
+                          {n} 家
                         </option>
                       ))}
                       <option value="custom">自定义</option>
@@ -352,9 +396,6 @@ export function Automation() {
                         onChange={(event) => setTargetCount(event.target.valueAsNumber)}
                       />
                     )}
-                    <small className="query-help">
-                      按成功新增到飞书的独立企业计数，重复和失败不占名额；实际数量可能不足。
-                    </small>
                   </label>
                   <label>
                     目标国家
@@ -381,7 +422,7 @@ export function Automation() {
                     </select>
                   </label>
                   <label>
-                    州 / 地区（可选 / State or territory, optional）
+                    州 / 地区
                     <select
                       aria-label="州 / 地区"
                       value={input.region}
@@ -390,7 +431,7 @@ export function Automation() {
                       }
                       onChange={(event) => updateTarget({ region: event.target.value })}
                     >
-                      <option value="">全部州 / 地区 · 全国范围 / All states · Nationwide</option>
+                      <option value="">全部州 / 地区</option>
                       {(locations?.country === input.country ? locations.regions : []).map(
                         (region) => (
                           <option key={region.code} value={region.name}>
@@ -406,6 +447,7 @@ export function Automation() {
                         ),
                       )}
                     </select>
+                    {locationsLoading && <small>正在读取地区选项…</small>}
                   </label>
                   <label className="span-2">
                     目标企业服务客群
@@ -420,7 +462,6 @@ export function Automation() {
                       <option value="B">B 端 · 面向企业 / 经销商</option>
                       <option value="C">C 端 · 面向家庭消费者</option>
                     </select>
-                    <small>C 端指面向个人消费者经营的企业，个人消费者不入库。</small>
                   </label>
                   <label>
                     客户类型
@@ -450,15 +491,9 @@ export function Automation() {
                         </option>
                       ))}
                     </select>
-                    <small className="query-help">
-                      {
-                        profiles.find((p) => p.value === (input.customer_profile || 'all'))
-                          ?.description
-                      }
-                    </small>
                   </label>
                   <fieldset className="product-selector span-2">
-                    <legend>目标产品（可多选）</legend>
+                    <legend>目标产品</legend>
                     <div className="product-group-grid">
                       {productGroups.map((group) => (
                         <section className="product-group" key={group.name}>
@@ -519,7 +554,6 @@ export function Automation() {
                   </fieldset>
                   <fieldset className="acquisition-channels span-2">
                     <legend>获客渠道</legend>
-                    <p className="channel-help">当前已接入网页搜索。其余渠道接入后即可选择。</p>
                     <div className="channel-options" role="radiogroup" aria-label="获客渠道">
                       {acquisitionChannels.map((channel) => {
                         const Icon = channel.icon;
@@ -532,11 +566,6 @@ export function Automation() {
                             aria-checked={selected}
                             className={`channel-option ${selected ? 'selected' : ''}`}
                             disabled={!channel.available}
-                            title={
-                              channel.available
-                                ? '搜索公开网页并研究企业官网'
-                                : '尚未接入，暂不可选择'
-                            }
                             onClick={() => {
                               if (channel.available)
                                 updateTarget({ acquisition_channel: channel.id });
@@ -547,7 +576,6 @@ export function Automation() {
                             </span>
                             <span className="channel-copy">
                               <strong>{channel.name}</strong>
-                              <small>{channel.detail}</small>
                             </span>
                             <span className="channel-state">
                               {selected ? (
@@ -563,16 +591,6 @@ export function Automation() {
                       })}
                     </div>
                   </fieldset>
-                  <div className="search-scope span-2" aria-live="polite">
-                    <Globe2 size={15} />
-                    <span>
-                      搜索范围：
-                      {input.region
-                        ? `${input.region} 全州 / 全地区`
-                        : `${locations?.markets.find((m) => m.value === input.country)?.label || input.country} · 全部范围`}
-                    </span>
-                    {locationsLoading && <small>正在读取地区选项…</small>}
-                  </div>
                   <label className="span-2">
                     搜索词
                     <textarea
@@ -583,11 +601,124 @@ export function Automation() {
                       value={input.search_query}
                       onChange={(event) => patch('search_query', event.target.value)}
                     />
-                    <small className="query-help">
-                      根据产品、客户类型、画像和地区自动生成，可直接编辑。
-                    </small>
                   </label>
                 </fieldset>
+                {runMode === 'scheduled' && (
+                  <fieldset className="form-grid schedule-fields" disabled={running}>
+                    <legend>
+                      <CalendarDays size={17} />
+                      定时设置 · 北京时间
+                    </legend>
+                    <label className="span-2">
+                      计划名称
+                      <input
+                        aria-label="计划名称"
+                        maxLength={80}
+                        value={scheduleName}
+                        placeholder={`${input.country} · ${input.product.split(',')[0]}`}
+                        onChange={(event) => setScheduleName(event.target.value)}
+                      />
+                    </label>
+                    <label>
+                      执行周期
+                      <select
+                        aria-label="执行周期"
+                        value={timing.repeat}
+                        onChange={(event) =>
+                          setTiming((current) => ({
+                            ...current,
+                            repeat: event.target.value as ScheduleTiming['repeat'],
+                          }))
+                        }
+                      >
+                        <option value="once">指定日期（不重复）</option>
+                        <option value="daily">每天</option>
+                        <option value="weekly">每周（与开始日期同一天）</option>
+                      </select>
+                    </label>
+                    <label>
+                      开始日期
+                      <input
+                        aria-label="开始日期"
+                        type="date"
+                        required
+                        value={timing.startDate}
+                        min={new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10)}
+                        onChange={(event) =>
+                          setTiming((current) => ({ ...current, startDate: event.target.value }))
+                        }
+                      />
+                    </label>
+                    <fieldset className="schedule-time-selector span-2">
+                      <legend>执行时间</legend>
+                      <div className="schedule-time-list">
+                        {timing.times.map((value, index) => (
+                          <div className="schedule-time-row" key={index}>
+                            <label>
+                              时间 {index + 1}
+                              <input
+                                aria-label={`执行时间 ${index + 1}（北京时间）`}
+                                type="time"
+                                step={60}
+                                required
+                                value={value}
+                                onChange={(event) =>
+                                  setTiming((current) => ({
+                                    ...current,
+                                    times: current.times.map((time, position) =>
+                                      position === index ? event.target.value : time,
+                                    ),
+                                  }))
+                                }
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              className="btn subtle"
+                              aria-label={`删除执行时间 ${index + 1}`}
+                              disabled={timing.times.length === 1}
+                              onClick={() =>
+                                setTiming((current) => ({
+                                  ...current,
+                                  times: current.times.filter((_, position) => position !== index),
+                                }))
+                              }
+                            >
+                              删除
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                      <button
+                        type="button"
+                        className="btn secondary"
+                        disabled={timing.times.length >= 24}
+                        onClick={() =>
+                          setTiming((current) => {
+                            const [hours, minutes] = (current.times.at(-1) || '08:00')
+                              .split(':')
+                              .map(Number);
+                            let next = '09:00';
+                            for (let offset = 1; offset <= 24; offset++) {
+                              const candidate = `${String((hours + offset) % 24).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+                              if (!current.times.includes(candidate)) {
+                                next = candidate;
+                                break;
+                              }
+                            }
+                            return { ...current, times: [...current.times, next] };
+                          })
+                        }
+                      >
+                        添加执行时间
+                      </button>
+                      <small>最多 24 个时间点</small>
+                    </fieldset>
+                    <p className="muted span-2">
+                      本机服务需持续运行；任务冲突时顺序排队，暂停期间不补跑。
+                    </p>
+                  </fieldset>
+                )}
                 {locationsError && (
                   <div className="error-message" role="alert">
                     {locationsError}{' '}
@@ -604,10 +735,11 @@ export function Automation() {
                   <div className="connection-notice">
                     <KeyRound size={18} />
                     <div>
-                      <strong>{statusError ? 'API 服务未连接' : '先完成获客引擎配置'}</strong>
-                      <p>
-                        {statusError || status?.note || '完成服务端接入配置后，即可从这里运行。'}
-                      </p>
+                      <strong>{statusError ? 'API 服务未连接' : '请先配置 API 连接'}</strong>
+                      {statusError && <p>{statusError}</p>}
+                      <Link className="text-link" to="/settings">
+                        填写 API 连接配置
+                      </Link>
                     </div>
                   </div>
                 )}
@@ -616,7 +748,7 @@ export function Automation() {
                     {error}
                   </div>
                 )}
-                {job?.status === 'completed' && (
+                {runMode === 'now' && job?.status === 'completed' && (
                   <div className="success-message">
                     <CheckCircle2 size={17} />
                     <span>客户入库结果已核实。</span>
@@ -632,13 +764,20 @@ export function Automation() {
                     type="submit"
                     disabled={
                       !status?.configured ||
-                      taskActive ||
+                      running ||
+                      (runMode === 'now' && taskActive) ||
                       locationsLoading ||
                       Boolean(locationsError)
                     }
                   >
-                    {running ? <LoaderCircle className="spin" size={15} /> : <Play size={15} />}{' '}
-                    {running ? '正在执行…' : '开始获客'}
+                    {running ? (
+                      <LoaderCircle className="spin" size={15} />
+                    ) : runMode === 'scheduled' ? (
+                      <CalendarDays size={15} />
+                    ) : (
+                      <Play size={15} />
+                    )}{' '}
+                    {running ? '正在提交…' : runMode === 'scheduled' ? '保存定时计划' : '开始获客'}
                   </button>
                 </div>
               </form>
@@ -651,16 +790,6 @@ export function Automation() {
                       control={(action) => void controlJob(action)}
                       busy={controlBusy}
                     />
-                    <h3>
-                      {job.status === 'completed'
-                        ? '目标已完成'
-                        : job.status === 'partial'
-                          ? '部分完成'
-                          : '任务进行中'}
-                    </h3>
-                    <p>
-                      {job.message} · 实际新增 {job.inserted} / {job.target} 家
-                    </p>
                     <button
                       className="btn secondary"
                       onClick={() => {
@@ -682,7 +811,6 @@ export function Automation() {
                   <div className="empty-state">
                     <Workflow size={28} />
                     <h3>暂无任务结果</h3>
-                    <p>提交任务后可在这里查看进度与收录结果。</p>
                   </div>
                 )}
               </div>
@@ -690,7 +818,6 @@ export function Automation() {
               <div className="history-pane">
                 <SectionTitle
                   title="批量收录记录"
-                  subtitle="查看本机保存的任务进度与实际收录数量。"
                   action={
                     <button
                       className="btn subtle"
@@ -756,7 +883,6 @@ export function Automation() {
                   <div className="empty-state">
                     <Workflow size={28} />
                     <h3>{loadingHistory ? '正在读取…' : '暂无执行记录'}</h3>
-                    <p>提交获客任务后，可在这里查看进度与结果。</p>
                   </div>
                 )}
                 {status?.provider !== 'native' && (

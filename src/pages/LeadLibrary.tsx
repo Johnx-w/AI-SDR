@@ -1,12 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import {
   ArrowDownToLine,
   ArrowUpRight,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  Plus,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -18,7 +16,6 @@ import { Badge, Empty, Modal } from '../components/ui';
 import { CompanyLogo } from '../components/CompanyLogo';
 import { ContactPanel } from '../components/ContactPanel';
 import { exportCsv } from '../services/workspace';
-import type { Lead, Market } from '../domain/types';
 
 interface Prospect {
   id: string;
@@ -84,29 +81,9 @@ const safeUrl = (s: string) => {
     return undefined;
   }
 };
-function fromMock(l: Lead): Prospect {
-  return {
-    ...l,
-    domain: l.website.replace(/^https?:\/\//, ''),
-    match: '',
-    phone: '',
-    facts: [{ field: '客户研究', value: l.type, quote: l.evidence }],
-    contactEvidence: [],
-    updatedAt: null,
-    fields: {
-      公司: l.name,
-      市场: l.market,
-      产品: l.product,
-      联系人: l.contact,
-      邮箱: l.email,
-      适配说明: l.evidence,
-    },
-  };
-}
 export function LeadLibrary() {
-  const { data, update, notify } = useWorkspace();
+  const { notify } = useWorkspace();
   const [params, setParams] = useSearchParams();
-  const real = true;
   const [remote, setRemote] = useState<{ leads: Prospect[]; syncedAt: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -115,10 +92,8 @@ export function LeadLibrary() {
   const [grade, setGrade] = useState('');
   const [product, setProduct] = useState('');
   const [status, setStatus] = useState('');
-  const [source, setSource] = useState('');
   const [page, setPage] = useState(1);
   const [tab, setTab] = useState('客户画像');
-  const [adding, setAdding] = useState(false);
   async function load(signal?: AbortSignal) {
     setLoading(true);
     setError('');
@@ -137,16 +112,14 @@ export function LeadLibrary() {
     }
   }
   useEffect(() => {
-    if (!real) return;
     const c = new AbortController();
     void load(c.signal);
     return () => c.abort();
-  }, [real]);
+  }, []);
   useEffect(() => {
     setQuery(params.get('q') || '');
   }, [params.get('q')]);
-  if (!data) return null;
-  const leads = real ? remote?.leads || [] : data.leads.map(fromMock);
+  const leads = remote?.leads || [];
   const filtered = leads.filter(
     (l) =>
       (!query ||
@@ -156,19 +129,17 @@ export function LeadLibrary() {
       (!market || marketLabel(l.market) === market) &&
       (!grade || l.grade === grade) &&
       (!product || l.product === product) &&
-      (!status || l.status === status) &&
-      (!source || l.source === source) &&
-      true,
+      (!status || l.status === status),
   );
   const pages = Math.max(1, Math.ceil(filtered.length / 8));
   const current = Math.min(page, pages);
   const rows = filtered.slice((current - 1) * 8, current * 8);
   const viewed = leads.find((l) => l.id === params.get('lead'));
   const open = (id: string) => {
-    setParams(real ? { dataset: 'real', lead: id } : { lead: id });
+    setParams({ dataset: 'real', lead: id });
     setTab('客户画像');
   };
-  const close = () => setParams(real ? { dataset: 'real' } : {});
+  const close = () => setParams({ dataset: 'real' });
   const download = () => {
     exportCsv(
       filtered.map((l) => ({
@@ -186,9 +157,9 @@ export function LeadLibrary() {
         电话: l.phone,
         来源: l.website,
       })),
-      real ? '飞书真实客户.csv' : '演示客户.csv',
+      '飞书真实客户.csv',
     );
-    notify(`已导出 ${filtered.length} 条${real ? '真实' : '演示'}客户`);
+    notify(`已导出 ${filtered.length} 条真实客户`);
   };
   return (
     <>
@@ -197,27 +168,11 @@ export function LeadLibrary() {
           <ArrowDownToLine size={16} />
           导出客户
         </button>
-        {real ? (
-          <button className="btn primary" disabled={loading} onClick={() => void load()}>
-            <RefreshCw size={16} className={loading ? 'spin' : ''} />
-            {loading ? '正在读取' : '刷新飞书客户'}
-          </button>
-        ) : (
-          <button className="btn primary" onClick={() => setAdding(true)}>
-            <Plus size={16} />
-            手工录入
-          </button>
-        )}
+        <button className="btn primary" disabled={loading} onClick={() => void load()}>
+          <RefreshCw size={16} className={loading ? 'spin' : ''} />
+          {loading ? '正在读取' : '刷新飞书客户'}
+        </button>
       </PageHeading>
-      {params.has('duplicates') && !real && (
-        <div className="info-callout">
-          <ShieldCheck size={18} />
-          <p>
-            去重核对演示：Alder Shade Co. 与别名 Alder Shade
-            使用同一示例域名，已汇总为当前唯一客户。可打开客户查看原始信息。
-          </p>
-        </div>
-      )}
       <div className="library-stats">
         {[
           { name: '全部客户', value: leads.length },
@@ -226,9 +181,8 @@ export function LeadLibrary() {
             value: leads.filter((l) => l.grade === 'A').length,
           },
           {
-            name: real ? '未评级' : '跟进中',
-            value: leads.filter((l) => (real ? l.grade === '未评级' : l.status === '跟进中'))
-              .length,
+            name: '未评级',
+            value: leads.filter((l) => l.grade === '未评级').length,
           },
           { name: '可用邮箱记录', value: leads.filter((l) => l.email).length },
         ].map((x) => (
@@ -284,16 +238,6 @@ export function LeadLibrary() {
               set: setStatus,
               options: [...new Set(leads.map((l) => l.status))],
             },
-            ...(!real
-              ? [
-                  {
-                    label: '来源',
-                    val: source,
-                    set: setSource,
-                    options: [...new Set(leads.map((l) => l.source))],
-                  },
-                ]
-              : []),
           ].map((f) => (
             <select
               aria-label={f.label + '筛选'}
@@ -319,7 +263,6 @@ export function LeadLibrary() {
               setGrade('');
               setProduct('');
               setStatus('');
-              setSource('');
               setQuery('');
               setPage(1);
             }}
@@ -367,11 +310,11 @@ export function LeadLibrary() {
                   >
                     <td>
                       <div className="company-cell">
-                        <CompanyLogo id={l.id} name={l.name} real={real} />
+                        <CompanyLogo id={l.id} name={l.name} />
                         <div>
                           <strong>{l.name}</strong>
                           <span className="subtext">{l.domain || '域名待核实'}</span>
-                          <span className="subtext">企业 · B端 {real ? '' : '· 演示样本'}</span>
+                          <span className="subtext">企业 · B端</span>
                         </div>
                       </div>
                     </td>
@@ -400,7 +343,7 @@ export function LeadLibrary() {
                         </span>
                         <div>
                           <strong>
-                            {real ? l.grade : l.score === null ? '未评分' : l.score}
+                            {l.grade}
                             <small>{l.score === null ? '' : ' / 100'}</small>
                           </strong>
                           {l.score !== null ? (
@@ -408,18 +351,14 @@ export function LeadLibrary() {
                               <i style={{ width: l.score + '%' }} />
                             </div>
                           ) : (
-                            <span className="subtext">{real ? '人工评级' : '原始数据未提供'}</span>
+                            <span className="subtext">人工评级</span>
                           )}
                         </div>
                       </div>
                     </td>
                     <td>
-                      <Badge tone={l.grade === 'A' ? 'green' : 'neutral'}>
-                        {real ? l.grade : '示例证据'}
-                      </Badge>
-                      <span className="subtext">
-                        {real ? `${l.facts.length} 条官网事实` : '演示画像'}
-                      </span>
+                      <Badge tone={l.grade === 'A' ? 'green' : 'neutral'}>{l.grade}</Badge>
+                      <span className="subtext">{`${l.facts.length} 条官网事实`}</span>
                     </td>
                     <td>
                       <Badge>{l.status}</Badge>
@@ -443,17 +382,9 @@ export function LeadLibrary() {
             </table>
           </div>
         ) : (
-          <Empty
-            title="暂无匹配客户"
-            detail={
-              real ? '飞书暂无记录或当前筛选无匹配项。' : '请调整筛选条件，或手工添加演示客户。'
-            }
-          />
+          <Empty title="暂无匹配客户" detail="飞书暂无记录或当前筛选无匹配项。" />
         )}
-        <footer className="table-bottom">
-          <span>
-            共 {filtered.length} 条 · {real ? '飞书真实数据' : '演示数据'}
-          </span>
+        <footer className="table-bottom library-pagination-footer">
           <div className="pagination">
             <button
               aria-label="上一页"
@@ -479,7 +410,7 @@ export function LeadLibrary() {
         <Modal title={viewed.name} wide onClose={close}>
           <div className="modal-body prospect-detail">
             <div className="prospect-title">
-              <CompanyLogo key={viewed.id} id={viewed.id} name={viewed.name} real={real} />
+              <CompanyLogo key={viewed.id} id={viewed.id} name={viewed.name} />
               <div>
                 <h2>{viewed.name}</h2>
                 <p>
@@ -499,7 +430,7 @@ export function LeadLibrary() {
                   · {marketLabel(viewed.market)}
                 </p>
               </div>
-              <Badge tone={real ? 'green' : 'neutral'}>{real ? '飞书真实客户' : '演示客户'}</Badge>
+              <Badge tone="green">飞书真实客户</Badge>
             </div>
             <div className="detail-tabs">
               {['客户画像', '官网证据', '联系方式', '沟通与跟进', '原始字段'].map((t) => (
@@ -534,7 +465,7 @@ export function LeadLibrary() {
                       '最近研究',
                       viewed.updatedAt
                         ? new Date(viewed.updatedAt).toLocaleString('zh-CN')
-                        : '演示资料',
+                        : '尚无研究时间',
                     ],
                   ].map(([k, v]) => (
                     <div key={k}>
@@ -550,26 +481,6 @@ export function LeadLibrary() {
                     <p>{viewed.evidence}</p>
                   </div>
                 </div>
-                {!real && (
-                  <label className="profile-status">
-                    开发状态
-                    <select
-                      aria-label="更新演示客户状态"
-                      value={viewed.status}
-                      onChange={(e) => {
-                        const status = e.target.value as Lead['status'];
-                        update((d) => ({
-                          ...d,
-                          leads: d.leads.map((l) => (l.id === viewed.id ? { ...l, status } : l)),
-                        }));
-                      }}
-                    >
-                      {['待开发', '跟进中', '已回复', '暂缓开发'].map((x) => (
-                        <option key={x}>{x}</option>
-                      ))}
-                    </select>
-                  </label>
-                )}
               </>
             )}
             {tab === '官网证据' && (
@@ -577,9 +488,7 @@ export function LeadLibrary() {
                 <div className="info-callout">
                   <ShieldCheck size={18} />
                   <p>
-                    {real
-                      ? '以下为原始记录累积的官网事实。记录未提供逐条来源，链接仅指向最近研究页，历史引文需逐项核对。'
-                      : '以下为虚构的演示证据。'}
+                    以下为原始记录累积的官网事实。记录未提供逐条来源，链接仅指向最近研究页，历史引文需逐项核对。
                   </p>
                 </div>
                 {viewed.facts.map((f, i) => (
@@ -600,30 +509,12 @@ export function LeadLibrary() {
               </>
             )}
             {tab === '联系方式' && <ContactPanel key={viewed.id} lead={viewed} />}
-            {tab === '沟通与跟进' &&
-              (real ? (
-                <Empty
-                  title="尚未接入真实沟通记录"
-                  detail="当前只读客户主表；原有 n8n 获客和飞书写入链路保持可用。"
-                />
-              ) : (
-                <>
-                  <h3>最近会话</h3>
-                  {data.conversations
-                    .filter((c) => c.leadId === viewed.id)
-                    .map((c) => (
-                      <div className="evidence-fact" key={c.id}>
-                        <Badge>{c.channel}</Badge>
-                        <strong>{c.subject}</strong>
-                        <p>{c.preview}</p>
-                        <Badge tone="amber">{c.reviewed ? '演示已审核' : '原自动跟进已暂停'}</Badge>
-                      </div>
-                    ))}
-                  <Link className="btn primary" to={'/inbox?lead=' + viewed.id}>
-                    前往沟通中心 <ArrowUpRight size={15} />
-                  </Link>
-                </>
-              ))}
+            {tab === '沟通与跟进' && (
+              <Empty
+                title="尚未接入真实沟通记录"
+                detail="当前只读客户主表；沟通与跟进功能尚待接入。"
+              />
+            )}
             {tab === '原始字段' &&
               Object.entries(viewed.fields).map(([k, v]) => (
                 <details className="raw-field" key={k}>
@@ -632,81 +523,6 @@ export function LeadLibrary() {
                 </details>
               ))}
           </div>
-        </Modal>
-      )}
-      {adding && (
-        <Modal title="手工录入演示客户" onClose={() => setAdding(false)}>
-          <form
-            className="modal-body form-grid"
-            onSubmit={(e) => {
-              e.preventDefault();
-              const f = new FormData(e.currentTarget);
-              const name = String(f.get('name')).trim();
-              if (!name) return;
-              const l: Lead = {
-                id: crypto.randomUUID(),
-                name,
-                initials: name.slice(0, 2).toUpperCase(),
-                color: 'sage',
-                market: f.get('market') as Market,
-                region: '待补充',
-                city: '待补充',
-                type: String(f.get('type')),
-                product: String(f.get('product')),
-                grade: 'C',
-                score: 0,
-                status: '待开发',
-                source: '手动录入',
-                contact: String(f.get('contact')),
-                email: String(f.get('email')),
-                website: '',
-                lastActivity: '刚刚',
-                evidence: '手工录入演示客户，待补充官网研究。',
-                intent: '采购需求待确认',
-              };
-              update((d) => ({ ...d, leads: [l, ...d.leads] }));
-              setAdding(false);
-              notify('演示客户已保存');
-            }}
-          >
-            <label className="span-2">
-              公司名称
-              <input name="name" required maxLength={100} />
-            </label>
-            <label>
-              市场
-              <select name="market">
-                {['英国', '澳大利亚', '美国', '阿联酋'].map((x) => (
-                  <option key={x}>{x}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              客户类型
-              <select name="type">
-                <option>窗饰经销商</option>
-                <option>安装服务商</option>
-                <option>工程承包商</option>
-              </select>
-            </label>
-            <label>
-              产品
-              <input name="product" required />
-            </label>
-            <label>
-              联系人
-              <input name="contact" />
-            </label>
-            <label className="span-2">
-              示例邮箱
-              <input name="email" type="email" placeholder="name@company.example" />
-            </label>
-            <p className="muted span-2">仅保存至演示客户库。</p>
-            <button className="btn primary span-2">
-              <CheckCircle2 size={16} />
-              保存演示客户
-            </button>
-          </form>
         </Modal>
       )}
     </>

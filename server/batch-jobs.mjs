@@ -2,71 +2,15 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { groupedMarkets, audienceTerms } from './markets.mjs';
+import { domainKey } from './website-identity.mjs';
+import { searchPlan } from './search-plan.mjs';
 import { locationOptions } from './search-target.mjs';
-import acquisition from '../src/data/acquisition.json' with { type: 'json' };
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 export function validateCount(value = 20) {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 200)
     throw fail(400, '本次新增客户目标必须是 1–200 的整数');
   return value;
-}
-export function domainKey(value) {
-  try {
-    const u = new URL(value);
-    const host = u.hostname
-      .toLowerCase()
-      .replace(/^www\./, '')
-      .replace(/\.$/, '');
-    if (
-      !['http:', 'https:'].includes(u.protocol) ||
-      u.username ||
-      u.password ||
-      !host.includes('.') ||
-      /[:\d]$/.test(host)
-    )
-      return '';
-    return host;
-  } catch {
-    return '';
-  }
-}
-export function searchPlan(input) {
-  locationOptions(input.country, input.region);
-  const countries = groupedMarkets[input.country] || [input.country];
-  // Quote multi-word product phrases so Tavily matches them as exact phrases
-  // instead of scattering generic words (e.g. "awnings") across unrelated sites.
-  const products = input.product
-    .split(',')
-    .map((p) => p.trim())
-    .filter(Boolean)
-    .map((p) => (p.includes(' ') ? '"' + p + '"' : p));
-  const variants = input.customer_type
-    ? ['', 'company', 'contact', 'showroom']
-    : ['', 'supplier', 'installation', 'dealer', 'manufacturer', 'company', 'contact', 'showroom'];
-  const result = [];
-  for (const suffix of variants)
-    for (const product of products)
-      for (const country of countries) {
-        result.push({
-          country,
-          query: [
-            product,
-            audienceTerms[input.audience],
-            acquisition.customerTypes.find((t) => t.value === input.customer_type)?.terms,
-            acquisition.profiles.find((p) => p.value === input.customer_profile)?.terms,
-            input.region,
-            country,
-            suffix,
-          ]
-            .filter(Boolean)
-            .join(' ')
-            .slice(0, 395),
-        });
-      }
-  if (countries.length === 1) result.unshift({ country: input.country, query: input.search_query });
-  return [...new Map(result.map((p) => [p.query, p])).values()];
 }
 const labels = {
   target_reached: '已达到新增目标',
@@ -128,6 +72,10 @@ export class BatchJobs {
   }
   active() {
     return this.list().find((j) => ['running', 'stopping', 'paused'].includes(j.status));
+  }
+  findByKey(key) {
+    const row = this.db.prepare('SELECT data FROM jobs WHERE idem=?').get(key);
+    return row ? JSON.parse(row.data) : null;
   }
   create(input, key) {
     locationOptions(input.country, input.region);

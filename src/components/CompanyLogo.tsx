@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { Avatar } from './ui';
 
 interface Mark {
   url: string;
@@ -7,13 +6,12 @@ interface Mark {
   provider?: string;
 }
 const requests = new Map<string, Promise<Mark[]>>();
-export function CompanyLogo({ id, name, real }: { id: string; name: string; real: boolean }) {
+export function CompanyLogo({ id, name }: { id: string; name: string }) {
   const [marks, setMarks] = useState<Mark[]>([]);
   const [index, setIndex] = useState(0);
   useEffect(() => {
     setMarks([]);
     setIndex(0);
-    if (!real) return;
     let active = true;
     if (!requests.has(id))
       requests.set(
@@ -32,21 +30,8 @@ export function CompanyLogo({ id, name, real }: { id: string; name: string; real
     return () => {
       active = false;
     };
-  }, [id, real]);
+  }, [id]);
   const mark = marks[index];
-  if (!real)
-    return (
-      <Avatar
-        lead={{
-          initials: name
-            .split(' ')
-            .map((s) => s[0])
-            .slice(0, 2)
-            .join(''),
-          color: 'sage',
-        }}
-      />
-    );
   return (
     <span
       className={

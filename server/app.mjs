@@ -2,14 +2,13 @@ import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { readFeishu } from './feishu.mjs';
 import { discoverBranding } from './branding.mjs';
 import { summarizeRunOutput } from './run-outcome.mjs';
 import { validateTarget, locationOptions } from './search-target.mjs';
 import { BatchJobs, validateCount } from './batch-jobs.mjs';
-import { acquisitionConfig } from './acquisition-config.mjs';
-import { NativeAcquisition } from './native-acquisition.mjs';
-import { FeishuClient } from './feishu-direct.mjs';
+import { createAcquisitionProvider } from './acquisition-provider.mjs';
+import { ApiConnections } from './api-connections.mjs';
+import { AcquisitionSchedules } from './acquisition-schedules.mjs';
 
 class ApiError extends Error {
   constructor(status, message) {
@@ -57,16 +56,13 @@ export function createApp({
   dist = resolve('dist'),
   nativeImpl,
 } = {}) {
-  const migration = acquisitionConfig(env);
-  const isNative = migration.provider === 'native';
-  const feishuDirect = new FeishuClient({ env, fetchImpl });
-  const readLeads = () => (isNative ? feishuDirect.readLeads() : readFeishu({ env, fetchImpl }));
-  let native;
-  const nativeService = () =>
-    (native ??= nativeImpl || new NativeAcquisition({ env, fetchImpl, feishu: feishuDirect }));
-  const workflowId = env.N8N_WORKFLOW_ID || 'EycE9OmaPkRFUDSq';
-  const baseUrl = (env.N8N_BASE_URL || 'https://vynox.app.n8n.cloud').replace(/\/$/, '');
-  const editorUrl = `${baseUrl}/workflow/${encodeURIComponent(workflowId)}`;
+  const connections = new ApiConnections({ env, path: env.CONNECTIONS_PATH });
+  let provider = createAcquisitionProvider({
+    env: connections.environment(),
+    fetchImpl,
+    nativeImpl,
+  });
+  const readLeads = () => provider.readLeads();
   const runs = new Map();
   const realLeads = new Map();
   const brandingCache = new Map();
@@ -86,72 +82,40 @@ export function createApp({
   };
   let running = 0;
   let batch;
-  const batchCall = async (body) => {
-    const response = await fetchImpl(env.N8N_WEBHOOK_URL, {
-      method: 'POST',
-      redirect: 'error',
-      signal: AbortSignal.timeout(600000),
-      headers: { 'Content-Type': 'application/json', 'X-Shadeflow-Key': env.N8N_WEBHOOK_SECRET },
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) throw new Error(`n8n HTTP ${response.status}`);
-    const raw = await response.json();
-    const output = Array.isArray(raw) && raw.length === 1 ? raw[0] : raw;
-    if (!output || typeof output !== 'object') throw new Error('n8n 返回格式异常');
-    return output;
-  };
-  const n8nResearch = async (input, item) => {
-    try {
-      return await batchCall({ ...input, ...item, batch_mode: 'research' });
-    } catch {
-      for (let attempt = 0; attempt < 12; attempt++) {
-        const result = await batchCall({
-          batch_mode: 'status',
-          operation_id: item.operation_id,
-        }).catch(() => null);
-        if (result?.settled) return result.output;
-        await new Promise((resolve) => setTimeout(resolve, 10000));
-      }
-      throw new Error('当前企业执行结果尚未确认');
-    }
-  };
   const jobs = () =>
     (batch ??= new BatchJobs({
       path: env.BATCH_DB_PATH || ':memory:',
-      provider: migration.provider,
-      discover: (input, search, seen) =>
-        isNative
-          ? nativeService().discover(input, search, seen)
-          : batchCall({
-              ...input,
-              batch_mode: 'discover',
-              search_query: search.query,
-              search_country: search.country,
-              exclude_domains: seen.slice(-150),
-            }),
-      research: (input, item) =>
-        isNative ? nativeService().research(input, item) : n8nResearch(input, item),
-      status: (operation_id) =>
-        isNative
-          ? nativeService().status(operation_id)
-          : batchCall({ batch_mode: 'status', operation_id }),
+      provider: provider.info.provider,
+      discover: (...args) => provider.discover(...args),
+      research: (...args) => provider.research(...args),
+      status: (id) => provider.status(id),
       readLeads: async () => (await readLeads()).leads,
     }));
-  let validWebhook = false;
-  try {
-    const webhook = new URL(env.N8N_WEBHOOK_URL);
-    validWebhook =
-      webhook.protocol === 'https:' &&
-      webhook.origin === new URL(baseUrl).origin &&
-      webhook.pathname.startsWith('/webhook/') &&
-      !webhook.username &&
-      !webhook.password;
-  } catch {
-    /* 未配置时返回明确状态。 */
-  }
-  const configured = isNative
-    ? migration.nativeReady
-    : Boolean(validWebhook && env.N8N_WEBHOOK_SECRET && env.N8N_WEBHOOK_ENABLED === 'true');
+  let schedules;
+  const plans = () =>
+    (schedules ??= new AcquisitionSchedules({
+      path: env.SCHEDULE_DB_PATH || ':memory:',
+      jobs,
+      ready: () => provider.info.configured,
+      available: () => running === 0 && ![...runs.values()].some((run) => run.status === 'unknown'),
+    }));
+  const completeRun = (requestId, hash, output) => {
+    let summary;
+    try {
+      summary = summarizeRunOutput(output);
+    } catch (error) {
+      throw new ApiError(502, error.message);
+    }
+    const result = {
+      requestId,
+      status: 'completed',
+      summary,
+      result: output,
+      completedAt: new Date().toISOString(),
+    };
+    runs.set(requestId, { hash, status: 'completed', result });
+    return result;
+  };
   const json = (response, status, body) => {
     response.writeHead(status, {
       'Content-Type': 'application/json; charset=utf-8',
@@ -176,9 +140,70 @@ export function createApp({
           throw new ApiError(403, '不允许跨站调用');
         if (url.pathname === '/api/health' && request.method === 'GET')
           return json(response, 200, { ok: true });
+        if (url.pathname === '/api/v1/connections') {
+          if (request.method === 'GET') return json(response, 200, connections.view());
+          if (request.method === 'PUT') {
+            const body = await readJson(request);
+            if (
+              running ||
+              readingLeads ||
+              jobs().active() ||
+              [...runs.values()].some((r) => r.status === 'unknown')
+            )
+              throw new ApiError(409, '请先完成或核对当前任务，再修改 API 连接');
+            const result = connections.update(body);
+            provider.close();
+            batch?.close();
+            batch = undefined;
+            provider = createAcquisitionProvider({
+              env: connections.environment(),
+              fetchImpl,
+              nativeImpl,
+            });
+            realLeads.clear();
+            brandingCache.clear();
+            return json(response, 200, result);
+          }
+          throw new ApiError(405, '不支持的配置操作');
+        }
         const prefix = url.pathname.startsWith('/api/v1/acquisition')
           ? '/api/v1/acquisition'
           : '/api/v1/integrations/n8n';
+        if (
+          url.pathname === `${prefix}/schedules` ||
+          url.pathname.startsWith(`${prefix}/schedules/`)
+        ) {
+          const suffix = url.pathname
+            .slice(`${prefix}/schedules`.length)
+            .split('/')
+            .filter(Boolean);
+          const manager = plans();
+          if (!suffix.length && request.method === 'GET')
+            return json(response, 200, {
+              schedules: manager.list().map((plan) => manager.view(plan)),
+            });
+          if (!suffix.length && request.method === 'POST') {
+            const body = await readJson(request);
+            if (!body || typeof body !== 'object' || Array.isArray(body))
+              throw new ApiError(400, '请提交有效的定时计划');
+            if (!provider.info.configured) throw new ApiError(503, '请先填写 API 连接配置');
+            const plan = manager.create(
+              {
+                name: body.name,
+                timing: body.timing,
+                input: {
+                  ...validateInput(body.input),
+                  target_count: validateCount(body.input?.target_count),
+                },
+              },
+              request.headers['idempotency-key'],
+            );
+            return json(response, 201, manager.view(plan));
+          }
+          if (suffix.length === 2 && request.method === 'POST')
+            return json(response, 200, manager.view(manager.control(suffix[0], suffix[1])));
+          throw new ApiError(404, '定时计划接口不存在');
+        }
         if (url.pathname === `${prefix}/locations` && request.method === 'GET')
           return json(
             response,
@@ -204,29 +229,15 @@ export function createApp({
           return json(response, 200, await cached.promise);
         }
         if (url.pathname === `${prefix}/status` && request.method === 'GET')
-          return json(response, 200, {
-            configured,
-            workflowId: isNative ? '' : workflowId,
-            editorUrl: isNative ? '' : editorUrl,
-            provider: migration.provider,
-            transport: isNative ? 'direct' : 'webhook',
-            nativeReady: migration.nativeReady,
-            missing: isNative ? migration.missing : undefined,
-            note: isNative
-              ? configured
-                ? 'Node.js 后端直连 Tavily、DeepSeek 与飞书；配置齐备，真实任务结果见任务记录。'
-                : '后端直连配置缺失：' + migration.missing.join('、')
-              : configured
-                ? 'Webhook 调用参数已配置；尚不代表已通过真实运行验证。'
-                : '尚未配置生产 Webhook 与 Header Auth；Codex MCP OAuth 不自动授权本应用。',
-          });
+          return json(response, 200, provider.info);
         if (url.pathname === `${prefix}/jobs` || url.pathname.startsWith(`${prefix}/jobs/`)) {
           const suffix = url.pathname.slice(`${prefix}/jobs`.length).split('/').filter(Boolean);
           const manager = jobs();
           if (!suffix.length && request.method === 'GET')
             return json(response, 200, { jobs: manager.list().map((j) => manager.view(j)) });
           if (!suffix.length && request.method === 'POST') {
-            if (!configured) throw new ApiError(503, '获客执行引擎尚未配置，请检查接入状态');
+            if (!provider.info.configured)
+              throw new ApiError(503, '获客执行引擎尚未配置，请检查接入状态');
             if (running) throw new ApiError(409, '单次任务正在执行');
             const body = await readJson(request);
             const input = {
@@ -242,14 +253,15 @@ export function createApp({
             if (suffix[1] === 'stop')
               return json(response, 200, manager.view(manager.stop(suffix[0])));
             if (suffix[1] === 'resume') {
-              if (!configured) throw new ApiError(503, '获客执行引擎尚未配置');
+              if (!provider.info.configured) throw new ApiError(503, '获客执行引擎尚未配置');
               return json(response, 200, manager.view(await manager.resume(suffix[0])));
             }
           }
           throw new ApiError(404, '任务接口不存在');
         }
         if (url.pathname === `${prefix}/runs` && request.method === 'POST') {
-          if (!configured) throw new ApiError(503, '获客执行引擎尚未配置，请先完成接入配置。');
+          if (!provider.info.configured)
+            throw new ApiError(503, '获客执行引擎尚未配置，请先完成接入配置。');
           const input = validateInput(await readJson(request));
           const requestId = request.headers['idempotency-key'] || randomUUID();
           if (typeof requestId !== 'string' || !/^[\w-]{8,100}$/.test(requestId))
@@ -259,19 +271,10 @@ export function createApp({
           if (existing) {
             if (existing.hash !== hash) throw new ApiError(409, '同一请求编号不能使用不同参数');
             if (existing.result) return json(response, 200, existing.result);
-            if (isNative && existing.status === 'unknown') {
-              const settled = await nativeService().status(requestId);
-              if (settled.settled) {
-                const result = {
-                  requestId,
-                  status: 'completed',
-                  summary: summarizeRunOutput(settled.output),
-                  result: settled.output,
-                  completedAt: new Date().toISOString(),
-                };
-                runs.set(requestId, { hash, status: 'completed', result });
-                return json(response, 200, result);
-              }
+            if (existing.status === 'unknown') {
+              const settled = await provider.recoverRun(requestId);
+              if (settled.settled)
+                return json(response, 200, completeRun(requestId, hash, settled.output));
             }
             throw new ApiError(
               409,
@@ -289,65 +292,11 @@ export function createApp({
           runs.set(requestId, { hash, status: 'running' });
           running++;
           try {
-            if (isNative) {
-              const output = await nativeService().run(input, requestId);
-              const result = {
-                requestId,
-                status: 'completed',
-                summary: summarizeRunOutput(output),
-                result: output,
-                completedAt: new Date().toISOString(),
-              };
-              runs.set(requestId, { hash, status: 'completed', result });
-              return json(response, 200, result);
-            }
-            const upstream = await fetchImpl(env.N8N_WEBHOOK_URL, {
-              method: 'POST',
-              redirect: 'error',
-              signal: AbortSignal.timeout(110000),
-              headers: {
-                'Content-Type': 'application/json',
-                'X-Shadeflow-Key': env.N8N_WEBHOOK_SECRET,
-                'X-Request-ID': requestId,
-              },
-              body: JSON.stringify({ ...input, request_id: requestId }),
-            });
-            const text = await upstream.text();
-            if (!upstream.ok)
-              throw new ApiError(
-                502,
-                `n8n 返回 HTTP ${upstream.status}；请核对执行记录后再决定是否重试。`,
-              );
-            let output;
-            try {
-              output = JSON.parse(text);
-            } catch {
-              throw new ApiError(502, 'n8n 未返回 JSON。请检查 Webhook 的响应设置。');
-            }
-            if (
-              output?.message === 'Workflow was started' ||
-              output?.message === 'Workflow got started'
-            )
-              throw new ApiError(502, 'Webhook 仅返回了启动确认，请改为等待最后节点完成再响应。');
-            let summary;
-            try {
-              summary = summarizeRunOutput(output);
-            } catch (error) {
-              throw new ApiError(502, error.message);
-            }
-            const result = {
-              requestId,
-              status: 'completed',
-              summary,
-              result: output,
-              completedAt: new Date().toISOString(),
-            };
-            runs.set(requestId, { hash, status: 'completed', result });
-            return json(response, 200, result);
+            const output = await provider.run(input, requestId);
+            return json(response, 200, completeRun(requestId, hash, output));
           } catch (error) {
             runs.set(requestId, { hash, status: 'unknown' });
-            if (error instanceof ApiError) throw error;
-            if (isNative && error.status) throw new ApiError(error.status, error.message);
+            if (error.status) throw error;
             throw new ApiError(
               504,
               '未能确认执行结果。任务可能仍在运行，请先查看任务记录，勿直接重复提交。',
@@ -357,31 +306,7 @@ export function createApp({
           }
         }
         if (url.pathname === `${prefix}/executions` && request.method === 'GET') {
-          if (isNative) return json(response, 200, { data: nativeService().store.history() });
-          if (!env.N8N_API_KEY)
-            throw new ApiError(
-              503,
-              '读取历史记录需要配置服务端 N8N_API_KEY；运行工作流只需 Webhook 凭证。',
-            );
-          const upstream = await fetchImpl(
-            `${baseUrl}/api/v1/executions?workflowId=${encodeURIComponent(workflowId)}&limit=10&includeData=false`,
-            {
-              redirect: 'error',
-              headers: { 'X-N8N-API-KEY': env.N8N_API_KEY },
-              signal: AbortSignal.timeout(15000),
-            },
-          );
-          if (!upstream.ok)
-            throw new ApiError(502, `读取 n8n 历史记录失败 (HTTP ${upstream.status})`);
-          const payload = await upstream.json();
-          return json(response, 200, {
-            data: (payload.data || []).map((item) => ({
-              id: item.id,
-              status: item.status,
-              startedAt: item.startedAt,
-              stoppedAt: item.stoppedAt,
-            })),
-          });
+          return json(response, 200, { data: await provider.history() });
         }
         throw new ApiError(404, '接口不存在');
       }
@@ -413,9 +338,11 @@ export function createApp({
       });
     }
   });
+  server.on('listening', () => plans().start());
   server.on('close', () => {
+    schedules?.close();
     if (batch && !batch.busy) batch.close();
-    if (native && !batch?.busy && !running) native.close();
+    if (!batch?.busy && !running) provider.close();
   });
   return server;
 }
