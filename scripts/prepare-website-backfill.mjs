@@ -50,7 +50,7 @@ for (const record of before) {
   );
   summaries.push({
     record_id: record.record_id,
-    name: record.fields['客户名称'],
+    name: record.fields['公司名称'] || record.fields['客户名称'],
     phone: result.fields['电话'],
     email: result.fields['邮箱'],
     address: result.fields['详细地址'],

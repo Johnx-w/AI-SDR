@@ -22,6 +22,14 @@ import { exportCsv } from '../services/workspace';
 interface Prospect {
   id: string;
   name: string;
+  companyIdentity?: {
+    legal_name: string | null;
+    website_name: string | null;
+    aliases: string[];
+    status: string;
+    notes?: string[];
+    evidence: { field: string; value: string; quote: string; source_url: string }[];
+  } | null;
   domain: string;
   market: string;
   type: string;
@@ -165,7 +173,7 @@ export function LeadLibrary() {
   const filtered = leads.filter(
     (l) =>
       (!query ||
-        `${l.name} ${l.domain} ${l.contact} ${l.email} ${l.source}`
+        `${l.name} ${(l.companyIdentity?.aliases || []).join(' ')} ${l.domain} ${l.contact} ${l.email} ${l.source}`
           .toLowerCase()
           .includes(query.toLowerCase())) &&
       (!market || marketLabel(l.market) === market) &&
@@ -185,7 +193,9 @@ export function LeadLibrary() {
   const download = () => {
     exportCsv(
       filtered.map((l) => ({
-        客户: l.name,
+        公司名称: l.name,
+        官网名称: l.companyIdentity?.website_name || '',
+        公司别名: l.companyIdentity?.aliases.join('、') || '',
         市场: marketLabel(l.market),
         类型: typeNames[l.type] || l.type,
         产品: l.product,
@@ -333,7 +343,7 @@ export function LeadLibrary() {
             <table className="reference-lead-table">
               <thead>
                 <tr>
-                  <th>客户／来源</th>
+                  <th>公司名称／来源</th>
                   <th>市场与客户类型</th>
                   <th>用户评级</th>
                   <th>联系准备</th>
@@ -493,6 +503,26 @@ export function LeadLibrary() {
               <>
                 <div className="profile-kv">
                   {[
+                    ['公司名称', viewed.name],
+                    [
+                      '官网名称／别名',
+                      [
+                        viewed.companyIdentity?.website_name,
+                        ...(viewed.companyIdentity?.aliases || []),
+                      ]
+                        .filter((v, i, all) => v && all.indexOf(v) === i)
+                        .join('、') || '尚未核实',
+                    ],
+                    ['经营法人全名', viewed.companyIdentity?.legal_name || '尚未核实'],
+                    [
+                      '名称核验',
+                      viewed.companyIdentity?.status === 'legal_name_self_reported'
+                        ? '已取得官网自述法人名称，尚需与海关买方身份核对'
+                        : '当前名称可用于搜索，海关买方身份待核实',
+                    ],
+                    ...(viewed.companyIdentity?.notes?.length
+                      ? [['名称待核实事项', viewed.companyIdentity.notes.join('；')]]
+                      : []),
                     ['用户评级', viewed.grade],
                     ['评级依据', viewed.ratingReason || '尚无评级依据'],
                     ['客户类型', typeNames[viewed.type] || viewed.type],
@@ -554,7 +584,18 @@ export function LeadLibrary() {
                     以下为已有官网研究事实。自动评估保留逐条引文和来源；旧记录缺少逐条来源时，链接指向最近研究页，需结合原文核对。
                   </p>
                 </div>
-                {viewed.facts.map((f, i) => (
+                {[
+                  ...(viewed.companyIdentity?.evidence || []),
+                  ...viewed.facts.filter(
+                    (f) =>
+                      !viewed.companyIdentity?.evidence.some(
+                        (n) =>
+                          n.field === f.field &&
+                          n.value === f.value &&
+                          n.source_url === f.source_url,
+                      ),
+                  ),
+                ].map((f, i) => (
                   <article className="evidence-fact" key={i}>
                     <Badge>{f.field}</Badge>
                     <strong>{f.value}</strong>
@@ -570,7 +611,7 @@ export function LeadLibrary() {
                     )}
                   </article>
                 ))}
-                {!viewed.facts.length && (
+                {!viewed.facts.length && !viewed.companyIdentity?.evidence.length && (
                   <Empty title="尚无官网证据" detail="请通过原有获客流程补充研究资料。" />
                 )}
               </>

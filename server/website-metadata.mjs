@@ -359,6 +359,10 @@ export function extractWebsiteMetadata({ content, sourceUrl }) {
 export function planWebsitePages(sourceUrl, content = '') {
   const base = websiteScope(sourceUrl);
   if (!base) return [];
+  const legalPage = (path) =>
+    /\/(?:privacy(?:[-_/](?:policy|notice|statement))?|terms(?:[-_/](?:and|conditions|of|service|use))*|legal|impressum)\/?$/i.test(
+      path,
+    );
   const urls = [base.url, base.origin + '/'];
   const links = [
     ...String(content)
@@ -374,6 +378,7 @@ export function planWebsitePages(sourceUrl, content = '') {
       (/contact|about|联系我们|聯絡|service[-_/ ]?areas?|areas[-_/ ](?:we[-_/ ])?(?:serve|service)/i.test(
         m[0],
       ) ||
+        legalPage(next.path) ||
         /^\/(?:cities|locations)\/?$/i.test(next.path)) &&
       !/\/(?:wp-content|wp-includes|wp-json)\//i.test(next.path) &&
       !/\.(pdf|jpe?g|png|gif|webp|svg|ico|zip|css|js|json|xml|woff2?)$/i.test(next.path)
@@ -383,9 +388,17 @@ export function planWebsitePages(sourceUrl, content = '') {
   const first = [...new Set(urls)].slice(0, base.path === '/' ? 1 : 2);
   const extra = [...new Set(urls)]
     .filter((u) => !first.includes(u))
-    .sort(
-      (a, b) => Number(/contact|联系我们|聯絡/i.test(b)) - Number(/contact|联系我们|聯絡/i.test(a)),
-    );
+    .sort((a, b) => {
+      const priority = (url) =>
+        /contact|联系我们|聯絡/i.test(url)
+          ? 3
+          : /about/i.test(url)
+            ? 2
+            : legalPage(websiteScope(url)?.path || '')
+              ? 1
+              : 0;
+      return priority(b) - priority(a);
+    });
   return [...first, ...extra].slice(0, 5);
 }
 

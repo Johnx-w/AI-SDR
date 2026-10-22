@@ -69,6 +69,7 @@ function fixture({
   tavilyError = false,
   pageText = sourceText,
   modelOverrides = {},
+  companyNameField = '客户名称',
 } = {}) {
   const calls = [],
     records = JSON.parse(JSON.stringify(initial));
@@ -82,7 +83,15 @@ function fixture({
     if (url.includes('/auth/v3/'))
       return json({ code: 0, tenant_access_token: 'test-token', expire: 7200 });
     if (url.endsWith('/fields?page_size=100'))
-      return json({ code: 0, data: { items: definitions, has_more: false } });
+      return json({
+        code: 0,
+        data: {
+          items: definitions.map((field) =>
+            field.field_name === '客户名称' ? { ...field, field_name: companyNameField } : field,
+          ),
+          has_more: false,
+        },
+      });
     if (url.includes('/records?page_size=')) {
       lists++;
       if (lateDuplicate && lists === 2)
@@ -163,6 +172,26 @@ function fixture({
 }
 
 const policyFact = (value, quote) => ({ value, quote, source_url: site });
+test('新名称字段贯通研究、飞书写入读回和持久身份资料', async () => {
+  const f = fixture({ companyNameField: '公司名称' });
+  const svc = f.make();
+  try {
+    const output = await svc.research(input, {
+      source_url: site,
+      operation_id: 'company-name-renamed-01',
+    });
+    assert.equal(output.新增, 1);
+    assert.equal(f.records[0].fields['公司名称'], 'Acme Screens');
+    assert.equal(f.records[0].fields['客户名称'], undefined);
+    const identity = svc.store.companyIdentity('rec-native', site, 'Acme Screens');
+    assert.equal(identity.website_name, 'Acme Screens');
+    assert.equal(identity.customs_match_status, 'requires_identity_match');
+    assert.equal(identity.legal_name, null);
+  } finally {
+    svc.close();
+  }
+});
+
 for (const [scenarioIndex, scenario] of [
   {
     name: '个人装修求购账号，即使有公司名或选择 C 端也淘汰',

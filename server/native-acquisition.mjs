@@ -101,13 +101,22 @@ export class NativeAcquisition {
     this.assessments = assessments || new AssessmentService({ env, feishu: this.feishu });
   }
   assessmentInfo() {
-    return { ruleVersion: ASSESSMENT_RULE_VERSION, markets, customs: 'not_connected' };
+    return {
+      ruleVersion: ASSESSMENT_RULE_VERSION,
+      markets,
+      customs: 'not_connected',
+      customsIncludedInInitialScore: false,
+    };
   }
   decorateLeads(data) {
     this.assessments.start();
     return {
       ...data,
       leads: data.leads.map((lead) => {
+        lead = {
+          ...lead,
+          companyIdentity: this.store.companyIdentity(lead.id, lead.website, lead.name),
+        };
         const stored = lead.assessment?.id
           ? this.assessments.summary(lead.assessment.id)
           : !lead.ratingReason
@@ -525,7 +534,10 @@ export class NativeAcquisition {
         this.store.complete(op, output);
         return output;
       }
-      if (item.target_record_id && !research.company_name)
+      if (
+        item.target_record_id &&
+        (!research.company_name || research.company_identity?.status === 'identity_conflict')
+      )
         return await this.persistIncompleteAssessment(
           op,
           input,
@@ -704,6 +716,10 @@ export class NativeAcquisition {
     if (domainKey(fieldText(record.fields?.['来源链接'])) !== domainKey(op.source_url))
       return false;
     return Object.entries(op.fields).every(([key, value]) => {
+      if (['公司名称', '客户名称'].includes(key))
+        return (
+          fieldText(record.fields?.['公司名称'] || record.fields?.['客户名称']) === fieldText(value)
+        );
       if (value === null) return fieldText(record.fields?.[key]) === '';
       const expected = typeof value === 'object' ? value.link || value.text : value;
       if (typeof expected === 'number') return Number(record.fields?.[key]) === expected;
@@ -712,6 +728,16 @@ export class NativeAcquisition {
   }
   async finishWritten(op) {
     op.recordVerifiedAt ||= new Date().toISOString();
+    if (op.research?.company_identity && op.recordId) {
+      const name = op.fields?.['公司名称'] || op.fields?.['客户名称'];
+      if (name)
+        this.store.saveCompanyIdentity(
+          op.recordId,
+          op.source_url,
+          name,
+          op.research.company_identity,
+        );
+    }
     if (op.assessment) {
       op.stage = 'assessment';
       this.store.save(op);

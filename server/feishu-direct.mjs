@@ -161,14 +161,14 @@ export function recordsForDomain(records, domain) {
 
 export function encodeResearchFields(raw, definitions) {
   const types = new Map(definitions.map((f) => [f.field_name, f.type]));
-  for (const name of [
-    '客户名称',
-    '来源链接',
-    'customer_id',
-    '广告代码',
-    '需求产品',
-    '客户行业画像',
-  ])
+  const nameField = types.has('公司名称') ? '公司名称' : '客户名称';
+  if (types.get(nameField) !== 1) throw fail('客户表缺少公司名称文本字段');
+  const name = raw['公司名称'] || raw['客户名称'];
+  raw = Object.fromEntries(
+    Object.entries(raw).filter(([key]) => !['公司名称', '客户名称'].includes(key)),
+  );
+  if (name) raw[nameField] = name;
+  for (const name of ['来源链接', 'customer_id', '广告代码', '需求产品', '客户行业画像'])
     if (!types.has(name)) throw fail('客户表缺少迁移必需字段：' + name);
   for (const name of ['广告代码', '需求产品', '客户行业画像'])
     if (types.get(name) !== 1) throw fail('客户表字段必须为文本：' + name);
@@ -183,6 +183,6 @@ export function encodeResearchFields(raw, definitions) {
     else if (type === 15 && typeof value === 'string') fields[name] = { text: value, link: value };
     else throw fail('客户表字段类型不兼容：' + name);
   }
-  if (!fields['客户名称'] || !fields['来源链接']) throw fail('企业名称或来源链接不足，已阻止写入');
+  if (!fields[nameField] || !fields['来源链接']) throw fail('公司名称或来源链接不足，已阻止写入');
   return fields;
 }
