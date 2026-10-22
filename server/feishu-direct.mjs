@@ -11,8 +11,8 @@ export class FeishuClient {
     this.fetch = fetchImpl;
     this.token = null;
   }
-  tablePath() {
-    const { FEISHU_APP_TOKEN: app, FEISHU_TABLE_ID: table } = this.env;
+  tablePath(table = this.env.FEISHU_TABLE_ID) {
+    const { FEISHU_APP_TOKEN: app } = this.env;
     if (!app || !table) throw fail('飞书表格参数尚未配置');
     return '/bitable/v1/apps/' + encodeURIComponent(app) + '/tables/' + encodeURIComponent(table);
   }
@@ -50,30 +50,50 @@ export class FeishuClient {
   }
   async request(path, { method = 'GET', body } = {}) {
     const token = await this.accessToken();
-    const data = await platformJson(
-      this.fetch,
-      base + path,
-      {
-        method,
-        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-        ...(body ? { body: JSON.stringify(body) } : {}),
-      },
-      '飞书',
-    );
+    let data;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        data = await platformJson(
+          this.fetch,
+          base + path,
+          {
+            method,
+            headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+            ...(body ? { body: JSON.stringify(body) } : {}),
+          },
+          '飞书',
+        );
+        break;
+      } catch (error) {
+        // Reads can be retried; an uncertain remote write must be reconciled by its owner.
+        if (
+          method !== 'GET' ||
+          attempt >= 2 ||
+          (error.upstreamStatus && error.upstreamStatus < 500 && error.upstreamStatus !== 429)
+        )
+          throw error;
+        await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+      }
+    }
     if (data.code !== 0) {
       if ([99991661, 99991663, 99991664, 99991668].includes(data.code)) this.token = null;
-      throw fail('飞书操作失败（代码 ' + String(data.code) + '），请检查权限和字段');
+      throw Object.assign(
+        fail('飞书操作失败（代码 ' + String(data.code) + '），请检查权限和字段'),
+        { remoteCode: data.code },
+      );
     }
     return data.data;
   }
-  async list(resource) {
+  async list(resource, tableId, filter) {
     const rows = [],
       seen = new Set();
     let cursor = '';
     for (let page = 0; page < 10000; page++) {
       const query = new URLSearchParams({ page_size: resource === 'fields' ? '100' : '500' });
       if (cursor) query.set('page_token', cursor);
-      const data = await this.request(this.tablePath() + '/' + resource + '?' + query);
+      if (filter) query.set('filter', filter);
+      const data = await this.request(this.tablePath(tableId) + '/' + resource + '?' + query);
+      if (data?.items === undefined && data?.total === 0 && data?.has_more === false) return rows;
       if (!Array.isArray(data?.items)) throw fail('飞书分页响应异常');
       rows.push(...data.items);
       if (!data.has_more) return rows;
@@ -83,11 +103,28 @@ export class FeishuClient {
     }
     throw fail('飞书分页超过安全上限，未使用不完整结果');
   }
-  records() {
-    return this.list('records');
+  records(tableId, filter) {
+    return this.list('records', tableId, filter);
   }
-  fields() {
-    return this.list('fields');
+  fields(tableId) {
+    return this.list('fields', tableId);
+  }
+  async tables() {
+    const items = [],
+      seen = new Set();
+    let cursor = '';
+    for (let page = 0; page < 1000; page++) {
+      const query = new URLSearchParams({ page_size: '100' });
+      if (cursor) query.set('page_token', cursor);
+      const data = await this.request(this.tablePath().split('/tables/')[0] + '/tables?' + query);
+      if (!Array.isArray(data?.items)) throw fail('飞书数据表列表异常');
+      items.push(...data.items);
+      if (!data.has_more) return items;
+      cursor = data.page_token;
+      if (!cursor || seen.has(cursor)) throw fail('飞书数据表分页不完整');
+      seen.add(cursor);
+    }
+    throw fail('飞书数据表超过分页上限');
   }
   async readLeads() {
     const records = await this.records();
@@ -98,14 +135,14 @@ export class FeishuClient {
       syncedAt: new Date().toISOString(),
     };
   }
-  async record(id) {
-    const data = await this.request(this.tablePath() + '/records/' + encodeURIComponent(id));
+  async record(id, tableId) {
+    const data = await this.request(this.tablePath(tableId) + '/records/' + encodeURIComponent(id));
     if (!data?.record?.record_id) throw fail('飞书记录读回异常');
     return data.record;
   }
-  async write(action, fields, recordId, clientToken) {
+  async write(action, fields, recordId, clientToken, tableId) {
     const path =
-      this.tablePath() +
+      this.tablePath(tableId) +
       '/records' +
       (action === 'update' ? '/' + encodeURIComponent(recordId) : '') +
       (action === 'insert' ? '?client_token=' + encodeURIComponent(clientToken) : '');
@@ -135,7 +172,8 @@ export function encodeResearchFields(raw, definitions) {
     if (!types.has(name)) throw fail('客户表缺少迁移必需字段：' + name);
   for (const name of ['广告代码', '需求产品', '客户行业画像'])
     if (types.get(name) !== 1) throw fail('客户表字段必须为文本：' + name);
-  if (types.get('客户类型') !== 3) throw fail('客户类型必须为单选字段');
+  if (![1, 3].includes(types.get('客户类型')))
+    throw fail('客户类型必须为文本字段（迁移期间兼容旧单选）');
   const fields = {};
   for (const [name, value] of Object.entries(raw)) {
     const type = types.get(name);

@@ -25,7 +25,14 @@ export function createAcquisitionProvider({ env, fetchImpl = fetch, nativeImpl }
           ? 'Node.js 后端直连 Tavily、DeepSeek 与飞书；配置齐备，真实任务结果见任务记录。'
           : '后端直连配置缺失：' + config.missing.join('、'),
       },
-      readLeads: () => feishu.readLeads(),
+      readLeads: async () => {
+        const data = await feishu.readLeads();
+        return service().decorateLeads ? service().decorateLeads(data) : data;
+      },
+      assessmentInfo: () => service().assessmentInfo(),
+      assessRecord: (...args) => service().assessRecord(...args),
+      assessmentHistory: (...args) => service().assessmentHistory(...args),
+      retryAssessment: (...args) => service().retryAssessment(...args),
       discover: (...args) => service().discover(...args),
       research: (...args) => service().research(...args),
       status: (id) => service().status(id),

@@ -1,5 +1,7 @@
 import { normalizePhone, normalizePhoneLines } from './phone-format.mjs';
 import { formatRelatedProducts } from './product-format.mjs';
+import { readAssessmentSummary } from './customer-assessment.mjs';
+import { domainKey } from './website-identity.mjs';
 
 export const fieldText = (value) => {
   if (value == null) return '';
@@ -16,6 +18,8 @@ export function mapFeishuRecord(record) {
     /* 原始字段仍可查看。 */
   }
   const read = (key) => fieldText(f[key]);
+  const grade = read('用户评级') || read('客户等级') || read('用户等级');
+  const assessment = readAssessmentSummary(read('评级依据'));
   const contactEvidence = Array.isArray(profile.latest_research?.contact_evidence)
     ? profile.latest_research.contact_evidence
     : [];
@@ -26,7 +30,7 @@ export function mapFeishuRecord(record) {
   return {
     id: record.record_id,
     name: read('客户名称') || profile.company_name || '未命名客户',
-    domain: profile.website_key || '',
+    domain: domainKey(read('来源链接')) || profile.website_key || '',
     market: read('国家') || '待核实',
     type:
       {
@@ -44,8 +48,10 @@ export function mapFeishuRecord(record) {
       '待核实',
     product: formatRelatedProducts(read('相关产品')),
     match: '',
-    score: null,
-    grade: ['A', 'B', 'C'].includes(read('客户等级')) ? read('客户等级') : '未评级',
+    score: assessment?.score ?? null,
+    assessment,
+    grade: ['A', 'B', 'C', '待核实', '待补全', '暂不开发'].includes(grade) ? grade : '未评级',
+    ratingReason: read('评级依据'),
     status: read('开发状态') || '未记录',
     region: read('州 / 城市'),
     city: '',
@@ -81,7 +87,7 @@ export function mapFeishuRecord(record) {
             return phone ? [{ ...c, ...phone }] : [];
           })(),
     ),
-    updatedAt: profile.latest_research?.at || null,
+    updatedAt: Number(read('最近研究时间')) || profile.latest_research?.at || null,
     fields: Object.fromEntries(Object.entries(f).map(([k, v]) => [k, fieldText(v)])),
   };
 }
