@@ -1,0 +1,201 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "出口业务员 Agent 单轮业务上下文",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "agent_id",
+    "evaluation_time",
+    "event",
+    "conversation",
+    "company_context",
+    "demand_context",
+    "drawing_context",
+    "knowledge",
+    "policy"
+  ],
+  "properties": {
+    "contract_version": { "const": "1.1" },
+    "agent_id": { "$ref": "#/definitions/agentId" },
+    "evaluation_time": { "type": "string", "minLength": 1 },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "message_id", "text"],
+      "properties": {
+        "type": { "enum": ["inbound", "follow_up", "human_return"] },
+        "message_id": { "type": ["string", "null"] },
+        "text": { "type": "string" }
+      }
+    },
+    "conversation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "revision",
+        "customer_id",
+        "channel",
+        "language",
+        "buyer_status",
+        "history_summary"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "revision": { "type": "integer", "minimum": 0 },
+        "customer_id": { "type": ["string", "null"] },
+        "channel": { "type": "string", "minLength": 1 },
+        "language": { "type": "string", "minLength": 1 },
+        "buyer_status": { "enum": ["b2b", "personal", "unknown"] },
+        "history_summary": { "type": "string" }
+      }
+    },
+    "company_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "origin_country", "role", "approved_facts"],
+      "properties": {
+        "name": { "type": ["string", "null"] },
+        "origin_country": { "const": "CN" },
+        "role": { "const": "exporter" },
+        "approved_facts": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/approvedKnowledge" }
+        }
+      }
+    },
+    "demand_context": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "product_agent_id",
+          "lead_agent_id",
+          "ownership",
+          "purchase_purpose",
+          "product_type",
+          "purchase_forms",
+          "project_context",
+          "facts",
+          "missing_fields",
+          "sales_stage",
+          "handoff_ack_sent",
+          "human_return_note"
+        ],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "product_agent_id": {
+            "anyOf": [{ "$ref": "#/definitions/agentId" }, { "type": "null" }]
+          },
+          "lead_agent_id": { "anyOf": [{ "$ref": "#/definitions/agentId" }, { "type": "null" }] },
+          "ownership": { "enum": ["ai", "pending_human", "human"] },
+          "purchase_purpose": { "enum": ["business", "personal", "unknown"] },
+          "product_type": { "type": ["string", "null"] },
+          "purchase_forms": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "finished",
+                "semi_finished",
+                "profiles",
+                "components",
+                "fabric",
+                "motor",
+                "control_system"
+              ]
+            },
+            "uniqueItems": true
+          },
+          "project_context": {
+            "enum": ["none", "institutional_indoor", "institutional_outdoor", "unknown"]
+          },
+          "facts": { "type": "object" },
+          "missing_fields": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+          "sales_stage": {
+            "enum": [
+              "qualification",
+              "requirements",
+              "selection",
+              "quote_human",
+              "sample",
+              "follow_up",
+              "negotiation_human",
+              "won",
+              "closed"
+            ]
+          },
+          "handoff_ack_sent": { "type": "boolean" },
+          "human_return_note": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "drawing_context": { "$ref": "drawing-context.schema.json" },
+    "knowledge": { "type": "array", "items": { "$ref": "#/definitions/approvedKnowledge" } },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "follow_up_enabled",
+        "follow_up_intervals_days",
+        "max_follow_ups",
+        "send_window",
+        "available_tools"
+      ],
+      "properties": {
+        "follow_up_enabled": { "type": "boolean" },
+        "follow_up_intervals_days": {
+          "type": ["array", "null"],
+          "minItems": 1,
+          "items": { "type": "number", "exclusiveMinimum": 0 }
+        },
+        "max_follow_ups": { "type": ["integer", "null"], "minimum": 1 },
+        "send_window": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["start", "end", "timezone"],
+              "properties": {
+                "start": { "type": "string", "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$" },
+                "end": { "type": "string", "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$" },
+                "timezone": { "type": "string", "minLength": 1 }
+              }
+            }
+          ]
+        },
+        "available_tools": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "follow_up_enabled": { "const": true } } },
+          "then": {
+            "properties": {
+              "follow_up_intervals_days": { "type": "array" },
+              "max_follow_ups": { "type": "integer" },
+              "send_window": { "type": "object" }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "agentId": { "enum": ["shutter", "venetian", "indoor", "outdoor"] },
+    "approvedKnowledge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "category", "content", "approved", "valid_until"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "category": { "anyOf": [{ "$ref": "#/definitions/agentId" }, { "type": "null" }] },
+        "content": { "type": "string", "minLength": 1 },
+        "approved": { "const": true },
+        "valid_until": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

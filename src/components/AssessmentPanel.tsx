@@ -187,8 +187,10 @@ export function AssessmentPanel({ recordId, country, product, assessment, onChan
   return (
     <section className="assessment-panel">
       <header>
-        <h3>自动评分</h3>
-        <p>重新读取官网，由固定规则计算。海关未接入时保留未知，分数不按比例补满。</p>
+        <h3>初步评分</h3>
+        <p>
+          官网证据按产品40、采购角色30、持续经营20、供货能力需求10计分，合计100分。海关采购表现另行分析。
+        </p>
       </header>
       {assessment && (
         <div className="assessment-current">
@@ -205,6 +207,9 @@ export function AssessmentPanel({ recordId, country, product, assessment, onChan
           <span>
             {assessment.ruleVersion} · {time(assessment.evaluatedAt)}
           </span>
+          {assessment.ruleVersion !== 'acquisition-v3.0' && (
+            <p>当前显示旧版评估，分值与新版权重不同；重新研究评级后生成新版结果，旧记录保留。</p>
+          )}
           {assessment.dimensions && (
             <div className="assessment-dimensions">
               {Object.entries(assessment.dimensions).map(([key, value]) => (
@@ -272,6 +277,12 @@ export function AssessmentPanel({ recordId, country, product, assessment, onChan
           {error}
         </p>
       )}
+      <section aria-label="海关采购表现">
+        <h3>后续海关分析</h3>
+        <p>
+          初评完成后独立分析相关产品的进口规模、频率、新近性及中国来源占比，不加到初评分数中。数据接入尚未完成。
+        </p>
+      </section>
       <div className="assessment-history-heading">
         <h3>评估历史</h3>
         <button
@@ -297,7 +308,7 @@ export function AssessmentPanel({ recordId, country, product, assessment, onChan
           <details className="assessment-history-entry" key={entry.id}>
             <summary>
               {time(entry.evaluatedAt)} · {entry.grade || entry.status || '未评级'} · 已支持
-              {entry.score}分{' '}
+              {entry.score}分 · {entry.ruleVersion}{' '}
               <Badge>{entry.sync?.status === 'synced' ? 'T12已同步' : 'T12待核对'}</Badge>
             </summary>
             <p className="assessment-reason">{entry.evidenceReason || entry.reason}</p>

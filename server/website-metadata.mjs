@@ -165,14 +165,6 @@ export function extractWebsiteMetadata({ content, sourceUrl }) {
     ) {
       platform = 'LinkedIn';
       url = 'https://www.linkedin.com/' + parts.slice(0, 2).join('/');
-    } else if (host === 'wa.me' && /^\d{7,15}$/.test(parts[0] || '')) {
-      platform = 'WhatsApp';
-      url = 'https://wa.me/' + parts[0];
-    } else if (host === 'api.whatsapp.com' && parts[0] === 'send') {
-      const phone = /[?&]phone=(\d{7,15})(?:&|$)/.exec(u.url)?.[1];
-      if (!phone) return;
-      platform = 'WhatsApp';
-      url = 'https://wa.me/' + phone;
     }
     if (platform)
       social.push({
@@ -319,7 +311,7 @@ export function extractWebsiteMetadata({ content, sourceUrl }) {
       const name = plain(item[1]);
       if (
         /^[A-Za-zÀ-ž][A-Za-zÀ-ž .,'’&()/-]{0,99}$/.test(name) &&
-        !/contact|privacy|terms|quote|copyright|facebook|instagram|whatsapp/i.test(name)
+        !/contact|privacy|terms|quote|copyright|facebook|instagram/i.test(name)
       )
         addArea(name, 'service_list', item[0], heading[0]);
     }
@@ -551,7 +543,7 @@ export function enrichmentFields(profile, evidence, existing = {}) {
     const value = [...normalized.values()].join('\n');
     if (value) fields[label] = value;
   }
-  for (const platform of ['Facebook', 'Instagram', 'LinkedIn', 'WhatsApp']) {
+  for (const platform of ['Facebook', 'Instagram', 'LinkedIn']) {
     const value = mergeLines(
       existing[platform],
       social.filter((x) => x.platform === platform).map((x) => x.url),

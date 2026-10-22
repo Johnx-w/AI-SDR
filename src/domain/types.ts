@@ -77,6 +77,8 @@ export interface WorkspaceRepository {
 }
 export interface WorkflowInput {
   query_mode?: 'auto';
+  product_scope?: 'all' | 'specific';
+  environment_preference?: 'all' | 'indoor' | 'outdoor';
   products?: ProductSelection[];
   customer_types?: string[];
   preferred_requirements?: string;
@@ -96,6 +98,7 @@ export interface ProductSelection {
   label: string;
   direction: 'finished' | 'materials' | 'samples';
   group: string;
+  selectAll?: boolean;
   aliases: string[];
 }
 export interface SearchMetric {

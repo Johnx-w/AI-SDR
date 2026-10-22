@@ -1,5 +1,5 @@
 // Product-relevance gating shared by the pre-AI page screen and the post-AI audit.
-import { productTerms } from '../src/domain/acquisition-products.mjs';
+import { isAllProductScope, productTerms } from '../src/domain/acquisition-products.mjs';
 // The broad page screen saves model calls; the final audit must match the target category.
 
 // Strong industry phrases: unambiguous architectural shading terminology.
@@ -92,6 +92,10 @@ function phraseMatches(text, phrase) {
 export function pageRelevance(text, target = {}) {
   const content = String(text || '');
   if (content.length < 80) return { relevant: false, score: 0, matched: [] };
+  if (isAllProductScope(target)) {
+    const relevant = broadWindowProductStatus(content, true) === 'matched';
+    return { relevant, score: relevant ? 1 : 0, matched: relevant ? ['window furnishings'] : [] };
+  }
   const matched = [];
   const hit = (label) => {
     if (!matched.includes(label)) matched.push(label);
@@ -133,6 +137,107 @@ const categories = [
 ];
 const partsPattern =
   /\b(?:components?|parts?|motors?|brackets?|headrails?|springs?)\b|配件|零件|电机|制头|弹簧|安装码/i;
+const unrelatedWindowProducts =
+  /\b(?:(?:shower|bath|stage|theat(?:re|er)|welding|air|fire|vehicle|caravan|automotive|car|truck|marine|boat|rv)\s+(?:window\s+)?(?:curtains?|blinds?|shades?|screens?|awnings?|shutters?)|(?:medical|cubicle|surgical)\s+(?:privacy\s+)?curtains?|hospital\s+(?:privacy|cubicle|bedside)\s+curtains?|(?:lamp|eye|sun\s*glass)\s*shades?|(?:led|lcd|computer|phone|projection|printing)\s+screens?|screen\s+printing|camera\s+shutters?|(?:curtains?|blinds?|shades?|awnings?)\s+(?:for|in)\s+(?:cars?|vehicles?|caravans?|boats?|rvs?))\b|浴帘|医用帘|医疗帘|隔帘|舞台幕布|焊接帘|房车|车载|汽车遮阳|灯罩/gi;
+const windowIndustryPattern =
+  /\b(?:window\s+(?:coverings?|furnishings?|treatments?|blinds?|shades?|curtains?|shutters?|screens?)|blinds|shades|curtains|draper(?:y|ies)|awnings?|pergolas?|shutters?|zip\s*[- ]?(?:screens?|tracks?)|zipscreen|ziptrak|(?:roller|roman|venetian|cellular|honeycomb|zebra|vertical|pleated|panel\s+track|woven\s+wood|bamboo)\s+(?:blinds?|shades?)|(?:insect|fly|bug)\s+screens?|shade\s+sails?)\b|窗饰|窗帘|遮阳篷|遮阳棚|遮阳帆|百叶帘|百叶窗|卷帘|罗马帘|蜂巢帘|斑马帘|百褶帘|竹木帘|防风帘|拉链帘|纱窗|凉亭|廊架|天幕/i;
+const dedicatedWindowMaterialsPattern =
+  /\b(?:blind|shade|curtain|awning|shutter)\s+(?:components?|parts?|motors?|fabrics?|tracks?|rails?|slats?|tubes?|brackets?|accessories|hardware)\b|\bsemi[- ]?finished\s+(?:window\s+coverings?|blinds?|shades?|curtains?|awnings?|shutters?)\b/i;
+const sampleProductPattern =
+  /\b(?:samples?|swatches?|sample\s+books?|sample\s+cards?|display\s+kits?|display\s+cases?)\b|样本|样册|样卡|展示套件|展示箱/i;
+const sampleProductDescriptions =
+  /\b(?:(?:window\s+(?:coverings?|furnishings?|treatments?)|blinds?|shades?|curtains?|awnings?)\s+)?(?:fabrics?\s+)?(?:samples?(?:\s+(?:books?|cards?|kits?))?|swatches?|display\s+(?:kits?|cases?))(?:\s+(?:for|of)\s+(?:window\s+)?(?:coverings?|furnishings?|blinds?|shades?|curtains?|fabrics?))?\b|(?:窗饰|窗帘|面料)?(?:样本册|样本|样册|样卡|展示套件|展示箱)/gi;
+const windowMaterialsPattern =
+  /\b(?:semi[- ]?finished|components?|parts?|motors?|brackets?|headrails?|springs?|slats?|tubes?|tracks?|rails?|profiles?|extrusions?|hardware|accessories|mechanisms?|chains?|cords?)\b|\b(?:curtain|blind|blinds|shade|shades|awning|awnings)\s+fabrics?\b|\bfabrics?\s+for\s+(?:curtains?|blinds?|shades?|awnings?)\b|半成品|材料|配件|零件|电机|制头|弹簧|安装码|叶片|型材|轨道|面料|卷管/i;
+
+function broadWindowProductStatus(text, allowSampleMentions = false) {
+  const original = String(text || '').trim();
+  if (!original) return 'unknown';
+  let cleaned = original.replace(unrelatedWindowProducts, ' ');
+  // A sample book may contain curtain fabric without being a material supplier.
+  const mentionsSamples = sampleProductPattern.test(cleaned);
+  if (!allowSampleMentions && mentionsSamples)
+    cleaned = cleaned.replace(sampleProductDescriptions, ' ');
+  if (windowIndustryPattern.test(cleaned) || dedicatedWindowMaterialsPattern.test(cleaned))
+    return 'matched';
+  if (mentionsSamples) return 'not_matched';
+  if (cleaned !== original) return 'not_matched';
+  return /\b(?:screens?|motors?|fabrics?|materials?|parts?|components?|hardware|shading)\b|屏幕|电机|面料|材料|配件|零件/i.test(
+    original,
+  )
+    ? 'unknown'
+    : 'not_matched';
+}
+
+// Delivery direction is checked separately from the product family. Generic
+// motors/fabric never establish a window-furnishing opportunity on their own.
+export function windowProductDirections(text) {
+  if (broadWindowProductStatus(text) !== 'matched') return [];
+  const cleaned = String(text)
+    .replace(unrelatedWindowProducts, ' ')
+    .replace(sampleProductDescriptions, ' ');
+  if (!windowMaterialsPattern.test(cleaned)) return ['finished'];
+  const found = new Set(['materials']);
+  // A catalog sentence may list complete blinds and dedicated components side
+  // by side. Classify the independent phrases rather than assigning the whole
+  // sentence to materials merely because one listed product is a motor.
+  for (const sentence of cleaned.split(/[.!?;。\n]/)) {
+    let sharedMaterialContext = false;
+    for (const phrase of sentence.split(/\b(?:and|or|plus)\b|[,;&]|、|以及|和|与/)) {
+      const material = windowMaterialsPattern.test(phrase);
+      if (material) {
+        sharedMaterialContext =
+          /\bsemi[- ]?finished\b|\b(?:components?|parts?|motors?|fabrics?|materials?)\s+for\b|半成品|(?:配件|材料|面料).*用于/i.test(
+            phrase,
+          );
+        continue;
+      }
+      const independentSupply =
+        /\b(?:we\s+)?(?:supply|sell|offer|manufacture|produce)\b|供应|销售|生产/i.test(phrase);
+      if (
+        (!sharedMaterialContext || independentSupply) &&
+        broadWindowProductStatus(phrase) === 'matched'
+      )
+        found.add('finished');
+    }
+  }
+  return [...found];
+}
+// These catalog subtypes need their own evidence. A generic "awning" or "roller
+// blind" listing cannot establish that a company sells the selected subtype.
+const specificProductPatterns = new Map([
+  ['outdoor roller blinds', /outdoor\s+roller\s+(?:blinds?|shades?)|户外卷帘|室外卷帘/i],
+  [
+    'straight drop awnings',
+    /straight\s+drop\s+(?:awnings?|blinds?|screens?)|直落式?户外帘|直落帘/i,
+  ],
+  [
+    'wire guided outdoor blinds',
+    /wire\s+guid(?:ed|e)\s+(?:outdoor\s+)?(?:blinds?|screens?|awnings?)|钢丝导向.*(?:帘|篷)/i,
+  ],
+  [
+    'outdoor venetian blinds',
+    /(?:outdoor|external|exterior)\s+venetian\s+blinds?|户外百叶帘|室外百叶帘/i,
+  ],
+  [
+    'outdoor roller shutters',
+    /(?:outdoor|external|exterior)\s+roller\s+shutters?|户外卷闸帘|室外卷闸帘/i,
+  ],
+  ['folding arm awnings', /folding\s+arm\s+awnings?|曲臂(?:遮阳)?篷/i],
+  ['window awnings', /window\s+awnings?|窗篷|窗式遮阳篷/i],
+  ['side awnings', /side\s+(?:awnings?|screens?)|侧遮阳帘|侧边遮阳篷/i],
+  ['retractable roof awnings', /retractable\s+roof\s+(?:awnings?|systems?)|伸缩天幕篷|伸缩天幕/i],
+  ['pergola awnings', /pergola\s+(?:awnings?|shades?)|廊架遮阳篷|凉亭篷/i],
+  ['shade sails', /shade\s+sails?|遮阳帆/i],
+  ['sheer curtains', /sheer\s+curtains?|voile\s+curtains?|纱帘/i],
+  ['solar roller shades', /solar\s+(?:roller\s+)?shades?|solar\s+roller\s+blinds?|阳光卷帘/i],
+  ['pleated shades', /pleated\s+(?:shades?|blinds?)|百褶帘/i],
+  [
+    'woven wood shades',
+    /woven\s+wood\s+(?:shades?|blinds?)|bamboo\s+(?:shades?|blinds?)|竹木帘|竹帘/i,
+  ],
+  ['panel track blinds', /panel\s+track\s+(?:blinds?|shades?)|推拉板帘|板帘/i],
+]);
 function productCategories(text) {
   // Catalogs often coordinate two styles before the shared noun.
   text = String(text).replace(
@@ -157,12 +262,24 @@ export function productsRelevant(products, target = {}) {
   const list = (Array.isArray(products) ? products : []).filter(
     (p) => typeof p === 'string' && p.trim(),
   );
+  // Preserve unconstrained helper calls; API requests normalize an explicit scope.
+  if (!target.product_scope && !target.product && !target.products?.length) return 'unrestricted';
+  if (isAllProductScope(target)) {
+    if (!list.length) return 'unknown';
+    const statuses = list.map((product) => broadWindowProductStatus(product));
+    return statuses.includes('matched')
+      ? 'matched'
+      : statuses.includes('unknown')
+        ? 'unknown'
+        : 'not_matched';
+  }
   const terms = productTerms(target).flatMap((p) => targetProductTerms(p));
   // No target product constraint (e.g. direct unit-test calls) means unrestricted.
   if (!terms.length) return 'unrestricted';
   if (!list.length) return 'unknown';
   for (const term of terms) {
     const wanted = productCategories(term);
+    const specificPattern = specificProductPatterns.get(term);
     const needsParts = partsPattern.test(term);
     const outdoorParts = needsParts && /outdoor|室外|户外/i.test(term);
     const indoorParts = needsParts && /indoor|室内/i.test(term);
@@ -173,6 +290,10 @@ export function productsRelevant(products, target = {}) {
       )
         continue;
       if (partsPattern.test(product) !== needsParts) continue;
+      if (specificPattern) {
+        if (specificPattern.test(product)) return 'matched';
+        continue;
+      }
       const actual = productCategories(product);
       if (outdoorParts || indoorParts) {
         const outdoor =

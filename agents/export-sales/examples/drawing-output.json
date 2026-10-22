@@ -1,0 +1,37 @@
+{
+  "contract_version": "1.1",
+  "agent_id": "indoor",
+  "conversation_id": "demo-drawing-001",
+  "based_on_revision": 3,
+  "buyer_status_suggestion": "b2b",
+  "items": [
+    {
+      "demand_id": "demo-demand-tube",
+      "action": "reply",
+      "route_to": null,
+      "reply_fragment": "The tube's outer diameter is 38 mm, with a tolerance of ±0.2 mm, as shown in drawing DEMO-DWG-TUBE, Rev. B, Detail A.",
+      "handoff_reason": null,
+      "internal_note": "仅引用本轮批准的外径及公差，提出同SKU与版本图片的附件请求；图号、存储引用和哈希均为虚构协议数据。尚未取出文件或发送，不在正文声称已附图。",
+      "missing_fields": [],
+      "source_ids": ["DEMO-PARAM-TUBE-OUTER-DIAMETER-B", "demo-drawing-message-001"],
+      "cited_drawing_parameter_ids": ["DEMO-PARAM-TUBE-OUTER-DIAMETER-B"],
+      "attachment_requests": [
+        {
+          "asset_id": "DEMO-ASSET-TUBE-B",
+          "drawing_revision": "B",
+          "parameter_ids": ["DEMO-PARAM-TUBE-OUTER-DIAMETER-B"],
+          "delivery": "attachment",
+          "caption": "DEMO-DWG-TUBE, Rev. B — roller tube, Detail A"
+        }
+      ],
+      "facts_to_record": [],
+      "sales_stage_suggestion": "selection"
+    }
+  ],
+  "conversation_summary_update": "海外B端买方询问卷帘管外径与公差并索取当前图纸；回复引用演示批准记录并请求对应附件，不涉及报价或兼容保证。",
+  "follow_up_suggestion": {
+    "operation": "cancel_old_and_reassess",
+    "eligible_demand_ids": [],
+    "reason": "本轮有新来信，未启用定时跟进；附件需发送程序实际取文件并复核后才能发送。"
+  }
+}

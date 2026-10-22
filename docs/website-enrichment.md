@@ -2,9 +2,9 @@
 
 2026-10-20：原 n8n 工作流 `EycE9OmaPkRFUDSq` 增加官网 HTML、首页及联系页读取。Dify 继续输出企业研究原有七字段；联系方式、实际地址、服务地区和社媒通过独立提取与映射入库，不受 Dify `result_json` 字段白名单限制。
 
-`server/website-metadata.mjs` 与 n8n 使用同一组纯函数。地址优先读取同站企业 JSON-LD `PostalAddress`，其次接受明确包含国家、州和邮编的完整邮政地址。`areaServed` / `serviceArea` 与明确的服务声明保存为服务地区，不能作为企业地址；搜索目标也不参与所在地填充。无证据时保留原值。当前规则覆盖受支持社媒的显式账号链接，不把分享按钮当账号，不根据电话生成 WhatsApp。
+`server/website-metadata.mjs` 与 n8n 使用同一组纯函数。地址优先读取同站企业 JSON-LD `PostalAddress`，其次接受明确包含国家、州和邮编的完整邮政地址。`areaServed` / `serviceArea` 与明确的服务声明保存为服务地区，不能作为企业地址；搜索目标也不参与所在地填充。无证据时保留原值。当前规则提取 Facebook、Instagram、LinkedIn，不提取 WhatsApp 联系方式。
 
-飞书保留“国家／州／城市”，新增“详细地址”“服务地区”“服务地区JSON”，以及 Facebook、Instagram、LinkedIn、YouTube、TikTok、X、Pinterest、社媒JSON。电话、邮箱和 WhatsApp 使用原字段。来源 URL、引文、提取方法保留在画像及相应 JSON 列。客户库显示已存的地址、服务地区和社媒链接。
+飞书保留“国家／州／城市”，新增“详细地址”“服务地区”“服务地区JSON”，以及 Facebook、Instagram、LinkedIn、YouTube、TikTok、X、Pinterest、社媒JSON。电话和邮箱使用原字段。T2 的 WhatsApp 列已移除。来源 URL、引文、提取方法保留在画像及相应 JSON 列。客户库显示已存的地址、服务地区和社媒链接。
 
 历史补全执行 #143 按原记录 ID 更新 12 条官网客户，未新建客户。共 13 条记录中的 Eventbrite 来源被跳过，避免将平台数据归到企业。V-Track 原始 HTML 验证（#142）分别得到 Lavon / TX 地址、Miami / Florida 服务地区、电话和四个平台账号；MagnaTrack 的 Tavily 正文提供 Sarasota / FL 地址和两个平台账号，没有明确电话或服务地区证据，保持空白。
 
@@ -20,7 +20,7 @@
 
 单站 n8n 验证流程 `OFMC2EzRQuJGxNgF` 的执行 #149 从完整原始联系页提取，并只更新原记录 `reczz28OqNAqD98Y`。读回确认 Facebook、Instagram、WhatsApp、`3235 Skylane Dr. Unit 111, Carrollton, TX, 75006` 和 55 条服务地区均保存。地图 URL 及逐条城市引文保存在画像JSON中。此次没有更新其他历史客户；单站验证流程位于个人项目根目录，验证后归档。
 
-读回时进一步发现该页将传真 `469-499-3323` 也设为 `tel:` 链接。现同时检查链接和可见正文的 Fax 标签，排除明确传真；#151 再次读取官网、移除该条验证误存的传真，并逐项读回核实。共享提取器在入库节点只保留一份，避免旧内嵌函数遮蔽新规则。
+读回时进一步发现该页将传真 `469-499-3323` 也设为 `tel:` 链接。现同时检查链接和可见正文的 Fax 标签，排除明确传真；#151 再次读取官网、移除该条验证误存的传真，并逐项读回核实。共享提取器在入库节点只保留一份，避免旧内嵌函数遮蔽新规则。2026-10-22 已从获客写入流程中移除 WhatsApp 字段映射。
 
 ## 市场、服务客群与可读字段（2026-10-20，覆盖上述旧版字段说明）
 

@@ -2,11 +2,13 @@ import { groupedMarkets, audienceTerms } from './markets.mjs';
 import { locationOptions } from './search-target.mjs';
 import acquisition from '../src/data/acquisition.json' with { type: 'json' };
 import { automaticSearchPlan } from '../src/domain/search-query.mjs';
+import { isAllProductScope } from '../src/domain/acquisition-products.mjs';
 
 export function searchPlan(input) {
   locationOptions(input.country, input.region);
   const countries = groupedMarkets[input.country] || [input.country];
-  if (input.query_mode === 'auto') return automaticSearchPlan(input, countries);
+  if (input.query_mode === 'auto' || isAllProductScope(input))
+    return automaticSearchPlan(input, countries);
   // Quote multi-word product phrases so Tavily matches them as exact phrases
   // instead of scattering generic words (e.g. "awnings") across unrelated sites.
   const products = input.product

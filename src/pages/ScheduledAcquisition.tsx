@@ -6,7 +6,12 @@ import { Badge, Empty } from '../components/ui';
 import { BatchProgress } from '../components/BatchProgress';
 import { acquisitionApi } from '../services/acquisition';
 import type { AcquisitionSchedule } from '../domain/types';
-import { directionLabels } from '../domain/acquisition-products.mjs';
+import {
+  ALL_PRODUCTS_LABEL,
+  directionLabels,
+  environmentPreferenceLabels,
+  isAllProductScope,
+} from '../domain/acquisition-products.mjs';
 
 const names = { enabled: '已启用', paused: '已暂停', closed: '已关闭', completed: '已触发' };
 const repeatNames = { once: '指定日期', daily: '每天', weekly: '每周' };
@@ -125,7 +130,7 @@ export function ScheduledAcquisition({ embedded = false }: { embedded?: boolean 
       ) : !visible.length && !error ? (
         <Empty
           title="暂无定时获客计划"
-          detail="在获客任务页选择产品、地区、客户方向及执行时间，保存后会显示在这里。"
+          detail="在获客任务页设置市场、客户条件及执行时间，保存后会显示在这里。"
         />
       ) : null}
       <div className="schedule-list">
@@ -154,11 +159,22 @@ export function ScheduledAcquisition({ embedded = false }: { embedded?: boolean 
               </span>
               <span>每次新增 {plan.input.target_count} 家</span>
               <p>
-                {plan.input.products?.length
-                  ? plan.input.products
-                      .map((product) => `${product.label}（${directionLabels[product.direction]}）`)
-                      .join('、')
-                  : plan.input.product}
+                {isAllProductScope(plan.input)
+                  ? `${ALL_PRODUCTS_LABEL}（成品、半成品和零件）`
+                  : plan.input.products?.length
+                    ? plan.input.products
+                        .map(
+                          (product) => `${product.label}（${directionLabels[product.direction]}）`,
+                        )
+                        .join('、')
+                    : plan.input.product}
+                {plan.input.environment_preference &&
+                  plan.input.environment_preference !== 'all' && (
+                    <small>
+                      {' '}
+                      · {environmentPreferenceLabels[plan.input.environment_preference]}
+                    </small>
+                  )}
               </p>
             </div>
             <dl className="schedule-times">

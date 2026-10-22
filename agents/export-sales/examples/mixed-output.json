@@ -1,0 +1,43 @@
+{
+  "contract_version": "1.1",
+  "agent_id": "venetian",
+  "conversation_id": "demo-mixed-001",
+  "based_on_revision": 4,
+  "buyer_status_suggestion": "b2b",
+  "items": [
+    {
+      "demand_id": "demo-demand-blind",
+      "action": "reply",
+      "route_to": null,
+      "reply_fragment": "Cut Down blinds are intended for adjustment locally within the limits of the specific product, while Custom Made blinds are made to the final dimensions you confirm. Which approach suits your distribution range? If you have a size list, please share the dimensions, units and quantities per size.",
+      "handoff_reason": null,
+      "internal_note": "仅答复独立的横百叶常规问题，不解释或承诺异形透气窗进度。",
+      "missing_fields": ["size_system", "dimensions", "quantities"],
+      "source_ids": ["demo-kb-size-systems", "demo-message-002"],
+      "facts_to_record": [],
+      "sales_stage_suggestion": "selection",
+      "cited_drawing_parameter_ids": [],
+      "attachment_requests": []
+    },
+    {
+      "demand_id": "demo-demand-shutter",
+      "action": "internal_only",
+      "route_to": null,
+      "reply_fragment": null,
+      "handoff_reason": null,
+      "internal_note": "客户询问已人工接管的拱形透气窗进度，转给当前人工负责人；无已确认进展，不生成客户进度说明，也不重复移交确认。",
+      "missing_fields": ["verified_feasibility"],
+      "source_ids": ["demo-message-002"],
+      "facts_to_record": [],
+      "sales_stage_suggestion": null,
+      "cited_drawing_parameter_ids": [],
+      "attachment_requests": []
+    }
+  ],
+  "conversation_summary_update": "经销商新增横百叶尺寸方式咨询；另询问人工负责的异形透气窗进展，仍无人工交回记录。",
+  "follow_up_suggestion": {
+    "operation": "cancel_old_and_reassess",
+    "eligible_demand_ids": [],
+    "reason": "收到新来信；未启用跟进计划，且异形透气窗仍由人工负责。"
+  }
+}

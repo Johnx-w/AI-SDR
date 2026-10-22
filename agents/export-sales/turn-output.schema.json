@@ -1,0 +1,198 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "出口业务员 Agent 单轮建议输出",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "agent_id",
+    "conversation_id",
+    "based_on_revision",
+    "buyer_status_suggestion",
+    "items",
+    "conversation_summary_update",
+    "follow_up_suggestion"
+  ],
+  "properties": {
+    "contract_version": { "const": "1.1" },
+    "agent_id": { "$ref": "#/definitions/agentId" },
+    "conversation_id": { "type": "string", "minLength": 1 },
+    "based_on_revision": { "type": "integer", "minimum": 0 },
+    "buyer_status_suggestion": { "enum": ["b2b", "personal", "unknown"] },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "demand_id",
+          "action",
+          "route_to",
+          "reply_fragment",
+          "handoff_reason",
+          "internal_note",
+          "missing_fields",
+          "source_ids",
+          "cited_drawing_parameter_ids",
+          "attachment_requests",
+          "facts_to_record",
+          "sales_stage_suggestion"
+        ],
+        "properties": {
+          "demand_id": { "type": "string", "minLength": 1 },
+          "action": {
+            "enum": [
+              "reply",
+              "clarify",
+              "request_handoff",
+              "internal_only",
+              "route",
+              "decline",
+              "suppress"
+            ]
+          },
+          "route_to": { "anyOf": [{ "$ref": "#/definitions/agentId" }, { "type": "null" }] },
+          "reply_fragment": { "type": ["string", "null"], "minLength": 1 },
+          "handoff_reason": {
+            "enum": [
+              null,
+              "formal_quote",
+              "freight_amount",
+              "discount",
+              "moq_exception",
+              "special_delivery",
+              "irregular_shape",
+              "special_process",
+              "agency_exclusive_framework",
+              "contract_payment",
+              "complaint_claim",
+              "capability_unverified",
+              "configured_large_order",
+              "other"
+            ]
+          },
+          "internal_note": { "type": "string" },
+          "missing_fields": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+          "source_ids": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+          "cited_drawing_parameter_ids": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "uniqueItems": true
+          },
+          "attachment_requests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["asset_id", "drawing_revision", "parameter_ids", "delivery", "caption"],
+              "properties": {
+                "asset_id": { "type": "string", "minLength": 1 },
+                "drawing_revision": { "type": "string", "minLength": 1 },
+                "parameter_ids": {
+                  "type": "array",
+                  "items": { "type": "string", "minLength": 1 },
+                  "uniqueItems": true
+                },
+                "delivery": { "enum": ["attachment", "inline"] },
+                "caption": { "type": "string" }
+              }
+            }
+          },
+          "facts_to_record": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["field", "value", "source_id"],
+              "properties": {
+                "field": { "type": "string", "minLength": 1 },
+                "value": {},
+                "source_id": { "type": "string", "minLength": 1 }
+              }
+            }
+          },
+          "sales_stage_suggestion": {
+            "enum": [
+              null,
+              "qualification",
+              "requirements",
+              "selection",
+              "quote_human",
+              "sample",
+              "follow_up",
+              "negotiation_human",
+              "won",
+              "closed"
+            ]
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "action": { "enum": ["internal_only", "route", "decline", "suppress"] }
+              }
+            },
+            "then": { "properties": { "reply_fragment": { "type": "null" } } }
+          },
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "enum": ["internal_only", "route", "decline", "suppress", "request_handoff"]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "cited_drawing_parameter_ids": { "maxItems": 0 },
+                "attachment_requests": { "maxItems": 0 }
+              }
+            }
+          },
+          {
+            "if": { "properties": { "action": { "enum": ["reply", "clarify"] } } },
+            "then": {
+              "properties": {
+                "reply_fragment": { "type": "string", "minLength": 1 },
+                "handoff_reason": { "type": "null" },
+                "route_to": { "type": "null" }
+              }
+            }
+          },
+          {
+            "if": { "properties": { "action": { "const": "request_handoff" } } },
+            "then": {
+              "properties": {
+                "handoff_reason": { "type": "string" },
+                "route_to": { "type": "null" }
+              }
+            }
+          },
+          {
+            "if": { "properties": { "action": { "const": "route" } } },
+            "then": { "properties": { "route_to": { "$ref": "#/definitions/agentId" } } }
+          }
+        ]
+      }
+    },
+    "conversation_summary_update": { "type": ["string", "null"] },
+    "follow_up_suggestion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "eligible_demand_ids", "reason"],
+      "properties": {
+        "operation": {
+          "enum": ["none", "cancel_old_and_reassess", "consider_configured_schedule", "stop"]
+        },
+        "eligible_demand_ids": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        },
+        "reason": { "type": "string" }
+      }
+    }
+  },
+  "definitions": { "agentId": { "enum": ["shutter", "venetian", "indoor", "outdoor"] } }
+}

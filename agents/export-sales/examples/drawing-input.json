@@ -1,0 +1,115 @@
+{
+  "contract_version": "1.1",
+  "agent_id": "indoor",
+  "evaluation_time": "2026-10-22T15:00:00+08:00",
+  "event": {
+    "type": "inbound",
+    "message_id": "demo-drawing-message-001",
+    "text": "We supply roller blinds to dealers in the UK. What is the outer diameter and tolerance of the DEMO-ROLLER-TUBE-38 tube? Could you send the current technical drawing?"
+  },
+  "conversation": {
+    "id": "demo-drawing-001",
+    "revision": 3,
+    "customer_id": "demo-business-003",
+    "channel": "email",
+    "language": "en",
+    "buyer_status": "b2b",
+    "history_summary": "虚构协议演示：海外B端经销供货商询问具体卷帘管规格并索取技术图；不涉及正式报价。"
+  },
+  "company_context": {
+    "name": null,
+    "origin_country": "CN",
+    "role": "exporter",
+    "approved_facts": []
+  },
+  "demand_context": [
+    {
+      "id": "demo-demand-tube",
+      "product_agent_id": "indoor",
+      "lead_agent_id": "indoor",
+      "ownership": "ai",
+      "purchase_purpose": "business",
+      "product_type": "roller blind tube",
+      "purchase_forms": ["components"],
+      "project_context": "none",
+      "facts": {
+        "product_sku": "DEMO-ROLLER-TUBE-38",
+        "component": "roller tube"
+      },
+      "missing_fields": [],
+      "sales_stage": "selection",
+      "handoff_ack_sent": false,
+      "human_return_note": null
+    }
+  ],
+  "drawing_context": {
+    "assets": [
+      {
+        "asset_id": "DEMO-ASSET-TUBE-B",
+        "origin": "company",
+        "product_skus": ["DEMO-ROLLER-TUBE-38"],
+        "component": "roller tube",
+        "drawing_id": "DEMO-DWG-TUBE",
+        "drawing_revision": "B",
+        "file_name": "DEMO-DWG-TUBE-RevB.png",
+        "storage_ref": "demo-only://drawing-files/DEMO-DWG-TUBE-RevB.png",
+        "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "media_type": "image/png",
+        "document_status": "current",
+        "page_number": 1,
+        "view_name": "Detail A",
+        "parent_asset_id": null,
+        "technical_review": {
+          "status": "approved",
+          "reviewed_by": "demo-technical-reviewer",
+          "reviewed_at": "2026-10-22T09:00:00+08:00"
+        },
+        "external_release": {
+          "status": "approved",
+          "audience": "all_b2b",
+          "customer_ids": [],
+          "approved_by": "demo-release-reviewer",
+          "approved_at": "2026-10-22T10:00:00+08:00"
+        }
+      }
+    ],
+    "parameters": [
+      {
+        "parameter_id": "DEMO-PARAM-TUBE-OUTER-DIAMETER-B",
+        "asset_id": "DEMO-ASSET-TUBE-B",
+        "product_sku": "DEMO-ROLLER-TUBE-38",
+        "component": "roller tube",
+        "parameter_name": "outer diameter",
+        "kind": "dimension",
+        "page_number": 1,
+        "view_name": "Detail A",
+        "location_label": "Detail A 外径尺寸线",
+        "source_region": {
+          "coordinate_system": "normalized",
+          "bbox": [0.25, 0.2, 0.75, 0.65]
+        },
+        "raw_text": "Ø38 ±0.2 mm",
+        "extraction_method": "ocr",
+        "extracted_value": 38,
+        "extracted_unit": "mm",
+        "extracted_tolerance": "±0.2 mm",
+        "extraction_notes": "虚构OCR候选；此记录及其审核数据均为协议演示，不表示实际读图完成。",
+        "review_status": "approved",
+        "approved_value": 38,
+        "approved_unit": "mm",
+        "approved_tolerance": "±0.2 mm",
+        "reviewed_by": "demo-technical-reviewer",
+        "reviewed_at": "2026-10-22T09:00:00+08:00",
+        "review_note": "虚构审核说明：此数值对应管外径，不是内径；不包含电机兼容承诺。"
+      }
+    ]
+  },
+  "knowledge": [],
+  "policy": {
+    "follow_up_enabled": false,
+    "follow_up_intervals_days": null,
+    "max_follow_ups": null,
+    "send_window": null,
+    "available_tools": []
+  }
+}

@@ -59,7 +59,14 @@ export function nextOccurrence(timing, after) {
 }
 
 export class AcquisitionSchedules {
-  constructor({ path = ':memory:', jobs, ready, available, now = Date.now }) {
+  constructor({
+    path = ':memory:',
+    jobs,
+    ready,
+    available,
+    checkInput = () => {},
+    now = Date.now,
+  }) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
     this.db.exec(
@@ -68,6 +75,7 @@ export class AcquisitionSchedules {
     this.jobs = jobs;
     this.ready = ready;
     this.available = available;
+    this.checkInput = checkInput;
     this.now = now;
   }
   list() {
@@ -178,6 +186,9 @@ export class AcquisitionSchedules {
           continue;
         }
         try {
+          // The connection may have changed since this plan was saved. Never
+          // dispatch a preserved scope to an engine that cannot honor it.
+          this.checkInput(plan.input);
           job = manager.create(plan.input, key);
         } catch (error) {
           const reason = error.status ? error.message : '计划启动失败，请检查本机服务';

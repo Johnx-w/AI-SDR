@@ -50,10 +50,21 @@
       "direction": "finished",
       "selectAll": true,
       "products": [
-        ["outdoor zip screens", "双层/防风帘 / 户外拉链帘"],
-        ["pergolas", "凉亭"],
-        ["awnings", "天幕 / 遮阳篷"],
-        ["full cassette folding arm awnings", "全盒曲臂篷"]
+        ["outdoor zip screens", "户外拉链帘 / 防风帘"],
+        ["outdoor roller blinds", "户外卷帘"],
+        ["straight drop awnings", "直落式户外帘"],
+        ["wire guided outdoor blinds", "钢丝导向户外帘"],
+        ["outdoor venetian blinds", "户外百叶帘"],
+        ["outdoor roller shutters", "户外卷闸帘"],
+        ["awnings", "遮阳篷"],
+        ["folding arm awnings", "曲臂遮阳篷"],
+        ["full cassette folding arm awnings", "全盒曲臂篷"],
+        ["window awnings", "窗篷"],
+        ["side awnings", "侧遮阳帘"],
+        ["retractable roof awnings", "伸缩天幕篷"],
+        ["pergolas", "凉亭 / 廊架"],
+        ["pergola awnings", "廊架遮阳篷"],
+        ["shade sails", "遮阳帆"]
       ]
     },
     {
@@ -67,10 +78,15 @@
         ["Venetian blinds", "百叶帘"],
         ["shutters", "百叶窗 / 板式百叶"],
         ["fabric curtains", "布艺帘"],
+        ["sheer curtains", "纱帘"],
         ["roller blinds", "卷帘"],
+        ["solar roller shades", "阳光卷帘"],
+        ["pleated shades", "百褶帘"],
+        ["woven wood shades", "竹木帘"],
         ["Shangri-La sheer shades", "香格里拉帘"],
         ["dream curtains sheer vertical blinds", "梦幻帘"],
-        ["vertical blinds", "垂直帘"]
+        ["vertical blinds", "垂直帘"],
+        ["panel track blinds", "推拉板帘"]
       ]
     },
     {

@@ -5,7 +5,6 @@ import {
   CalendarDays,
   CheckCircle2,
   ChevronDown,
-  Globe2,
   LoaderCircle,
   Play,
   Plus,
@@ -14,7 +13,6 @@ import {
   X,
 } from 'lucide-react';
 import { PageHeading } from '../components/PageHeading';
-import { Badge } from '../components/ui';
 import { ProductPicker } from '../components/ProductPicker';
 import { useWorkspace } from '../app/WorkspaceProvider';
 import { acquisitionApi } from '../services/acquisition';
@@ -26,7 +24,13 @@ import type {
   ScheduleTiming,
   WorkflowInput,
 } from '../domain/types';
-import { builtinProducts, directionLabels } from '../domain/acquisition-products.mjs';
+import {
+  ALL_PRODUCTS_LABEL,
+  ALL_PRODUCTS_VALUE,
+  builtinProducts,
+  directionLabels,
+  isAllProductScope,
+} from '../domain/acquisition-products.mjs';
 import acquisition from '../data/acquisition.json' with { type: 'json' };
 import { ScheduledAcquisition } from './ScheduledAcquisition';
 import { ExecutionRecords } from './ExecutionRecords';
@@ -49,8 +53,10 @@ const initialInput: WorkflowInput = {
   required_requirements: [],
   country: 'United States',
   region: '',
-  product: 'outdoor zip screens',
-  products: [builtinProducts[0]],
+  product_scope: 'all',
+  environment_preference: 'all',
+  product: ALL_PRODUCTS_VALUE,
+  products: [],
   acquisition_channel: 'tavily_web',
   search_query: '',
 };
@@ -117,8 +123,21 @@ export function Automation() {
   const [pending, setPending] = useState<Submission | null>(restored);
   const locked = submitting || !!pending;
   const submissionRef = useRef(false);
+  const specificProductsRef = useRef(restored?.input.products || []);
   const patch = (changes: Partial<WorkflowInput>) =>
     setInput((current) => ({ ...current, ...changes }));
+  const allProductScope = isAllProductScope(input);
+  const selected = input.products || [];
+  const hasProductSelection =
+    allProductScope ||
+    selected.length > 0 ||
+    (input.product_scope === undefined && !!input.product.trim());
+  const environmentPreference = input.environment_preference || 'all';
+  const environmentLabels = {
+    all: '室内室外均可',
+    indoor: '优先室内窗饰',
+    outdoor: '优先室外遮阳',
+  };
   useEffect(() => {
     if (!pending && params.get('mode') === 'scheduled') setRunMode('scheduled');
   }, [params.get('mode'), pending]);
@@ -189,8 +208,12 @@ export function Automation() {
   useEffect(() => {
     const controller = new AbortController();
     setPreview([]);
-    setPreviewLoading(true);
     setPreviewError('');
+    if (!hasProductSelection) {
+      setPreviewLoading(false);
+      return () => controller.abort();
+    }
+    setPreviewLoading(true);
     const timer = setTimeout(() => {
       acquisitionApi
         .searchPreview(input, controller.signal)
@@ -209,12 +232,22 @@ export function Automation() {
       controller.abort();
     };
   }, [JSON.stringify(input), revision]);
-  const selected = input.products || [];
   const required = input.required_requirements || [];
   const scheduleName =
-    name.trim() || `${input.country} · ${selected[0]?.label || input.product}`.slice(0, 80);
+    name.trim() ||
+    `${input.country} · ${allProductScope ? ALL_PRODUCTS_LABEL : selected[0]?.label || input.product}`.slice(
+      0,
+      80,
+    );
   const marketLabel =
     locations?.markets.find((m) => m.value === input.country)?.label || input.country;
+  const selectedRegion =
+    locations?.country === input.country
+      ? locations.regions.find((region) => region.name === input.region)
+      : undefined;
+  const regionLabel = selectedRegion?.label
+    ? `${selectedRegion.label} · ${selectedRegion.name}`
+    : input.region;
   const canSubmit =
     status?.configured &&
     !statusError &&
@@ -222,7 +255,7 @@ export function Automation() {
     !locationsLoading &&
     !previewError &&
     !previewLoading &&
-    selected.length &&
+    hasProductSelection &&
     Number.isInteger(targetCount) &&
     targetCount >= 1 &&
     targetCount <= 200 &&
@@ -294,20 +327,34 @@ export function Automation() {
           <dt>目标市场</dt>
           <dd>
             {marketLabel}
-            {input.region && <small>{input.region}</small>}
+            {input.region && <small>{regionLabel}</small>}
           </dd>
         </div>
         <div>
-          <dt>供货产品</dt>
+          <dt>业务范围</dt>
           <dd>
-            {selected.length
-              ? selected.map((p) => (
-                  <span className="acq-summary-product" key={p.value}>
-                    {p.label}
-                    <small>{directionLabels[p.direction]}</small>
-                  </span>
-                ))
-              : '尚未选择'}
+            {allProductScope ? (
+              <>
+                {ALL_PRODUCTS_LABEL}
+                <small>成品、半成品、材料与零件</small>
+              </>
+            ) : selected.length ? (
+              selected.map((p) => (
+                <span className="acq-summary-product" key={p.value}>
+                  {p.label}
+                  <small>{directionLabels[p.direction]}</small>
+                </span>
+              ))
+            ) : (
+              input.product || '尚未选择'
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt>产品偏好</dt>
+          <dd>
+            {environmentLabels[environmentPreference]}
+            {environmentPreference !== 'all' && <small>优先寻找，兼顾另一方向</small>}
           </dd>
         </div>
         <div>
@@ -319,7 +366,6 @@ export function Automation() {
                   .map((t) => t.label)
                   .join('、')
               : '不限类型'}
-            <small>多选满足任意一种即可</small>
           </dd>
         </div>
         {input.preferred_requirements && (
@@ -402,10 +448,6 @@ export function Automation() {
       </PageHeading>
       <div className="acq-topline">
         <p>设置目标企业，让系统完成发现与研究。</p>
-        <Badge tone="green">
-          <Globe2 size={13} />
-          网页搜索
-        </Badge>
       </div>
       <nav className="acq-page-tabs" aria-label="获客任务页面">
         {[
@@ -437,7 +479,7 @@ export function Automation() {
               </Link>
             </div>
           )}
-          {catalogError && (
+          {catalogError && !allProductScope && (
             <div className="acq-notice">
               常用产品目录读取失败，当前可使用内置产品。
               <button type="button" onClick={() => setRevision((n) => n + 1)}>
@@ -524,23 +566,124 @@ export function Automation() {
                       </button>
                     </p>
                   )}
-                  <div className="acq-field-label">
-                    目标产品<span>按供货方向分类，可选择多个品类</span>
+                  <div className="acq-field-label">业务范围</div>
+                  <div className="acq-business-scope" role="status">
+                    <CheckCircle2 size={19} />
+                    <div>
+                      <strong>{allProductScope ? ALL_PRODUCTS_LABEL : '指定产品'}</strong>
+                      <p>
+                        {allProductScope
+                          ? '覆盖窗饰成品、半成品、材料与零件，由系统识别客户实际经营产品和可匹配的供货方向。'
+                          : '本次仅寻找与指定产品相关的企业，可在高级产品设置中调整。'}
+                      </p>
+                    </div>
                   </div>
-                  <ProductPicker
-                    catalog={catalog}
-                    selected={selected}
-                    disabled={locked}
-                    onSaved={(p) =>
-                      setCatalog((current) => [
-                        ...current.filter((s) => s.value.toLowerCase() !== p.value.toLowerCase()),
-                        p,
-                      ])
-                    }
-                    onChange={(products) =>
-                      patch({ products, product: products.map((p) => p.value).join(', ') })
-                    }
-                  />
+                  <div className="acq-field-label">
+                    产品偏好<span>选填 · 调整寻找重点</span>
+                  </div>
+                  <div className="acq-environment-options" role="radiogroup" aria-label="产品偏好">
+                    {(['all', 'indoor', 'outdoor'] as const).map((value) => (
+                      <label
+                        key={value}
+                        className={environmentPreference === value ? 'selected' : ''}
+                      >
+                        <input
+                          type="radio"
+                          name="environment-preference"
+                          value={value}
+                          checked={environmentPreference === value}
+                          onChange={() => patch({ environment_preference: value })}
+                        />
+                        {environmentLabels[value]}
+                      </label>
+                    ))}
+                  </div>
+                  <details className="acq-advanced acq-product-advanced">
+                    <summary>
+                      <span>高级产品设置</span>
+                      <span>
+                        {allProductScope
+                          ? '全部业务'
+                          : hasProductSelection
+                            ? '已指定产品'
+                            : '待选产品'}{' '}
+                        <ChevronDown size={14} />
+                      </span>
+                    </summary>
+                    <div className="acq-scope-options" role="radiogroup" aria-label="产品范围">
+                      <label className={allProductScope ? 'selected' : ''}>
+                        <input
+                          type="radio"
+                          name="product-scope"
+                          value="all"
+                          checked={allProductScope}
+                          onChange={() => {
+                            specificProductsRef.current = selected;
+                            patch({
+                              product_scope: 'all',
+                              products: [],
+                              product: ALL_PRODUCTS_VALUE,
+                            });
+                          }}
+                        />
+                        <span>
+                          {ALL_PRODUCTS_LABEL}
+                          <small>日常广泛获客，系统自动扩展相关品类</small>
+                        </span>
+                      </label>
+                      <label className={!allProductScope ? 'selected' : ''}>
+                        <input
+                          type="radio"
+                          name="product-scope"
+                          value="specific"
+                          checked={!allProductScope}
+                          onChange={() => {
+                            const products = specificProductsRef.current;
+                            patch({
+                              product_scope: 'specific',
+                              products,
+                              product: products.map((product) => product.value).join(', '),
+                            });
+                          }}
+                        />
+                        <span>
+                          指定产品
+                          <small>用于专项开发，已选产品会限制本次获客范围</small>
+                        </span>
+                      </label>
+                    </div>
+                    {!allProductScope && (
+                      <>
+                        <p className="acq-preference-help">
+                          选择本次要开发的产品，满足其中任意一种即可；成品、材料配件均可选择。
+                        </p>
+                        <ProductPicker
+                          catalog={catalog}
+                          selected={selected}
+                          disabled={locked}
+                          onSaved={(product) =>
+                            setCatalog((current) => [
+                              ...current.filter(
+                                (item) => item.value.toLowerCase() !== product.value.toLowerCase(),
+                              ),
+                              product,
+                            ])
+                          }
+                          onChange={(products) => {
+                            specificProductsRef.current = products;
+                            patch({
+                              product_scope: 'specific',
+                              products,
+                              product: products.map((product) => product.value).join(', '),
+                            });
+                          }}
+                        />
+                        {!hasProductSelection && (
+                          <p className="acq-preference-help">请至少选择一个产品后开始获客。</p>
+                        )}
+                      </>
+                    )}
+                  </details>
                 </section>
                 <section className="panel acq-config-section">
                   <header>

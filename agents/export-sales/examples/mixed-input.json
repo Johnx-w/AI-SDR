@@ -1,0 +1,82 @@
+{
+  "contract_version": "1.1",
+  "agent_id": "venetian",
+  "evaluation_time": "2026-10-22T15:00:00+08:00",
+  "event": {
+    "type": "inbound",
+    "message_id": "demo-message-002",
+    "text": "We distribute window coverings in Canada. Could you explain Cut Down versus Custom Made horizontal blinds? Also, do you have an update on the arched plantation shutters our project team asked about?"
+  },
+  "conversation": {
+    "id": "demo-mixed-001",
+    "revision": 4,
+    "customer_id": "demo-business-001",
+    "channel": "email",
+    "language": "en",
+    "buyer_status": "b2b",
+    "history_summary": "虚构协议演示：加拿大经销商。异形透气窗已移交人工，确认已发送；百叶窗为独立的新产品需求。"
+  },
+  "company_context": {
+    "name": null,
+    "origin_country": "CN",
+    "role": "exporter",
+    "approved_facts": []
+  },
+  "demand_context": [
+    {
+      "id": "demo-demand-blind",
+      "product_agent_id": "venetian",
+      "lead_agent_id": "venetian",
+      "ownership": "ai",
+      "purchase_purpose": "business",
+      "product_type": "horizontal blind",
+      "purchase_forms": ["finished"],
+      "project_context": "none",
+      "facts": {
+        "destination_country": "Canada",
+        "buyer_role": "distributor"
+      },
+      "missing_fields": ["size_system", "dimensions", "quantities"],
+      "sales_stage": "selection",
+      "handoff_ack_sent": false,
+      "human_return_note": null
+    },
+    {
+      "id": "demo-demand-shutter",
+      "product_agent_id": "shutter",
+      "lead_agent_id": "shutter",
+      "ownership": "human",
+      "purchase_purpose": "business",
+      "product_type": "arched plantation shutter",
+      "purchase_forms": ["finished"],
+      "project_context": "none",
+      "facts": {
+        "shape": "arched"
+      },
+      "missing_fields": ["verified_feasibility"],
+      "sales_stage": "requirements",
+      "handoff_ack_sent": true,
+      "human_return_note": null
+    }
+  ],
+  "knowledge": [
+    {
+      "id": "demo-kb-size-systems",
+      "category": "venetian",
+      "content": "仅供协议演示的已确认资料假设：Cut Down 与 Custom Made 是本品类两种成品需求方式。前者须按具体型号允许方式在买方当地调整；后者按确认的最终尺寸制作。本记录不包含型号、裁切范围、价格、MOQ、现货或交期。",
+      "approved": true,
+      "valid_until": null
+    }
+  ],
+  "policy": {
+    "follow_up_enabled": false,
+    "follow_up_intervals_days": null,
+    "max_follow_ups": null,
+    "send_window": null,
+    "available_tools": []
+  },
+  "drawing_context": {
+    "assets": [],
+    "parameters": []
+  }
+}

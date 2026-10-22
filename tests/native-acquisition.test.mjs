@@ -53,7 +53,6 @@ const definitions = [
     'Facebook',
     'Instagram',
     'LinkedIn',
-    'WhatsApp',
   ].map((field_name) => ({ field_name, type: 1 })),
   { field_name: '首次发现时间', type: 5 },
   { field_name: '客户类型', type: 3 },
