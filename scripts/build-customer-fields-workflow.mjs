@@ -67,11 +67,15 @@ const checkedBuilder = (
   "if(types['客户类型']!==3)throw new Error('客户类型必须为单选字段');",
   "if(![1,3].includes(types['客户类型']))throw new Error('客户类型必须为文本字段（兼容旧单选）');",
 );
-const gatedBuilder = checkedBuilder.replace(
+const renamedBuilder = checkedBuilder.replace(
+  'const fields=Object.fromEntries',
+  "if(!types['公司名称']&&types['客户名称']&&raw['公司名称']){raw['客户名称']=raw['公司名称'];delete raw['公司名称'];}const fields=Object.fromEntries",
+);
+const gatedBuilder = renamedBuilder.replace(
   'const evidence=',
   "if(!r.ok || r.eligibility?.status!=='eligible')throw new Error('客户未通过全局准入判断');const evidence=",
 );
-if (gatedBuilder === checkedBuilder) throw new Error('无法定位入库准入关口');
+if (gatedBuilder === renamedBuilder) throw new Error('无法定位入库准入关口');
 replace('构建飞书记录', {
   mode: 'runOnceForAllItems',
   jsCode:

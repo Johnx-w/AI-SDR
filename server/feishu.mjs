@@ -29,7 +29,7 @@ export function mapFeishuRecord(record) {
     ].join('\n');
   return {
     id: record.record_id,
-    name: read('客户名称') || profile.company_name || '未命名客户',
+    name: read('公司名称') || read('客户名称') || profile.company_name || '未命名公司',
     domain: domainKey(read('来源链接')) || profile.website_key || '',
     market: read('国家') || '待核实',
     type:

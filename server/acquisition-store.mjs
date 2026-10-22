@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import { domainKey } from './website-identity.mjs';
 
 export class AcquisitionStore {
   constructor(path = ':memory:', scope = '') {
@@ -10,6 +11,9 @@ export class AcquisitionStore {
     this.scope = scope;
     this.db.exec(
       'PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS acquisition_operations (id TEXT PRIMARY KEY, hash TEXT NOT NULL, data TEXT NOT NULL);',
+    );
+    this.db.exec(
+      'CREATE TABLE IF NOT EXISTS company_identities(scope TEXT NOT NULL, record_id TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(scope, record_id))',
     );
   }
   get(id) {
@@ -78,6 +82,31 @@ export class AcquisitionStore {
       )
       .get(id, this.scope);
     return row ? JSON.parse(row.data) : null;
+  }
+  saveCompanyIdentity(recordId, website, recordName, identity) {
+    const entry = {
+      ...identity,
+      recordId,
+      website,
+      recordName,
+      checkedAt: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        'INSERT INTO company_identities(scope,record_id,data) VALUES(?,?,?) ON CONFLICT(scope,record_id) DO UPDATE SET data=excluded.data',
+      )
+      .run(this.scope, recordId, JSON.stringify(entry));
+    return entry;
+  }
+  companyIdentity(recordId, website, recordName) {
+    const row = this.db
+      .prepare('SELECT data FROM company_identities WHERE scope=? AND record_id=?')
+      .get(this.scope, recordId);
+    if (!row) return null;
+    const entry = JSON.parse(row.data);
+    return domainKey(entry.website) === domainKey(website) && entry.recordName === recordName
+      ? entry
+      : null;
   }
   close() {
     this.db.close();
