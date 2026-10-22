@@ -18,6 +18,7 @@ const containsRecord = (value, id) => {
 };
 const publicEntry = (entry) => ({
   ...entry.snapshot,
+  evidenceReason: formatAssessmentEvidence(entry.snapshot),
   recordId: entry.recordId,
   sync: {
     status: entry.historyStatus,

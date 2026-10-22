@@ -1,4 +1,5 @@
 // Product-relevance gating shared by the pre-AI page screen and the post-AI audit.
+import { productTerms } from '../src/domain/acquisition-products.mjs';
 // The broad page screen saves model calls; the final audit must match the target category.
 
 // Strong industry phrases: unambiguous architectural shading terminology.
@@ -98,7 +99,7 @@ export function pageRelevance(text, target = {}) {
   // 1. Strong industry phrase anywhere in the page.
   for (const pattern of strongPhrases) if (pattern.test(content)) hit(pattern.source);
   // 2. Target product phrases (multi-word phrases are specific enough to prove relevance).
-  const terms = targetProductTerms(target.product);
+  const terms = productTerms(target).flatMap((p) => targetProductTerms(p));
   const multiWord = terms.filter((t) => t.includes(' '));
   const single = terms.filter((t) => !t.includes(' ') && !genericWords.has(t));
   for (const phrase of multiWord) if (phraseMatches(content, phrase)) hit(phrase);
@@ -134,7 +135,10 @@ const partsPattern =
   /\b(?:components?|parts?|motors?|brackets?|headrails?|springs?)\b|配件|零件|电机|制头|弹簧|安装码/i;
 function productCategories(text) {
   // Catalogs often coordinate two styles before the shared noun.
-  text = String(text).replace(/\broller\s*(?:&|and|\/)\s*solar\s+shades?\b/gi, 'roller shades solar shades');
+  text = String(text).replace(
+    /\broller\s*(?:&|and|\/)\s*solar\s+shades?\b/gi,
+    'roller shades solar shades',
+  );
   let found = categories.filter(([, pattern]) => pattern.test(text)).map(([id]) => id);
   if (/roller\s+shutter|rolling\s+shutter|卷闸|卷门/i.test(text))
     found = found.filter((id) => id !== 'shutter');
@@ -153,7 +157,7 @@ export function productsRelevant(products, target = {}) {
   const list = (Array.isArray(products) ? products : []).filter(
     (p) => typeof p === 'string' && p.trim(),
   );
-  const terms = targetProductTerms(target.product);
+  const terms = productTerms(target).flatMap((p) => targetProductTerms(p));
   // No target product constraint (e.g. direct unit-test calls) means unrestricted.
   if (!terms.length) return 'unrestricted';
   if (!list.length) return 'unknown';

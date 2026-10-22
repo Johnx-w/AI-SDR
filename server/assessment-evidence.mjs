@@ -88,6 +88,16 @@ export function verifiedAssessmentOpportunities(raw, pages, target = {}, verifie
     const product = opportunity.product.trim().slice(0, 160);
     if (product.length < 2 || (target.product && productsRelevant([product], target) !== 'matched'))
       continue;
+    if (
+      target.products?.length &&
+      !target.products.some(
+        (selected) =>
+          selected.direction === opportunity.direction &&
+          productsRelevant([product], { product: selected.value, products: [selected] }) ===
+            'matched',
+      )
+    )
+      continue;
     const related = productsRelevant(verifiedProducts, { product }) === 'matched';
     const key = opportunity.direction + ':' + compact(product).toLowerCase();
     if (seen.has(key)) continue;

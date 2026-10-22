@@ -162,6 +162,106 @@ test('同域不同网页只研究一次，重复与不匹配不占名额，自�
     manager.close();
   }
 });
+
+test('每条实际搜索词记录发现、去重、待核实和评级产出', async () => {
+  const records = [];
+  const { manager } = harness({
+    discover: async () => ({
+      candidates: [
+        { source_url: 'https://review.example/' },
+        { source_url: 'https://accepted.example/' },
+      ],
+      skipped_existing: [{ url: 'https://known.example/' }],
+    }),
+    research: async (_target, item) => {
+      if (item.domain === 'review.example')
+        return {
+          outcome: 'review',
+          reason: '必需条件待核实',
+          research: {
+            review_required: true,
+            requirement_checks: [
+              { condition: '必须有商用项目', verdict: 'unknown', quote: '', source_url: '' },
+            ],
+          },
+        };
+      records.push({ id: 'rec-accepted', name: 'Accepted', website: item.source_url });
+      return {
+        新增: 1,
+        明细: [{ source_url: item.source_url, result: 'inserted', record_id: 'rec-accepted' }],
+        assessment: { grade: 'A', score: 80, status: '优先开发' },
+      };
+    },
+    readLeads: async () => records,
+  });
+  try {
+    const created = manager.create({ ...input, target_count: 1 }, 'search-metrics-01');
+    await manager.work(created.id);
+    const job = manager.get(created.id);
+    assert.equal(job.status, 'completed');
+    assert.equal(job.review, 1);
+    assert.equal(job.searchStats.length, 1);
+    assert.deepEqual(
+      {
+        discovered: job.searchStats[0].discovered,
+        duplicates: job.searchStats[0].duplicates,
+        queued: job.searchStats[0].queued,
+        researched: job.searchStats[0].researched,
+        inserted: job.searchStats[0].inserted,
+        review: job.searchStats[0].review,
+        ratings: job.searchStats[0].ratings,
+      },
+      {
+        discovered: 3,
+        duplicates: 1,
+        queued: 2,
+        researched: 2,
+        inserted: 1,
+        review: 1,
+        ratings: { A: 1, B: 0, C: 0, unrated: 0 },
+      },
+    );
+    assert.ok(job.rows.every((row) => row.search_id === job.searchStats[0].id));
+  } finally {
+    manager.close();
+  }
+});
+
+test('服务重启把未完成的搜索指标标记为中断并保留进度', () => {
+  const folder = mkdtempSync(join(tmpdir(), 'batch-search-restart-'));
+  const path = join(folder, 'jobs.sqlite');
+  let manager;
+  try {
+    manager = harness({ path }).manager;
+    const created = manager.create({ ...input, target_count: 1 }, 'search-restart-01');
+    created.searchStats.push({
+      id: created.id + ':search:1',
+      query: 'roller blinds Texas',
+      country: 'United States',
+      status: 'running',
+      discovered: 0,
+      duplicates: 0,
+      queued: 0,
+      researched: 0,
+      inserted: 0,
+      updated: 0,
+      rejected: 0,
+      review: 0,
+      failed: 0,
+      ratings: { A: 0, B: 0, C: 0, unrated: 0 },
+    });
+    manager.save(created);
+    manager.close();
+    manager = harness({ path }).manager;
+    const restored = manager.get(created.id);
+    assert.equal(restored.status, 'paused');
+    assert.equal(restored.searchStats[0].status, 'interrupted');
+    assert.ok(restored.searchStats[0].completedAt);
+  } finally {
+    manager?.close();
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
 test('已知抓取失败占研究次数，不计新增，达到3倍上限部分完成', async () => {
   const { manager } = harness({
     research: async () => ({ outcome: 'failed', stage: 'extract', reason: '空正文' }),

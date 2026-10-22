@@ -6,6 +6,7 @@ import type {
   AcquisitionSchedule,
   ScheduleTiming,
   ConnectionSettings,
+  ProductSelection,
 } from '../domain/types';
 
 export const WORKFLOW_URL = 'https://vynox.app.n8n.cloud/workflow/EycE9OmaPkRFUDSq';
@@ -15,10 +16,27 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     signal: init?.signal ?? AbortSignal.timeout(125000),
   });
   const body = await response.json().catch(() => ({ error: '服务未返回有效 JSON' }));
-  if (!response.ok) throw new Error(body.error || `请求失败 (${response.status})`);
+  if (!response.ok)
+    throw Object.assign(new Error(body.error || `请求失败 (${response.status})`), {
+      status: response.status,
+    });
   return body as T;
 }
 export const acquisitionApi = {
+  products: () => request<{ products: ProductSelection[] }>('/products'),
+  saveProduct: (product: ProductSelection) =>
+    request<ProductSelection>('/products', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(product),
+    }),
+  searchPreview: (input: WorkflowInput, signal?: AbortSignal) =>
+    request<{ queries: { country: string; query: string }[] }>('/search-preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+      signal,
+    }),
   schedules: () => request<{ schedules: AcquisitionSchedule[] }>('/schedules'),
   createSchedule: (
     name: string,

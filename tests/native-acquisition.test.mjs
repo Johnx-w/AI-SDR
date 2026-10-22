@@ -163,32 +163,7 @@ function fixture({
 }
 
 const policyFact = (value, quote) => ({ value, quote, source_url: site });
-for (const scenario of [
-  {
-    name: '自有同品类工厂，即使筛选工厂与生产画像也淘汰',
-    text: 'Acme Screens manufactures zip screens in our own factory. We supply dealers nationwide.',
-    fields: {
-      production_model: 'own_factory',
-      operating_model: 'beyond_local',
-      customer_type: 'manufacturer',
-    },
-    manufactured: ['zip screens'],
-    target: { customer_type: 'manufacturer', customer_profile: 'manufacturing' },
-    code: 'same_category_factory',
-  },
-  {
-    name: '纯本地安装企业，C 端和服务画像不能覆盖淘汰规则',
-    text: 'Acme Screens only installs imported zip screens for local homeowners in Florida. We have no factory and no wholesale or national shipping business.',
-    fields: { operating_model: 'local_only', customer_type: 'service_provider', audience: 'C' },
-    target: { audience: 'C', customer_type: 'service_provider', customer_profile: 'service' },
-    code: 'local_only',
-  },
-  {
-    name: '纯本地零售门店',
-    text: 'Acme Screens is a local retail store selling imported zip screens only to nearby homeowners. We do not manufacture or deliver outside our town.',
-    fields: { operating_model: 'local_only', customer_type: 'retailer', audience: 'C' },
-    code: 'local_only',
-  },
+for (const [scenarioIndex, scenario] of [
   {
     name: '个人装修求购账号，即使有公司名或选择 C 端也淘汰',
     text: 'I am John Smith, a homeowner looking for zip screens for my own house. This is a personal consumer account, not a trading business.',
@@ -209,15 +184,8 @@ for (const scenario of [
     productMismatch: true,
   },
   { name: '缺少主体证据', fields: { entity_type: null }, code: 'entity_unknown' },
-  { name: '缺少生产方式证据', fields: { production_model: null }, code: 'production_unknown' },
-  { name: '缺少经营范围证据', fields: { operating_model: null }, code: 'scope_unknown' },
-  {
-    name: '自有工厂但未证明实际自产产品',
-    fields: { production_model: 'own_factory' },
-    code: 'factory_products_unknown',
-  },
-]) {
-  test('准入拦截不新增、不更新飞书：' + scenario.name, async () => {
+].entries()) {
+  test('明确硬冲突不新增飞书：' + scenario.name, async () => {
     const quote = scenario.text || sourceText;
     const facts = Object.fromEntries(
       Object.entries({
@@ -227,51 +195,82 @@ for (const scenario of [
         ...scenario.fields,
       }).map(([key, value]) => [key, value === null ? null : policyFact(value, quote)]),
     );
-    for (const updateExisting of [false, true]) {
-      const f = fixture({
-        pageText: quote,
-        initial: updateExisting
-          ? [
-              {
-                record_id: 'rec-existing',
-                fields: { 来源链接: site, 客户名称: 'Existing', 客户等级: 'A' },
-              },
-            ]
-          : [],
-        modelOverrides: {
-          ...facts,
-          company_name: policyFact('Acme Screens', quote),
-          products: (scenario.products || ['zip screens']).map((p) => policyFact(p, quote)),
-          manufactured_products: (scenario.manufactured || []).map((p) => policyFact(p, quote)),
-          profile_tags: ['trade', 'service', 'manufacturing'].map((p) => policyFact(p, quote)),
-        },
-      });
-      const svc = f.make();
-      try {
-        const output = await svc.research(
-          { ...input, ...scenario.target },
-          {
-            source_url: site,
-            operation_id: 'policy-blocked-' + updateExisting,
-            ...(updateExisting ? { target_record_id: 'rec-existing' } : {}),
-          },
-        );
-        assert.equal(output.新增, 0);
-        assert.equal(output.更新, 0);
-        assert.equal(output.research.ok, false);
-        if (scenario.productMismatch) assert.equal(output.research.product_match, 'not_matched');
-        else assert.equal(output.research.eligibility.code, scenario.code);
-        assert.equal(
-          f.calls.some((c) => c.url.includes('/records') && ['POST', 'PUT'].includes(c.method)),
-          false,
-        );
-        if (updateExisting) assert.equal(f.records[0].fields.客户等级, 'A');
-      } finally {
-        svc.close();
-      }
+    const f = fixture({
+      pageText: quote,
+      modelOverrides: {
+        ...facts,
+        company_name: policyFact('Acme Screens', quote),
+        products: (scenario.products || ['zip screens']).map((p) => policyFact(p, quote)),
+        manufactured_products: [],
+        profile_tags: ['trade'].map((p) => policyFact(p, quote)),
+      },
+    });
+    const svc = f.make();
+    try {
+      const output = await svc.research(
+        { ...input, ...scenario.target },
+        { source_url: site, operation_id: 'policy-blocked-' + scenarioIndex },
+      );
+      assert.equal(output.新增, 0);
+      assert.equal(output.更新, 0);
+      assert.equal(output.research.ok, false);
+      if (scenario.productMismatch) assert.equal(output.research.product_match, 'not_matched');
+      else assert.equal(output.research.eligibility.code, scenario.code);
+      assert.equal(
+        f.calls.some((c) => c.url.includes('/records') && ['POST', 'PUT'].includes(c.method)),
+        false,
+      );
+    } finally {
+      svc.close();
     }
   });
 }
+
+test('工厂、本地服务和经营范围未知不再构成全局淘汰', async () => {
+  for (const [index, scenario] of [
+    {
+      text: 'Acme Screens manufactures zip screens in our own factory and supplies dealers.',
+      fields: { production_model: 'own_factory', customer_type: 'manufacturer' },
+      manufactured: ['zip screens'],
+    },
+    {
+      text: 'Acme Screens installs imported zip screens for local homeowners in Florida.',
+      fields: { operating_model: 'local_only', customer_type: 'service_provider', audience: 'C' },
+    },
+    { text: sourceText, fields: { production_model: null, operating_model: null } },
+  ].entries()) {
+    const facts = Object.fromEntries(
+      Object.entries({
+        entity_type: 'business',
+        production_model: 'no_own_factory',
+        operating_model: 'beyond_local',
+        ...scenario.fields,
+      }).map(([key, value]) => [key, value === null ? null : policyFact(value, scenario.text)]),
+    );
+    const f = fixture({
+      pageText: scenario.text,
+      modelOverrides: {
+        ...facts,
+        company_name: policyFact('Acme Screens', scenario.text),
+        products: [policyFact('zip screens', scenario.text)],
+        manufactured_products: (scenario.manufactured || []).map((p) =>
+          policyFact(p, scenario.text),
+        ),
+      },
+    });
+    const svc = f.make();
+    try {
+      const output = await svc.research(input, {
+        source_url: site,
+        operation_id: 'eligible-business-' + index,
+      });
+      assert.equal(output.research.eligibility.status, 'eligible');
+      assert.equal(output.新增, 1);
+    } finally {
+      svc.close();
+    }
+  }
+});
 
 test('C 端经营企业可以入库：全国销售、进口渠道、兼营本地安装与个人经营账号', async () => {
   for (const text of [
@@ -297,7 +296,7 @@ test('C 端经营企业可以入库：全国销售、进口渠道、兼营本地
       );
       assert.equal(output.research.eligibility.status, 'eligible');
       assert.equal(output.新增, 1);
-      assert.equal(f.records[0].fields.主体类型, '企业');
+      assert.equal(f.records[0].fields.来源链接, site);
       assert.equal(f.records[0].fields.服务客群, 'C端');
     } finally {
       svc.close();
@@ -616,7 +615,7 @@ test('定向复核只更新原记录的采集字段，保留人工跟进状态�
   }
 });
 
-test('写请求响应丢失后维持不确定状态；重复请求及重启核对不再次新增', async () => {
+test('写请求响应丢失后按域名核对结果；重复请求及重启不再次新增', async () => {
   const folder = mkdtempSync(join(tmpdir(), 'native-write-'));
   const path = join(folder, 'operations.sqlite'),
     f = fixture({ loseWrite: true });
@@ -624,10 +623,13 @@ test('写请求响应丢失后维持不确定状态；重复请求及重启核�
   const item = { source_url: site, operation_id: 'uncertain-write-01' };
   try {
     await assert.rejects(svc.research(input, item), /待核对/);
-    assert.equal((await svc.status(item.operation_id)).settled, false);
+    const recovered = await svc.status(item.operation_id);
+    assert.equal(recovered.settled, true);
+    assert.equal(recovered.output.新增, 1);
     svc.close();
     svc = f.make({ store: new AcquisitionStore(path) });
-    await assert.rejects(svc.research(input, item), /尚待确认/);
+    const repeated = await svc.research(input, item);
+    assert.equal(repeated.新增, 1);
     assert.equal(f.records.length, 1);
     assert.equal(
       f.calls.filter((c) => c.method === 'POST' && c.url.includes('client_token=')).length,
@@ -639,19 +641,17 @@ test('写请求响应丢失后维持不确定状态；重复请求及重启核�
   }
 });
 
-test('已返回记录编号但读回中断，重启后仅核对即可完成', async () => {
+test('已返回记录编号后读回短暂中断，由受控重试完成且不重复写入', async () => {
   const folder = mkdtempSync(join(tmpdir(), 'native-read-'));
   const path = join(folder, 'operations.sqlite'),
     f = fixture({ loseReadback: true });
   let svc = f.make({ store: new AcquisitionStore(path) });
   try {
-    await assert.rejects(
-      svc.research(input, {
-        source_url: site,
-        operation_id: 'readback-recovery-01',
-      }),
-      /待核对/,
-    );
+    const first = await svc.research(input, {
+      source_url: site,
+      operation_id: 'readback-recovery-01',
+    });
+    assert.equal(first.新增, 1);
     svc.close();
     svc = f.make({ store: new AcquisitionStore(path) });
     const result = await svc.status('readback-recovery-01');

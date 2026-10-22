@@ -1,5 +1,9 @@
 {
   "customerTypes": [
+    { "value": "supplier", "label": "专业供应商", "terms": "supplier" },
+    { "value": "importer", "label": "进口商", "terms": "importer" },
+    { "value": "trader", "label": "贸易商", "terms": "trading company" },
+    { "value": "brand", "label": "品牌商", "terms": "brand" },
     { "value": "manufacturer", "label": "工厂", "terms": "manufacturer factory" },
     { "value": "contractor", "label": "工程承包商", "terms": "contractor commercial projects" },
     { "value": "wholesaler", "label": "批发商", "terms": "wholesaler wholesale" },
@@ -43,6 +47,7 @@
   "productGroups": [
     {
       "name": "室外成品窗帘",
+      "direction": "finished",
       "selectAll": true,
       "products": [
         ["outdoor zip screens", "双层/防风帘 / 户外拉链帘"],
@@ -53,6 +58,7 @@
     },
     {
       "name": "室内成品窗帘",
+      "direction": "finished",
       "selectAll": true,
       "products": [
         ["Roman blinds", "罗马帘"],
@@ -68,14 +74,25 @@
       ]
     },
     {
-      "name": "室外半成品窗帘",
+      "name": "室外材料配件",
+      "direction": "materials",
       "selectAll": false,
       "products": [["outdoor blinds awnings components and parts", "室外窗帘配件零件"]]
     },
     {
-      "name": "室内半成品窗帘",
+      "name": "室内材料配件",
+      "direction": "materials",
       "selectAll": false,
       "products": [["indoor blinds curtains components and parts", "室内窗帘配件零件"]]
+    },
+    {
+      "name": "样本与展示资料",
+      "direction": "samples",
+      "selectAll": true,
+      "products": [
+        ["blinds fabric sample books", "窗饰面料样本册"],
+        ["blinds display kits", "窗饰展示套件"]
+      ]
     }
   ]
 }

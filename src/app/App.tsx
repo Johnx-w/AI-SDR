@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowUpRight,
   Bell,
@@ -17,7 +17,6 @@ import {
   Settings2,
   Sparkles,
   UsersRound,
-  Workflow,
   X,
   Zap,
 } from 'lucide-react';
@@ -25,14 +24,12 @@ import { useWorkspace } from './WorkspaceProvider';
 import { Campaigns, Reports } from '../pages/Business';
 import { Dashboard, Communication, Materials } from '../pages/Workbench';
 import { ApiConnections } from '../pages/ApiConnections';
-import { ScheduledAcquisition } from '../pages/ScheduledAcquisition';
 import { LeadLibrary } from '../pages/LeadLibrary';
 import { Automation } from '../pages/Automation';
 
 const nav = [
   { path: '/', name: '运营总览', icon: LayoutDashboard },
   { path: '/automation', name: '获客任务', icon: Zap },
-  { path: '/tasks', name: '自动获客', icon: Workflow },
   { path: '/leads', name: '客户库', icon: UsersRound },
   { path: '/inbox', name: '沟通中心', icon: MessageSquare },
   { path: '/materials', name: '产品与资料', icon: FolderOpen },
@@ -219,7 +216,7 @@ export function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/leads" element={<LeadLibrary />} />
-            <Route path="/tasks" element={<ScheduledAcquisition />} />
+            <Route path="/tasks" element={<Navigate to="/automation?tab=schedules" replace />} />
             <Route path="/materials" element={<Materials />} />
             <Route path="/campaigns" element={<Campaigns />} />
             <Route path="/inbox" element={<Communication />} />
