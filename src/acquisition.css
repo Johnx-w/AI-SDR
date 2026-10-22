@@ -169,6 +169,72 @@
   font-size: 11px;
   font-weight: 400;
 }
+.acq-business-scope {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 16px;
+  border: 1px solid #dce6d4;
+  border-radius: 9px;
+  background: #f5f8f1;
+}
+.acq-business-scope > svg {
+  color: #76935f;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.acq-business-scope strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+.acq-business-scope p,
+.acq-preference-help {
+  margin: 7px 0 0;
+  font-size: 11px;
+  line-height: 1.8;
+  color: #7b8974;
+}
+.acq-environment-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.acq-environment-options > label,
+.acq-scope-options > label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #e1e6dc;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.acq-environment-options > label.selected,
+.acq-scope-options > label.selected {
+  background: #edf4e7;
+  border-color: #bdcfae;
+  color: var(--green);
+}
+.acq-scope-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 16px;
+}
+.acq-scope-options small {
+  display: block;
+  margin-top: 5px;
+  color: #7b8974;
+  font-size: 10px;
+  line-height: 1.7;
+}
+.acq-product-advanced > summary > span:last-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+}
 .acq-selected-products {
   display: flex;
   flex-wrap: wrap;
@@ -265,10 +331,29 @@
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+.acq-product-group-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 14px 0 8px;
+}
 .acq-product-options h4 {
   color: #7c8b74;
   font-size: 11px;
-  margin: 14px 0 8px;
+  margin: 0;
+}
+.acq-product-options .acq-product-select-all {
+  border: 0;
+  background: transparent;
+  color: var(--green);
+  padding: 3px 6px;
+  font-size: 11px;
+  border-radius: 5px;
+}
+.acq-product-options .acq-product-select-all:hover,
+.acq-product-options .acq-product-select-all[aria-pressed='true'] {
+  background: #eaf1e3;
 }
 .acq-product-options section {
   margin: 0;
@@ -687,7 +772,8 @@
     padding: 17px;
   }
   .acq-form-grid,
-  .acq-run-mode {
+  .acq-run-mode,
+  .acq-scope-options {
     grid-template-columns: minmax(0, 1fr);
   }
   .acq-span-2 {

@@ -1,0 +1,40 @@
+{
+  "contract_version": "1.1",
+  "agent_id": "shutter",
+  "conversation_id": "demo-quote-001",
+  "based_on_revision": 2,
+  "buyer_status_suggestion": "b2b",
+  "items": [
+    {
+      "demand_id": "demo-demand-quote",
+      "action": "request_handoff",
+      "route_to": null,
+      "reply_fragment": "Thank you for your quotation request for the PVC plantation shutters. Pricing, freight to Melbourne and delivery timing require confirmation by our sales team. The specification schedule will also need to be checked for that review.",
+      "handoff_reason": "formal_quote",
+      "internal_note": "正式报价移交人工，连同运费金额和交期确认。核实是否成功收到并可读取客户规格附件；当前不能声称已审阅。100只仅为本次需求，不作为大单或MOQ判断。人工报价后须自行选择继续人工或明确交回Agent。",
+      "missing_fields": [
+        "verified_specification_schedule",
+        "approved_price",
+        "approved_freight",
+        "approved_delivery"
+      ],
+      "source_ids": ["demo-quote-message-001"],
+      "facts_to_record": [
+        {
+          "field": "requested_quantity",
+          "value": 100,
+          "source_id": "demo-quote-message-001"
+        }
+      ],
+      "sales_stage_suggestion": "quote_human",
+      "cited_drawing_parameter_ids": [],
+      "attachment_requests": []
+    }
+  ],
+  "conversation_summary_update": "海外批发商申请PVC透气窗正式报价与墨尔本运费、交付确认，需人工接管并核实规格附件。",
+  "follow_up_suggestion": {
+    "operation": "cancel_old_and_reassess",
+    "eligible_demand_ids": [],
+    "reason": "报价需求转人工且未启用自动跟进，不安排自动催问。"
+  }
+}

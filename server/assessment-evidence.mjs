@@ -1,4 +1,5 @@
-import { productsRelevant } from './relevance.mjs';
+import { productsRelevant, windowProductDirections } from './relevance.mjs';
+import { isAllProductScope } from '../src/domain/acquisition-products.mjs';
 
 export const assessmentKinds = [
   'core_product',
@@ -53,7 +54,8 @@ export const assessmentOpportunitySchema = {
 };
 
 export const assessmentInstructions = `
-另输出 assessment_opportunities 数组，最多6个，按“实际产品族×供货方向”分别记录评分所需事实，不输出分数或评级。direction=finished成品/materials材料配件/samples样本展示；product是官网实际可证实的具体产品名称，不能直接复制未证实的搜索词。只研究target相关产品，不把多个方向混在一起。每项facts为{kind,value,quote,source_url}，引文必须来自输入pages中同一连续原文，无证据就省略。
+另输出 assessment_opportunities 数组，最多6个，按“实际产品族×供货方向”分别记录评分所需事实，不输出分数或评级。direction=finished成品/materials半成品及材料配件/samples样本展示；product是官网实际可证实的具体产品名称，不能直接复制未证实的搜索词。specific范围只研究target相关产品；all范围研究全部适用窗饰成品及半成品材料配件，优先环境仅影响搜索顺序，不排除另一环境的真实业务；all默认不研究独立样本展示业务。不把多个方向混在一起。每项facts为{kind,value,quote,source_url}，引文必须来自输入pages中同一连续原文，无证据就省略。
+成品经营、制造与材料配件业务分开取证。官网明确经营窗饰专用面料、型材、零件、电机或半成品可支持materials潜在适配机会，不要求其已经公开求购；只有自产成品不能自动生成其材料配件清单、采购需求或材料方向的计分事实。目录不等于企业采购需求，不能推断其愿意外采、兼容我方规格或已有合作意愿。
 kind含义：core_product=实际核心/专营产品；secondary_product=综合业务的明确副线；adjacent_product=充分证实仅邻近业务；unrelated_product=明确不经营/无关。specialist_supply=专业供货/定制经销零售/批发/品牌/供货工程，或材料方向的相关制造；general_supply=综合建材/工程中的产品供货；installation_only=明确只做安装维修不供货；no_supply_role=明确无适用供货角色。目录不自动证明主营，没找到不代表不经营。
 current_supply_process=当前同产品询价/量尺/定制下单/交付流程；custom_made=同产品按尺寸/面料/结构定制；motorized_system=同产品电动或自动化；commercial_specification=同产品明确商用工程材料/系统规格（只有commercial宣传词不够）。这些value简述事实，不能把另一个产品的电动特性挪来。
 company_since的value为同一企业持续经营起始年YYYY或完整日期YYYY-MM-DD；company_years为官网明确该企业持续经营的完整年数。员工/创始人个人经验、团队合计经验、版权年份不算企业年限。operating_outlet每条是有具体地址的现营网点；active_dealer每条是一个可识别的实际经销商；未来网点、服务城市、移动展厅覆盖城市不能算。value直接复制可识别的网点/经销商名称或地址。
@@ -73,9 +75,37 @@ const identifiedKinds = new Set([
   'completed_commercial_project',
 ]);
 const productKinds = new Set(['unrelated_product']);
+const directionFactKinds = new Set([
+  'core_product',
+  'secondary_product',
+  'adjacent_product',
+  'unrelated_product',
+  'specialist_supply',
+  'general_supply',
+  'current_supply_process',
+  'custom_made',
+  'motorized_system',
+  'commercial_specification',
+]);
+const genericWindowProduct =
+  /^(?:(?:indoor|outdoor|semi[- ]?finished)\s+)?(?:window\s+(?:coverings?|furnishings?|treatments?)|blinds?|shades?|curtains?|drapery)(?:\s+(?:components?|parts?|materials?|fabrics?|accessories|hardware))?$|^(?:室内|室外|半成品)?(?:窗饰|窗帘)(?:成品|半成品|材料|配件|零件|面料)?$/i;
+const supportsBroadProduct = (evidence, product, direction) =>
+  windowProductDirections(evidence).includes(direction) &&
+  (genericWindowProduct.test(product) ||
+    compact(evidence).toLowerCase().includes(compact(product).toLowerCase()) ||
+    productsRelevant([evidence], { product_scope: 'specific', product }) === 'matched');
 
-export function verifiedAssessmentOpportunities(raw, pages, target = {}, verifiedProducts = []) {
+export function verifiedAssessmentOpportunities(
+  raw,
+  pages,
+  target = {},
+  verifiedProducts = [],
+  verifiedProductFacts = [],
+) {
   if (!Array.isArray(raw)) return [];
+  const allScope =
+    isAllProductScope(target) &&
+    Boolean(target.product_scope || target.product || target.products?.length);
   const result = [];
   const seen = new Set();
   for (const opportunity of raw.slice(0, 6)) {
@@ -89,6 +119,7 @@ export function verifiedAssessmentOpportunities(raw, pages, target = {}, verifie
     if (product.length < 2 || (target.product && productsRelevant([product], target) !== 'matched'))
       continue;
     if (
+      !allScope &&
       target.products?.length &&
       !target.products.some(
         (selected) =>
@@ -98,7 +129,24 @@ export function verifiedAssessmentOpportunities(raw, pages, target = {}, verifie
       )
     )
       continue;
-    const related = productsRelevant(verifiedProducts, { product }) === 'matched';
+    if (
+      allScope &&
+      (!['finished', 'materials'].includes(opportunity.direction) ||
+        !windowProductDirections(product).includes(opportunity.direction))
+    )
+      continue;
+    const related = allScope
+      ? verifiedProductFacts.length
+        ? verifiedProductFacts.some(
+            (fact) =>
+              typeof fact.value === 'string' &&
+              supportsBroadProduct(fact.value, product, opportunity.direction) &&
+              supportsBroadProduct(fact.quote, product, opportunity.direction),
+          )
+        : verifiedProducts.some((value) =>
+            supportsBroadProduct(value, product, opportunity.direction),
+          )
+      : productsRelevant(verifiedProducts, { product }) === 'matched';
     const key = opportunity.direction + ':' + compact(product).toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
@@ -116,6 +164,12 @@ export function verifiedAssessmentOpportunities(raw, pages, target = {}, verifie
       // Only whitespace is normalized. Partial lines, summaries and joined quotes are rejected.
       const quote = compact(fact.quote);
       if (!compact(page.text).includes(quote)) continue;
+      if (
+        allScope &&
+        directionFactKinds.has(fact.kind) &&
+        !supportsBroadProduct(quote, product, opportunity.direction)
+      )
+        continue;
       if (productKinds.has(fact.kind) && productsRelevant([quote], { product }) !== 'matched')
         continue;
       const value = fact.value.trim().slice(0, 300);

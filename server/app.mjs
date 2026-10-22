@@ -102,12 +102,17 @@ export function createApp({
   const checkCapabilities = (input) => {
     if (
       provider.info.provider !== 'native' &&
-      (input.customer_types?.length ||
+      (input.product_scope === 'all' ||
+        (input.environment_preference && input.environment_preference !== 'all') ||
+        input.customer_types?.length ||
         input.required_requirements?.length ||
         input.preferred_requirements ||
         input.products?.length)
     )
-      throw new ApiError(400, '多类型、补充条件与产品目录获客需要在API连接中选择后端直连引擎');
+      throw new ApiError(
+        400,
+        '全部窗饰范围、室内外偏好、多类型及产品目录获客需要在API连接中选择后端直连引擎',
+      );
     return input;
   };
   const plans = () =>
@@ -116,6 +121,7 @@ export function createApp({
       jobs,
       ready: () => provider.info.configured,
       available: () => running === 0 && ![...runs.values()].some((run) => run.status === 'unknown'),
+      checkInput: (input) => checkCapabilities(input),
     }));
   const completeRun = (requestId, hash, output) => {
     let summary;

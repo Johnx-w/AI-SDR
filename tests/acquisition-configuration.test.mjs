@@ -4,12 +4,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { validateTarget } from '../server/search-target.mjs';
+import { builtinProducts, MAX_SELECTED_PRODUCTS } from '../src/domain/acquisition-products.mjs';
 import { ProductCatalog } from '../server/product-catalog.mjs';
 import { parseCompanyResearch } from '../server/company-research.mjs';
-import {
-  automaticSearchPlan,
-  MAX_AUTO_SEARCH_QUERIES,
-} from '../src/domain/search-query.mjs';
+import { automaticSearchPlan, MAX_AUTO_SEARCH_QUERIES } from '../src/domain/search-query.mjs';
 
 const selectedProduct = {
   value: 'motorized roller blinds',
@@ -41,6 +39,42 @@ test('结构化产品、角色和条件经过校验，并由同一快照生成�
   assert.ok(queries.some(({ query }) => query.includes('"electric roller shades"')));
   assert.ok(
     queries.every(({ query }) => query.includes('Texas') && query.includes('United States')),
+  );
+});
+
+test('室内和室外成品可以同时全选并提交', () => {
+  const finishedProducts = builtinProducts.filter((product) => product.direction === 'finished');
+  assert.equal(finishedProducts.length, 30);
+  const target = validateTarget({
+    query_mode: 'auto',
+    products: finishedProducts,
+    customer_types: [],
+    country: 'United States',
+    region: '',
+    product: '',
+    audience: 'BC',
+    acquisition_channel: 'tavily_web',
+  });
+  assert.equal(target.products.length, 30);
+  assert.equal(target.product.split(', ').length, 30);
+});
+
+test('产品数量仍受任务上限保护', () => {
+  const products = Array.from({ length: MAX_SELECTED_PRODUCTS + 1 }, (_, index) => ({
+    ...selectedProduct,
+    value: `product ${index + 1}`,
+  }));
+  assert.throws(
+    () =>
+      validateTarget({
+        products,
+        country: 'United States',
+        region: '',
+        product: '',
+        audience: 'BC',
+        acquisition_channel: 'tavily_web',
+      }),
+    /1–40个产品/,
   );
 });
 

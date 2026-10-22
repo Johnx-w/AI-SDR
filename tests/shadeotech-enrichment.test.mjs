@@ -31,10 +31,9 @@ test('明确标注 Fax 的 tel 链接和可见号码不进入电话字段，保�
   }
 });
 
-test('Shadeotech 页尾三个社媒、地图地址和明确城市列表均可提取；不收录 Houzz 或后续商品列表', () => {
+test('Shadeotech 页尾受支持社媒、地图地址和明确城市列表均可提取；忽略 WhatsApp、Houzz 和后续商品列表', () => {
   const e = combineWebsiteEvidence([{ url, content: fixture }]);
-  assert.deepEqual(e.social.map((s) => s.platform).sort(), ['Facebook', 'Instagram', 'WhatsApp']);
-  assert.equal(e.social.find((s) => s.platform === 'WhatsApp').url, 'https://wa.me/14694993322');
+  assert.deepEqual(e.social.map((s) => s.platform).sort(), ['Facebook', 'Instagram']);
   const a = e.addresses[0];
   assert.equal(a.street, '3235 Skylane Dr. Unit 111');
   assert.equal(a.city, 'Carrollton');
@@ -51,7 +50,7 @@ test('Shadeotech 页尾三个社媒、地图地址和明确城市列表均可提
   assert.ok(!e.service_areas.some((x) => /Stock|Price|Hide similarities/.test(x.name)));
   const out = enrichmentFields({ company_name: 'Shadeotech' }, e).fields;
   assert.equal(out['州 / 城市'], 'TX · Carrollton');
-  assert.equal(out.WhatsApp, 'https://wa.me/14694993322');
+  assert.equal(out.WhatsApp, undefined);
   assert.equal(out.Facebook, 'https://www.facebook.com/shadeotech');
   assert.equal(out.Instagram, 'https://www.instagram.com/shadeotech');
   assert.equal(out['服务地区'].split('\n').length, 55);

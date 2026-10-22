@@ -4,6 +4,11 @@ import { acquisitionApi } from '../services/acquisition';
 import { BatchProgress } from '../components/BatchProgress';
 import { Badge, Empty } from '../components/ui';
 import type { AcquisitionJob } from '../domain/types';
+import {
+  ALL_PRODUCTS_LABEL,
+  environmentPreferenceLabels,
+  isAllProductScope,
+} from '../domain/acquisition-products.mjs';
 
 const states: Record<string, string> = {
   running: '运行中',
@@ -87,7 +92,12 @@ export function ExecutionRecords({ selectedId }: { selectedId?: string }) {
                 {job.input.region ? ' · ' + job.input.region : ''}
               </strong>
               <small>
-                {job.input.products?.map((p) => p.label).join('、') || job.input.product}
+                {isAllProductScope(job.input)
+                  ? `${ALL_PRODUCTS_LABEL}（成品、半成品和零件）`
+                  : job.input.products?.map((p) => p.label).join('、') || job.input.product}
+                {job.input.environment_preference &&
+                  job.input.environment_preference !== 'all' &&
+                  ` · ${environmentPreferenceLabels[job.input.environment_preference]}`}
               </small>
               <small>
                 {new Date(job.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}

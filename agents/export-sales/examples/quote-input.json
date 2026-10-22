@@ -1,0 +1,65 @@
+{
+  "contract_version": "1.1",
+  "agent_id": "shutter",
+  "evaluation_time": "2026-10-22T15:00:00+08:00",
+  "event": {
+    "type": "inbound",
+    "message_id": "demo-quote-message-001",
+    "text": "We are an Australian shutter wholesaler. Please quote 100 PVC plantation shutters against the attached specification schedule, including freight to Melbourne. Could you also confirm delivery timing?"
+  },
+  "conversation": {
+    "id": "demo-quote-001",
+    "revision": 2,
+    "customer_id": "demo-business-002",
+    "channel": "email",
+    "language": "en",
+    "buyer_status": "b2b",
+    "history_summary": "虚构协议演示：海外批发商，已提供规格清单；本轮索取正式报价、运费和交付确认。"
+  },
+  "company_context": {
+    "name": null,
+    "origin_country": "CN",
+    "role": "exporter",
+    "approved_facts": []
+  },
+  "demand_context": [
+    {
+      "id": "demo-demand-quote",
+      "product_agent_id": "shutter",
+      "lead_agent_id": "shutter",
+      "ownership": "ai",
+      "purchase_purpose": "business",
+      "product_type": "PVC plantation shutter",
+      "purchase_forms": ["finished"],
+      "project_context": "none",
+      "facts": {
+        "buyer_role": "wholesaler",
+        "material": "PVC",
+        "quantity": 100,
+        "destination": "Melbourne, Australia",
+        "specification_schedule": "本演示仅记录客户声称有附件；无可读取附件正文。"
+      },
+      "missing_fields": [
+        "verified_specification_schedule",
+        "approved_price",
+        "approved_freight",
+        "approved_delivery"
+      ],
+      "sales_stage": "requirements",
+      "handoff_ack_sent": false,
+      "human_return_note": null
+    }
+  ],
+  "knowledge": [],
+  "policy": {
+    "follow_up_enabled": false,
+    "follow_up_intervals_days": null,
+    "max_follow_ups": null,
+    "send_window": null,
+    "available_tools": []
+  },
+  "drawing_context": {
+    "assets": [],
+    "parameters": []
+  }
+}

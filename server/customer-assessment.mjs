@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { domainKey } from './website-identity.mjs';
 
-export const ASSESSMENT_RULE_VERSION = 'acquisition-v2.1';
+export const ASSESSMENT_RULE_VERSION = 'acquisition-v3.0';
 export const directionNames = { finished: '成品', materials: '材料配件', samples: '样本展示' };
 export const ASSESSMENT_HISTORY_FORMAT = 'evidence-v1';
 export function assessmentRating(snapshot) {
@@ -17,7 +17,7 @@ const labels = {
   V: '供货能力需求',
   I: '海关采购表现',
 };
-const maximums = { P: 35, R: 25, D: 15, V: 10, I: 15 };
+const maximums = { P: 40, R: 30, D: 20, V: 10 };
 const compact = (value) =>
   String(value ?? '')
     .replace(/\s+/g, ' ')
@@ -44,8 +44,8 @@ function dimensionScore(opportunity, at) {
   };
   const P = best(
     [
-      ['core_product', 35],
-      ['secondary_product', 25],
+      ['core_product', 40],
+      ['secondary_product', 30],
       ['adjacent_product', 10],
       ['unrelated_product', 0],
     ],
@@ -53,8 +53,8 @@ function dimensionScore(opportunity, at) {
   );
   const R = best(
     [
-      ['specialist_supply', 25],
-      ['general_supply', 20],
+      ['specialist_supply', 30],
+      ['general_supply', 25],
       ['installation_only', 10],
       ['no_supply_role', 0],
     ],
@@ -110,13 +110,13 @@ function dimensionScore(opportunity, at) {
     });
     const years = of('company_years').filter((f) => Number(f.value) >= 5 && Number(f.value) < 200);
     if (outlets.length >= 5 || dealers.length >= 10 || commercial.length >= 3) {
-      D.score = 15;
+      D.score = 20;
       D.facts = [
         ...current,
         ...(outlets.length >= 5 ? outlets : dealers.length >= 10 ? dealers : commercial),
       ];
     } else if (since.length || years.length || projects.length >= 2) {
-      D.score = 10;
+      D.score = 15;
       D.facts = [...current, ...(since.length ? since : years.length ? years : projects)];
     } else {
       D.score = 5;
@@ -131,10 +131,8 @@ function dimensionScore(opportunity, at) {
     [...custom, ...advanced],
     custom.length || advanced.length ? '' : '定制/电动或工程配套特征尚未取得依据',
   );
-  // File import is a separate module. Public webpages and query terms never supply customs points.
-  const I = group(null, [], '海关数据尚未接入或未关联，不代表没有进口');
-  I.components = { scale: null, frequency: null, recency: null };
-  const dimensions = { P, R, D, V, I };
+  // Customs analysis is a later, independent assessment, never an initial-score dimension.
+  const dimensions = { P, R, D, V };
   for (const [key, dimension] of Object.entries(dimensions)) dimension.maximum = maximums[key];
   return dimensions;
 }
@@ -151,7 +149,7 @@ function gradeOpportunity(opportunity, dimensions, research) {
     status = '暂不开发';
   else if (research.entity_type !== 'business') status = '待核实';
   else if (P.score === null || R.score === null) status = '待核实';
-  else if (P.score < 25 || R.score < 20) {
+  else if (P.score < 30 || R.score < 25) {
     grade = 'C';
     status = '暂缓开发';
   } else if (D.score === null) status = '待补全';
@@ -208,7 +206,14 @@ export function assessCompany({ research, target, at = Date.now(), id }) {
     source: research.incomplete_reason ? 'research_incomplete' : 'verified_website_research',
     website: research.source_url,
     companyName: research.company_name,
-    target: { product: target.product, country: target.country },
+    target: {
+      product: target.product,
+      country: target.country,
+      ...(target.product_scope ? { product_scope: target.product_scope } : {}),
+      ...(target.environment_preference
+        ? { environment_preference: target.environment_preference }
+        : {}),
+    },
     grade: best?.grade || null,
     status: best?.status || (research.entity_type === 'individual' ? '暂不开发' : '待核实'),
     score: best?.score ?? 0,
@@ -224,12 +229,11 @@ export function assessCompany({ research, target, at = Date.now(), id }) {
             score: null,
             maximum,
             facts: [],
-            missing:
-              key === 'I' ? '海关数据尚未接入或未关联' : '本轮未取得可用于规则评分的结构化证据',
+            missing: '本轮未取得可用于规则评分的结构化证据',
           },
         ]),
       ),
-    missing: best?.missing || ['本轮未取得对应产品的可验证评分事实', '海关数据尚未接入或未关联'],
+    missing: best?.missing || ['本轮未取得对应产品的可验证评分事实'],
     opportunities,
     facts: research.facts || [],
     entityType: research.entity_type,
@@ -256,7 +260,10 @@ export function formatAssessmentReason(snapshot) {
       ([key, d]) =>
         key + ' ' + labels[key] + '：' + (d.score === null ? '未知' : d.score) + '/' + d.maximum,
     ),
-    '海关：规模5/频率6/新近性4；当前未接入或未关联，不假设15分。',
+    // Preserve the explanation when formatting a historical five-dimension snapshot.
+    ...(snapshot.dimensions.I
+      ? ['海关：规模5/频率6/新近性4；当前未接入或未关联，不假设15分。']
+      : []),
   ];
   if (snapshot.incompleteReason) lines.push('本轮研究限制：' + snapshot.incompleteReason);
   if (snapshot.missing.length) lines.push('待补充：' + snapshot.missing.join('；'));

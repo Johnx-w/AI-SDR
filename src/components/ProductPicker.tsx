@@ -1,7 +1,12 @@
 import { useState } from 'react';
 import { Check, ChevronDown, Plus, Search, X } from 'lucide-react';
 import { acquisitionApi } from '../services/acquisition';
-import { directionLabels, validateProduct } from '../domain/acquisition-products.mjs';
+import {
+  directionLabels,
+  MAX_SELECTED_PRODUCTS,
+  MAX_SELECTED_PRODUCT_CHARACTERS,
+  validateProduct,
+} from '../domain/acquisition-products.mjs';
 import type { ProductSelection } from '../domain/types';
 
 const emptyProduct: ProductSelection = {
@@ -43,8 +48,13 @@ export function ProductPicker({
         .includes(search.toLowerCase()),
   );
   const update = (next: ProductSelection[]) => {
-    if (next.length > 12 || next.map((p) => p.value).join(', ').length > 500) {
-      setError('每轮最多选择12个产品，英文名称合计不超过500字。请分成多个计划。');
+    if (
+      next.length > MAX_SELECTED_PRODUCTS ||
+      next.map((p) => p.value).join(', ').length > MAX_SELECTED_PRODUCT_CHARACTERS
+    ) {
+      setError(
+        `每轮最多选择${MAX_SELECTED_PRODUCTS}个产品，英文名称合计不超过${MAX_SELECTED_PRODUCT_CHARACTERS}字。请分成多个计划。`,
+      );
       return;
     }
     setError('');
@@ -56,6 +66,24 @@ export function ProductPicker({
       exists
         ? selected.filter((p) => p.value.toLowerCase() !== product.value.toLowerCase())
         : [...selected, product],
+    );
+  };
+  const toggleGroup = (group: string) => {
+    const products = all.filter((product) => product.group === group);
+    const groupValues = new Set(products.map((product) => product.value.toLowerCase()));
+    const allSelected = products.every((product) =>
+      selected.some((item) => item.value.toLowerCase() === product.value.toLowerCase()),
+    );
+    update(
+      allSelected
+        ? selected.filter((product) => !groupValues.has(product.value.toLowerCase()))
+        : [
+            ...selected,
+            ...products.filter(
+              (product) =>
+                !selected.some((item) => item.value.toLowerCase() === product.value.toLowerCase()),
+            ),
+          ],
     );
   };
   async function add() {
@@ -70,8 +98,9 @@ export function ProductPicker({
           .filter(Boolean),
       });
       if (
-        selected.length >= 12 ||
-        [...selected.map((p) => p.value), product.value].join(', ').length > 500
+        selected.length >= MAX_SELECTED_PRODUCTS ||
+        [...selected.map((p) => p.value), product.value].join(', ').length >
+          MAX_SELECTED_PRODUCT_CHARACTERS
       )
         throw new Error('已达到本轮产品上限，请先移除部分产品');
       const actual = common ? await acquisitionApi.saveProduct(product) : product;
@@ -117,7 +146,10 @@ export function ProductPicker({
       <details className="acq-product-menu">
         <summary>
           <Search size={15} />
-          选择产品 <span>{selected.length}/12</span>
+          选择产品{' '}
+          <span>
+            {selected.length}/{MAX_SELECTED_PRODUCTS}
+          </span>
           <ChevronDown size={14} />
         </summary>
         <div className="acq-product-browser">
@@ -147,34 +179,54 @@ export function ProductPicker({
             ))}
           </div>
           <div className="acq-product-options">
-            {[...new Set(visible.map((p) => p.group))].map((group) => (
-              <section key={group}>
-                <h4>{group}</h4>
-                {visible
-                  .filter((p) => p.group === group)
-                  .map((p) => {
-                    const checked = selected.some(
-                      (s) => s.value.toLowerCase() === p.value.toLowerCase(),
-                    );
-                    return (
+            {[...new Set(visible.map((p) => p.group))].map((group) => {
+              const groupProducts = all.filter((product) => product.group === group);
+              const canSelectAll = groupProducts.some((product) => product.selectAll);
+              const allSelected = groupProducts.every((product) =>
+                selected.some((item) => item.value.toLowerCase() === product.value.toLowerCase()),
+              );
+              return (
+                <section key={group}>
+                  <div className="acq-product-group-heading">
+                    <h4>{group}</h4>
+                    {canSelectAll && (
                       <button
                         type="button"
-                        className={checked ? 'selected' : ''}
-                        aria-pressed={checked}
+                        className="acq-product-select-all"
+                        aria-pressed={allSelected}
                         disabled={disabled || saving}
-                        key={p.value}
-                        onClick={() => toggle(p)}
+                        onClick={() => toggleGroup(group)}
                       >
-                        <span className="acq-checkbox">{checked && <Check size={13} />}</span>
-                        <span>
-                          {p.label}
-                          <small>{p.value}</small>
-                        </span>
+                        {allSelected ? '取消全选' : '全选'}
                       </button>
-                    );
-                  })}
-              </section>
-            ))}
+                    )}
+                  </div>
+                  {visible
+                    .filter((p) => p.group === group)
+                    .map((p) => {
+                      const checked = selected.some(
+                        (s) => s.value.toLowerCase() === p.value.toLowerCase(),
+                      );
+                      return (
+                        <button
+                          type="button"
+                          className={checked ? 'selected' : ''}
+                          aria-pressed={checked}
+                          disabled={disabled || saving}
+                          key={p.value}
+                          onClick={() => toggle(p)}
+                        >
+                          <span className="acq-checkbox">{checked && <Check size={13} />}</span>
+                          <span>
+                            {p.label}
+                            <small>{p.value}</small>
+                          </span>
+                        </button>
+                      );
+                    })}
+                </section>
+              );
+            })}
             {!visible.length && <p className="muted">没有匹配的产品，可以添加新产品。</p>}
           </div>
         </div>

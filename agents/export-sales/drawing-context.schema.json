@@ -1,0 +1,243 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "drawing-context.schema.json",
+  "title": "图纸资产、提取候选与人工审核参数",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["assets", "parameters"],
+  "properties": {
+    "assets": { "type": "array", "items": { "$ref": "#/definitions/asset" } },
+    "parameters": { "type": "array", "items": { "$ref": "#/definitions/parameter" } }
+  },
+  "definitions": {
+    "nullableText": { "type": ["string", "null"] },
+    "value": { "type": ["number", "string", "null"] },
+    "region": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["coordinate_system", "bbox"],
+          "properties": {
+            "coordinate_system": { "const": "normalized" },
+            "bbox": {
+              "type": "array",
+              "minItems": 4,
+              "maxItems": 4,
+              "items": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        }
+      ]
+    },
+    "technicalReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reviewed_by", "reviewed_at"],
+      "properties": {
+        "status": { "enum": ["pending", "approved", "rejected"] },
+        "reviewed_by": { "$ref": "#/definitions/nullableText" },
+        "reviewed_at": { "$ref": "#/definitions/nullableText" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "approved" } } },
+          "then": {
+            "properties": {
+              "reviewed_by": { "type": "string", "minLength": 1 },
+              "reviewed_at": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      ]
+    },
+    "externalRelease": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "audience", "customer_ids", "approved_by", "approved_at"],
+      "properties": {
+        "status": { "enum": ["pending", "approved", "blocked"] },
+        "audience": { "enum": ["none", "all_b2b", "specified_customers"] },
+        "customer_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "approved_by": { "$ref": "#/definitions/nullableText" },
+        "approved_at": { "$ref": "#/definitions/nullableText" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "approved" } } },
+          "then": {
+            "properties": {
+              "audience": { "enum": ["all_b2b", "specified_customers"] },
+              "approved_by": { "type": "string", "minLength": 1 },
+              "approved_at": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "audience": { "const": "specified_customers" } } },
+          "then": { "properties": { "customer_ids": { "minItems": 1 } } }
+        }
+      ]
+    },
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "asset_id",
+        "origin",
+        "product_skus",
+        "component",
+        "drawing_id",
+        "drawing_revision",
+        "file_name",
+        "storage_ref",
+        "content_hash",
+        "media_type",
+        "document_status",
+        "page_number",
+        "view_name",
+        "parent_asset_id",
+        "technical_review",
+        "external_release"
+      ],
+      "properties": {
+        "asset_id": { "type": "string", "minLength": 1 },
+        "origin": { "enum": ["company", "customer"] },
+        "product_skus": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "component": { "$ref": "#/definitions/nullableText" },
+        "drawing_id": { "type": "string", "minLength": 1 },
+        "drawing_revision": { "type": "string", "minLength": 1 },
+        "file_name": { "type": "string", "minLength": 1 },
+        "storage_ref": { "type": "string", "minLength": 1 },
+        "content_hash": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+        "media_type": { "type": "string", "minLength": 1 },
+        "document_status": { "enum": ["current", "superseded", "withdrawn"] },
+        "page_number": { "type": ["integer", "null"], "minimum": 1 },
+        "view_name": { "$ref": "#/definitions/nullableText" },
+        "parent_asset_id": { "$ref": "#/definitions/nullableText" },
+        "technical_review": { "$ref": "#/definitions/technicalReview" },
+        "external_release": { "$ref": "#/definitions/externalRelease" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "external_release": { "properties": { "status": { "const": "approved" } } }
+            }
+          },
+          "then": {
+            "properties": {
+              "content_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+              "technical_review": { "properties": { "status": { "const": "approved" } } }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "origin": { "const": "customer" },
+              "external_release": { "properties": { "status": { "const": "approved" } } }
+            }
+          },
+          "then": {
+            "properties": {
+              "external_release": {
+                "properties": { "audience": { "const": "specified_customers" } }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "parameter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "parameter_id",
+        "asset_id",
+        "product_sku",
+        "component",
+        "parameter_name",
+        "kind",
+        "page_number",
+        "view_name",
+        "location_label",
+        "source_region",
+        "raw_text",
+        "extraction_method",
+        "extracted_value",
+        "extracted_unit",
+        "extracted_tolerance",
+        "extraction_notes",
+        "review_status",
+        "approved_value",
+        "approved_unit",
+        "approved_tolerance",
+        "reviewed_by",
+        "reviewed_at",
+        "review_note"
+      ],
+      "properties": {
+        "parameter_id": { "type": "string", "minLength": 1 },
+        "asset_id": { "type": "string", "minLength": 1 },
+        "product_sku": { "type": "string", "minLength": 1 },
+        "component": { "$ref": "#/definitions/nullableText" },
+        "parameter_name": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["dimension", "structure_note", "material", "other"] },
+        "page_number": { "type": ["integer", "null"], "minimum": 1 },
+        "view_name": { "$ref": "#/definitions/nullableText" },
+        "location_label": { "$ref": "#/definitions/nullableText" },
+        "source_region": { "$ref": "#/definitions/region" },
+        "raw_text": { "type": "string" },
+        "extraction_method": { "enum": ["native_text", "ocr", "vision", "cad", "manual"] },
+        "extracted_value": { "$ref": "#/definitions/value" },
+        "extracted_unit": { "$ref": "#/definitions/nullableText" },
+        "extracted_tolerance": { "$ref": "#/definitions/nullableText" },
+        "extraction_notes": { "$ref": "#/definitions/nullableText" },
+        "review_status": { "enum": ["pending", "approved", "rejected", "superseded"] },
+        "approved_value": { "$ref": "#/definitions/value" },
+        "approved_unit": { "$ref": "#/definitions/nullableText" },
+        "approved_tolerance": { "$ref": "#/definitions/nullableText" },
+        "reviewed_by": { "$ref": "#/definitions/nullableText" },
+        "reviewed_at": { "$ref": "#/definitions/nullableText" },
+        "review_note": { "$ref": "#/definitions/nullableText" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "review_status": { "const": "approved" } } },
+          "then": {
+            "properties": {
+              "approved_value": { "type": ["number", "string"], "minLength": 1 },
+              "page_number": { "type": "integer" },
+              "reviewed_by": { "type": "string", "minLength": 1 },
+              "reviewed_at": { "type": "string", "minLength": 1 }
+            },
+            "anyOf": [
+              { "properties": { "source_region": { "type": "object" } } },
+              { "properties": { "location_label": { "type": "string", "minLength": 1 } } }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "review_status": { "const": "approved" },
+              "kind": { "const": "dimension" }
+            }
+          },
+          "then": { "properties": { "approved_unit": { "type": "string", "minLength": 1 } } }
+        }
+      ]
+    }
+  }
+}

@@ -57,7 +57,7 @@ export function mapFeishuRecord(record) {
     city: '',
     address: read('详细地址'),
     serviceAreas: read('服务地区'),
-    social: ['Facebook', 'Instagram', 'LinkedIn', 'WhatsApp'].flatMap((platform) =>
+    social: ['Facebook', 'Instagram', 'LinkedIn'].flatMap((platform) =>
       read(platform)
         .split('\n')
         .filter(Boolean)

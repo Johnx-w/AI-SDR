@@ -3,6 +3,7 @@ import { normalizePhoneLines, selectBusinessPhones } from './phone-format.mjs';
 import { productsRelevant, countryMatches } from './relevance.mjs';
 import { customerEligibility } from './customer-eligibility.mjs';
 import acquisition from '../src/data/acquisition.json' with { type: 'json' };
+import { isAllProductScope } from '../src/domain/acquisition-products.mjs';
 import { verifyCompanyIdentity } from './company-identity.mjs';
 import {
   assessmentInstructions,
@@ -12,6 +13,9 @@ import {
 
 // Shared, evidence-checked business research used by the production and replay workflows.
 export function companyResearchRequest(page, target = {}) {
+  const scopeInstructions = isAllProductScope(target)
+    ? '本次为all全窗饰范围：调查企业全部适用的窗饰成品、半成品、专用材料和配件业务，允许window coverings、window furnishings、blinds、shades、curtains等真实泛称，不要求命中某个细品类。environment_preference仅是发现阶段的优先顺序，不是产品准入限制；不能因另一环境而排除。generic screen、motor、fabric等词本身不能证明窗饰行业。半成品归materials；独立样本册/展示资料业务不在默认范围。只按官网事实输出实际经营产品、供货角色和可能适配方向，不从自产成品推测其已经采购配件，不把目录填进demand_products。'
+    : '本次为specific指定产品范围：按target实际选定的产品和供货方向调查、匹配，其他产品可以如实记录但不能冒充目标产品证据。';
   return {
     messages: [
       {
@@ -30,6 +34,8 @@ demand_products 只提取企业自身明确公开的采购、求购、寻找供�
 main_product_preference 用一两句中文概括网站主营产品/产品线侧重，是分析而非实际采购偏好。必须基于产品介绍证据，禁止采购量、预算、周期、意向、决策人等推测。不得重复搜索目标当成主营产品。区分 zip screens、Venetian blinds、plantation shutters、roller shutters。如最新可见正文明确说不经营某产品，应剔除该产品；不可沿用旧记录或旧 JSON-LD 的过时产品。
 address 只能是企业实际办公/门店/工厂地址；服务城市不可冒充公司所在地。可将明确邮政地址标准化，如 TX 75006 对应美国；不能仅凭城市名或电话区号推国家。service_areas 只包括明确服务覆盖地区。不得输出邮箱/电话/社媒，由独立提取器负责。不得自行生成用户评级。` +
           assessmentInstructions +
+          '\n' +
+          scopeInstructions +
           `
 另输出 customer_types 数组，每项是带独立原文证据的经营角色（value,quote,source_url），允许兼营多个角色。可选值：${acquisition.customerTypes.map((t) => t.value + '=' + t.label).join('，')}。customer_type仍保留主要角色，但不能用主要角色覆盖其他已证实角色。target.customer_types多选时任意一种匹配即可，搜索选择不是企业事实。
 target.preferred_requirements 是优先偏好，不是准入条件；能证实的相关特征放入 preference_evidence 数组（value为中文事实简述，quote/source_url为原文出处），没有证据留空。
@@ -388,6 +394,7 @@ export function parseCompanyResearch(response, page, target = {}) {
       pages,
       target,
       [...products, ...demand_products],
+      facts.filter((fact) => ['products', 'demand_products'].includes(fact.field)),
     ),
     facts,
   };
@@ -627,7 +634,7 @@ export function researchFields(research, evidence, existing = {}, researchPages 
     const value = [...normalized.values()].join('\n');
     if (value) fields[label] = value;
   }
-  for (const platform of ['Facebook', 'Instagram', 'LinkedIn', 'WhatsApp']) {
+  for (const platform of ['Facebook', 'Instagram', 'LinkedIn']) {
     const value = join(
       existing[platform],
       (evidence.social || []).filter((s) => s.platform === platform).map((s) => s.url),
@@ -650,7 +657,7 @@ export function mergeResearchFields(existing, incoming) {
         ? v.text || v.link || ''
         : String(v ?? '');
   const fields = { ...incoming };
-  for (const name of ['邮箱', 'Facebook', 'Instagram', 'LinkedIn', 'WhatsApp']) {
+  for (const name of ['邮箱', 'Facebook', 'Instagram', 'LinkedIn']) {
     if (!fields[name]) continue;
     const lines = [...text(existing[name]).split('\n'), ...text(fields[name]).split('\n')]
       .map((s) => s.trim())

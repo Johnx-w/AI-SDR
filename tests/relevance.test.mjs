@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { pageRelevance, productsRelevant, countryMatches } from '../server/relevance.mjs';
+import { builtinProducts } from '../src/domain/acquisition-products.mjs';
 
 const target = {
   product: 'outdoor zip screens, pergolas, awnings, full cassette folding arm awnings',
@@ -102,4 +103,28 @@ test('半成品按室内外配件比较，不混入成品窗帘', () => {
     productsRelevant(['zip screen parts'], { product: 'outdoor zip screens' }),
     'not_matched',
   );
+});
+
+test('内外成品目录中的每一品类都能独立匹配，细分品类不被通用名称冒充', () => {
+  const finished = builtinProducts.filter((product) => product.direction === 'finished');
+  for (const product of finished)
+    assert.equal(
+      productsRelevant([product.value], { products: [product] }),
+      'matched',
+      product.label,
+    );
+  for (const [target, actual] of [
+    ['straight drop awnings', 'folding arm awnings'],
+    ['folding arm awnings', 'window awnings'],
+    ['pergola awnings', 'pergolas'],
+    ['outdoor roller blinds', 'roller blinds'],
+    ['outdoor venetian blinds', 'Venetian blinds'],
+    ['solar roller shades', 'roller blinds'],
+    ['sheer curtains', 'fabric curtains'],
+    ['panel track blinds', 'vertical blinds'],
+  ])
+    assert.equal(productsRelevant([actual], { product: target }), 'not_matched', target);
+  assert.equal(productsRelevant(['纱帘'], { product: 'sheer curtains' }), 'matched');
+  assert.equal(productsRelevant(['竹帘'], { product: 'woven wood shades' }), 'matched');
+  assert.equal(productsRelevant(['户外百叶帘'], { product: 'outdoor venetian blinds' }), 'matched');
 });

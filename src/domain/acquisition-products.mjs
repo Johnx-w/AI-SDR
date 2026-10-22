@@ -1,6 +1,15 @@
 import acquisition from '../data/acquisition.json' with { type: 'json' };
 
 export const directionLabels = { finished: '成品', materials: '材料配件', samples: '样本展示' };
+export const MAX_SELECTED_PRODUCTS = 40;
+export const MAX_SELECTED_PRODUCT_CHARACTERS = 1000;
+export const ALL_PRODUCTS_LABEL = '全部窗饰业务';
+export const ALL_PRODUCTS_VALUE = 'window coverings';
+export const environmentPreferenceLabels = {
+  all: '室内室外均可',
+  indoor: '优先室内',
+  outdoor: '优先室外',
+};
 export const builtinProducts = acquisition.productGroups.flatMap((group) =>
   group.products.map(([value, label]) => ({
     id: value,
@@ -8,9 +17,18 @@ export const builtinProducts = acquisition.productGroups.flatMap((group) =>
     label,
     direction: group.direction,
     group: group.name,
+    selectAll: group.selectAll,
     aliases: [],
   })),
 );
+
+// Existing plans with concrete products retain their original scope. New callers
+// may omit products entirely to use the broad company-wide acquisition default.
+export function isAllProductScope(target = {}) {
+  if (target.product_scope === 'all') return true;
+  if (target.product_scope === 'specific') return false;
+  return !target.products?.length && !String(target.product || '').trim();
+}
 
 // Snapshot plain product names, never complete search expressions. Plans keep their own copy.
 export function validateProduct(value) {
@@ -50,6 +68,17 @@ export function validateProduct(value) {
 }
 
 export function productTerms(target) {
+  if (isAllProductScope(target))
+    return [
+      'window coverings',
+      'window furnishings',
+      'curtain fabrics',
+      'blind components',
+      'semi finished blinds',
+      ...builtinProducts
+        .filter((product) => product.direction !== 'samples')
+        .map((product) => product.value),
+    ];
   if (target.products?.length)
     return [...new Set(target.products.flatMap((p) => [p.value, ...(p.aliases || [])]))];
   return String(target.product || '')
