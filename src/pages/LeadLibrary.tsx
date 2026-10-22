@@ -62,11 +62,17 @@ interface Prospect {
   fields: Record<string, string>;
 }
 const typeNames: Record<string, string> = {
+  supplier: '专业供应商',
+  importer: '进口商',
+  trader: '贸易商',
+  brand: '品牌商',
   installer: '安装服务商',
   distributor: '批发／经销商',
+  wholesaler: '批发商',
   retailer: '零售商',
   contractor: '工程承包商',
   manufacturer: '制造商',
+  service_provider: '服务商',
   unknown: '待核实',
 };
 const marketNames: Record<string, string> = {
@@ -84,6 +90,38 @@ const safeUrl = (s: string) => {
   } catch {
     return undefined;
   }
+};
+const shortRatingReason = (lead: Prospect) => {
+  const lines = (lead.assessment?.evidenceReason || lead.ratingReason || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return (
+    lines.find((line) =>
+      /^(主营产品|明确经营品类|专业供货角色|综合供货角色|研究限制|待补充依据)/.test(line),
+    ) ||
+    lines.find((line) => line.startsWith('依据：')) ||
+    (['待核实', '待补全', '未评级'].includes(lead.grade)
+      ? lead.assessment?.incompleteReason || '关键评级依据仍待补充'
+      : lines[0] || '打开客户档案查看评级依据')
+  );
+};
+const contactPreparation = (lead: Prospect) => {
+  const count = (value: string) =>
+    value
+      .split(/\n|[、；;]/)
+      .map((item) => item.trim())
+      .filter(Boolean).length;
+  if (lead.email && lead.phone)
+    return {
+      label: '邮箱与电话已记录',
+      detail: `${count(lead.email)} 个邮箱 · ${count(lead.phone)} 个电话，需核对可用性`,
+    };
+  if (lead.email) return { label: '已记录邮箱', detail: `${count(lead.email)} 个公开邮箱入口` };
+  if (lead.phone) return { label: '已记录电话', detail: `${count(lead.phone)} 个公开电话入口` };
+  if (lead.contactEvidence.length)
+    return { label: '已有联系线索', detail: `${lead.contactEvidence.length} 条来源证据` };
+  return { label: '联系入口待补', detail: '未发现公开邮箱或办公电话' };
 };
 export function LeadLibrary() {
   const { notify } = useWorkspace();
@@ -189,7 +227,7 @@ export function LeadLibrary() {
             name: '待补资料',
             value: leads.filter((l) => ['未评级', '待核实', '待补全'].includes(l.grade)).length,
           },
-          { name: '可用邮箱记录', value: leads.filter((l) => l.email).length },
+          { name: '已记录邮箱', value: leads.filter((l) => l.email).length },
         ].map((x) => (
           <div key={x.name}>
             <span>{x.name}</span>
@@ -298,8 +336,8 @@ export function LeadLibrary() {
                   <th>客户／来源</th>
                   <th>市场与客户类型</th>
                   <th>用户评级</th>
-                  <th>证据状态</th>
-                  <th>联系状态</th>
+                  <th>联系准备</th>
+                  <th>开发状态</th>
                   <th />
                 </tr>
               </thead>
@@ -360,16 +398,19 @@ export function LeadLibrary() {
                               {l.grade === '未评级' ? '尚未自动评级' : '手工记录'}
                             </span>
                           )}
+                          <span className="rating-reason-short">{shortRatingReason(l)}</span>
                         </div>
                       </div>
                     </td>
                     <td>
-                      <Badge tone={l.grade === 'A' ? 'green' : 'neutral'}>{l.grade}</Badge>
-                      <span className="subtext">{`${l.facts.length} 条官网事实`}</span>
+                      <Badge tone={l.email || l.phone ? 'green' : 'neutral'}>
+                        {contactPreparation(l).label}
+                      </Badge>
+                      <span className="subtext">{contactPreparation(l).detail}</span>
                     </td>
                     <td>
                       <Badge>{l.status}</Badge>
-                      <span className="subtext">{l.email ? '已发现邮箱' : '待补充联系人'}</span>
+                      <span className="subtext">由业务跟进记录独立更新</span>
                     </td>
                     <td>
                       <button

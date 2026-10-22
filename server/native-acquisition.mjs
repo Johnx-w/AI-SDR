@@ -23,6 +23,7 @@ import {
   assessCompany,
   assessmentId,
   assessmentRating,
+  formatAssessmentEvidence,
   ASSESSMENT_RULE_VERSION,
 } from './customer-assessment.mjs';
 import { AssessmentService } from './assessment-service.mjs';
@@ -147,6 +148,8 @@ export class NativeAcquisition {
             manualOverride,
             product: stored.product,
             direction: stored.direction,
+            evidenceReason: formatAssessmentEvidence(stored),
+            incompleteReason: stored.incompleteReason,
             missing: stored.missing,
             dimensions: Object.fromEntries(
               Object.entries(stored.dimensions).map(([k, d]) => [
@@ -449,15 +452,23 @@ export class NativeAcquisition {
         const research = {
           ok: false,
           stage: 'done',
-          reason: '官网内容与目标产品不相关，已预筛排除',
+          reason:
+            input.query_mode === 'auto'
+              ? '本轮官网正文未取得目标品类依据，待补充核实'
+              : '官网内容与目标产品不相关，已预筛排除',
           source_url: item.source_url,
           product_match: 'not_matched',
           relevance,
           checked_urls: page.checked_urls,
+          review_required: input.query_mode === 'auto',
         };
         op.research = research;
         this.store.save(op);
-        const output = this.output(op, { research, reason: research.reason });
+        const output = this.output(op, {
+          research,
+          reason: research.reason,
+          ...(research.review_required ? { outcome: 'review' } : {}),
+        });
         this.store.complete(op, output);
         return output;
       }
@@ -508,6 +519,7 @@ export class NativeAcquisition {
       ) {
         const output = this.output(op, {
           research,
+          ...(research.review_required ? { outcome: 'review' } : {}),
           reason: research.reason || '官网企业名称缺乏可验证证据',
         });
         this.store.complete(op, output);

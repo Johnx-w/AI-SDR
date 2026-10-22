@@ -9,6 +9,8 @@ import { BatchJobs, validateCount } from './batch-jobs.mjs';
 import { createAcquisitionProvider } from './acquisition-provider.mjs';
 import { ApiConnections } from './api-connections.mjs';
 import { AcquisitionSchedules } from './acquisition-schedules.mjs';
+import { ProductCatalog } from './product-catalog.mjs';
+import { searchPlan } from './search-plan.mjs';
 
 class ApiError extends Error {
   constructor(status, message) {
@@ -24,8 +26,10 @@ const types = {
   '.png': 'image/png',
   '.ico': 'image/x-icon',
 };
+const maxJsonBytes = 32768;
 export function validateInput(input) {
   const target = validateTarget(input);
+  if (target.query_mode === 'auto') return { ...target, search_query: searchPlan(target)[0].query };
   if (
     typeof input.search_query !== 'string' ||
     !input.search_query.trim() ||
@@ -41,7 +45,7 @@ async function readJson(request) {
   let size = 0;
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > 8192) throw new ApiError(413, '请求体不能超过 8 KB');
+    if (size > maxJsonBytes) throw new ApiError(413, '请求体不能超过 32 KB');
     chunks.push(chunk);
   }
   try {
@@ -92,6 +96,20 @@ export function createApp({
       readLeads: async () => (await readLeads()).leads,
     }));
   let schedules;
+  let products;
+  const catalog = () =>
+    (products ??= new ProductCatalog(env.PRODUCT_DB_PATH || env.BATCH_DB_PATH || ':memory:'));
+  const checkCapabilities = (input) => {
+    if (
+      provider.info.provider !== 'native' &&
+      (input.customer_types?.length ||
+        input.required_requirements?.length ||
+        input.preferred_requirements ||
+        input.products?.length)
+    )
+      throw new ApiError(400, '多类型、补充条件与产品目录获客需要在API连接中选择后端直连引擎');
+    return input;
+  };
   const plans = () =>
     (schedules ??= new AcquisitionSchedules({
       path: env.SCHEDULE_DB_PATH || ':memory:',
@@ -169,6 +187,18 @@ export function createApp({
         const prefix = url.pathname.startsWith('/api/v1/acquisition')
           ? '/api/v1/acquisition'
           : '/api/v1/integrations/n8n';
+        if (url.pathname === `${prefix}/products`) {
+          if (request.method === 'GET') return json(response, 200, { products: catalog().list() });
+          if (request.method === 'POST')
+            return json(response, 201, catalog().save(await readJson(request)));
+          throw new ApiError(405, '不支持的产品目录操作');
+        }
+        if (url.pathname === `${prefix}/search-preview` && request.method === 'POST') {
+          const input = checkCapabilities(
+            validateInput({ ...(await readJson(request)), query_mode: 'auto' }),
+          );
+          return json(response, 200, { queries: searchPlan(input) });
+        }
         if (
           url.pathname === `${prefix}/schedules` ||
           url.pathname.startsWith(`${prefix}/schedules/`)
@@ -192,7 +222,7 @@ export function createApp({
                 name: body.name,
                 timing: body.timing,
                 input: {
-                  ...validateInput(body.input),
+                  ...checkCapabilities(validateInput(body.input)),
                   target_count: validateCount(body.input?.target_count),
                 },
               },
@@ -286,7 +316,7 @@ export function createApp({
             if (running) throw new ApiError(409, '单次任务正在执行');
             const body = await readJson(request);
             const input = {
-              ...validateInput(body),
+              ...checkCapabilities(validateInput(body)),
               target_count: validateCount(body.target_count),
             };
             const job = manager.create(input, request.headers['idempotency-key']);
@@ -307,7 +337,7 @@ export function createApp({
         if (url.pathname === `${prefix}/runs` && request.method === 'POST') {
           if (!provider.info.configured)
             throw new ApiError(503, '获客执行引擎尚未配置，请先完成接入配置。');
-          const input = validateInput(await readJson(request));
+          const input = checkCapabilities(validateInput(await readJson(request)));
           const requestId = request.headers['idempotency-key'] || randomUUID();
           if (typeof requestId !== 'string' || !/^[\w-]{8,100}$/.test(requestId))
             throw new ApiError(400, '无效的 Idempotency-Key');
@@ -385,6 +415,7 @@ export function createApp({
   });
   server.on('listening', () => plans().start());
   server.on('close', () => {
+    products?.close();
     schedules?.close();
     if (batch && !batch.busy) batch.close();
     if (!batch?.busy && !running) provider.close();

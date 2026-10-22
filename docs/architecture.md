@@ -22,7 +22,15 @@
 | POST | `/api/v1/integrations/n8n/runs`       | 校验业务参数，调用已认证的真实 Webhook，返回原始结果       |
 | GET  | `/api/v1/integrations/n8n/executions` | 可选 Public API 历史，仅返回 ID、状态和时间字段            |
 
-POST body 为六个 WorkflowInput 字段。浏览器传入 `Idempotency-Key`；服务端转发 `request_id` 和 `X-Request-ID`。成功返回：
+统一入口 `/api/v1/acquisition` 由当前执行引擎处理，并额外提供：
+
+- `GET/POST /products`：读取常用产品目录或保存一个自定义产品。
+- `POST /search-preview`：只生成自动搜索词预览，不调用付费搜索。
+- `GET/POST /jobs` 与 `GET/POST /jobs/:id/:action`：创建、查询、停止或恢复持久化批量任务。
+- `GET/POST /schedules` 与 `POST /schedules/:id/:action`：创建、查询、暂停、恢复或关闭定时计划。
+- `GET /locations`：返回国家与地区联动选项。
+
+旧版 `runs` body 为六个 WorkflowInput 字段。新版 `jobs` 和 `schedules` 还接收结构化产品快照、多选客户类型、优先条件与必需条件；请求体上限为32KB。浏览器传入 `Idempotency-Key`；服务端转发 `request_id` 和 `X-Request-ID`。旧版单次运行成功返回：
 
 ```json
 {
@@ -55,4 +63,4 @@ POST body 为六个 WorkflowInput 字段。浏览器传入 `Idempotency-Key`；�
 
 本次检查的取舍与后续维护建议见 [可维护性检查](maintenance-review.md)。
 
-MCP 是开发协助通道，业务运行使用服务端 HTTP。native 模式由 Node.js 直接调用 Tavily、DeepSeek 和飞书；原 n8n 仍可作为回退引擎。平台凭证仅保存于服务端环境，不进入前端或 Git。任务队列与操作日志已持久化到本机 SQLite，云端认证、定时计划、PostgreSQL 和多来源采集将在后续阶段建设。
+MCP 是开发协助通道，业务运行使用服务端 HTTP。native 模式由 Node.js 直接调用 Tavily、DeepSeek 和飞书；原 n8n 仍可作为回退引擎。平台凭证仅保存于服务端环境，不进入前端或 Git。任务队列、定时计划、产品目录、操作日志与评估快照已持久化到本机 SQLite；云端身份认证、正式数据库备份和多来源采集仍需在部署阶段建设。

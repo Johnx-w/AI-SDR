@@ -22,16 +22,13 @@ test('企业面向 B、C 或 BC 不影响全局准入，个人消费者始终淘
   }
 });
 
-test('制造商按自产实际品类比较，同品类淘汰，不误杀采购配件的成品工厂', () => {
+test('工厂和本地经营角色不做全局淘汰，具体供货机会另行判断', () => {
   const factory = {
     ...business,
     production_model: 'own_factory',
     manufactured_products: ['outdoor zip screens'],
   };
-  assert.equal(
-    customerEligibility(factory, { product: 'outdoor zip screens' }).code,
-    'same_category_factory',
-  );
+  assert.equal(customerEligibility(factory, { product: 'outdoor zip screens' }).status, 'eligible');
   assert.equal(
     customerEligibility(factory, { product: 'outdoor blinds awnings components and parts' }).status,
     'eligible',
@@ -40,14 +37,11 @@ test('制造商按自产实际品类比较，同品类淘汰，不误杀采购�
   assert.equal(
     customerEligibility({ ...factory, manufactured_products: [] }, { product: 'zip screens' })
       .status,
-    'insufficient_evidence',
+    'eligible',
   );
   assert.equal(
-    customerEligibility(
-      { ...factory, manufactured_products: ['awnings'] },
-      { product: 'full cassette folding arm awnings' },
-    ).code,
-    'same_category_factory',
+    customerEligibility({ ...business, operating_model: 'local_only' }).status,
+    'eligible',
   );
 });
 
@@ -62,7 +56,7 @@ test('Schema 中准入字段必填但允许无证据返回 null，数组独立�
   );
 });
 
-test('兼容 n8n 的独立 Code 节点包含准入与品类依赖，可执行相同规则', () => {
+test('兼容 n8n 的独立 Code 节点执行相同的企业主体准入规则', () => {
   const run = (subject, target) =>
     vm.runInNewContext(researchPolicyCode + '\ncustomerEligibility(subject,target)', {
       subject,
@@ -75,16 +69,7 @@ test('兼容 n8n 的独立 Code 节点包含准入与品类依赖，可执行相
     run(
       { ...business, production_model: 'own_factory', manufactured_products: ['Ziptrak'] },
       target,
-    ).code,
-    'same_category_factory',
+    ).status,
+    'eligible',
   );
-  const parsed = vm.runInNewContext(
-    researchPolicyCode +
-      '\n' +
-      parseCompanyResearch.toString() +
-      '\nparseCompanyResearch({choices:[{finish_reason:"stop",message:{content:"{}"}}]}, {source_url:"https://example.org/",page_text:""},target)',
-    { target },
-  );
-  assert.equal(parsed.ok, false);
-  assert.equal(parsed.eligibility.status, 'insufficient_evidence');
 });

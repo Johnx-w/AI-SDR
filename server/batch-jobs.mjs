@@ -51,6 +51,11 @@ export class BatchJobs {
         job.status = 'paused';
         job.reason = 'interrupted';
         job.pending = job.current ? 1 : 0;
+        for (const metric of job.searchStats || [])
+          if (metric.status === 'running') {
+            metric.status = 'interrupted';
+            metric.completedAt = new Date(this.now()).toISOString();
+          }
         this.save(job);
       }
   }
@@ -106,6 +111,9 @@ export class BatchJobs {
       pending: 0,
       searches: 0,
       researched: 0,
+      review: 0,
+      queryPlan: searchPlan(input),
+      searchStats: [],
       cursor: 0,
       queue: [],
       seen: [],
@@ -192,11 +200,21 @@ export class BatchJobs {
         record_id: row.record_id,
         name: records[0].name,
         executionId: output.execution_id,
+        assessment: output.assessment || null,
+        preferenceEvidence: output.research?.preference_evidence || [],
       });
     } else if (output?.更新 === 1 || output?.skipped_existing_count > 0) {
       job.skipped++;
       if (output?.更新 === 1) job.updated++;
       job.rows.push({ ...item, result: 'duplicate', reason: output.reason });
+    } else if (output?.outcome === 'review' || output?.research?.review_required) {
+      job.review = (job.review || 0) + 1;
+      job.rows.push({
+        ...item,
+        result: 'review',
+        reason: output.reason,
+        requirementChecks: output.research?.requirement_checks || [],
+      });
     } else if (
       output?.research &&
       (['rejected', 'insufficient_evidence'].includes(output.research.eligibility?.status) ||
@@ -206,6 +224,7 @@ export class BatchJobs {
           'audience_match',
           'customer_type_match',
           'profile_match',
+          'required_match',
         ].some(
           (key) =>
             ['not_matched', 'unknown'].includes(output.research[key]) &&
@@ -219,6 +238,23 @@ export class BatchJobs {
       job.rows.push({ ...item, result: 'failed', reason: output.reason });
     } else {
       throw new Error('写入结果无法确认');
+    }
+    const acceptedRow = job.rows.at(-1);
+    const metric = job.searchStats?.find((entry) => entry.id === item.search_id);
+    if (metric) {
+      metric.researched++;
+      const key = {
+        inserted: 'inserted',
+        duplicate: 'updated',
+        rejected: 'rejected',
+        review: 'review',
+        failed: 'failed',
+      }[acceptedRow.result];
+      if (key) metric[key]++;
+      if (acceptedRow.result === 'inserted') {
+        const grade = acceptedRow.assessment?.grade;
+        metric.ratings[['A', 'B', 'C'].includes(grade) ? grade : 'unrated']++;
+      }
     }
     const latest = this.get(job.id);
     if (latest.status === 'stopping') job.status = 'stopping';
@@ -263,7 +299,7 @@ export class BatchJobs {
           return;
         }
         if (!j.queue.length) {
-          const plan = searchPlan(j.input);
+          const plan = j.queryPlan || searchPlan(j.input);
           j.searchSignatures ||= [];
           let search;
           // Revisit a query only when excluded domains have changed. This can
@@ -284,11 +320,45 @@ export class BatchJobs {
             return;
           }
           j.searches++;
+          j.searchStats ||= [];
+          const metric = {
+            id: `${j.id}:search:${j.searches}`,
+            query: search.query,
+            country: search.country,
+            startedAt: new Date(this.now()).toISOString(),
+            status: 'running',
+            discovered: 0,
+            duplicates: 0,
+            queued: 0,
+            researched: 0,
+            inserted: 0,
+            updated: 0,
+            rejected: 0,
+            review: 0,
+            failed: 0,
+            ratings: { A: 0, B: 0, C: 0, unrated: 0 },
+          };
+          j.searchStats.push(metric);
           checkpoint(j);
-          const found = await this.discover(j.input, search, j.seen);
+          let found;
+          try {
+            found = await this.discover(j.input, search, j.seen);
+          } catch (error) {
+            metric.status = 'failed';
+            metric.error = error.status ? error.message : '本次搜索未取得结果';
+            metric.completedAt = new Date(this.now()).toISOString();
+            checkpoint(j);
+            throw error;
+          }
+          metric.status = 'completed';
+          metric.completedAt = new Date(this.now()).toISOString();
+          metric.usage = found.usage || null;
+          metric.discovered =
+            (found.candidates || []).length + (found.skipped_existing || []).length;
           const fresh = this.get(id);
           j.status = fresh.status;
           for (const c of found.skipped_existing || []) {
+            metric.duplicates++;
             const d = domainKey(c.url);
             if (d && !j.skippedDomains.includes(d)) {
               j.skippedDomains.push(d);
@@ -303,7 +373,12 @@ export class BatchJobs {
                 domain,
                 source_url: c.source_url,
                 source_title: c.source_title || '',
+                search_id: metric.id,
+                search_query: search.query,
               });
+              metric.queued++;
+            } else if (domain) {
+              metric.duplicates++;
             }
           }
           checkpoint(j);

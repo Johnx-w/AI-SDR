@@ -13,6 +13,9 @@ export interface AssessmentSummary {
   ruleVersion: string;
   evaluatedAt?: string;
   product?: string;
+  direction?: string;
+  evidenceReason?: string;
+  incompleteReason?: string | null;
   dimensions?: Record<string, Dimension>;
   missing?: string[];
   sync?: { status: string; error?: string | null; recordId?: string | null };
@@ -192,7 +195,7 @@ export function AssessmentPanel({ recordId, country, product, assessment, onChan
           <strong>
             {assessment.grade || assessment.status || '未评级'} · 已支持 {assessment.score}/100
           </strong>
-          <Badge>{assessment.complete ? '资料完整' : '部分数据待补'}</Badge>
+          <Badge>{assessment.complete ? '评分维度完整' : '含未知维度'}</Badge>
           {assessment.manualOverride && <Badge>主表评级已人工修改</Badge>}
           {assessment.sync && (
             <Badge tone={assessment.sync.status === 'synced' ? 'green' : 'neutral'}>
@@ -214,7 +217,14 @@ export function AssessmentPanel({ recordId, country, product, assessment, onChan
               ))}
             </div>
           )}
-          {!!assessment.missing?.length && <p>待补充：{assessment.missing.join('；')}</p>}
+          <details className="assessment-evidence-current" open>
+            <summary>评级依据与待补资料</summary>
+            {assessment.evidenceReason && (
+              <p className="assessment-reason">{assessment.evidenceReason}</p>
+            )}
+            {assessment.incompleteReason && <p>本轮研究限制：{assessment.incompleteReason}</p>}
+            {!!assessment.missing?.length && <p>待补充：{assessment.missing.join('；')}</p>}
+          </details>
         </div>
       )}
       <div className="assessment-form">
@@ -290,7 +300,7 @@ export function AssessmentPanel({ recordId, country, product, assessment, onChan
               {entry.score}分{' '}
               <Badge>{entry.sync?.status === 'synced' ? 'T12已同步' : 'T12待核对'}</Badge>
             </summary>
-            <p className="assessment-reason">{entry.reason}</p>
+            <p className="assessment-reason">{entry.evidenceReason || entry.reason}</p>
             {entry.sync?.error && <p className="assessment-error">{entry.sync.error}</p>}
             {entry.sync?.status !== 'synced' && (
               <button

@@ -76,6 +76,11 @@ export interface WorkspaceRepository {
   reset(): Promise<Workspace>;
 }
 export interface WorkflowInput {
+  query_mode?: 'auto';
+  products?: ProductSelection[];
+  customer_types?: string[];
+  preferred_requirements?: string;
+  required_requirements?: string[];
   audience: 'B' | 'C' | 'BC';
   customer_type?: string;
   customer_profile?: string;
@@ -84,6 +89,31 @@ export interface WorkflowInput {
   product: string;
   acquisition_channel: 'tavily_web';
   search_query: string;
+}
+export interface ProductSelection {
+  id?: string;
+  value: string;
+  label: string;
+  direction: 'finished' | 'materials' | 'samples';
+  group: string;
+  aliases: string[];
+}
+export interface SearchMetric {
+  id: string;
+  query: string;
+  country: string;
+  status: string;
+  error?: string;
+  discovered: number;
+  duplicates: number;
+  queued: number;
+  researched: number;
+  inserted: number;
+  updated: number;
+  rejected: number;
+  review: number;
+  failed: number;
+  ratings: Record<string, number>;
 }
 export interface IntegrationStatus {
   configured: boolean;
@@ -124,6 +154,9 @@ export interface AcquisitionJob {
   pending: number;
   searches: number;
   researched: number;
+  review?: number;
+  searchStats?: SearchMetric[];
+  queryPlan?: { country: string; query: string }[];
   message: string;
   createdAt: string;
   completedAt?: string;
@@ -135,6 +168,16 @@ export interface AcquisitionJob {
     reason?: string;
     record_id?: string;
     executionId?: string;
+    search_id?: string;
+    search_query?: string;
+    assessment?: { grade?: string | null; score: number; status: string } | null;
+    preferenceEvidence?: { value: string; quote: string; source_url: string }[];
+    requirementChecks?: {
+      condition: string;
+      verdict: 'matched' | 'not_matched' | 'unknown';
+      quote?: string;
+      source_url?: string;
+    }[];
   }[];
 }
 
