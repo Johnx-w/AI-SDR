@@ -14,7 +14,7 @@
     "follow_up_suggestion"
   ],
   "properties": {
-    "contract_version": { "const": "1.1" },
+    "contract_version": { "const": "1.2" },
     "agent_id": { "$ref": "#/definitions/agentId" },
     "conversation_id": { "type": "string", "minLength": 1 },
     "based_on_revision": { "type": "integer", "minimum": 0 },
@@ -67,6 +67,7 @@
               "contract_payment",
               "complaint_claim",
               "capability_unverified",
+              "product_not_in_catalog",
               "configured_large_order",
               "other"
             ]

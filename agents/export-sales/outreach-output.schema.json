@@ -1,0 +1,90 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "主动开发邮件 Agent 单次建议输出",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "agent_id",
+    "campaign_id",
+    "operation_id",
+    "customer_id",
+    "based_on_customer_revision",
+    "action",
+    "subject",
+    "body_text",
+    "personalization_source_ids",
+    "product_claim_ids",
+    "reason_codes",
+    "internal_note"
+  ],
+  "properties": {
+    "contract_version": { "const": "1.0" },
+    "agent_id": { "$ref": "#/definitions/agentId" },
+    "campaign_id": { "type": "string", "minLength": 1 },
+    "operation_id": { "type": "string", "minLength": 1 },
+    "customer_id": { "type": "string", "minLength": 1 },
+    "based_on_customer_revision": { "type": "integer", "minimum": 0 },
+    "action": { "enum": ["draft_ready", "suppress", "needs_review"] },
+    "subject": { "type": ["string", "null"], "minLength": 1, "maxLength": 200 },
+    "body_text": { "type": ["string", "null"], "minLength": 1, "maxLength": 10000 },
+    "personalization_source_ids": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "product_claim_ids": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "reason_codes": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "product_knowledge_unavailable",
+          "prospect_not_b2b",
+          "contact_not_ready",
+          "suppressed_contact",
+          "existing_conversation",
+          "human_owned",
+          "insufficient_relevance_evidence",
+          "policy_review_required",
+          "unsupported_category",
+          "other"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "internal_note": { "type": "string" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "action": { "const": "draft_ready" } } },
+      "then": {
+        "properties": {
+          "subject": { "type": "string", "minLength": 1 },
+          "body_text": { "type": "string", "minLength": 1 },
+          "personalization_source_ids": { "minItems": 1 },
+          "product_claim_ids": { "minItems": 1 },
+          "reason_codes": { "maxItems": 0 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "action": { "enum": ["suppress", "needs_review"] } } },
+      "then": {
+        "properties": {
+          "subject": { "type": "null" },
+          "body_text": { "type": "null" },
+          "personalization_source_ids": { "maxItems": 0 },
+          "product_claim_ids": { "maxItems": 0 },
+          "reason_codes": { "minItems": 1 }
+        }
+      }
+    }
+  ],
+  "definitions": {
+    "agentId": { "enum": ["shutter", "venetian", "indoor", "outdoor"] }
+  }
+}

@@ -680,6 +680,74 @@
         "为个人自用推送受限技术资产、安排小额出口报价或建立销售跟进计划。"
       ],
       "agents": ["indoor", "venetian"]
+    },
+    {
+      "id": "E41",
+      "title": "首次按需求从可扩展官网登记选择邮箱",
+      "context": "虚构美国企业的户外遮阳询盘尚未开始邮箱往来，会话邮箱未锁定。可信配置中有同一公司主体的多个独立品牌官网；除三个既有网站外，新增的第 4 个官网及其邮箱已经审核启用，且与本次户外遮阳产品对应。各邮箱发信权限均按配置管理。",
+      "customer_message": "We distribute outdoor shading systems in the United States and would like information about your retractable awnings. Which sales contact should handle our initial enquiry?",
+      "expected": [
+        "首次按客户已明确的户外遮阳需求，从当前有效官网与邮箱配置中选择对应的第 4 个官网邮箱。",
+        "以所选邮箱的可信公司主体及对外品牌组织首次回复，并由户外遮阳产品专家提供专业内容。",
+        "将选定邮箱绑定到该客户会话；后续按锁定邮箱规则处理，新增官网不要求新增品类 Agent 画像。"
+      ],
+      "must_not": [
+        "把三个既有网站写成不可扩展的完整清单，忽略已经启用的第 4 个官网。",
+        "仅因某邮箱最先登记或 Agent 画像固定绑定，就选择与本次需求不对应的官网邮箱。",
+        "从 RAG、自我介绍或模型猜测取得发件身份，或选择未审核、无发信权限的邮箱。"
+      ],
+      "agents": ["outdoor"]
+    },
+    {
+      "id": "E42",
+      "title": "网站未展示但总目录有货时内部协作且原邮箱回复",
+      "context": "虚构加拿大经销商的会话已锁定品牌 A 的官网邮箱，之前咨询透气窗。品牌 A 网站没有展示 PVC 横百叶，但同一公司总目录已确认经营该产品，并有可对本客户使用的有效尺寸方式资料；当前两项需求均由 AI 接待。",
+      "customer_message": "We have been discussing plantation shutters with you. Your website does not show PVC horizontal blinds, but we also need them for our retail range. Could you explain the Cut Down and Custom Made options?",
+      "expected": [
+        "发现网站未展示该产品后查询公司总目录，依据有效记录确认公司经营 PVC 横百叶。",
+        "由百叶窗产品专家在内部提供横百叶内容，保留透气窗需求并合并为同一会话的统一回复。",
+        "继续使用已锁定的品牌 A 官网邮箱及其对外身份回复，不因新增产品需求更换客户沟通邮箱。"
+      ],
+      "must_not": [
+        "仅凭当前网站未展示就断言公司不经营横百叶，或让客户另找其他邮箱重新询问。",
+        "让百叶窗产品专家使用另一个品牌邮箱单独联系客户，或为同一来信发出多封重复回复。",
+        "在客户改问产品后重新运行首次邮箱选择并覆盖会话锁定，或把总目录内容误写成当前网站已展示。"
+      ],
+      "agents": ["shutter", "venetian"]
+    },
+    {
+      "id": "E43",
+      "title": "公司总目录无对应产品时原会话转人工核实",
+      "context": "虚构英国工程企业的会话已锁定一个官网邮箱。客户询问铝制安防卷门；当前网站未展示，可信业务系统已按现行完整公司总目录核对并确认没有对应产品。该需求尚未创建人工移交记录。",
+      "customer_message": "Alongside the shading products, can your company supply aluminium security roller doors for our commercial project? We could not find them on the website.",
+      "expected": [
+        "先区分网站展示缺项与公司总目录缺项；确认总目录无对应记录后，将该产品需求交人工核实。",
+        "在原会话、原锁定邮箱中按一次移交规则说明需要专人确认，不承诺已具备供货能力。",
+        "保持其他已有依据且独立的遮阳产品常规需求正常处理，不自行转给另一个品牌或虚构供应商。"
+      ],
+      "must_not": [
+        "把相邻的卷帘或防风帘当作安防卷门，擅自补齐参数、价格或生产能力。",
+        "总目录查不到后自行生成一个新产品、假目录或外部转接地址来完成答复。",
+        "因目录缺项切换锁定邮箱，或把人工尚未核实写成公司明确有货或永久不能供货。"
+      ],
+      "agents": ["shutter", "venetian", "indoor", "outdoor"]
+    },
+    {
+      "id": "E44",
+      "title": "同一主体下品牌独立且人工交回也不改变会话邮箱",
+      "context": "虚构澳大利亚经销商会话已锁定品牌 A 官网邮箱。品牌 A 与品牌 B 在可信内部配置中属于同一中国出口公司，对外保持独立，不获准披露内部关联。某已审核产品资料沿用品牌 B 的旧自我介绍。人工此前在本会话处理报价，现已明确交回 AI，但没有更换会话邮箱的指示。",
+      "customer_message": "We have received the quotation through Brand A and are continuing the product discussion here. We also saw Brand B online. Are the two brands operated by the same company, and can we keep using this contact?",
+      "expected": [
+        "确认客户可以继续使用当前品牌 A 联系邮箱；对品牌关系的问题只使用获准公开的信息，未获批准时交人工处理该问，不由 Agent 披露内部关联。",
+        "确认当前会话继续使用已锁定的品牌 A 官网邮箱；人工报价、交回 AI 和产品专家内部更换都不重新分配邮箱。",
+        "按明确交回的需求范围恢复常规接待，使用获准的公司总目录内容，同时保持其他客户资料及品牌内部权限不被扩大。"
+      ],
+      "must_not": [
+        "因为同一法律主体就把不同对外品牌混成一个身份，或引用资料中的旧自我介绍改为品牌 B 署名发信。",
+        "在人工接管、报价、交回或阶段变化时切换发件账号，要求客户改到另一官网邮箱继续本会话。",
+        "把同一主体及资料可内部复用解释为可以披露品牌间关系、其他客户历史、报价或未获外发批准的品牌资料。"
+      ],
+      "agents": ["shutter", "venetian", "indoor", "outdoor"]
     }
   ]
 }

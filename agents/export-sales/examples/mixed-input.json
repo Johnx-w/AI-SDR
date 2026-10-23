@@ -1,5 +1,5 @@
 {
-  "contract_version": "1.1",
+  "contract_version": "1.2",
   "agent_id": "venetian",
   "evaluation_time": "2026-10-22T15:00:00+08:00",
   "event": {
@@ -14,13 +14,19 @@
     "channel": "email",
     "language": "en",
     "buyer_status": "b2b",
-    "history_summary": "虚构协议演示：加拿大经销商。异形透气窗已移交人工，确认已发送；百叶窗为独立的新产品需求。"
+    "history_summary": "虚构协议演示：加拿大经销商始终通过 sales@horizontal-export.example 沟通。横百叶在该官网范围；透气窗仅在公司总目录范围，由产品专家内部辅助。本次拱形透气窗已交人工且确认已发送，横百叶为独立常规需求。"
   },
   "company_context": {
     "name": null,
     "origin_country": "CN",
     "role": "exporter",
     "approved_facts": []
+  },
+  "mailbox_context": {
+    "brand_id": "demo-brand-horizontal",
+    "website_domain": "horizontal-export.example",
+    "mailbox_id": "demo-mailbox-horizontal-sales",
+    "mailbox_address": "sales@horizontal-export.example"
   },
   "demand_context": [
     {
@@ -30,6 +36,12 @@
       "ownership": "ai",
       "purchase_purpose": "business",
       "product_type": "horizontal blind",
+      "product_access": {
+        "scope": "website",
+        "product_id": "DEMO-HORIZONTAL-BLIND-SERIES",
+        "source_id": "demo-website-horizontal-scope",
+        "source_version": "DEMO-WEB-V1"
+      },
       "purchase_forms": ["finished"],
       "project_context": "none",
       "facts": {
@@ -48,6 +60,12 @@
       "ownership": "human",
       "purchase_purpose": "business",
       "product_type": "arched plantation shutter",
+      "product_access": {
+        "scope": "shared_catalog",
+        "product_id": "DEMO-PLANTATION-SHUTTER",
+        "source_id": "demo-company-catalog-shutter",
+        "source_version": "DEMO-CATALOG-V1"
+      },
       "purchase_forms": ["finished"],
       "project_context": "none",
       "facts": {
@@ -64,6 +82,20 @@
       "id": "demo-kb-size-systems",
       "category": "venetian",
       "content": "仅供协议演示的已确认资料假设：Cut Down 与 Custom Made 是本品类两种成品需求方式。前者须按具体型号允许方式在买方当地调整；后者按确认的最终尺寸制作。本记录不包含型号、裁切范围、价格、MOQ、现货或交期。",
+      "approved": true,
+      "valid_until": null
+    },
+    {
+      "id": "demo-website-horizontal-scope",
+      "category": "venetian",
+      "content": "虚构目录核对演示：horizontal-export.example 的 DEMO-WEB-V1 产品范围包含 DEMO-HORIZONTAL-BLIND-SERIES 横百叶。记录只说明官网产品覆盖，不证明具体规格、裁切范围、价格、库存或交期。",
+      "approved": true,
+      "valid_until": null
+    },
+    {
+      "id": "demo-company-catalog-shutter",
+      "category": "shutter",
+      "content": "虚构公司总目录核对演示：DEMO-CATALOG-V1 包含 DEMO-PLANTATION-SHUTTER 产品方向，当前横百叶官网未展示此项。透气窗产品专家可提供内部支持，客户仍通过原固定邮箱沟通；本次拱形需求可行性仍由人工核实，不表示已确认可制造。",
       "approved": true,
       "valid_until": null
     }

@@ -1,5 +1,5 @@
 {
-  "contract_version": "1.1",
+  "contract_version": "1.2",
   "agent_id": "shutter",
   "conversation_id": "demo-quote-001",
   "based_on_revision": 2,
@@ -11,14 +11,14 @@
       "route_to": null,
       "reply_fragment": "Thank you for your quotation request for the PVC plantation shutters. Pricing, freight to Melbourne and delivery timing require confirmation by our sales team. The specification schedule will also need to be checked for that review.",
       "handoff_reason": "formal_quote",
-      "internal_note": "正式报价移交人工，连同运费金额和交期确认。核实是否成功收到并可读取客户规格附件；当前不能声称已审阅。100只仅为本次需求，不作为大单或MOQ判断。人工报价后须自行选择继续人工或明确交回Agent。",
+      "internal_note": "正式报价移交人工，连同运费金额和交期确认。核实是否成功收到并可读取客户规格附件；当前不能声称已审阅。100只仅为本次需求，不作为大单或MOQ判断。人工报价后须自行选择继续人工或明确交回Agent。 本产品在虚构官网范围内，移交与后续跟进仍沿用 sales@shutter-export.example。",
       "missing_fields": [
         "verified_specification_schedule",
         "approved_price",
         "approved_freight",
         "approved_delivery"
       ],
-      "source_ids": ["demo-quote-message-001"],
+      "source_ids": ["demo-quote-message-001", "demo-website-pvc-shutter-scope"],
       "facts_to_record": [
         {
           "field": "requested_quantity",
