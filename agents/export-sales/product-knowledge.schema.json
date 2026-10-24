@@ -1,0 +1,93 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "主动开发可用的产品声明目录",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["catalog_version", "status", "records"],
+  "properties": {
+    "catalog_version": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["awaiting_reviewed_product_data", "ready", "suspended"] },
+    "records": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/record" }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "ready" } } },
+      "then": { "properties": { "records": { "minItems": 1 } } }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": { "enum": ["awaiting_reviewed_product_data", "suspended"] }
+        }
+      },
+      "then": { "properties": { "records": { "maxItems": 0 } } }
+    }
+  ],
+  "definitions": {
+    "agentId": { "enum": ["shutter", "venetian", "indoor", "outdoor"] },
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "agent_id",
+        "product_name",
+        "statement",
+        "claim_type",
+        "usage",
+        "markets",
+        "customer_types",
+        "source_ref",
+        "approved",
+        "approved_by",
+        "approved_at",
+        "valid_until"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "agent_id": { "$ref": "#/definitions/agentId" },
+        "product_name": { "type": "string", "minLength": 1 },
+        "statement": { "type": "string", "minLength": 1 },
+        "claim_type": {
+          "enum": [
+            "product_scope",
+            "material",
+            "purchase_form",
+            "feature",
+            "application",
+            "service_policy",
+            "other"
+          ]
+        },
+        "usage": {
+          "type": "array",
+          "items": { "enum": ["outreach", "auto_reply", "human_only"] },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "markets": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "使用 ISO 3166-1 alpha-2；* 表示经审核可用于全部市场。"
+        },
+        "customer_types": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "使用公司审核的客户类型；* 表示不限定 B 端客户类型。"
+        },
+        "source_ref": { "type": "string", "minLength": 1 },
+        "approved": { "const": true },
+        "approved_by": { "type": "string", "minLength": 1 },
+        "approved_at": { "type": "string", "minLength": 1 },
+        "valid_until": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

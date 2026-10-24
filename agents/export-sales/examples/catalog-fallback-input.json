@@ -1,0 +1,77 @@
+{
+  "contract_version": "1.2",
+  "agent_id": "indoor",
+  "evaluation_time": "2026-10-23T15:00:00+08:00",
+  "event": {
+    "type": "inbound",
+    "message_id": "demo-catalog-message-001",
+    "text": "We distribute window coverings in Canada. Do you also supply finished roller blinds for wholesale orders?"
+  },
+  "conversation": {
+    "id": "demo-catalog-conversation-001",
+    "revision": 2,
+    "customer_id": "demo-business-catalog-001",
+    "channel": "email",
+    "language": "en",
+    "buyer_status": "b2b",
+    "history_summary": "虚构协议演示：该经销商已使用 demo-shutter.example 对应邮箱沟通。本轮首次询问卷帘。"
+  },
+  "company_context": {
+    "name": null,
+    "origin_country": "CN",
+    "role": "exporter",
+    "approved_facts": []
+  },
+  "mailbox_context": {
+    "brand_id": "demo-shutter-brand",
+    "website_domain": "demo-shutter.example",
+    "mailbox_id": "demo-shutter-mailbox",
+    "mailbox_address": "sales@demo-shutter.example"
+  },
+  "demand_context": [
+    {
+      "id": "demo-demand-roller-001",
+      "product_agent_id": "indoor",
+      "lead_agent_id": "indoor",
+      "ownership": "ai",
+      "purchase_purpose": "business",
+      "product_type": "finished roller blind",
+      "product_access": {
+        "scope": "shared_catalog",
+        "product_id": "demo-product-roller-001",
+        "source_id": "demo-global-catalog-record-001",
+        "source_version": "demo-v1"
+      },
+      "purchase_forms": ["finished"],
+      "project_context": "none",
+      "facts": {
+        "buyer_role": "distributor",
+        "destination_country": "Canada"
+      },
+      "missing_fields": ["size_range", "quantities", "fabric_requirements"],
+      "sales_stage": "requirements",
+      "handoff_ack_sent": false,
+      "human_return_note": null
+    }
+  ],
+  "drawing_context": {
+    "assets": [],
+    "parameters": []
+  },
+  "knowledge": [
+    {
+      "id": "demo-approved-roller-scope-001",
+      "category": "indoor",
+      "content": "仅供协议演示的已审核公司资料假设：本出口交易主体可向海外B端供应卷帘成品，允许在普通产品答疑中说明。此记录不包含具体型号、面料性能、价格、MOQ或交期。",
+      "approved": true,
+      "valid_until": null
+    }
+  ],
+  "policy": {
+    "follow_up_enabled": false,
+    "follow_up_intervals_days": null,
+    "max_follow_ups": null,
+    "send_window": null,
+    "available_tools": []
+  }
+}

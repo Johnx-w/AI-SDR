@@ -1,5 +1,5 @@
 {
-  "contract_version": "1.1",
+  "contract_version": "1.2",
   "agent_id": "indoor",
   "conversation_id": "demo-drawing-001",
   "based_on_revision": 3,
@@ -11,9 +11,13 @@
       "route_to": null,
       "reply_fragment": "The tube's outer diameter is 38 mm, with a tolerance of ±0.2 mm, as shown in drawing DEMO-DWG-TUBE, Rev. B, Detail A.",
       "handoff_reason": null,
-      "internal_note": "仅引用本轮批准的外径及公差，提出同SKU与版本图片的附件请求；图号、存储引用和哈希均为虚构协议数据。尚未取出文件或发送，不在正文声称已附图。",
+      "internal_note": "仅引用本轮批准的外径及公差，提出同SKU与版本图片的附件请求；图号、存储引用和哈希均为虚构协议数据。尚未取出文件或发送，不在正文声称已附图。 部件在当前虚构官网范围内，回复与附件申请沿用 sales@indoor-export.example。",
       "missing_fields": [],
-      "source_ids": ["DEMO-PARAM-TUBE-OUTER-DIAMETER-B", "demo-drawing-message-001"],
+      "source_ids": [
+        "DEMO-PARAM-TUBE-OUTER-DIAMETER-B",
+        "demo-drawing-message-001",
+        "demo-website-roller-tube-scope"
+      ],
       "cited_drawing_parameter_ids": ["DEMO-PARAM-TUBE-OUTER-DIAMETER-B"],
       "attachment_requests": [
         {

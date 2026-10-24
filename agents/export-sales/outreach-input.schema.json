@@ -1,0 +1,218 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "主动开发邮件 Agent 单次运行上下文",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "evaluation_time",
+    "agent_id",
+    "campaign",
+    "operation_id",
+    "event",
+    "lead_snapshot",
+    "sender_identity",
+    "product_knowledge",
+    "policy",
+    "delivery_history"
+  ],
+  "properties": {
+    "contract_version": { "const": "1.0" },
+    "evaluation_time": { "type": "string", "minLength": 1 },
+    "agent_id": { "$ref": "#/definitions/agentId" },
+    "campaign": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status", "sending_mode", "revision"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["draft", "active", "paused", "closed"] },
+        "sending_mode": { "enum": ["draft_only", "review_required", "automatic"] },
+        "revision": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "operation_id": { "type": "string", "minLength": 1 },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "sequence_step"],
+      "properties": {
+        "type": { "enum": ["first_touch", "sequence_follow_up"] },
+        "sequence_step": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "lead_snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "customer_id",
+        "revision",
+        "company_name",
+        "website",
+        "country",
+        "customer_type",
+        "buyer_status",
+        "development_status",
+        "contact_readiness",
+        "contact",
+        "opportunity_ids",
+        "relevance_evidence",
+        "open_conversation",
+        "human_owned",
+        "suppression"
+      ],
+      "properties": {
+        "customer_id": { "type": "string", "minLength": 1 },
+        "revision": { "type": "integer", "minimum": 0 },
+        "company_name": { "type": "string", "minLength": 1 },
+        "website": { "type": ["string", "null"] },
+        "country": { "type": "string", "minLength": 2, "maxLength": 2 },
+        "customer_type": { "type": "string", "minLength": 1 },
+        "buyer_status": { "enum": ["b2b", "personal", "unknown"] },
+        "development_status": {
+          "enum": ["pending_outreach", "contacted", "replied", "paused", "closed"]
+        },
+        "contact_readiness": { "enum": ["ready", "needs_review", "unavailable"] },
+        "contact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "email", "kind", "source_id", "verification_status"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "email": { "type": "string", "minLength": 3 },
+            "kind": {
+              "enum": ["company_public", "named_business", "personal", "unknown"]
+            },
+            "source_id": { "type": "string", "minLength": 1 },
+            "verification_status": { "enum": ["verified", "public_unverified", "invalid"] }
+          }
+        },
+        "opportunity_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "relevance_evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "content", "source_url"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "content": { "type": "string", "minLength": 1 },
+              "source_url": { "type": "string", "minLength": 1 }
+            }
+          },
+          "minItems": 1
+        },
+        "open_conversation": { "type": "boolean" },
+        "human_owned": { "type": "boolean" },
+        "suppression": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "do_not_contact",
+            "unsubscribed",
+            "hard_bounced",
+            "complaint",
+            "duplicate_owner",
+            "reason"
+          ],
+          "properties": {
+            "do_not_contact": { "type": "boolean" },
+            "unsubscribed": { "type": "boolean" },
+            "hard_bounced": { "type": "boolean" },
+            "complaint": { "type": "boolean" },
+            "duplicate_owner": { "type": "boolean" },
+            "reason": { "type": ["string", "null"] }
+          }
+        }
+      }
+    },
+    "sender_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "company_name", "display_name", "email", "reply_to", "approved"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "company_name": { "type": ["string", "null"] },
+        "display_name": { "type": ["string", "null"] },
+        "email": { "type": ["string", "null"] },
+        "reply_to": { "type": ["string", "null"] },
+        "approved": { "type": "boolean" }
+      }
+    },
+    "product_knowledge": { "$ref": "product-knowledge.schema.json" },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outreach_enabled",
+        "company_policy_approved",
+        "policy_revision",
+        "allowed_markets",
+        "within_send_window",
+        "send_window",
+        "daily_limit",
+        "sent_today",
+        "per_domain_daily_limit",
+        "sent_to_domain_today",
+        "approved_footer",
+        "unsubscribe_instruction",
+        "sequence_follow_up_enabled"
+      ],
+      "properties": {
+        "outreach_enabled": { "type": "boolean" },
+        "company_policy_approved": { "type": "boolean" },
+        "policy_revision": { "type": ["string", "null"] },
+        "allowed_markets": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 2, "maxLength": 2 },
+          "uniqueItems": true
+        },
+        "within_send_window": { "type": "boolean" },
+        "send_window": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["start", "end", "timezone"],
+              "properties": {
+                "start": { "type": "string", "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$" },
+                "end": { "type": "string", "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$" },
+                "timezone": { "type": "string", "minLength": 1 }
+              }
+            }
+          ]
+        },
+        "daily_limit": { "type": ["integer", "null"], "minimum": 1 },
+        "sent_today": { "type": "integer", "minimum": 0 },
+        "per_domain_daily_limit": { "type": ["integer", "null"], "minimum": 1 },
+        "sent_to_domain_today": { "type": "integer", "minimum": 0 },
+        "approved_footer": { "type": ["string", "null"] },
+        "unsubscribe_instruction": { "type": ["string", "null"] },
+        "sequence_follow_up_enabled": { "type": "boolean" }
+      }
+    },
+    "delivery_history": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sent_operation_ids", "last_sent_at", "reply_received"],
+      "properties": {
+        "sent_operation_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "last_sent_at": { "type": ["string", "null"] },
+        "reply_received": { "type": "boolean" }
+      }
+    }
+  },
+  "definitions": {
+    "agentId": { "enum": ["shutter", "venetian", "indoor", "outdoor"] }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "contract_version": "1.2",
+  "agent_id": "indoor",
+  "conversation_id": "demo-catalog-conversation-001",
+  "based_on_revision": 2,
+  "buyer_status_suggestion": "b2b",
+  "items": [
+    {
+      "demand_id": "demo-demand-roller-001",
+      "action": "reply",
+      "route_to": null,
+      "reply_fragment": "We can supply finished roller blinds for wholesale orders. Could you share the size range, approximate quantities, and any fabric requirements you have in mind?",
+      "handoff_reason": null,
+      "internal_note": "卷帘不在本虚构官网覆盖记录中，但公司总目录确认有产品，且本轮有获准的公司供货范围资料。由室内成品帘 Agent 提供内容；统一发送程序仍使用 sales@demo-shutter.example，不提其他品牌。",
+      "missing_fields": ["size_range", "quantities", "fabric_requirements"],
+      "source_ids": [
+        "demo-global-catalog-record-001",
+        "demo-approved-roller-scope-001",
+        "demo-catalog-message-001"
+      ],
+      "cited_drawing_parameter_ids": [],
+      "attachment_requests": [],
+      "facts_to_record": [],
+      "sales_stage_suggestion": "requirements"
+    }
+  ],
+  "conversation_summary_update": "加拿大B端经销商在固定邮箱询问卷帘成品；总目录与获准供货范围资料支持普通答疑，由室内品类提供内容并由原邮箱统一回复。",
+  "follow_up_suggestion": {
+    "operation": "cancel_old_and_reassess",
+    "eligible_demand_ids": [],
+    "reason": "本轮有新来信，当前未启用定时跟进。"
+  }
+}

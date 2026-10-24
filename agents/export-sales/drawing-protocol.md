@@ -62,7 +62,7 @@ flowchart TD
 
 ## 回复引用与附件申请
 
-单轮协议升级为 `contract_version: 1.1`。无图纸的输入也提供空的 `drawing_context: {"assets": [], "parameters": []}`；无图纸引用或无附件的输出分别提供空数组。
+图纸字段自单轮协议 `1.1` 引入，现行会话协议为 `contract_version: 1.2`。无图纸的输入也提供空的 `drawing_context: {"assets": [], "parameters": []}`；无图纸引用或无附件的输出分别提供空数组。
 
 每项可自动回复的需求使用以下字段：
 

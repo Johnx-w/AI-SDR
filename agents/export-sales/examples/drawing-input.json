@@ -1,5 +1,5 @@
 {
-  "contract_version": "1.1",
+  "contract_version": "1.2",
   "agent_id": "indoor",
   "evaluation_time": "2026-10-22T15:00:00+08:00",
   "event": {
@@ -22,6 +22,12 @@
     "role": "exporter",
     "approved_facts": []
   },
+  "mailbox_context": {
+    "brand_id": "demo-brand-indoor",
+    "website_domain": "indoor-export.example",
+    "mailbox_id": "demo-mailbox-indoor-sales",
+    "mailbox_address": "sales@indoor-export.example"
+  },
   "demand_context": [
     {
       "id": "demo-demand-tube",
@@ -30,6 +36,12 @@
       "ownership": "ai",
       "purchase_purpose": "business",
       "product_type": "roller blind tube",
+      "product_access": {
+        "scope": "website",
+        "product_id": "DEMO-ROLLER-TUBE-38",
+        "source_id": "demo-website-roller-tube-scope",
+        "source_version": "DEMO-WEB-V1"
+      },
       "purchase_forms": ["components"],
       "project_context": "none",
       "facts": {
@@ -104,7 +116,15 @@
       }
     ]
   },
-  "knowledge": [],
+  "knowledge": [
+    {
+      "id": "demo-website-roller-tube-scope",
+      "category": "indoor",
+      "content": "虚构目录核对演示：indoor-export.example 的 DEMO-WEB-V1 产品范围包含 DEMO-ROLLER-TUBE-38 卷帘管部件；具体外径和公差只由本轮批准的图纸参数记录提供，不从目录名称推断。",
+      "approved": true,
+      "valid_until": null
+    }
+  ],
   "policy": {
     "follow_up_enabled": false,
     "follow_up_intervals_days": null,
