@@ -1,0 +1,29 @@
+{
+  "note": "Minimal public phrase excerpts and the erroneous materials label from the captured operation; not a full page/provider response.",
+  "source_url": "https://www.blindstogo.ca/shades/roller-shades/",
+  "target": {
+    "product_scope": "specific",
+    "product": "roller blind fabric, sunscreen fabric, zebra blind fabric"
+  },
+  "product": "Roller Shades",
+  "opportunity": {
+    "direction": "materials",
+    "product": "Roller Shades",
+    "facts": [
+      { "kind": "core_product", "value": "定制卷帘", "quote": "custom Roller Shades" },
+      {
+        "kind": "specialist_supply",
+        "value": "专业成品卷帘零售",
+        "quote": "we specialize in offering high-quality roller shades"
+      },
+      {
+        "kind": "current_supply_process",
+        "value": "消费者网购结账",
+        "quote": "secure checkout process"
+      },
+      { "kind": "custom_made", "value": "成品面料选项", "quote": "choose fabric" },
+      { "kind": "company_since", "value": "1954", "quote": "Since 1954" },
+      { "kind": "motorized_system", "value": "成品电动选项", "quote": "Motorized System" }
+    ]
+  }
+}

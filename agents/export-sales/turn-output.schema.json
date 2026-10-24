@@ -1,6 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "出口业务员 Agent 单轮建议输出",
+  "$id": "turn-output.schema.json",
+  "title": "出口业务员 Agent 单轮建议输出（审核与接管分离）",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -14,7 +15,7 @@
     "follow_up_suggestion"
   ],
   "properties": {
-    "contract_version": { "const": "1.2" },
+    "contract_version": { "const": "1.3" },
     "agent_id": { "$ref": "#/definitions/agentId" },
     "conversation_id": { "type": "string", "minLength": 1 },
     "based_on_revision": { "type": "integer", "minimum": 0 },
@@ -27,6 +28,9 @@
         "required": [
           "demand_id",
           "action",
+          "approval_gate",
+          "approval_reason",
+          "handoff_scope",
           "route_to",
           "reply_fragment",
           "handoff_reason",
@@ -51,24 +55,27 @@
               "suppress"
             ]
           },
+          "approval_gate": { "enum": ["none", "per_message"] },
+          "approval_reason": { "enum": [null, "commercial_commitment"] },
+          "handoff_scope": { "enum": [null, "demand", "conversation"] },
           "route_to": { "anyOf": [{ "$ref": "#/definitions/agentId" }, { "type": "null" }] },
           "reply_fragment": { "type": ["string", "null"], "minLength": 1 },
           "handoff_reason": {
             "enum": [
               null,
-              "formal_quote",
-              "freight_amount",
-              "discount",
-              "moq_exception",
-              "special_delivery",
-              "irregular_shape",
-              "special_process",
-              "agency_exclusive_framework",
-              "contract_payment",
-              "complaint_claim",
-              "capability_unverified",
+              "negotiation_out_of_authority",
+              "special_payment",
+              "nonstandard_customization",
+              "repeated_negotiation",
+              "severe_complaint",
+              "complex_commercial",
+              "compensation",
+              "sales_stagnation",
+              "critical_knowledge_gap",
               "product_not_in_catalog",
               "configured_large_order",
+              "signing_intent",
+              "agency_negotiation",
               "other"
             ]
           },
@@ -118,10 +125,10 @@
               "qualification",
               "requirements",
               "selection",
-              "quote_human",
+              "quote_review",
               "sample",
               "follow_up",
-              "negotiation_human",
+              "negotiation_review",
               "won",
               "closed"
             ]
@@ -135,6 +142,16 @@
               }
             },
             "then": { "properties": { "reply_fragment": { "type": "null" } } }
+          },
+          {
+            "if": { "properties": { "approval_gate": { "const": "per_message" } } },
+            "then": {
+              "properties": {
+                "action": { "const": "reply" },
+                "approval_reason": { "const": "commercial_commitment" }
+              }
+            },
+            "else": { "properties": { "approval_reason": { "type": "null" } } }
           },
           {
             "if": {
@@ -157,6 +174,7 @@
               "properties": {
                 "reply_fragment": { "type": "string", "minLength": 1 },
                 "handoff_reason": { "type": "null" },
+                "handoff_scope": { "type": "null" },
                 "route_to": { "type": "null" }
               }
             }
@@ -166,7 +184,18 @@
             "then": {
               "properties": {
                 "handoff_reason": { "type": "string" },
+                "handoff_scope": { "enum": ["demand", "conversation"] },
+                "approval_gate": { "const": "none" },
                 "route_to": { "type": "null" }
+              }
+            }
+          },
+          {
+            "if": { "properties": { "action": { "not": { "const": "request_handoff" } } } },
+            "then": {
+              "properties": {
+                "handoff_reason": { "type": "null" },
+                "handoff_scope": { "type": "null" }
               }
             }
           },

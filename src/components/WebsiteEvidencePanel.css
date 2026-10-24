@@ -1,0 +1,121 @@
+.website-evidence-panel {
+  display: grid;
+  gap: 12px;
+}
+.website-evidence-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  color: #81917e;
+  font-size: 11px;
+}
+.website-evidence-list {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.website-evidence-item + .website-evidence-item {
+  border-top: 1px solid var(--border);
+}
+.website-evidence-item > summary {
+  display: grid;
+  grid-template-columns: 14px 104px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: baseline;
+  padding: 16px;
+  cursor: pointer;
+  list-style: none;
+}
+.website-evidence-item > summary::-webkit-details-marker {
+  display: none;
+}
+.website-evidence-item > summary:hover {
+  background: #f8faf5;
+}
+.website-evidence-item > summary:focus-visible {
+  outline: 2px solid #79a27d;
+  outline-offset: -3px;
+}
+.website-evidence-chevron {
+  align-self: center;
+  color: #8a9d82;
+}
+.website-evidence-item[open] > summary .website-evidence-chevron {
+  transform: rotate(90deg);
+}
+.website-evidence-category {
+  color: #517552;
+  font-size: 11px;
+}
+.website-evidence-summary {
+  font-size: 12px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+.website-evidence-count {
+  color: #8a9a83;
+  white-space: nowrap;
+  font-size: 10px;
+}
+.website-evidence-originals {
+  display: grid;
+  gap: 12px;
+  padding: 0 16px 16px 42px;
+}
+.website-evidence-original {
+  padding: 14px;
+  border: 1px solid #e5eadf;
+  border-radius: 7px;
+  background: #f9fbf6;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.website-evidence-record-type {
+  font-size: 10px;
+  color: #7c9076;
+}
+.website-evidence-value {
+  line-height: 1.8;
+  white-space: pre-wrap;
+  margin: 8px 0;
+}
+.website-evidence-original blockquote {
+  border-left: 2px solid #cbd9be;
+  padding-left: 12px;
+  margin: 10px 0;
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+.website-evidence-original a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #3c6b4a;
+  text-decoration: underline;
+  font-size: 11px;
+}
+.website-evidence-source-missing {
+  color: #85947d;
+  font-size: 11px;
+}
+@media (max-width: 640px) {
+  .website-evidence-item > summary {
+    grid-template-columns: 14px minmax(0, 1fr) auto;
+    gap: 4px 10px;
+  }
+  .website-evidence-category {
+    grid-column: 2;
+  }
+  .website-evidence-summary {
+    grid-column: 2 / -1;
+    grid-row: 2;
+  }
+  .website-evidence-count {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  .website-evidence-originals {
+    padding-left: 16px;
+  }
+}

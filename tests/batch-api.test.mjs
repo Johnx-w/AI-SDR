@@ -6,6 +6,7 @@ const env = {
   N8N_WEBHOOK_URL: 'https://vynox.app.n8n.cloud/webhook/test-only',
   N8N_WEBHOOK_ENABLED: 'true',
   N8N_WEBHOOK_SECRET: 'test-only',
+  FEISHU_READ_WEBHOOK_URL: 'https://vynox.app.n8n.cloud/webhook/read-test-only',
 };
 const input = {
   country: 'United States',
@@ -22,7 +23,9 @@ test('批量接口立即接收、持久查询、幂等返回、校验数量且�
   let calls = 0;
   const app = createApp({
     env,
-    fetchImpl: async () => {
+    fetchImpl: async (url) => {
+      if (String(url).includes('/webhook/read-test-only'))
+        return Response.json({ code: 0, data: { items: [], has_more: false } });
       calls++;
       await gate;
       return new Response(JSON.stringify([{ candidates: [] }]), { status: 200 });

@@ -7,6 +7,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  ClipboardList,
   Command,
   Globe2,
   LayoutDashboard,
@@ -26,11 +27,13 @@ import { Dashboard, Communication, Materials } from '../pages/Workbench';
 import { ApiConnections } from '../pages/ApiConnections';
 import { LeadLibrary } from '../pages/LeadLibrary';
 import { Automation } from '../pages/Automation';
+import { CustomerBusiness } from '../pages/CustomerBusiness';
 
 const nav = [
   { path: '/', name: '运营总览', icon: LayoutDashboard },
   { path: '/automation', name: '获客任务', icon: Zap },
   { path: '/leads', name: '客户库', icon: UsersRound },
+  { path: '/business', name: '客户业务', icon: ClipboardList },
   { path: '/inbox', name: '沟通中心', icon: MessageSquare },
   { path: '/materials', name: '产品与资料', icon: FolderOpen },
   { path: '/settings', name: 'API 连接', icon: Settings2 },
@@ -54,7 +57,6 @@ export function App() {
   const [mobile, setMobile] = useState(false);
   const [notifications, setNotifications] = useState(false);
   const current = nav.find((item) => item.path === location.pathname);
-  const unread = data?.conversations.filter((item) => item.unread).length || 0;
   if (!data)
     return (
       <div className="boot">
@@ -102,7 +104,6 @@ export function App() {
             >
               <Icon size={18} />
               <span>{name}</span>
-              {path === '/inbox' && unread > 0 ? <b className="nav-count">{unread}</b> : null}
             </NavLink>
           ))}
         </nav>
@@ -216,7 +217,8 @@ export function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/leads" element={<LeadLibrary />} />
-            <Route path="/tasks" element={<Navigate to="/automation?tab=schedules" replace />} />
+            <Route path="/tasks" element={<Navigate to="/business?tab=tasks" replace />} />
+            <Route path="/business" element={<CustomerBusiness />} />
             <Route path="/materials" element={<Materials />} />
             <Route path="/campaigns" element={<Campaigns />} />
             <Route path="/inbox" element={<Communication />} />

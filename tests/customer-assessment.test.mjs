@@ -37,7 +37,7 @@ test('初评四项可独立达到100分，不依赖海关，摘要可经飞书�
     fact('motorized_system'),
     ...Array.from({ length: 5 }, (_, i) => fact('operating_outlet', `Showroom ${i}`)),
   ]);
-  assert.equal(result.ruleVersion, 'acquisition-v3.0');
+  assert.equal(result.ruleVersion, 'acquisition-v3.2');
   assert.equal(result.score, 100);
   assert.equal(result.grade, 'A');
   assert.equal(result.complete, true);
@@ -55,7 +55,7 @@ test('初评四项可独立达到100分，不依赖海关，摘要可经飞书�
   });
   assert.equal(lead.score, 100);
   assert.equal(lead.assessment.complete, true);
-  assert.equal(lead.assessment.ruleVersion, 'acquisition-v3.0');
+  assert.equal(lead.assessment.ruleVersion, 'acquisition-v3.2');
 });
 
 test('持续经营中档按15分计算；95分来自真实业务证据而非海关假设', () => {
@@ -68,6 +68,15 @@ test('持续经营中档按15分计算；95分来自真实业务证据而非海�
   assert.equal(result.dimensions.D.score, 15);
   assert.equal(result.score, 95);
   assert.equal(result.complete, true);
+});
+
+test('新旧评估的T12证据用词按版本保留，避免旧历史读回比较失配', () => {
+  const result = evaluate([...baseline.map((k) => fact(k)), fact('custom_made')]);
+  assert.match(formatAssessmentEvidence(result), /定制特征/);
+  assert.match(
+    formatAssessmentEvidence({ ...result, ruleVersion: 'acquisition-v3.0' }),
+    /定制能力需求/,
+  );
 });
 
 test('同一网点重复出现不触发20分档', () => {
@@ -94,21 +103,54 @@ test('新档位门槛保留A75与B60，未知V不按比例放大', () => {
   assert.doesNotMatch(b.missing.join(' '), /海关/);
 });
 
-test('缺经营依据即使有80分仍待补全，海关不能解除前置门槛', () => {
+test('缺持续经营依据仍保留已支持的初始A评级，海关不参与初评分', () => {
   const facts = ['core_product', 'specialist_supply', 'custom_made', 'motorized_system'].map((k) =>
     fact(k),
   );
   const result = evaluate(facts, { customs: { score: 15, importCount: 1000 } });
   assert.equal(result.score, 80);
-  assert.equal(result.grade, null);
-  assert.equal(result.status, '待补全');
+  assert.equal(result.grade, 'A');
+  assert.equal(result.status, '优先开发');
+  assert.ok(result.missing.includes('持续经营或当前供货流程资料不足'));
   assert.deepEqual(result, evaluate(facts));
+});
+
+test('已核实卷帘业务但经营角色未知时保留C初评，最佳成品证据保留面料潜在机会', () => {
+  const result = assessCompany({
+    research: {
+      source_url: source,
+      company_name: 'Example Blinds',
+      entity_type: 'business',
+      products: ['Custom roller shades', 'Roller shade fabric'],
+      product_relation: {
+        status: 'matched',
+        kind: 'catalog_related',
+        basis_product: 'Roller shade fabric',
+      },
+      assessment_opportunities: [
+        {
+          direction: 'finished',
+          product: 'Custom roller shades',
+          relationship: 'potential_input',
+          facts: [fact('core_product', 'Custom roller shades')],
+        },
+      ],
+    },
+    target: { country: 'Canada', product: 'roller blind fabric' },
+    id: 'fixture-partial-role',
+  });
+  assert.equal(result.grade, 'C');
+  assert.equal(result.status, '常规开发');
+  assert.equal(result.score, 40);
+  assert.equal(result.dimensions.R.score, null, '未知角色不补分');
+  assert.equal(result.supplyOpportunity.procurementStatus, 'unconfirmed');
+  assert.equal(result.supplyOpportunity.basisProduct, 'Custom roller shades');
 });
 
 test('邻近产品、仅安装、身份冲突与明确无关仍限制初评', () => {
   for (const [product, role, extra, status] of [
-    ['adjacent_product', 'specialist_supply', [], '暂缓开发'],
-    ['core_product', 'installation_only', [], '暂缓开发'],
+    ['adjacent_product', 'specialist_supply', [], '常规开发'],
+    ['core_product', 'installation_only', [], '常规开发'],
     ['core_product', 'specialist_supply', [fact('identity_conflict')], '待核实'],
     ['unrelated_product', 'specialist_supply', [], '暂不开发'],
   ]) {

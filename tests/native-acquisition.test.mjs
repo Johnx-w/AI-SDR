@@ -31,7 +31,7 @@ const input = {
   acquisition_channel: 'tavily_web',
 };
 const sourceText =
-  'Acme Screens imports zip screens from independent factories. We supply dealers and installers nationwide, without our own factory.';
+  'Acme Screens imports zip screens from independent factories. We supply dealers and installers nationwide in the United States, without our own factory.';
 const definitions = [
   ...[
     '客户名称',
@@ -69,6 +69,7 @@ function fixture({
   pageText = sourceText,
   modelOverrides = {},
   companyNameField = '客户名称',
+  automaticAssessment = false,
 } = {}) {
   const calls = [],
     records = JSON.parse(JSON.stringify(initial));
@@ -85,7 +86,15 @@ function fixture({
       return json({
         code: 0,
         data: {
-          items: definitions.map((field) =>
+          items: [
+            ...definitions,
+            ...(automaticAssessment
+              ? [
+                  { field_name: '用户评级', type: 3 },
+                  { field_name: '最近研究时间', type: 5 },
+                ]
+              : []),
+          ].map((field) =>
             field.field_name === '客户名称' ? { ...field, field_name: companyNameField } : field,
           ),
           has_more: false,
@@ -139,7 +148,9 @@ function fixture({
         production_model: evidence('no_own_factory', sourceText),
         operating_model: evidence('beyond_local', sourceText),
         manufactured_products: [],
-        actual_country: null,
+        actual_country: pageText.includes('United States')
+          ? evidence('United States', pageText)
+          : null,
         customer_type: evidence('distributor', sourceText),
         audience: evidence('B', sourceText),
         main_product_preference: evidence('主营 zip screens。', sourceText),
@@ -171,6 +182,191 @@ function fixture({
 }
 
 const policyFact = (value, quote) => ({ value, quote, source_url: site });
+
+test('客户已入库但最新评估保存失败时可恢复，恢复不重复研究或写客户', async () => {
+  const f = fixture({ automaticAssessment: true });
+  const svc = f.make();
+  const save = svc.assessments.save.bind(svc.assessments);
+  let failOnce = true;
+  svc.assessments.save = (...args) => {
+    if (failOnce) {
+      failOnce = false;
+      throw new Error('storage unavailable');
+    }
+    return save(...args);
+  };
+  const item = { source_url: site, operation_id: 'current-assessment-recovery-1' };
+  try {
+    await assert.rejects(() => svc.research(input, item), /最新评估保存待核对/);
+    const settled = await svc.status(item.operation_id);
+    assert.equal(settled.settled, true);
+    assert.equal(settled.output.新增, 1);
+    assert.equal(svc.assessmentHistory('rec-native').assessments.length, 1);
+    assert.equal(f.calls.filter((call) => call.url.endsWith('/responses')).length, 1);
+    assert.equal(
+      f.calls.filter((call) => call.method === 'POST' && call.url.includes('/records')).length,
+      1,
+    );
+  } finally {
+    svc.close();
+  }
+});
+
+test('仅有T2也能完成自动评分和入库，评估只存后台最新值且不访问历史表', async () => {
+  const f = fixture({ automaticAssessment: true });
+  const svc = f.make();
+  const item = { source_url: site, operation_id: 'current-assessment-only-1' };
+  try {
+    const result = await svc.research(input, item);
+    assert.equal(result.新增, 1);
+    assert.ok(f.records[0].fields.用户评级);
+    const current = svc.assessmentHistory('rec-native');
+    assert.equal(current.assessments.length, 1);
+    assert.equal(current.assessment.id, result.assessment.id);
+    assert.equal(current.assessment.sync, undefined);
+    assert.equal(svc.assessmentInfo().assessmentStorage, 'latest_only');
+    assert(
+      f.calls
+        .filter((call) => call.url.includes('/bitable/'))
+        .every((call) => call.url.includes('/tables/test-table/')),
+    );
+    assert.equal(
+      f.calls.filter((call) => call.method === 'POST' && call.url.includes('/records')).length,
+      1,
+    );
+    const before = f.calls.length;
+    assert.deepEqual(await svc.research(input, item), result);
+    assert.equal(f.calls.length, before);
+  } finally {
+    svc.close();
+  }
+});
+
+test('海关候选复用官网取证、入库读回；新产品票据关联既有身份，不加初评分', async () => {
+  const addressText =
+    'Our address is 500 Palm Street, Miami FL 33101, United States. We supply roller blind fabric.';
+  const pageText = sourceText + ' ' + addressText;
+  const f = fixture({
+    pageText,
+    modelOverrides: {
+      actual_country: policyFact('United States', addressText),
+      address: policyFact(
+        {
+          country: 'United States',
+          region: 'Florida',
+          city: 'Miami',
+          street: '500 Palm Street',
+          postal_code: '33101',
+        },
+        addressText,
+      ),
+      products: [policyFact('roller blind fabric', addressText)],
+    },
+  });
+  let family = 'fabrics';
+  const buyer = () => ({
+    id: 'buyer-1',
+    name: 'Acme Screens INC',
+    address: '500 Palm Street Miami FL 33101',
+    country: null,
+    product_family: family,
+    records: [
+      {
+        provider: 'fixture',
+        id: family,
+        date: '2026-10-01',
+        description: family === 'fabrics' ? 'roller blind fabric' : 'blind components',
+        bill_of_lading_number: 'BL-1',
+      },
+    ],
+  });
+  const customs = {
+    discover: async () => ({
+      buyers: [buyer()],
+      usage: { charged_records: 1, run_used_records: 1 },
+    }),
+    close() {},
+  };
+  const svc = f.make({ customs });
+  const target = {
+    ...input,
+    product: 'roller blind fabric',
+    acquisition_channel: 'customs',
+    query_mode: 'auto',
+  };
+  try {
+    const found = await svc.discover(target, {
+      country: 'United States',
+      source_kind: 'customs',
+      family,
+      run_id: 'customs-round-01',
+    });
+    assert.equal(found.candidates[0].source_kind, 'customs');
+    assert.equal(
+      f.calls.some((c) => c.url.includes('deepseek')),
+      false,
+    );
+    const out = await svc.research(target, {
+      ...found.candidates[0],
+      operation_id: 'customs-company-001',
+    });
+    assert.equal(out.新增, 1);
+    assert.equal(out.research.customs_evidence[0].match.status, 'verified');
+    assert.equal(svc.store.customsEvidence(site)[0].record_id, 'rec-native');
+    family = 'components';
+    await svc.discover(
+      { ...target, product: 'indoor blinds components' },
+      { country: 'United States', source_kind: 'customs', family, run_id: 'customs-round-01' },
+    );
+    assert.equal(svc.store.customsEvidence(site).length, 2);
+    assert.equal(svc.store.customsEvidence(site)[1].match.status, 'verified');
+    assert.equal(f.records.length, 1);
+    assert.equal(svc.assessmentInfo().customsIncludedInInitialScore, false);
+  } finally {
+    svc.close();
+  }
+});
+
+test('只有名称的海关候选保持待关联，错误主体或未核实经营国不会冒充核实买家', async () => {
+  for (const [name, country, expected] of [
+    ['Acme Screens', 'United States', 'name_only'],
+    ['Different Entity', 'United States', 'conflict'],
+    ['Acme Screens', null, 'name_only'],
+  ]) {
+    const extra = 'We are a United States company supplying roller blind fabric.';
+    const f = fixture({
+      pageText: sourceText + ' ' + extra,
+      modelOverrides: {
+        products: [policyFact('roller blind fabric', extra)],
+        actual_country: country ? policyFact(country, extra) : null,
+      },
+    });
+    const svc = f.make();
+    const buyer = { id: 'buyer1', name, product_family: 'fabrics', records: [] };
+    svc.store.saveCustomsEvidence(site, buyer);
+    try {
+      const out = await svc.research(
+        {
+          ...input,
+          product: 'roller blind fabric',
+          acquisition_channel: 'customs',
+          query_mode: 'auto',
+        },
+        {
+          source_url: site,
+          source_kind: 'customs',
+          customs_evidence: buyer,
+          operation_id: 'identity-customs-test',
+        },
+      );
+      assert.equal(svc.store.customsEvidence(site)[0].match.status, expected);
+      assert.equal(out.新增, expected === 'conflict' || !country ? 0 : 1);
+      if (expected === 'conflict' || !country) assert.equal(out.outcome, 'review');
+    } finally {
+      svc.close();
+    }
+  }
+});
 test('新名称字段贯通研究、飞书写入读回和持久身份资料', async () => {
   const f = fixture({ companyNameField: '公司名称' });
   const svc = f.make();
@@ -257,12 +453,12 @@ for (const [scenarioIndex, scenario] of [
 test('工厂、本地服务和经营范围未知不再构成全局淘汰', async () => {
   for (const [index, scenario] of [
     {
-      text: 'Acme Screens manufactures zip screens in our own factory and supplies dealers.',
+      text: 'Acme Screens manufactures zip screens in our own factory and supplies dealers in the United States.',
       fields: { production_model: 'own_factory', customer_type: 'manufacturer' },
       manufactured: ['zip screens'],
     },
     {
-      text: 'Acme Screens installs imported zip screens for local homeowners in Florida.',
+      text: 'Acme Screens installs imported zip screens for local homeowners in Florida, United States.',
       fields: { operating_model: 'local_only', customer_type: 'service_provider', audience: 'C' },
     },
     { text: sourceText, fields: { production_model: null, operating_model: null } },
@@ -302,8 +498,8 @@ test('工厂、本地服务和经营范围未知不再构成全局淘汰', async
 
 test('C 端经营企业可以入库：全国销售、进口渠道、兼营本地安装与个人经营账号', async () => {
   for (const text of [
-    'Acme Screens imports zip screens from independent factories and sells to homeowners nationwide. We do not own a factory.',
-    'I operate Acme Screens, importing zip screens from other manufacturers for homeowners nationwide. I install locally too, without my own factory.',
+    'Acme Screens imports zip screens from independent factories and sells to homeowners nationwide in the United States. We do not own a factory.',
+    'I operate Acme Screens, importing zip screens from other manufacturers for homeowners nationwide in the United States. I install locally too, without my own factory.',
   ]) {
     const f = fixture({
       pageText: text,
@@ -334,7 +530,7 @@ test('C 端经营企业可以入库：全国销售、进口渠道、兼营本地
 
 test('自产成品但明确采购目标配件的工厂可入库，不等同于同品类配件制造同行', async () => {
   const text =
-    'Acme Screens manufactures outdoor zip screens in our own factory for dealers nationwide. We are seeking suppliers of zip screen motors.';
+    'Acme Screens manufactures outdoor zip screens in our own factory for dealers nationwide in the United States. We are seeking suppliers of zip screen motors.';
   const f = fixture({
       pageText: text,
       modelOverrides: {
@@ -363,6 +559,35 @@ test('自产成品但明确采购目标配件的工厂可入库，不等同于�
     assert.equal(out.research.eligibility.status, 'eligible');
     assert.equal(out.新增, 1);
     assert.match(f.records[0].fields.需求产品, /zip screen motors/);
+  } finally {
+    svc.close();
+  }
+});
+
+test('经营卷帘的企业可作为潜在面料配件客户收录，采购与自产未证实仍保留缺项', async () => {
+  const text =
+    'Acme Screens sells roller shades to homeowners in the United States. Our company offers window coverings for residential customers.';
+  const f = fixture({
+    pageText: text,
+    modelOverrides: {
+      company_name: policyFact('Acme Screens', text),
+      entity_type: policyFact('business', text),
+      products: [policyFact('roller shades', text)],
+      production_model: null,
+      operating_model: null,
+      demand_products: [],
+    },
+  });
+  const svc = f.make();
+  try {
+    const result = await svc.research(
+      { ...input, product: 'blind components, roller blind fabric' },
+      { source_url: site, operation_id: 'potential-input-buyer' },
+    );
+    assert.equal(result.新增, 1);
+    assert.equal(result.research.product_relation.kind, 'potential_input');
+    assert.deepEqual(result.research.demand_products, []);
+    assert.equal(result.research.production_model, 'unknown');
   } finally {
     svc.close();
   }
@@ -425,6 +650,9 @@ test('直连候选排除目录、社媒、招聘、私网、已收录域名，�
   const r = selectWebsiteCandidates(
     [
       { url: 'https://facebook.com/company' },
+      { url: 'https://www.etsy.com/ca/market/roller_blind_fabric' },
+      { url: 'https://tracxn.com/d/companies/hanaro-one-way/profile' },
+      { url: 'https://www.ctvnews.ca/health/article/fabric-roller-blinds-recalled-in-canada' },
       { url: 'https://127.0.0.1/' },
       { url: 'https://local.internal/' },
       { url: 'https://www.yellowpages.com/company' },
@@ -544,7 +772,7 @@ test('原生研究贯通官网补全、来源校验、飞书写入及读回；�
     assert.equal(output.新增, 1);
     assert.equal(output.明细[0].record_id, 'rec-native');
     assert.equal(f.records[0].fields.邮箱, 'sales@acme.example.org');
-    assert.equal(f.records[0].fields.国家, undefined);
+    assert.equal(f.records[0].fields.国家, 'United States');
     assert.equal(f.records[0].fields.客户等级, undefined);
     const count = f.calls.length;
     assert.deepEqual(await svc.research(input, item), output);
@@ -767,6 +995,7 @@ test('统一获客接口以 native 引擎完成单家批量任务，无 n8n 请�
     }
     assert.equal(final.status, 'completed');
     assert.equal(final.inserted, 1);
+    assert.equal(final.countPolicy, 'broad-business-v1');
     assert.equal(final.provider, 'native');
     assert.ok(f.calls.every((c) => !c.url.includes('n8n')));
     const history = await (await fetch(root + '/executions')).json();

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   ArrowDownToLine,
@@ -7,17 +7,22 @@ import {
   ChevronRight,
   RefreshCw,
   Search,
-  ShieldCheck,
-  Sparkles,
 } from 'lucide-react';
 import { PageHeading } from '../components/PageHeading';
 import { useWorkspace } from '../app/WorkspaceProvider';
 import { Badge, Empty, Modal } from '../components/ui';
 import { CompanyLogo } from '../components/CompanyLogo';
 import { ContactPanel } from '../components/ContactPanel';
-import { AssessmentPanel } from '../components/AssessmentPanel';
+import { CustomerProfile } from '../components/CustomerProfile';
+import { SupplementPanel } from '../components/SupplementPanel';
+import type { ManualConfirmation, SupplementContext } from '../services/leadSupplements';
+import { WebsiteEvidencePanel } from '../components/WebsiteEvidencePanel';
+import { CustomerBusinessSummary } from '../components/CustomerBusinessSummary';
+import { AssessmentPanel, CustomsEvidence } from '../components/AssessmentPanel';
 import type { AssessmentSummary } from '../components/AssessmentPanel';
+import type { CustomsBuyerEvidence } from '../domain/types';
 import { exportCsv } from '../services/workspace';
+import { formatBeijingText, formatBeijingTime } from '../domain/date-time.mjs';
 
 interface Prospect {
   id: string;
@@ -39,6 +44,9 @@ interface Prospect {
   grade: string;
   ratingReason?: string;
   assessment?: AssessmentSummary | null;
+  confirmations?: ManualConfirmation[];
+  manualPurchaseNeed?: string;
+  customsEvidence?: CustomsBuyerEvidence[];
   status: string;
   region: string;
   city: string;
@@ -47,6 +55,8 @@ interface Prospect {
   mainProductPreference?: string;
   advertisingCodes?: string;
   demandProducts?: string;
+  supplyOpportunity?: string;
+  pendingQuestions?: string;
   industryProfile?: string;
   audience?: string;
   social?: { platform: string; url: string; quote: string; source_url: string }[];
@@ -66,7 +76,7 @@ interface Prospect {
   evidence: string;
   facts: { field: string; value: string; quote: string; source_url?: string }[];
   contactEvidence: { kind: string; value: string; quote: string; source_url: string }[];
-  updatedAt: number | null;
+  updatedAt: string | number | null;
   fields: Record<string, string>;
 }
 const typeNames: Record<string, string> = {
@@ -99,20 +109,23 @@ const safeUrl = (s: string) => {
     return undefined;
   }
 };
+const customsRecordCount = (lead: Prospect) =>
+  new Set(
+    (lead.customsEvidence || []).flatMap((buyer) =>
+      (buyer.records || []).map((record) => `${record.provider || ''}:${record.id}`),
+    ),
+  ).size;
 const shortRatingReason = (lead: Prospect) => {
   const lines = (lead.assessment?.evidenceReason || lead.ratingReason || '')
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean);
-  return (
-    lines.find((line) =>
-      /^(主营产品|明确经营品类|专业供货角色|综合供货角色|研究限制|待补充依据)/.test(line),
-    ) ||
-    lines.find((line) => line.startsWith('依据：')) ||
-    (['待核实', '待补全', '未评级'].includes(lead.grade)
-      ? lead.assessment?.incompleteReason || '关键评级依据仍待补充'
-      : lines[0] || '打开客户档案查看评级依据')
-  );
+  const pending = lines.find((line) => /^(待补充依据|待补充)[:：]/.test(line));
+  const reason =
+    (['待核实', '待补全', '未评级'].includes(lead.grade) ? pending : '') ||
+    lines.find((line) => /^(主营产品|明确经营品类|专业供货角色|综合供货角色)[:：]/.test(line)) ||
+    (['待核实', '待补全', '未评级'].includes(lead.grade) ? '关键依据待补充' : '查看评级依据');
+  return reason.length > 46 ? reason.slice(0, 45) + '…' : reason;
 };
 const contactPreparation = (lead: Prospect) => {
   const count = (value: string) =>
@@ -123,12 +136,12 @@ const contactPreparation = (lead: Prospect) => {
   if (lead.email && lead.phone)
     return {
       label: '邮箱与电话已记录',
-      detail: `${count(lead.email)} 个邮箱 · ${count(lead.phone)} 个电话，需核对可用性`,
+      detail: `${count(lead.email)} 个邮箱 · ${count(lead.phone)} 个电话`,
     };
   if (lead.email) return { label: '已记录邮箱', detail: `${count(lead.email)} 个公开邮箱入口` };
   if (lead.phone) return { label: '已记录电话', detail: `${count(lead.phone)} 个公开电话入口` };
-  if (lead.contactEvidence.length)
-    return { label: '已有联系线索', detail: `${lead.contactEvidence.length} 条来源证据` };
+  const forms = lead.contactEvidence.filter((entry) => entry.kind === 'form');
+  if (forms.length) return { label: '已有联系表单', detail: `${forms.length} 个官网表单` };
   return { label: '联系入口待补', detail: '未发现公开邮箱或办公电话' };
 };
 export function LeadLibrary() {
@@ -144,6 +157,8 @@ export function LeadLibrary() {
   const [status, setStatus] = useState('');
   const [page, setPage] = useState(1);
   const [tab, setTab] = useState('客户画像');
+  const [supplement, setSupplement] = useState<SupplementContext | undefined>(undefined);
+  const detailBody = useRef<HTMLDivElement>(null);
   async function load(signal?: AbortSignal) {
     setLoading(true);
     setError('');
@@ -169,6 +184,9 @@ export function LeadLibrary() {
   useEffect(() => {
     setQuery(params.get('q') || '');
   }, [params.get('q')]);
+  useEffect(() => {
+    setSupplement(undefined);
+  }, [params.get('lead')]);
   const leads = remote?.leads || [];
   const filtered = leads.filter(
     (l) =>
@@ -185,9 +203,16 @@ export function LeadLibrary() {
   const current = Math.min(page, pages);
   const rows = filtered.slice((current - 1) * 8, current * 8);
   const viewed = leads.find((l) => l.id === params.get('lead'));
-  const open = (id: string) => {
+  useEffect(() => {
+    const body = detailBody.current;
+    if (body) body.scrollTop = 0;
+    const dialog = body?.closest('dialog');
+    if (dialog) dialog.scrollTop = 0;
+  }, [supplement, tab, viewed?.id]);
+  const open = (id: string, detailTab = '客户画像') => {
+    setSupplement(undefined);
     setParams({ dataset: 'real', lead: id });
-    setTab('客户画像');
+    setTab(detailTab);
   };
   const close = () => setParams({ dataset: 'real' });
   const download = () => {
@@ -200,15 +225,20 @@ export function LeadLibrary() {
         类型: typeNames[l.type] || l.type,
         产品: l.product,
         评分: l.score ?? '未评分',
-        用户评级: l.grade,
+        初评结果: l.grade,
         评级依据: l.ratingReason || '',
         开发状态: l.status,
         广告代码: l.advertisingCodes || '',
-        需求产品: l.demandProducts || '',
+        企业经营产品: l.product,
+        主营产品概况: l.mainProductPreference || '',
+        公开采购需求: l.demandProducts || '',
+        主要供货机会: l.supplyOpportunity || '',
+        待确认事项: l.pendingQuestions || '',
         客户行业画像: l.industryProfile || '',
         邮箱: l.email,
         电话: l.phone,
-        来源: l.website,
+        企业官网: l.website,
+        来源链接: l.source,
       })),
       '飞书真实客户.csv',
     );
@@ -345,7 +375,7 @@ export function LeadLibrary() {
                 <tr>
                   <th>公司名称／来源</th>
                   <th>市场与客户类型</th>
-                  <th>用户评级</th>
+                  <th>初评结果</th>
                   <th>联系准备</th>
                   <th>开发状态</th>
                   <th />
@@ -358,7 +388,7 @@ export function LeadLibrary() {
                     tabIndex={0}
                     onClick={() => open(l.id)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') open(l.id);
+                      if (e.key === 'Enter' && e.target === e.currentTarget) open(l.id);
                     }}
                   >
                     <td>
@@ -368,6 +398,27 @@ export function LeadLibrary() {
                           <strong>{l.name}</strong>
                           <span className="subtext">{l.domain || '域名待核实'}</span>
                           <span className="subtext">企业 · B端</span>
+                          {customsRecordCount(l) ? (
+                            <button
+                              className="text-link"
+                              aria-label={`查看 ${l.name} 的海关记录`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                open(l.id, '海关记录');
+                              }}
+                            >
+                              海关记录 {customsRecordCount(l)} 条
+                              {l.customsEvidence?.some(
+                                (buyer) => buyer.match?.status !== 'verified',
+                              )
+                                ? ' · 身份待核实'
+                                : ''}
+                            </button>
+                          ) : (
+                            <span className="subtext">
+                              {l.customsEvidence?.length ? '海关线索待补票据' : '海关记录未关联'}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </td>
@@ -408,7 +459,16 @@ export function LeadLibrary() {
                               {l.grade === '未评级' ? '尚未自动评级' : '手工记录'}
                             </span>
                           )}
-                          <span className="rating-reason-short">{shortRatingReason(l)}</span>
+                          <button
+                            className="rating-reason-short text-link"
+                            aria-label={`查看 ${l.name} 的评级依据`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              open(l.id, '最新评估');
+                            }}
+                          >
+                            {shortRatingReason(l)}
+                          </button>
                         </div>
                       </div>
                     </td>
@@ -420,7 +480,6 @@ export function LeadLibrary() {
                     </td>
                     <td>
                       <Badge>{l.status}</Badge>
-                      <span className="subtext">由业务跟进记录独立更新</span>
                     </td>
                     <td>
                       <button
@@ -465,8 +524,8 @@ export function LeadLibrary() {
         </footer>
       </section>
       {viewed && (
-        <Modal title={viewed.name} wide onClose={close}>
-          <div className="modal-body prospect-detail">
+        <Modal title="客户档案" wide onClose={close}>
+          <div className="modal-body prospect-detail" ref={detailBody}>
             <div className="prospect-title">
               <CompanyLogo key={viewed.id} id={viewed.id} name={viewed.name} />
               <div>
@@ -488,148 +547,115 @@ export function LeadLibrary() {
                   · {marketLabel(viewed.market)}
                 </p>
               </div>
-              <Badge tone="green">飞书真实客户</Badge>
             </div>
-            <div className="detail-tabs">
-              {['客户画像', '评分与历史', '官网证据', '联系方式', '沟通与跟进', '原始字段'].map(
-                (t) => (
-                  <button className={tab === t ? 'active' : ''} onClick={() => setTab(t)} key={t}>
-                    {t}
-                  </button>
-                ),
-              )}
-            </div>
-            {tab === '客户画像' && (
+            {supplement ? (
+              <SupplementPanel<Prospect>
+                key={
+                  viewed.id +
+                  ':' +
+                  supplement.category +
+                  ':' +
+                  supplement.dimension +
+                  ':' +
+                  supplement.pendingItem
+                }
+                leadId={viewed.id}
+                assessment={viewed.assessment}
+                context={supplement}
+                onCancel={() => setSupplement(undefined)}
+                onSaved={(saved) => {
+                  setRemote(
+                    (data) =>
+                      data && {
+                        ...data,
+                        leads: data.leads.map((lead) =>
+                          lead.id === viewed.id ? { ...lead, ...saved } : lead,
+                        ),
+                      },
+                  );
+                  setSupplement(undefined);
+                  notify(
+                    saved.assessment
+                      ? '补充资料已保存，档案与评级已更新'
+                      : '补充资料已保存，档案已更新',
+                  );
+                }}
+              />
+            ) : (
               <>
-                <div className="profile-kv">
+                <div className="detail-tabs">
                   {[
-                    ['公司名称', viewed.name],
-                    [
-                      '官网名称／别名',
-                      [
-                        viewed.companyIdentity?.website_name,
-                        ...(viewed.companyIdentity?.aliases || []),
-                      ]
-                        .filter((v, i, all) => v && all.indexOf(v) === i)
-                        .join('、') || '尚未核实',
-                    ],
-                    ['经营法人全名', viewed.companyIdentity?.legal_name || '尚未核实'],
-                    [
-                      '名称核验',
-                      viewed.companyIdentity?.status === 'legal_name_self_reported'
-                        ? '已取得官网自述法人名称，尚需与海关买方身份核对'
-                        : '当前名称可用于搜索，海关买方身份待核实',
-                    ],
-                    ...(viewed.companyIdentity?.notes?.length
-                      ? [['名称待核实事项', viewed.companyIdentity.notes.join('；')]]
-                      : []),
-                    ['用户评级', viewed.grade],
-                    ['评级依据', viewed.ratingReason || '尚无评级依据'],
-                    ['客户类型', typeNames[viewed.type] || viewed.type],
-                    ['相关产品', viewed.product],
-                    ['主营产品偏好', viewed.mainProductPreference || '尚未分析'],
-                    ['需求产品', viewed.demandProducts || '未发现公开采购需求'],
-                    ['客户行业画像', viewed.industryProfile || '尚未分析'],
-                    ['广告代码', viewed.advertisingCodes || '未检出公开广告代码'],
-                    ['服务客群', viewed.audience || '待核实'],
-                    [
-                      '企业实际地址',
-                      viewed.address ||
-                        [viewed.city, viewed.region, viewed.market].filter(Boolean).join(', '),
-                    ],
-                    ['服务地区', viewed.serviceAreas || '未确认'],
-                    [
-                      '评分',
-                      viewed.score === null
-                        ? '未评分'
-                        : '已支持' + viewed.score + '/100 · ' + viewed.grade,
-                    ],
-                    [
-                      '最近研究',
-                      viewed.updatedAt
-                        ? new Date(viewed.updatedAt).toLocaleString('zh-CN')
-                        : '尚无研究时间',
-                    ],
-                  ].map(([k, v]) => (
-                    <div key={k}>
-                      <span>{k}</span>
-                      <strong>{v}</strong>
-                    </div>
+                    '客户画像',
+                    '海关记录',
+                    '最新评估',
+                    '官网证据',
+                    '联系方式',
+                    '沟通与跟进',
+                    '原始字段',
+                  ].map((t) => (
+                    <button className={tab === t ? 'active' : ''} onClick={() => setTab(t)} key={t}>
+                      {t}
+                    </button>
                   ))}
                 </div>
-                <div className="profile-reason">
-                  <Sparkles size={18} />
-                  <div>
-                    <h3>主营产品分析</h3>
-                    <p>{viewed.evidence}</p>
-                  </div>
-                </div>
-              </>
-            )}
-            {tab === '评分与历史' && (
-              <AssessmentPanel
-                key={viewed.id}
-                recordId={viewed.id}
-                country={viewed.market}
-                product={viewed.product}
-                assessment={viewed.assessment}
-                onChanged={() => load()}
-              />
-            )}
-            {tab === '官网证据' && (
-              <>
-                <div className="info-callout">
-                  <ShieldCheck size={18} />
-                  <p>
-                    以下为已有官网研究事实。自动评估保留逐条引文和来源；旧记录缺少逐条来源时，链接指向最近研究页，需结合原文核对。
-                  </p>
-                </div>
-                {[
-                  ...(viewed.companyIdentity?.evidence || []),
-                  ...viewed.facts.filter(
-                    (f) =>
-                      !viewed.companyIdentity?.evidence.some(
-                        (n) =>
-                          n.field === f.field &&
-                          n.value === f.value &&
-                          n.source_url === f.source_url,
-                      ),
-                  ),
-                ].map((f, i) => (
-                  <article className="evidence-fact" key={i}>
-                    <Badge>{f.field}</Badge>
-                    <strong>{f.value}</strong>
-                    <blockquote>{f.quote}</blockquote>
-                    {safeUrl(f.source_url || viewed.website) && (
-                      <a
-                        href={safeUrl(f.source_url || viewed.website)}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        证据来源 <ArrowUpRight size={14} />
-                      </a>
-                    )}
-                  </article>
-                ))}
-                {!viewed.facts.length && !viewed.companyIdentity?.evidence.length && (
-                  <Empty title="尚无官网证据" detail="请通过原有获客流程补充研究资料。" />
+                {tab === '客户画像' && (
+                  <CustomerProfile
+                    lead={viewed}
+                    typeLabel={typeNames[viewed.type] || viewed.type}
+                    onAssessment={() => setTab('最新评估')}
+                    onSupplement={setSupplement}
+                  />
                 )}
+                {tab === '海关记录' && <CustomsEvidence buyers={viewed.customsEvidence || []} />}
+                {tab === '最新评估' && (
+                  <AssessmentPanel
+                    key={viewed.id}
+                    assessment={viewed.assessment}
+                    ratingReason={viewed.ratingReason}
+                    researchAt={viewed.updatedAt}
+                    onSupplement={setSupplement}
+                  />
+                )}
+                {tab === '官网证据' && (
+                  <WebsiteEvidencePanel
+                    facts={viewed.facts}
+                    identityEvidence={viewed.companyIdentity?.evidence}
+                  />
+                )}
+                {tab === '联系方式' && (
+                  <ContactPanel
+                    key={viewed.id}
+                    lead={viewed}
+                    onSaved={(saved) => {
+                      setRemote(
+                        (data) =>
+                          data && {
+                            ...data,
+                            leads: data.leads.map((lead) =>
+                              lead.id === viewed.id ? { ...lead, ...saved } : lead,
+                            ),
+                          },
+                      );
+                      notify('联系方式已保存');
+                    }}
+                  />
+                )}
+                {tab === '沟通与跟进' && (
+                  <CustomerBusinessSummary key={viewed.id} customerId={viewed.id} />
+                )}
+                {tab === '原始字段' &&
+                  Object.entries(viewed.fields).map(([k, v]) => (
+                    <details className="raw-field" key={k}>
+                      <summary>{k}</summary>
+                      <pre>
+                        {v && /时间$/.test(k) && /^\d{13}$/.test(v)
+                          ? formatBeijingTime(Number(v))
+                          : formatBeijingText(v || '未提供')}
+                      </pre>
+                    </details>
+                  ))}
               </>
             )}
-            {tab === '联系方式' && <ContactPanel key={viewed.id} lead={viewed} />}
-            {tab === '沟通与跟进' && (
-              <Empty
-                title="尚未接入真实沟通记录"
-                detail="当前只读客户主表；沟通与跟进功能尚待接入。"
-              />
-            )}
-            {tab === '原始字段' &&
-              Object.entries(viewed.fields).map(([k, v]) => (
-                <details className="raw-field" key={k}>
-                  <summary>{k}</summary>
-                  <pre>{v || '未提供'}</pre>
-                </details>
-              ))}
           </div>
         </Modal>
       )}

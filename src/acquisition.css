@@ -734,13 +734,17 @@
   font-weight: 600;
 }
 .rating-reason-short {
-  display: block;
+  display: -webkit-box;
   font-size: 10px;
   line-height: 1.7;
   color: #839078;
   max-width: 230px;
   margin-top: 6px;
   overflow-wrap: anywhere;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-align: left;
 }
 @media (max-width: 1180px) {
   .acq-create-layout {

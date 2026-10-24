@@ -1,0 +1,439 @@
+.business-overview {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 20px 22px;
+  margin-bottom: 18px;
+}
+.business-overview > svg {
+  color: var(--green);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.business-overview strong {
+  font-size: 14px;
+}
+.business-overview p {
+  margin: 8px 0;
+  color: #647b67;
+  line-height: 1.7;
+}
+.business-overview small {
+  color: #82917e;
+}
+.business-alert {
+  padding: 13px 16px;
+  margin: 14px 0;
+  border: 1px solid #dce7d7;
+  border-radius: 7px;
+  background: #edf3e5;
+  color: #3e6348;
+  line-height: 1.7;
+}
+.business-alert.error {
+  background: #fff3ee;
+  border-color: #f0d9cb;
+  color: #96513b;
+}
+.business-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 18px;
+  padding: 18px 22px;
+  margin-bottom: 20px;
+}
+.business-filters > label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #6f846f;
+}
+.business-filters select {
+  padding: 9px 12px;
+  min-width: 200px;
+  max-width: 340px;
+  background: white;
+}
+.business-tabs {
+  display: flex;
+  gap: 20px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--border);
+}
+.business-tabs > button {
+  padding: 18px 3px 15px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  color: #7d8c7a;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.business-tabs > button.active {
+  color: var(--green);
+  border-bottom-color: var(--green);
+  font-weight: 650;
+}
+.business-tabs > button > span {
+  font-size: 11px;
+  background: #f0f3eb;
+  padding: 2px 7px;
+  border-radius: 8px;
+}
+.business-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.business-toolbar .search-field {
+  flex: 1;
+  min-width: 210px;
+}
+.business-toolbar > select {
+  padding: 9px 12px;
+  background: white;
+}
+.business-loading {
+  padding: 35px 22px;
+  color: #7d8c7a;
+}
+.business-table {
+  min-width: 900px;
+  width: 100%;
+}
+.business-table th,
+.business-table td {
+  padding: 18px;
+  text-align: left;
+  vertical-align: top;
+}
+.business-table td {
+  max-width: 300px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.business-table td > strong {
+  display: block;
+  margin-bottom: 8px;
+}
+.business-table td > a,
+.business-table td > span,
+.business-table td > small {
+  display: block;
+  margin-top: 7px;
+}
+.business-table td > a {
+  color: #557b49;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.business-table td > small {
+  color: #7e8e7a;
+}
+.business-quote {
+  white-space: pre-line;
+}
+.business-row-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.business-row-actions .btn {
+  white-space: nowrap;
+}
+.business-conversations {
+  border-bottom: 1px solid var(--border);
+  padding: 18px 20px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.business-conversations > strong {
+  width: 100%;
+  font-size: 13px;
+}
+.business-conversations > p {
+  color: #7e8e7a;
+  line-height: 1.7;
+}
+.business-conversation {
+  background: #fafbf7;
+  border: 1px solid #e3eadc;
+  border-radius: 8px;
+  display: flex;
+  text-align: left;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  max-width: 100%;
+}
+.business-conversation > svg {
+  color: #7c9772;
+  flex-shrink: 0;
+}
+.business-conversation small {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: #81917c;
+  overflow-wrap: anywhere;
+}
+.business-message-list {
+  padding: 20px;
+  display: grid;
+  gap: 17px;
+}
+.business-message {
+  border: 1px solid #e2e9dc;
+  border-radius: 9px;
+  padding: 20px;
+}
+.business-message header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.business-message header > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.business-message time {
+  color: #83927e;
+  font-size: 11px;
+}
+.business-message h3 {
+  margin: 17px 0 9px;
+  font-size: 15px;
+}
+.business-message-meta {
+  color: #7d8c78;
+  font-size: 12px;
+  line-height: 1.9;
+  overflow-wrap: anywhere;
+}
+.business-message-meta a {
+  color: #507344;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.business-message pre {
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 15px 0;
+  max-height: 420px;
+  overflow: auto;
+  padding: 15px;
+  background: #f8faf5;
+  border-radius: 6px;
+}
+.business-attachment {
+  margin: 5px 18px 8px 0;
+}
+.business-message footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: space-between;
+  align-items: center;
+  border-top: 1px solid #eaf0e4;
+  padding-top: 14px;
+  color: #809079;
+  font-size: 12px;
+}
+.business-form fieldset {
+  margin: 20px 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.business-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px 20px;
+}
+.business-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  color: #637963;
+  min-width: 0;
+}
+.business-field input,
+.business-field select,
+.business-field textarea {
+  width: 100%;
+  background: white;
+  border: 1px solid #dce6d7;
+  padding: 10px 11px;
+}
+.business-field textarea {
+  line-height: 1.75;
+  resize: vertical;
+}
+.business-full {
+  grid-column: 1/-1;
+}
+.business-form-note {
+  color: #82917e;
+  font-size: 12px;
+  line-height: 1.8;
+  margin: 0;
+}
+.business-form-meta {
+  color: #83927e;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.business-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  border: 1px solid #e2e9dc;
+  padding: 12px;
+  border-radius: 6px;
+  max-height: 180px;
+  overflow: auto;
+}
+.business-choices > label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.business-choices input {
+  width: auto;
+  margin-top: 4px;
+  padding: 0;
+  flex-shrink: 0;
+}
+.business-choices small {
+  color: #82917e;
+}
+.business-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  line-height: 1.7;
+  color: #4b6c44;
+}
+.business-confirm input {
+  margin-top: 5px;
+  flex-shrink: 0;
+}
+.business-source {
+  padding: 15px;
+  background: #f6f9f1;
+  border: 1px solid #e1e9d8;
+  border-radius: 7px;
+}
+.business-source > strong {
+  font-size: 12px;
+  color: #57754b;
+}
+.business-source textarea {
+  display: block;
+  width: 100%;
+  margin: 10px 0;
+  padding: 12px;
+  line-height: 1.7;
+  background: white;
+}
+.business-action-title {
+  font-weight: 650;
+  margin: 0;
+}
+.business-source pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  line-height: 1.8;
+  max-height: 240px;
+  overflow: auto;
+}
+.business-audit {
+  margin-top: 10px;
+  color: #7e8e7a;
+  font-size: 11px;
+}
+.business-audit summary {
+  cursor: pointer;
+  color: #547746;
+}
+.business-audit ol {
+  padding-left: 18px;
+}
+.business-audit li {
+  padding: 5px 0;
+}
+.business-audit li > span {
+  display: block;
+}
+.business-form .modal-actions {
+  position: sticky;
+  bottom: -26px;
+  padding: 15px 0;
+  margin-bottom: -12px;
+  background: white;
+  border-top: 1px solid var(--border);
+}
+.business-preflight p,
+.business-preflight li {
+  line-height: 1.8;
+}
+.business-preflight .btn {
+  margin-top: 20px;
+}
+@media (max-width: 760px) {
+  .business-filters > label {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .business-filters select {
+    min-width: 0;
+    max-width: none;
+    flex: 1;
+  }
+  .business-tabs {
+    gap: 10px;
+    padding: 0 14px;
+  }
+  .business-tabs > button {
+    font-size: 12px;
+    gap: 6px;
+  }
+  .business-toolbar .search-field {
+    min-width: 100%;
+  }
+  .business-fields,
+  .business-choices {
+    grid-template-columns: 1fr;
+  }
+  .business-message-list {
+    padding: 14px;
+  }
+  .business-message {
+    padding: 15px;
+  }
+  .business-message footer .btn {
+    width: 100%;
+    justify-content: center;
+  }
+  .business-conversation {
+    width: 100%;
+  }
+}

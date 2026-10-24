@@ -15,6 +15,22 @@ const input = {
   acquisition_channel: 'tavily_web',
   target_count: 20,
 };
+const readyHandoff = (source_url) => ({
+  policy: 'sales-handoff-v1',
+  ready: true,
+  reasons: [],
+  identity_verified: true,
+  opportunity_qualified: true,
+  contact_verified: true,
+  contacts: [
+    {
+      kind: 'email',
+      value: 'sales@' + domainKey(source_url),
+      source_url,
+      quote: 'Public business contact',
+    },
+  ],
+});
 function harness(extra = {}) {
   const leads = [];
   let num = 0;
@@ -31,6 +47,7 @@ function harness(extra = {}) {
       return {
         新增: 1,
         execution_id: '1',
+        handoff: readyHandoff(item.source_url),
         明细: [{ source_url: item.source_url, result: 'inserted', record_id: id }],
       };
     },
@@ -59,7 +76,7 @@ test('全局淘汰和证据不足的候选不占新增名额，队列继续补�
     await manager.work(job.id);
     const result = manager.get(job.id);
     assert.equal(result.inserted, 0);
-    assert.equal(result.rejected, 3);
+    assert.equal(result.rejected, 12);
     assert.equal(result.pending, 0);
     assert.equal(result.reason, 'research_limit');
     assert.ok(result.rows.every((row) => row.result === 'rejected'));
@@ -146,7 +163,11 @@ test('同域不同网页只研究一次，重复与不匹配不占名额，自�
       if (c.domain === 'same.com')
         return { research: { audience_match: 'not_matched' }, reason: '不匹配' };
       records.push({ id: 'r1', website: c.source_url, name: 'New' });
-      return { 新增: 1, 明细: [{ source_url: c.source_url, result: 'inserted', record_id: 'r1' }] };
+      return {
+        新增: 1,
+        handoff: readyHandoff(c.source_url),
+        明细: [{ source_url: c.source_url, result: 'inserted', record_id: 'r1' }],
+      };
     },
     readLeads: async () => records,
   });
@@ -190,6 +211,7 @@ test('每条实际搜索词记录发现、去重、待核实和评级产出', as
         新增: 1,
         明细: [{ source_url: item.source_url, result: 'inserted', record_id: 'rec-accepted' }],
         assessment: { grade: 'A', score: 80, status: '优先开发' },
+        handoff: readyHandoff(item.source_url),
       };
     },
     readLeads: async () => records,
@@ -262,7 +284,7 @@ test('服务重启把未完成的搜索指标标记为中断并保留进度', ()
     rmSync(folder, { recursive: true, force: true });
   }
 });
-test('已知抓取失败占研究次数，不计新增，达到3倍上限部分完成', async () => {
+test('已知抓取失败占研究次数，不计新增，达到有界研究预算后部分完成', async () => {
   const { manager } = harness({
     research: async () => ({ outcome: 'failed', stage: 'extract', reason: '空正文' }),
   });
@@ -271,7 +293,7 @@ test('已知抓取失败占研究次数，不计新增，达到3倍上限部分�
     await manager.work(j.id);
     const done = manager.get(j.id);
     assert.equal(done.reason, 'research_limit');
-    assert.equal(done.failed, 3);
+    assert.equal(done.failed, 12);
     assert.equal(done.inserted, 0);
   } finally {
     manager.close();
@@ -321,6 +343,7 @@ test('飞书读回失败或网络结果不明先暂停，核对成功后继续�
   let settled = false;
   const row = {
     新增: 1,
+    handoff: readyHandoff('https://company1.com/'),
     明细: [{ source_url: 'https://company1.com/', result: 'inserted', record_id: 'r1' }],
   };
   const { manager } = harness({
@@ -329,7 +352,8 @@ test('飞书读回失败或网络结果不明先暂停，核对成功后继续�
       throw new Error('timeout');
     },
     status: async () => ({ settled, output: row }),
-    readLeads: async () => [{ id: 'r1', website: 'https://company1.com/', name: 'Company' }],
+    readLeads: async () =>
+      count ? [{ id: 'r1', website: 'https://company1.com/', name: 'Company' }] : [],
   });
   try {
     const j = manager.create({ ...input, target_count: 1 }, 'unknown-result');

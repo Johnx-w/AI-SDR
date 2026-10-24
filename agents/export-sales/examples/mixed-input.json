@@ -1,5 +1,5 @@
 {
-  "contract_version": "1.2",
+  "contract_version": "1.3",
   "agent_id": "venetian",
   "evaluation_time": "2026-10-22T15:00:00+08:00",
   "event": {
@@ -14,7 +14,9 @@
     "channel": "email",
     "language": "en",
     "buyer_status": "b2b",
-    "history_summary": "虚构协议演示：加拿大经销商始终通过 sales@horizontal-export.example 沟通。横百叶在该官网范围；透气窗仅在公司总目录范围，由产品专家内部辅助。本次拱形透气窗已交人工且确认已发送，横百叶为独立常规需求。"
+    "history_summary": "虚构协议演示：加拿大经销商始终通过 sales@horizontal-export.example 沟通。横百叶在该官网范围；透气窗仅在公司总目录范围，由产品专家内部辅助。本次拱形透气窗已交人工且确认已发送，横百叶为独立常规需求。",
+    "ownership": "ai",
+    "handoff_ack_sent": false
   },
   "company_context": {
     "name": null,
@@ -51,7 +53,15 @@
       "missing_fields": ["size_system", "dimensions", "quantities"],
       "sales_stage": "selection",
       "handoff_ack_sent": false,
-      "human_return_note": null
+      "human_return_note": null,
+      "repeated_negotiation": false,
+      "nonprogress_exchanges": 0,
+      "large_order_match": { "matched": false, "rule_id": null },
+      "knowledge_resolution": {
+        "retrieval_state": "not_needed",
+        "clarification_attempted": false,
+        "unresolved_critical_question": false
+      }
     },
     {
       "id": "demo-demand-shutter",
@@ -74,7 +84,15 @@
       "missing_fields": ["verified_feasibility"],
       "sales_stage": "requirements",
       "handoff_ack_sent": true,
-      "human_return_note": null
+      "human_return_note": null,
+      "repeated_negotiation": false,
+      "nonprogress_exchanges": 0,
+      "large_order_match": { "matched": false, "rule_id": null },
+      "knowledge_resolution": {
+        "retrieval_state": "not_needed",
+        "clarification_attempted": false,
+        "unresolved_critical_question": false
+      }
     }
   ],
   "knowledge": [
@@ -104,6 +122,7 @@
     "follow_up_enabled": false,
     "follow_up_intervals_days": null,
     "max_follow_ups": null,
+    "stagnation_exchange_threshold": null,
     "send_window": null,
     "available_tools": []
   },

@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { pageRelevance, productsRelevant, countryMatches } from '../server/relevance.mjs';
+import {
+  pageRelevance,
+  productsRelevant,
+  businessProductRelation,
+  countryMatches,
+} from '../server/relevance.mjs';
 import { builtinProducts } from '../src/domain/acquisition-products.mjs';
 
 const target = {
@@ -52,6 +57,28 @@ test('国家证据与目标市场比对，别名可归一', () => {
   assert.equal(countryMatches('USA', ['United States']), 'matched');
   assert.equal(countryMatches('', ['Australia']), 'unknown');
   assert.equal(countryMatches('Australia', []), 'unrestricted');
+});
+
+test('成品卷帘与面料组件形成潜在业务关联，不宣称已采购，也不放宽到无关产品', () => {
+  for (const product of ['roller blind fabric', 'blind components', 'roller blind clutch']) {
+    const result = businessProductRelation(['Roller Shades'], { product });
+    assert.equal(result.status, 'matched', product);
+    assert.equal(result.kind, 'potential_input', product);
+  }
+  assert.equal(
+    businessProductRelation(['Roman blinds'], { product: 'outdoor zip screen components' }).status,
+    'not_matched',
+  );
+  assert.equal(
+    businessProductRelation(['roller blind fabric'], { product: 'roller blind fabric' }).kind,
+    'catalog_related',
+  );
+  assert.equal(
+    businessProductRelation(['window treatments', 'window coverings'], {
+      product: 'blind components',
+    }).kind,
+    'potential_input',
+  );
 });
 
 test('按目标品类而非整个窗饰行业匹配，兼容中英文别名', () => {

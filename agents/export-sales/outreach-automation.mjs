@@ -61,7 +61,7 @@ export function eligibleProductClaims(input) {
 
 export function evaluateOutreachReadiness(input) {
   const reasons = [];
-  add(reasons, 'invalid_contract_version', input?.contract_version !== '1.0');
+  add(reasons, 'invalid_contract_version', input?.contract_version !== '1.1');
   add(reasons, 'invalid_agent', !AGENT_IDS.has(input?.agent_id));
   add(reasons, 'invalid_evaluation_time', !Number.isFinite(effectiveTime(input)));
   add(reasons, 'missing_operation_id', !nonEmpty(input?.operation_id));
@@ -96,13 +96,14 @@ export function evaluateOutreachReadiness(input) {
   if (event?.type === 'first_touch') {
     add(reasons, 'invalid_sequence_step', event.sequence_step !== 1);
     add(reasons, 'already_contacted', lead?.development_status !== 'pending_outreach');
+    add(reasons, 'first_touch_already_sent', input?.delivery_history?.first_touch_sent !== false);
   } else if (event?.type === 'sequence_follow_up') {
     add(
       reasons,
       'invalid_sequence_step',
       !Number.isInteger(event.sequence_step) || event.sequence_step < 2,
     );
-    add(reasons, 'sequence_follow_up_disabled', input?.policy?.sequence_follow_up_enabled !== true);
+    reasons.push('sequence_follow_up_not_launched');
     add(reasons, 'sequence_state_invalid', lead?.development_status !== 'contacted');
   } else {
     reasons.push('unsupported_event');
@@ -140,7 +141,7 @@ export function evaluateOutreachReadiness(input) {
 }
 
 function validateDraftIdentity(input, output, reasons) {
-  add(reasons, 'output_contract_mismatch', output?.contract_version !== '1.0');
+  add(reasons, 'output_contract_mismatch', output?.contract_version !== '1.1');
   add(reasons, 'output_agent_mismatch', output?.agent_id !== input.agent_id);
   add(reasons, 'output_campaign_mismatch', output?.campaign_id !== input.campaign.id);
   add(reasons, 'output_operation_mismatch', output?.operation_id !== input.operation_id);
@@ -156,6 +157,13 @@ function automaticReasons(input) {
   const reasons = [];
   const sender = input.sender_identity;
   const policy = input.policy;
+  add(
+    reasons,
+    'campaign_automatic_approval_missing_or_stale',
+    !Number.isInteger(input.campaign?.revision) ||
+      !Number.isInteger(input.campaign?.approved_automatic_revision) ||
+      input.campaign.approved_automatic_revision !== input.campaign.revision,
+  );
   add(reasons, 'sender_identity_unapproved', sender?.approved !== true);
   add(reasons, 'sender_company_missing', !nonEmpty(sender?.company_name));
   add(reasons, 'sender_name_missing', !nonEmpty(sender?.display_name));

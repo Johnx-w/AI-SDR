@@ -1,5 +1,5 @@
 {
-  "contract_version": "1.2",
+  "contract_version": "1.3",
   "agent_id": "shutter",
   "conversation_id": "demo-quote-001",
   "based_on_revision": 2,
@@ -7,11 +7,14 @@
   "items": [
     {
       "demand_id": "demo-demand-quote",
-      "action": "request_handoff",
+      "action": "clarify",
+      "approval_gate": "none",
+      "approval_reason": null,
+      "handoff_scope": null,
       "route_to": null,
-      "reply_fragment": "Thank you for your quotation request for the PVC plantation shutters. Pricing, freight to Melbourne and delivery timing require confirmation by our sales team. The specification schedule will also need to be checked for that review.",
-      "handoff_reason": "formal_quote",
-      "internal_note": "正式报价移交人工，连同运费金额和交期确认。核实是否成功收到并可读取客户规格附件；当前不能声称已审阅。100只仅为本次需求，不作为大单或MOQ判断。人工报价后须自行选择继续人工或明确交回Agent。 本产品在虚构官网范围内，移交与后续跟进仍沿用 sales@shutter-export.example。",
+      "reply_fragment": "Thank you for your quotation request for the PVC plantation shutters. Could you resend the specification schedule or confirm the dimensions and quantities? We will check the applicable pricing, freight and delivery terms before preparing the quotation.",
+      "handoff_reason": null,
+      "internal_note": "正式报价请求本身不触发接管。尚未实际读取规格附件，且没有适用已审核价格、运费或交期依据；先澄清资料，不能给出具体承诺。100只不构成未经配置的大单判断。后续若有适用获准条款，可起草并逐封人工审核；沿用 sales@shutter-export.example。",
       "missing_fields": [
         "verified_specification_schedule",
         "approved_price",
@@ -26,15 +29,15 @@
           "source_id": "demo-quote-message-001"
         }
       ],
-      "sales_stage_suggestion": "quote_human",
+      "sales_stage_suggestion": "requirements",
       "cited_drawing_parameter_ids": [],
       "attachment_requests": []
     }
   ],
-  "conversation_summary_update": "海外批发商申请PVC透气窗正式报价与墨尔本运费、交付确认，需人工接管并核实规格附件。",
+  "conversation_summary_update": "海外批发商申请 PVC 透气窗报价、墨尔本运费与交付确认；附件尚未可读，当前先补齐规格，不触发人工接管。",
   "follow_up_suggestion": {
     "operation": "cancel_old_and_reassess",
     "eligible_demand_ids": [],
-    "reason": "报价需求转人工且未启用自动跟进，不安排自动催问。"
+    "reason": "本轮报价问题仅需澄清且未启用自动跟进，不安排自动催问。"
   }
 }

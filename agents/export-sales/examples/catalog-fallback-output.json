@@ -1,5 +1,5 @@
 {
-  "contract_version": "1.2",
+  "contract_version": "1.3",
   "agent_id": "indoor",
   "conversation_id": "demo-catalog-conversation-001",
   "based_on_revision": 2,
@@ -8,6 +8,9 @@
     {
       "demand_id": "demo-demand-roller-001",
       "action": "reply",
+      "approval_gate": "none",
+      "approval_reason": null,
+      "handoff_scope": null,
       "route_to": null,
       "reply_fragment": "We can supply finished roller blinds for wholesale orders. Could you share the size range, approximate quantities, and any fabric requirements you have in mind?",
       "handoff_reason": null,

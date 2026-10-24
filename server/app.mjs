@@ -1,16 +1,22 @@
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { discoverBranding } from './branding.mjs';
 import { summarizeRunOutput } from './run-outcome.mjs';
 import { validateTarget, locationOptions } from './search-target.mjs';
-import { BatchJobs, validateCount } from './batch-jobs.mjs';
+import { BatchJobs, validateCount, validateResearchBudget } from './batch-jobs.mjs';
 import { createAcquisitionProvider } from './acquisition-provider.mjs';
 import { ApiConnections } from './api-connections.mjs';
+import { discoverResearchModels } from './model-discovery.mjs';
 import { AcquisitionSchedules } from './acquisition-schedules.mjs';
 import { ProductCatalog } from './product-catalog.mjs';
+import { ProductKnowledge } from './product-knowledge.mjs';
+import { ProductKnowledgeFeishu } from './product-knowledge-feishu.mjs';
+import { CustomerBusinessApi } from './customer-business-api.mjs';
 import { searchPlan } from './search-plan.mjs';
+import { MailService } from './mail-service.mjs';
+import { validateContactEdit } from './lead-contacts.mjs';
 
 class ApiError extends Error {
   constructor(status, message) {
@@ -29,6 +35,8 @@ const types = {
 const maxJsonBytes = 32768;
 export function validateInput(input) {
   const target = validateTarget(input);
+  if (input.research_budget !== undefined)
+    target.research_budget = validateResearchBudget(input.research_budget);
   if (target.query_mode === 'auto') return { ...target, search_query: searchPlan(target)[0].query };
   if (
     typeof input.search_query !== 'string' ||
@@ -54,11 +62,33 @@ async function readJson(request) {
     throw new ApiError(400, 'JSON 格式不正确');
   }
 }
+
+function requireMailOperator(request, token) {
+  if (typeof token !== 'string' || token.length < 32)
+    throw new ApiError(503, '请先在本机配置沟通中心操作者口令');
+  const supplied = request.headers['x-mail-operator-token'];
+  if (typeof supplied !== 'string') throw new ApiError(401, '请先解锁沟通中心');
+  const expectedBytes = Buffer.from(token);
+  const suppliedBytes = Buffer.from(supplied);
+  if (
+    expectedBytes.length !== suppliedBytes.length ||
+    !timingSafeEqual(expectedBytes, suppliedBytes)
+  )
+    throw new ApiError(401, '操作者口令无效');
+}
+
+function requireIdempotencyKey(request) {
+  const key = request.headers['idempotency-key'];
+  if (typeof key !== 'string' || !/^[\w-]{8,100}$/.test(key))
+    throw new ApiError(400, '邮件发送需要有效的 Idempotency-Key');
+  return key;
+}
 export function createApp({
   env = process.env,
   fetchImpl = fetch,
   dist = resolve('dist'),
   nativeImpl,
+  mailServiceFactory,
 } = {}) {
   const connections = new ApiConnections({ env, path: env.CONNECTIONS_PATH });
   let provider = createAcquisitionProvider({
@@ -90,6 +120,14 @@ export function createApp({
     (batch ??= new BatchJobs({
       path: env.BATCH_DB_PATH || ':memory:',
       provider: provider.info.provider,
+      scope: createHash('sha256')
+        .update(
+          JSON.stringify([
+            connections.environment().FEISHU_APP_TOKEN || '',
+            connections.environment().FEISHU_TABLE_ID || '',
+          ]),
+        )
+        .digest('hex'),
       discover: (...args) => provider.discover(...args),
       research: (...args) => provider.research(...args),
       status: (id) => provider.status(id),
@@ -99,7 +137,26 @@ export function createApp({
   let products;
   const catalog = () =>
     (products ??= new ProductCatalog(env.PRODUCT_DB_PATH || env.BATCH_DB_PATH || ':memory:'));
+  let productKnowledge;
+  const knowledge = () =>
+    (productKnowledge ??= new ProductKnowledge(
+      env.PRODUCT_KNOWLEDGE_DB_PATH || env.PRODUCT_DB_PATH || env.BATCH_DB_PATH || ':memory:',
+    ));
+  const productMirror = () =>
+    new ProductKnowledgeFeishu({ env: connections.environment(), fetchImpl });
+  const business = new CustomerBusinessApi({
+    getEnv: () => connections.environment(),
+    fetchImpl,
+    knowledge,
+    loadCustomers: async () => (await loadLeads()).leads,
+  });
+  const mail = mailServiceFactory ? mailServiceFactory({ env }) : new MailService({ env });
   const checkCapabilities = (input) => {
+    if (['customs', 'dual'].includes(input.acquisition_channel)) {
+      if (provider.info.provider !== 'native')
+        throw new ApiError(400, '海关逐票发现需要后端直连引擎');
+      if (!provider.info.customs?.configured) throw new ApiError(503, '请先配置海关数据连接');
+    }
     if (
       provider.info.provider !== 'native' &&
       (input.product_scope === 'all' ||
@@ -164,18 +221,86 @@ export function createApp({
           throw new ApiError(403, '不允许跨站调用');
         if (url.pathname === '/api/health' && request.method === 'GET')
           return json(response, 200, { ok: true });
+        if (url.pathname.startsWith('/api/v1/mail/')) {
+          requireMailOperator(request, env.MAIL_OPERATOR_TOKEN);
+          if (url.pathname === '/api/v1/mail/status' && request.method === 'GET')
+            return json(response, 200, mail.status());
+          if (url.pathname === '/api/v1/mail/conversations' && request.method === 'GET')
+            return json(response, 200, mail.listConversations());
+          if (url.pathname === '/api/v1/mail/test-send' && request.method === 'POST') {
+            const body = await readJson(request);
+            return json(
+              response,
+              200,
+              await mail.sendTechnicalTest({
+                confirmed: body?.confirmed,
+                idempotencyKey: requireIdempotencyKey(request),
+              }),
+            );
+          }
+          if (url.pathname === '/api/v1/mail/sync' && request.method === 'POST') {
+            const body = await readJson(request);
+            if (body?.confirmed !== true) throw new ApiError(400, '请先确认测试邮箱同步');
+            return json(response, 200, await mail.sync());
+          }
+          const conversationRoute = url.pathname.match(
+            /^\/api\/v1\/mail\/conversations\/([\w-]{1,100})(?:\/(draft|reply))?$/,
+          );
+          if (conversationRoute) {
+            const [, id, action] = conversationRoute;
+            if (!action && request.method === 'GET')
+              return json(response, 200, mail.getConversation(id));
+            if (action === 'draft' && request.method === 'PUT')
+              return json(response, 200, mail.saveDraft(id, await readJson(request)));
+            if (action === 'reply' && request.method === 'POST') {
+              const body = await readJson(request);
+              return json(
+                response,
+                200,
+                await mail.sendReply(id, {
+                  draftRevision: body?.draftRevision,
+                  confirmed: body?.confirmed,
+                  idempotencyKey: requireIdempotencyKey(request),
+                }),
+              );
+            }
+          }
+          throw new ApiError(404, '邮件接口不存在');
+        }
+        if (url.pathname === '/api/v1/connections/models') {
+          if (request.method !== 'POST') throw new ApiError(405, '不支持的模型目录操作');
+          const preview = connections.previewModelEnvironment(await readJson(request));
+          const controller = new AbortController();
+          const abort = () => controller.abort();
+          request.once('aborted', abort);
+          try {
+            return json(
+              response,
+              200,
+              await discoverResearchModels({ env: preview, fetchImpl, signal: controller.signal }),
+            );
+          } finally {
+            request.off('aborted', abort);
+          }
+        }
+        if (url.pathname === '/api/v1/business' || url.pathname.startsWith('/api/v1/business/')) {
+          const result = await business.handle(request, url, readJson);
+          return json(response, result.status, result.body);
+        }
         if (url.pathname === '/api/v1/connections') {
           if (request.method === 'GET') return json(response, 200, connections.view());
           if (request.method === 'PUT') {
             const body = await readJson(request);
             if (
               running ||
+              business.active ||
               readingLeads ||
               jobs().active() ||
               [...runs.values()].some((r) => r.status === 'unknown')
             )
               throw new ApiError(409, '请先完成或核对当前任务，再修改 API 连接');
             const result = connections.update(body);
+            business.reset();
             provider.close();
             batch?.close();
             batch = undefined;
@@ -189,6 +314,42 @@ export function createApp({
             return json(response, 200, result);
           }
           throw new ApiError(405, '不支持的配置操作');
+        }
+        if (url.pathname === '/api/v1/products/knowledge') {
+          if (request.method === 'GET')
+            return json(response, 200, {
+              products: knowledge().list(),
+              source: 'local',
+              feishu: await productMirror().info(),
+            });
+          if (request.method === 'POST' || request.method === 'PUT') {
+            const body = await readJson(request);
+            if (!body || typeof body !== 'object' || Array.isArray(body))
+              throw new ApiError(400, '产品资料格式不正确');
+            const { expectedVersion, ...value } = body;
+            if (request.method === 'POST' && value.id)
+              throw new ApiError(400, '新增产品资料不能指定已有编号');
+            if (request.method === 'PUT' && !value.id)
+              throw new ApiError(400, '修改产品资料需要产品编号');
+            const key = request.method === 'POST' ? request.headers['idempotency-key'] : undefined;
+            if (
+              request.method === 'POST' &&
+              (typeof key !== 'string' || !/^[\w-]{8,100}$/.test(key))
+            )
+              throw new ApiError(400, '新增产品资料需要有效的 Idempotency-Key');
+            const product = knowledge().save(value, { expectedVersion, idempotencyKey: key });
+            const feishu = await productMirror().sync(product);
+            return json(response, request.method === 'POST' ? 201 : 200, { product, feishu });
+          }
+          throw new ApiError(405, '不支持的产品资料操作');
+        }
+        const productSync = url.pathname.match(
+          /^\/api\/v1\/products\/knowledge\/(pk_[a-f0-9]{32})\/sync$/,
+        );
+        if (productSync && request.method === 'POST') {
+          const product = knowledge().get(productSync[1]);
+          if (!product) throw new ApiError(404, '产品资料不存在，请刷新资料库');
+          return json(response, 200, { product, feishu: await productMirror().sync(product) });
         }
         const prefix = url.pathname.startsWith('/api/v1/acquisition')
           ? '/api/v1/acquisition'
@@ -251,6 +412,59 @@ export function createApp({
           );
         if (url.pathname === '/api/v1/leads/real' && request.method === 'GET')
           return json(response, 200, await loadLeads());
+        const supplementRoute = url.pathname.match(
+          /^\/api\/v1\/leads\/real\/([\w-]{1,100})\/supplements$/,
+        );
+        if (supplementRoute) {
+          if (request.method === 'GET' && provider.pendingSupplement)
+            return json(response, 200, await provider.pendingSupplement(supplementRoute[1]));
+          if (request.method !== 'POST') throw new ApiError(405, '不支持的补充资料操作');
+          if (!provider.supplementRecord) throw new ApiError(503, '补充资料需要后端直连引擎');
+          const key = request.headers['idempotency-key'];
+          if (typeof key !== 'string' || !/^[\w-]{8,100}$/.test(key))
+            throw new ApiError(400, '保存资料需要有效Idempotency-Key');
+          const input = await readJson(request);
+          if (running || jobs().active())
+            throw new ApiError(409, '请先完成当前获客任务，再补充资料');
+          running++;
+          try {
+            const result = await provider.supplementRecord(
+              supplementRoute[1],
+              input,
+              key,
+              business.state().store,
+            );
+            realLeads.set(result.lead.id, result.lead);
+            return json(response, 200, result);
+          } finally {
+            running--;
+          }
+        }
+        const contactRoute = url.pathname.match(
+          /^\/api\/v1\/leads\/real\/([\w-]{1,100})\/contacts$/,
+        );
+        if (contactRoute && request.method === 'PATCH') {
+          const input = validateContactEdit(await readJson(request));
+          if (!provider.updateContacts) throw new ApiError(503, '修改联系方式需要后端直连引擎');
+          const directEnv = connections.environment();
+          if (
+            !directEnv.FEISHU_APP_ID ||
+            !directEnv.FEISHU_APP_SECRET ||
+            !directEnv.FEISHU_APP_TOKEN ||
+            !directEnv.FEISHU_TABLE_ID
+          )
+            throw new ApiError(503, '请先配置飞书应用直连，以保存联系方式');
+          if (running || jobs().active())
+            throw new ApiError(409, '请先完成当前获客任务，再修改联系方式');
+          running++;
+          try {
+            const result = await provider.updateContacts(contactRoute[1], input);
+            realLeads.set(result.lead.id, { ...realLeads.get(result.lead.id), ...result.lead });
+            return json(response, 200, result);
+          } finally {
+            running--;
+          }
+        }
         if (url.pathname === '/api/v1/assessments/rules' && request.method === 'GET') {
           if (!provider.assessmentInfo) throw new ApiError(503, '自动评级目前需要后端直连引擎');
           return json(response, 200, provider.assessmentInfo());
@@ -266,7 +480,7 @@ export function createApp({
           if (request.method === 'GET' && !evaluationId)
             return json(response, 200, provider.assessmentHistory(recordId));
           if (request.method === 'POST' && evaluationId)
-            return json(response, 200, await provider.retryAssessment(recordId, evaluationId));
+            throw new ApiError(410, '评估历史同步已停用，请刷新查看最新评估');
           if (request.method === 'POST' && !evaluationId) {
             if (!provider.info.configured) throw new ApiError(503, '请先配置企业研究所需API');
             if (running || jobs().active())
@@ -419,9 +633,17 @@ export function createApp({
       });
     }
   });
-  server.on('listening', () => plans().start());
+  server.on('listening', () => {
+    plans().start();
+    Promise.resolve(mail.start()).catch(() => {
+      // MailService records a safe status; startup must not take down acquisition.
+    });
+  });
   server.on('close', () => {
+    mail.close();
     products?.close();
+    productKnowledge?.close();
+    business.close();
     schedules?.close();
     if (batch && !batch.busy) batch.close();
     if (!batch?.busy && !running) provider.close();

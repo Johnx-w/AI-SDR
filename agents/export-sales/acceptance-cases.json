@@ -8,7 +8,7 @@
       "customer_message": "We distribute window coverings in the United States. Are you a supplier in China or a local installer? We are looking for finished blinds and components to resell.",
       "expected": [
         "以中国出口供货方的身份介绍对应供货范围，并确认买方需要的具体产品和采购形态。",
-        "围绕向海外经销商销售产品展开沟通，后续正式报价按人工接管规则处理。",
+        "围绕向海外经销商销售产品展开沟通；后续标准具体商务承诺仅用适用已审核资料起草并逐封人工审核，越权事项才按范围接管。",
         "说明本地安装等服务需要核实，未确认的信息保持未知。"
       ],
       "must_not": [
@@ -43,7 +43,7 @@
       "expected": [
         "识别其声明的企业采购和转售用途，继续基础接待，并适度确认公司名称、业务及所需品类。",
         "按已确认的企业样品政策核实办理条件；没有政策资料时说明需核实。",
-        "区分样品评估与大货采购，保持对价格、运费和样品条款的人工确认要求。"
+        "区分样品评估与大货采购；具体价格、运费和样品商务承诺必须有适用已审核依据并逐封人工确认。"
       ],
       "must_not": [
         "仅因个人邮箱、企业规模小或只要一套样品就按个人消费者拒绝。",
@@ -111,7 +111,7 @@
       "expected": [
         "由户外遮阳 Agent 接待，收集安装地点、系统型号、现场条件及客户控制系统的准确型号。",
         "逐项标明所询证书、风等级、防水等级、电压和控制兼容性尚需对应型号的有效资料核实。",
-        "把超出当前有效资料的技术确认交给适当人工核实，保留同一客户会话。"
+        "先进行可信检索并在歧义时做一次必要澄清；若关键能力仍无依据，按该需求交人工核实，保留同一客户会话。"
       ],
       "must_not": [
         "编造证书编号、标准符合性、风速或风等级、IP 等级、电机电压以及任何品牌兼容结论。",
@@ -213,7 +213,7 @@
       "expected": [
         "由百叶窗 Agent 正常说明已确认的 Custom Made 业务，并收集宽高、单位、安装方式、材质和数量。",
         "具体尺寸能否满足以系列能力资料核实，缺少范围时保持待确认。",
-        "把常规矩形按尺寸定制与异形或特殊工艺区分；出现正式报价请求时再按报价接管规则处理。"
+        "把常规矩形按尺寸定制与超出审核范围的非常规定制区分；出现标准报价请求时只在有适用已审核条款时起草，并对含具体承诺的邮件逐封审核。"
       ],
       "must_not": [
         "仅因 Custom Made 或非固定尺寸就判定为异形复杂单。",
@@ -241,17 +241,17 @@
     },
     {
       "id": "E15",
-      "title": "正式报价立即交人工且缺数据也不编价",
-      "context": "虚构加拿大百叶窗批发商提出明确正式报价要求。没有有效价格表、MOQ、运费、付款和交期数据，尺寸数量也不完整；报价请求本身已满足人工接管条件。",
+      "title": "正式报价缺数据时澄清且不编价、不自动接管",
+      "context": "虚构加拿大百叶窗批发商提出明确正式报价要求。没有有效价格表、MOQ、运费、付款和交期数据，尺寸数量也不完整；单凭标准报价请求不构成人工接管。",
       "customer_message": "Please issue your formal export quotation for our horizontal blind order, including unit prices, minimum quantities, freight to Canada, payment terms, and delivery time. We will send the final size breakdown shortly.",
       "expected": [
-        "将正式报价交给人工接管，整理客户现有要求及尚缺的尺寸、数量和目的地信息。",
-        "可提出完成报价所需的必要补充信息，但不能用资料未齐为由绕过人工接管。",
-        "没有有效商务数据时明确待核实，报价金额、条款和发送须由人工确认。"
+        "整理客户现有要求及尚缺的尺寸、数量和目的地信息，先提出必要的补充问题。",
+        "没有适用已审核商务数据时不写具体价格、MOQ、运费、付款或交期承诺；必要时内部核实。",
+        "保留 AI 接待归属；若以后取得适用版本化条款，具体商务草稿逐封交人工审核。"
       ],
       "must_not": [
         "自行估算一个正式价格、MOQ、运输价格、付款比例或交期。",
-        "把正式报价只设为普通自动回复审核，并在人工未决定交回时恢复 AI 接待。",
+        "仅因正式报价请求就把整项需求或整段会话人工接管，或假装已有可用价格表。",
         "将报价审批通过等同于全部订单条款都已获授权或订单已经成交。"
       ],
       "agents": ["venetian"]
@@ -264,7 +264,7 @@
       "expected": [
         "百叶窗 Agent 正常回答其独立、已确认的尺寸方式问题，沿用当前会话。",
         "人工接管的异形透气窗保持人工归属，相关评估仅引用人工已批准的内容。",
-        "统一对外回复，并按事项保持各自接待状态；若新问题涉及整批共同商务条件，则交由人工确认。"
+        "统一对外回复，并按事项保持各自接待状态；若新问题涉及标准整批具体商务条件，则整封邮件逐封审核，非标准跨需求承诺才整段接管。"
       ],
       "must_not": [
         "因透气窗已人工接管就无条件禁止百叶窗的独立常规答复。",
@@ -298,7 +298,7 @@
       "expected": [
         "确认存在该项需求的明确交回记录后，恢复室内成品帘的常规自动接待。",
         "从当前档案和有效报价读取已确认信息，仅询问仍然缺少的事项。",
-        "后续新出现的改价、特殊条款或其他接管条件，仍按原权限重新交人工处理。"
+        "后续新的标准具体承诺仍逐封审核；越权改价、特殊条款或其他接管条件才重新交人工接管。"
       ],
       "must_not": [
         "把一项需求的交回扩大到同会话中仍由人工接管的其他需求。",
@@ -327,11 +327,11 @@
     {
       "id": "E20",
       "title": "移交请求和确认幂等且不冒称人工已接手",
-      "context": "虚构英国透气窗代理合作需求已创建同一人工移交请求并发过确认。邮件渠道重复投递同一 message ID，队列重试两次；尚未成功分配具体人工业务员。",
+      "context": "虚构英国透气窗独家代理合作已触发整段会话人工接管，创建同一移交请求并发过确认。邮件渠道重复投递同一 message ID，队列重试两次；尚未成功分配具体人工业务员。",
       "customer_message": "We would like to discuss exclusive distribution of your plantation shutters in our territory. Please have the appropriate person review our proposal.",
       "expected": [
-        "将重复消息和处理重试关联到已有记录，保留同一个需求与移交请求。",
-        "已发送的移交确认不再重复发送，继续保持该需求人工接管状态。",
+        "将重复消息和处理重试关联到已有会话级移交记录及相关需求。",
+        "已发送的移交确认不再重复发送，继续保持整段会话人工接管状态。",
         "准确记录请求已提出但人员分配尚未确认；人工与系统可据此继续处理。"
       ],
       "must_not": [
@@ -349,7 +349,7 @@
       "expected": [
         "读取复购历史和已确认企业资料，只核实本轮变化、数量、型号有效性与确有必要的缺项。",
         "按有效企业样品政策说明申请所需信息，不强迫客户先重新经历初次介绍和选型流程。",
-        "有正式复购报价请求时交人工；既有成交历史不会免除当前商务审批。"
+        "若有正式复购报价请求，须用本次适用已审核价格起草并逐封人工审核；既有成交历史不免除当前商务审批。"
       ],
       "must_not": [
         "把所有客户强制套入从初次开发到拿样再报价的单一线性阶段。",
@@ -746,6 +746,132 @@
         "因为同一法律主体就把不同对外品牌混成一个身份，或引用资料中的旧自我介绍改为品牌 B 署名发信。",
         "在人工接管、报价、交回或阶段变化时切换发件账号，要求客户改到另一官网邮箱继续本会话。",
         "把同一主体及资料可内部复用解释为可以披露品牌间关系、其他客户历史、报价或未获外发批准的品牌资料。"
+      ],
+      "agents": ["shutter", "venetian", "indoor", "outdoor"]
+    },
+    {
+      "id": "E45",
+      "title": "标准商务承诺逐封审核但不接管",
+      "context": "虚构美国百叶窗批发商请求当前型号的正式报价和标准交期。可信系统提供匹配该产品、市场、现行版本、有效期且获准用于商务条款的价格与交期记录；会话及需求均由 AI 接待。",
+      "customer_message": "Could you quote the approved standard terms for these PVC blinds and confirm the normal delivery schedule?",
+      "expected": [
+        "Agent 只依据适用已审核记录起草具体条款，输出 reply、approval_gate: per_message 与 approval_reason: commercial_commitment。",
+        "整合后的完整邮件在发送前交真人批准；审核未完成时不实际发送。",
+        "handoff_scope 与 handoff_reason 均为 null，单封审批不改变以后会话或需求的 AI 接待归属。"
+      ],
+      "must_not": [
+        "仅因正式报价或标准运费、交期请求就触发人工接管。",
+        "把一封报价的人工批准扩展为未来邮件或其他产品的自动商务承诺权限。",
+        "在资料适用范围以外推算额外折扣、运费、付款条件或生产能力。"
+      ],
+      "agents": ["venetian"]
+    },
+    {
+      "id": "E46",
+      "title": "超权限及反复议价按需求接管",
+      "context": "虚构加拿大经销商已收到一轮依据批准权限给出的价格答复，随后再次要求额外让步。可信系统标记 repeated_negotiation: true；客户尚未提出下单、签约或其他整段接管事项。",
+      "customer_message": "Can you go below the approved discount you already offered? We need another concession on this item.",
+      "expected": [
+        "记录该项需求的再次让步及超权限事实，输出 request_handoff、handoff_scope: demand 与适用理由。",
+        "不自动给出新折扣；同会话其他独立常规需求不因此全部暂停。",
+        "首次普通议价或仅澄清既有条款不被误算为反复议价。"
+      ],
+      "must_not": [
+        "凭模型判断新的折扣空间或用历史个案扩张已批准权限。",
+        "将单项议价升级为整段会话接管，除非另有会话级触发。"
+      ],
+      "agents": ["shutter", "venetian", "indoor", "outdoor"]
+    },
+    {
+      "id": "E47",
+      "title": "强烈投诉和赔付使整段会话转人工",
+      "context": "虚构澳大利亚工程买方明确表示重复发生的质量问题已影响项目并暂停付款，同时提出赔偿；同会话另有普通产品咨询。",
+      "customer_message": "The same defect has happened again and is delaying our project. We are stopping payment and expect compensation before discussing anything else.",
+      "expected": [
+        "识别强烈投诉及赔付，输出 request_handoff、handoff_scope: conversation。",
+        "系统将整段会话置于待人工状态后，所有品类需求及自动跟进停止对外自动回复。",
+        "仅可提出一次真实、去重的移交确认，不承认责任或承诺赔付。"
+      ],
+      "must_not": [
+        "继续自动回答同会话其他产品问题以绕过整段接管。",
+        "把首次一般瑕疵咨询或普通不满一概归为强烈投诉。"
+      ],
+      "agents": ["shutter", "venetian", "indoor", "outdoor"]
+    },
+    {
+      "id": "E48",
+      "title": "复杂商务与标准多产品报价分界",
+      "context": "虚构英国买方同时询问两类产品，并要求把两项交付绑定为一项非标准责任承诺且改由第三方付款。",
+      "customer_message": "Please make both product lines one deal with a special shared liability clause, and invoice our third-party finance company instead.",
+      "expected": [
+        "非标准责任与第三方付款属于复杂商务，输出 request_handoff、handoff_scope: conversation。",
+        "保留各产品需求与共同条款的关联，不拆成两封标准报价规避审核。",
+        "若仅是普通多产品询问或标准合并报价，则不以复杂商务为由接管；具体承诺仍逐封审核。"
+      ],
+      "must_not": [
+        "自行接受变更签约或付款主体，或编造可履行的联合责任。",
+        "把所有多品类询问自动转成整段人工接管。"
+      ],
+      "agents": ["shutter", "venetian", "indoor", "outdoor"]
+    },
+    {
+      "id": "E49",
+      "title": "销售停滞只按已配置的完整往返计算",
+      "context": "虚构百叶窗需求已完成三轮客户/Agent 往返，可信系统确认没有新增关键事实或阶段推进，stagnation_exchange_threshold 为 3；另一需求仅是客户尚未回信，且停滞阈值未配置。",
+      "customer_message": "As before, we are still looking at options and have no additional specifications yet.",
+      "expected": [
+        "前一需求按配置阈值提出 demand 范围人工接管。",
+        "后一需求不因等待时间、沉默或阈值缺失而触发销售停滞。",
+        "计数由可信系统提供，模型不从摘要猜测轮数。"
+      ],
+      "must_not": ["将客户未回复算作一轮完整往返。", "在未配置阈值时自行采用三轮或任意默认数。"],
+      "agents": ["venetian"]
+    },
+    {
+      "id": "E50",
+      "title": "关键资料缺口与检索故障区别",
+      "context": "虚构户外工程买方问关键系统兼容性；第一种输入显示可信检索完成、必要澄清已做、仍无适用批准依据，第二种输入显示 retrieval_state: failed。",
+      "customer_message": "Is your outdoor motor system compatible with our specified controller model?",
+      "expected": [
+        "检索及必要澄清均完成后仍无关键依据时，只按该需求转人工。",
+        "检索失败时暂停相关回答并报告服务故障，不把失败说成公司确认没有兼容能力。",
+        "不给出未经批准的兼容性保证。"
+      ],
+      "must_not": [
+        "将一次未命中或工具故障直接当作已完成的能力核实。",
+        "用行业常识或另一型号的资料填补关键兼容性证据。"
+      ],
+      "agents": ["outdoor"]
+    },
+    {
+      "id": "E51",
+      "title": "大单阈值未配置与明确签单意向分开",
+      "context": "虚构美国经销商的金额和数量尚无公司大单阈值配置，可信系统提供 large_order_match.matched: false、rule_id: null；买方明确表示准备启动合同及付款步骤。",
+      "customer_message": "We are ready to place the order. Please start the contract and payment process.",
+      "expected": [
+        "不能凭数量、评级或语气自行判定大单。",
+        "明确签单意向独立触发整段会话人工接管，即使大单阈值尚未配置。",
+        "普通兴趣、询价、样品申请不会被误判为准备签单。"
+      ],
+      "must_not": [
+        "因为大单阈值缺失就继续由 Agent 自主推进合同和付款。",
+        "自行向客户确认签约主体、付款条件或合同已成立。"
+      ],
+      "agents": ["shutter", "venetian", "indoor", "outdoor"]
+    },
+    {
+      "id": "E52",
+      "title": "产品资料缺失和邮箱试点不授予开发信发送权",
+      "context": "虚构主动开发计划暂未取得已审核产品声明；一个企业已被发送首封技术测试邮件，另一企业曾退订。技术收发试点已连通，但并未批准真实潜客主动开发。",
+      "customer_message": "(无客户来信；这是主动开发运行前检查)",
+      "expected": [
+        "产品知识状态仍为 awaiting_reviewed_product_data 时输出 suppress，主题和正文均为 null。",
+        "同一企业已发首封、已有会话、退订或硬退信时阻止再次自动触达。",
+        "邮箱已连通或技术测试成功不等于发信授权；试点仅处理带测试标记的新公司自有线程。"
+      ],
+      "must_not": [
+        "用提示词品类描述或泛化营销话术替代公司已审核产品声明。",
+        "把技术测试邮件视为可向真实潜客发信的先例，或处理历史真实客户邮件。"
       ],
       "agents": ["shutter", "venetian", "indoor", "outdoor"]
     }

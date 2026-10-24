@@ -1,9 +1,28 @@
-import { useEffect, useRef, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { Fragment } from 'react';
+import { ArrowUpRight } from 'lucide-react';
 import { Badge } from './ui';
+import type { CustomsBuyerEvidence } from '../domain/types';
+import { formatBeijingText, formatBeijingTime } from '../domain/date-time.mjs';
+import { buildAssessmentDimensions } from '../domain/assessment-dimensions.mjs';
+import type { SupplementContext } from '../services/leadSupplements';
 import './AssessmentPanel.css';
 
-type Dimension = { score: number | null; maximum: number; missing?: string };
+type Dimension = {
+  score: number | null;
+  maximum: number;
+  missing?: string;
+  conflict?: boolean;
+  facts?: {
+    kind: string;
+    value: string;
+    quote: string;
+    source_url: string;
+    origin?: string;
+    confirmationId?: string;
+    confirmedBy?: string;
+    confirmedAt?: string;
+  }[];
+};
 export interface AssessmentSummary {
   id: string;
   score: number;
@@ -18,312 +37,495 @@ export interface AssessmentSummary {
   incompleteReason?: string | null;
   dimensions?: Record<string, Dimension>;
   missing?: string[];
-  sync?: { status: string; error?: string | null; recordId?: string | null };
   manualOverride?: boolean;
-}
-interface Evaluation extends AssessmentSummary {
-  reason: string;
+  opportunities?: { direction: string; product: string; facts?: Dimension['facts'] }[];
+  supplyOpportunity?: { targetProduct?: string; procurementStatus?: string; note?: string } | null;
 }
 interface Props {
-  recordId: string;
-  country: string;
-  product: string;
   assessment?: AssessmentSummary | null;
-  onChanged: () => Promise<void>;
+  ratingReason?: string;
+  researchAt?: string | number | null;
+  onSupplement?: (context: SupplementContext) => void;
 }
-const dimensionNames: Record<string, string> = {
-  P: '产品契合',
-  R: '采购角色',
-  D: '持续经营',
-  V: '供货能力需求',
-  I: '海关采购表现',
+const customsFamilyNames: Record<string, string> = {
+  fabrics: '窗饰面料',
+  fabric: '窗饰面料',
+  components: '组件与叶片',
+  plantation_shutters: '透气窗',
+  finished_blinds: '成品帘',
+  outdoor_shading: '户外遮阳',
+  samples: '窗饰样本册',
 };
-const countryAliases: Record<string, string> = {
-  美国: 'United States',
-  澳大利亚: 'Australia',
-  澳洲: 'Australia',
-  加拿大: 'Canada',
-  英国: 'United Kingdom',
-  新西兰: 'New Zealand',
+const customsMatchNames: Record<string, string> = {
+  verified: '买方身份关联已核实',
+  name_only: '仅名称一致 · 待核实',
+  pending: '买方身份待核实',
+  conflict: '身份存在冲突 · 不作已确认关联',
 };
-const time = (value?: string) => (value ? new Date(value).toLocaleString('zh-CN') : '时间未知');
-type PendingAssessment = { key: string; country: string; product: string };
-const pendingKey = (recordId: string) => 'shadeflow:pending-assessment:' + recordId;
-function readPending(recordId: string): PendingAssessment | null {
+function evidenceUrl(value?: string | null) {
   try {
-    const value = JSON.parse(sessionStorage.getItem(pendingKey(recordId)) || 'null');
-    return value &&
-      /^[\w-]{8,100}$/.test(value.key) &&
-      typeof value.country === 'string' &&
-      typeof value.product === 'string'
-      ? value
-      : null;
+    const url = new URL(value || '');
+    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password
+      ? url.href
+      : undefined;
   } catch {
-    return null;
-  }
-}
-function savePending(recordId: string, value: PendingAssessment | null) {
-  try {
-    if (value) sessionStorage.setItem(pendingKey(recordId), JSON.stringify(value));
-    else sessionStorage.removeItem(pendingKey(recordId));
-  } catch {
-    /* A restricted browser still retains the operation ID in the mounted panel. */
+    return undefined;
   }
 }
 
-export function AssessmentPanel({ recordId, country, product, assessment, onChanged }: Props) {
-  const [pending] = useState(() => readPending(recordId));
-  const [selectedCountry, setCountry] = useState(
-    pending?.country || countryAliases[country] || country,
+type CustomsRecord = CustomsBuyerEvidence['records'][number];
+const customsUnits: Record<string, string> = {
+  CTN: '箱',
+  CTNS: '箱',
+  CARTON: '箱',
+  CARTONS: '箱',
+  ROL: '卷',
+  ROLL: '卷',
+  ROLLS: '卷',
+  PCS: '件',
+  PIECES: '件',
+  SET: '套',
+  SETS: '套',
+  PKG: '包',
+  PKGS: '包',
+  M: '米',
+  MTR: '米',
+  SQM: '平方米',
+};
+function shipmentQuantity(record: CustomsRecord) {
+  const quantity = record.quantity;
+  if (!quantity || !Number.isFinite(quantity.value) || quantity.value < 0) return '未提供';
+  const value = quantity.value.toLocaleString('zh-CN', { maximumFractionDigits: 20 });
+  const unit = quantity.unit?.trim();
+  if (!unit) return `${value}（单位未提供）`;
+  const label = customsUnits[unit.toUpperCase()];
+  return label ? `${value} ${label}（${unit}）` : `${value} ${unit}`;
+}
+function shipmentProduct(description?: string) {
+  const text = (description || '').replace(/[-_/]/g, ' ').replace(/\s+/g, ' ').trim();
+  // Labels only translate explicit cargo phrases; the complete original stays in details.
+  const phrases: [RegExp, string][] = [
+    [/\bpvc\s+blind(?:window)?\s+(?:window\s+)?blind\s+components?\b/i, 'PVC 百叶窗组件'],
+    [/\bvertical\s+blinds?\s+components?\b/i, '垂直百叶组件'],
+    [/\bfaux\s*wood\s+blinds?\b(?!\s+(?:components?|parts?))/i, '仿木百叶帘'],
+    [/\b(?:roller\s+(?:blinds?|shades?))\s+fabrics?\b/i, '卷帘面料'],
+    [/\bpolyester\s+sun\s*screen\s+fabrics?\b/i, '聚酯遮阳面料'],
+    [/\bzebra\s+(?:blinds?|shades?)\s+fabrics?\b/i, '斑马帘面料'],
+    [/\b(?:honeycomb|cellular)\s+(?:blinds?|shades?)\s+fabrics?\b/i, '蜂巢帘面料'],
+    [/\bplantation\s+shutters?\b/i, '透气窗'],
+    [/\b(?:outdoor\s+)?zip\s*screens?\b|\bziptrack\s+blinds?\b/i, '户外防风帘'],
+    [/\b(?:roller\s+(?:blinds?|shades?))\b(?!\s+(?:fabric|component|part|clutch|sample))/i, '卷帘'],
+  ];
+  const labels = phrases.filter(([pattern]) => pattern.test(text)).map(([, label]) => label);
+  if (!labels.length && /\bsun\s*screen\s+fabrics?\b/i.test(text)) return '遮阳面料';
+  return [...new Set(labels)].join('、') || text || '产品未提供';
+}
+const shipmentBillKey = (record: CustomsRecord) =>
+  record.bill_of_lading_number
+    ? JSON.stringify([record.provider || '', record.bill_of_lading_number])
+    : null;
+
+export function CustomsEvidence({ buyers }: { buyers: CustomsBuyerEvidence[] }) {
+  return (
+    <section className="customs-evidence" aria-label="海关逐票证据">
+      <h3>海关记录</h3>
+      {!buyers.length ? (
+        <p>尚无关联到该官网的海关记录。</p>
+      ) : (
+        buyers.map((buyer) => {
+          const verified = buyer.match?.status === 'verified';
+          const records = buyer.records || [];
+          const billCounts = new Map<string, number>();
+          for (const record of records) {
+            const key = shipmentBillKey(record);
+            if (key) billCounts.set(key, (billCounts.get(key) || 0) + 1);
+          }
+          const billNumbers = new Set(records.map((r) => r.bill_of_lading_number).filter(Boolean));
+          return (
+            <section className="customs-buyer" key={`${buyer.id}:${buyer.product_family}`}>
+              <div className="customs-buyer-heading">
+                <strong>{customsFamilyNames[buyer.product_family] || buyer.product_family}</strong>
+                <Badge tone={verified ? 'green' : 'amber'}>
+                  {customsMatchNames[buyer.match?.status || 'pending'] || '买方身份待核实'}
+                </Badge>
+              </div>
+              {!!records.length && (
+                <p className="customs-record-count">
+                  {records.length} 条记录 ·{' '}
+                  {billNumbers.size ? `${billNumbers.size} 个提单号` : '提单号未提供'}
+                </p>
+              )}
+              {buyer.records?.length ? (
+                <table className="customs-product-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">记录日期</th>
+                      <th scope="col">产品</th>
+                      <th scope="col">进口数量</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {records.map((record, index) => {
+                      const sharedBill = (billCounts.get(shipmentBillKey(record) || '') || 0) > 1;
+                      return (
+                        <tr key={`${record.provider || ''}:${record.id}:${index}`}>
+                          <td className="customs-record-date">
+                            {formatBeijingText(record.date || '日期未知')}
+                          </td>
+                          <td>
+                            <strong>{shipmentProduct(record.description)}</strong>
+                            <details className="customs-record-details">
+                              <summary>原始记录</summary>
+                              <div className="customs-record-source">
+                                <p className="assessment-reason">
+                                  {record.description || '未提供货物描述'}
+                                </p>
+                                <p>
+                                  {formatBeijingText(record.date || '日期未知')} · B/L：
+                                  {record.bill_of_lading_number || '未提供提单号'}
+                                </p>
+                                <small>
+                                  {record.provider && `${record.provider} · `}记录 ID：
+                                  {record.id || '未知'}
+                                </small>
+                                <p>
+                                  {evidenceUrl(record.source_url) ? (
+                                    <a
+                                      href={evidenceUrl(record.source_url)}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                    >
+                                      查看原始来源
+                                    </a>
+                                  ) : (
+                                    <small>服务商未提供可打开的原始来源链接。</small>
+                                  )}
+                                </p>
+                              </div>
+                            </details>
+                          </td>
+                          <td className="customs-record-quantity">
+                            {shipmentQuantity(record)}
+                            {sharedBill && (
+                              <small className="customs-shared-bill">同提单 · 数量不累加</small>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              ) : (
+                <p>海关线索待补票据。</p>
+              )}
+            </section>
+          );
+        })
+      )}
+    </section>
   );
-  const [selectedProduct, setProduct] = useState(
-    pending?.product ||
-      product
-        .split(/\n|[、；;]/)
-        .map((v) => v.replace(/\([^)]*\)|（[^）]*）/g, '').trim())
+}
+function assessmentPresentation(
+  assessment: AssessmentSummary | null | undefined,
+  ratingReason: string,
+) {
+  const original = assessment?.evidenceReason || ratingReason;
+  const lines = original
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const technical =
+    /^(?:\[自动评估(?:\s|\])|自动评估编号[:：]|规则版本[:：]|评估时间[:：]|评级口径[:：])/;
+  const limitations = [
+    ...new Set(
+      [
+        assessment?.incompleteReason || '',
+        ...lines
+          .filter((line) => /^(?:本轮)?研究限制[:：]/.test(line))
+          .map((line) => line.replace(/^(?:本轮)?研究限制[:：]\s*/, '')),
+      ]
+        .flatMap((text) => text.split(/[；;]/))
+        .map((text) => text.trim())
         .filter(Boolean)
-        .slice(0, 4)
-        .join(', '),
-  );
-  const [markets, setMarkets] = useState<{ value: string; label?: string }[]>([]);
-  const [history, setHistory] = useState<Evaluation[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [reading, setReading] = useState(false);
-  const [retrying, setRetrying] = useState('');
-  const [unresolved, setUnresolved] = useState(!!pending);
-  const [error, setError] = useState('');
-  const [historyError, setHistoryError] = useState('');
-  const [message, setMessage] = useState('');
-  const [revision, setRevision] = useState(0);
-  const requestId = useRef<string | null>(pending?.key || null);
-  useEffect(() => {
-    const controller = new AbortController();
-    fetch('/api/v1/assessments/rules', { signal: controller.signal })
-      .then(async (r) => {
-        const data = await r.json();
-        if (r.ok) setMarkets(data.markets || []);
-      })
-      .catch(() => {});
-    return () => controller.abort();
-  }, []);
-  useEffect(() => {
-    const controller = new AbortController();
-    setReading(true);
-    setHistoryError('');
-    fetch('/api/v1/leads/real/' + recordId + '/assessments', { signal: controller.signal })
-      .then(async (r) => {
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.error || '评估历史读取失败');
-        if (!controller.signal.aborted) setHistory(data.assessments || []);
-      })
-      .catch((e) => {
-        if (!controller.signal.aborted) setHistoryError(e.message);
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setReading(false);
-      });
-    return () => controller.abort();
-  }, [recordId, revision]);
+        .map((text) =>
+          /^(?:本次仅按新规则重算|仅用已保存事实按)/.test(text)
+            ? '沿用已有官网证据重算，本次未重新抓取官网。'
+            : text,
+        ),
+    ),
+  ];
+  const pending = [
+    ...new Set(
+      [
+        ...(assessment?.missing || []),
+        ...lines
+          .filter((line) => /^待补充(?:依据)?[:：]/.test(line))
+          .map((line) => line.replace(/^待补充(?:依据)?[:：]\s*/, '')),
+      ]
+        .flatMap((text) => text.split(/[；;]/))
+        .map((text) => text.trim())
+        .filter(Boolean),
+    ),
+  ];
+  const evidence = lines
+    .filter(
+      (line) => !technical.test(line) && !/^(?:(?:本轮)?研究限制|待补充(?:依据)?)[:：]/.test(line),
+    )
+    .join('\n');
+  const fullRecord = lines.filter((line) => !technical.test(line)).join('\n');
+  const businessRecord = ratingReason
+    .split('\n')
+    .filter((line) => !technical.test(line.trim()))
+    .join('\n')
+    .trim();
+  const supplementalRecord =
+    assessment?.evidenceReason && businessRecord && businessRecord !== evidence
+      ? businessRecord
+      : '';
+  return { evidence, limitations, pending, fullRecord, original, supplementalRecord };
+}
 
-  async function evaluate() {
-    if (loading) return;
-    setLoading(true);
-    setError('');
-    setMessage('');
-    requestId.current ||= crypto.randomUUID();
-    savePending(recordId, {
-      key: requestId.current,
-      country: selectedCountry,
-      product: selectedProduct,
-    });
-    try {
-      const response = await fetch('/api/v1/leads/real/' + recordId + '/assessments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': requestId.current },
-        body: JSON.stringify({ country: selectedCountry, product: selectedProduct }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        if ([400, 404, 415].includes(response.status)) {
-          requestId.current = null;
-          savePending(recordId, null);
-          setUnresolved(false);
-        } else setUnresolved(true);
-        throw new Error(data.error || '研究评级结果待核对');
-      }
-      requestId.current = null;
-      savePending(recordId, null);
-      setUnresolved(false);
-      if (!data.assessment || !data['更新'])
-        throw new Error(data.reason || '本轮没有完成客户评级，未生成虚构历史');
-      setMessage('已更新T2评级，并同步T12历史。');
-      await onChanged();
-    } catch (e) {
-      if (requestId.current) setUnresolved(true);
-      setError((e as Error).message || '连接中断，请核对并继续本次评估');
-    } finally {
-      setLoading(false);
-      setRevision((v) => v + 1);
-    }
-  }
-  async function retry(entry: Evaluation) {
-    setRetrying(entry.id);
-    setHistoryError('');
-    try {
-      const response = await fetch(
-        '/api/v1/leads/real/' + recordId + '/assessments/' + entry.id + '/retry',
-        { method: 'POST' },
-      );
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'T12历史仍待核对');
-      await onChanged();
-    } catch (e) {
-      setHistoryError((e as Error).message);
-    } finally {
-      setRetrying('');
-      setRevision((v) => v + 1);
-    }
-  }
+function AssessmentRecord({ text }: { text: string }) {
+  return (
+    <pre className="assessment-full-record">
+      {text.split('\n').map((line, index) => {
+        const source = line.match(/^来源[:：]\s*(\S+)\s*$/)?.[1];
+        const url = source && evidenceUrl(source);
+        return (
+          <Fragment key={index}>
+            {url ? (
+              <a href={url} target="_blank" rel="noopener noreferrer">
+                来源：{source} <ArrowUpRight size={12} />
+              </a>
+            ) : (
+              formatBeijingText(line)
+            )}
+            {'\n'}
+          </Fragment>
+        );
+      })}
+    </pre>
+  );
+}
+
+export function AssessmentPanel({
+  assessment,
+  ratingReason = '',
+  researchAt,
+  onSupplement,
+}: Props) {
+  const presentation = assessmentPresentation(assessment, ratingReason);
+  const hasEvidence = Boolean(presentation.original.trim());
+  const legacyId = ratingReason.match(/\[自动评估\s+([^\]]+)\]/)?.[1];
+  const legacyRule = ratingReason.match(/(?:^|\n)规则版本[:：]\s*([^\n]+)/)?.[1];
+  const legacyTime = ratingReason.match(/(?:^|\n)评估时间[:：]\s*([^\n]+)/)?.[1];
+  const dimensions = buildAssessmentDimensions(assessment, ratingReason);
+  const pending = presentation.pending.filter(
+    (item) => !dimensions.some((dimension) => dimension.missing === item),
+  );
+  const directionNames: Record<string, string> = {
+    finished: '成品',
+    materials: '材料配件',
+    samples: '样本展示',
+  };
   return (
     <section className="assessment-panel">
       <header>
-        <h3>初步评分</h3>
-        <p>
-          官网证据按产品40、采购角色30、持续经营20、供货能力需求10计分，合计100分。海关采购表现另行分析。
-        </p>
+        <h3>初始开发优先级</h3>
+        {assessment?.product && (
+          <p>
+            {assessment.direction &&
+              (directionNames[assessment.direction] || assessment.direction) + ' · '}
+            {assessment.product}
+          </p>
+        )}
       </header>
-      {assessment && (
+      {assessment ? (
         <div className="assessment-current">
           <strong>
             {assessment.grade || assessment.status || '未评级'} · 已支持 {assessment.score}/100
           </strong>
           <Badge>{assessment.complete ? '评分维度完整' : '含未知维度'}</Badge>
           {assessment.manualOverride && <Badge>主表评级已人工修改</Badge>}
-          {assessment.sync && (
-            <Badge tone={assessment.sync.status === 'synced' ? 'green' : 'neutral'}>
-              {assessment.sync.status === 'synced' ? 'T12已同步' : 'T12待核对'}
-            </Badge>
-          )}
-          <span>
-            {assessment.ruleVersion} · {time(assessment.evaluatedAt)}
-          </span>
-          {assessment.ruleVersion !== 'acquisition-v3.0' && (
-            <p>当前显示旧版评估，分值与新版权重不同；重新研究评级后生成新版结果，旧记录保留。</p>
-          )}
-          {assessment.dimensions && (
-            <div className="assessment-dimensions">
-              {Object.entries(assessment.dimensions).map(([key, value]) => (
-                <div key={key}>
-                  <span>{dimensionNames[key] || key}</span>
-                  <strong>
-                    {value.score === null ? '未知' : value.score} / {value.maximum}
-                  </strong>
-                </div>
-              ))}
-            </div>
-          )}
-          <details className="assessment-evidence-current" open>
-            <summary>评级依据与待补资料</summary>
-            {assessment.evidenceReason && (
-              <p className="assessment-reason">{assessment.evidenceReason}</p>
+          <div className="assessment-dates">
+            <span>评估更新：{formatBeijingTime(assessment.evaluatedAt)}</span>
+            {researchAt !== undefined && researchAt !== null && (
+              <span>官网取证：{formatBeijingTime(researchAt)}</span>
             )}
-            {assessment.incompleteReason && <p>本轮研究限制：{assessment.incompleteReason}</p>}
-            {!!assessment.missing?.length && <p>待补充：{assessment.missing.join('；')}</p>}
-          </details>
+          </div>
+          {assessment.manualOverride && (
+            <p className="assessment-override-note">分数来自最新自动评估，客户评级已人工调整。</p>
+          )}
+        </div>
+      ) : !hasEvidence ? (
+        <p>尚无当前规则的自动评估。企业研究完成后会显示最新评分、依据与待补资料。</p>
+      ) : (
+        <div className="assessment-dates">
+          {legacyTime && <span>评估更新：{formatBeijingTime(legacyTime)}</span>}
+          {researchAt !== undefined && researchAt !== null && (
+            <span>官网取证：{formatBeijingTime(researchAt)}</span>
+          )}
         </div>
       )}
-      <div className="assessment-form">
-        <label>
-          企业国家
-          <select
-            aria-label="研究评级企业国家"
-            disabled={loading || unresolved}
-            value={selectedCountry}
-            onChange={(e) => setCountry(e.target.value)}
-          >
-            {!markets.some((m) => m.value === selectedCountry) && (
-              <option value={selectedCountry}>{selectedCountry || '请选择国家'}</option>
-            )}
-            {markets.map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label || m.value}
-              </option>
+      {dimensions.length > 0 && (
+        <section className="assessment-dimension-list" aria-label="评分维度">
+          {dimensions.map((dimension) => (
+            <article
+              className="assessment-dimension-card"
+              aria-label={dimension.name + '评分'}
+              key={dimension.key}
+            >
+              <div className="assessment-dimension-heading">
+                <h4>{dimension.name}</h4>
+                <strong>
+                  {dimension.score === null ? '未知' : dimension.score}
+                  <small> / {dimension.maximum}</small>
+                </strong>
+              </div>
+              <p className="assessment-dimension-conclusion">
+                {formatBeijingText(dimension.conclusion)}
+              </p>
+              {dimension.basis.length > 0 && (
+                <ul className="assessment-dimension-basis">
+                  {dimension.basis.slice(0, 2).map((basis, index) => (
+                    <li key={index}>
+                      {formatBeijingText(basis.length > 100 ? basis.slice(0, 100) + '…' : basis)}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {dimension.missing &&
+                dimension.missing !== dimension.conclusion &&
+                !dimension.basis.slice(0, 2).some((basis) => basis.includes(dimension.missing)) && (
+                  <p className="assessment-dimension-missing">
+                    {formatBeijingText(dimension.missing)}
+                  </p>
+                )}
+              {onSupplement && (dimension.missing || dimension.score === null) && (
+                <button
+                  className="text-link assessment-supplement-link"
+                  aria-label={'补充资料：' + dimension.name}
+                  onClick={() =>
+                    onSupplement({
+                      category: 'assessment',
+                      dimension: dimension.key as 'P' | 'R' | 'D' | 'V',
+                      pendingItem: dimension.missing || undefined,
+                    })
+                  }
+                >
+                  补充资料
+                </button>
+              )}
+              {dimension.facts.length > 0 && (
+                <details className="assessment-dimension-sources">
+                  <summary>原文与来源（{dimension.facts.length} 条）</summary>
+                  {dimension.facts.map((fact, index) => (
+                    <div className="assessment-source-fact" key={index}>
+                      {fact.origin === 'manual' && (
+                        <small className="assessment-manual-source">
+                          人工确认{fact.confirmedBy ? ' · ' + fact.confirmedBy : ''}
+                          {fact.confirmedAt ? ' · ' + formatBeijingTime(fact.confirmedAt) : ''}
+                        </small>
+                      )}
+                      <p>{formatBeijingText(fact.value)}</p>
+                      <blockquote>{formatBeijingText(fact.quote || '逐条原文未记录')}</blockquote>
+                      {evidenceUrl(fact.source_url) ? (
+                        <a
+                          href={evidenceUrl(fact.source_url)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {fact.source_url} <ArrowUpRight size={12} />
+                        </a>
+                      ) : (
+                        <span>
+                          {fact.source_url
+                            ? fact.source_url + '（链接不可打开）'
+                            : fact.origin === 'manual'
+                              ? '依据由确认人补充'
+                              : '来源链接未记录'}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </details>
+              )}
+            </article>
+          ))}
+        </section>
+      )}
+      {!!pending.length && (
+        <section className="assessment-notes" aria-label="待补资料">
+          <h4>待补资料</h4>
+          <ul>
+            {pending.map((item) => (
+              <li key={item}>
+                {formatBeijingText(item)}
+                {onSupplement && (
+                  <button
+                    className="text-link assessment-supplement-link"
+                    aria-label={'补充资料：' + item}
+                    onClick={() =>
+                      onSupplement({
+                        category: /采购需求|采购方式/.test(item) ? 'purchase_need' : 'profile',
+                        pendingItem: item,
+                        ...(item === assessment?.supplyOpportunity?.note &&
+                        assessment.supplyOpportunity.targetProduct
+                          ? {
+                              product: assessment.supplyOpportunity.targetProduct,
+                              direction: 'materials',
+                            }
+                          : {}),
+                      })
+                    }
+                  >
+                    补充资料
+                  </button>
+                )}
+              </li>
             ))}
-          </select>
-        </label>
-        <label>
-          本次评价的具体产品
-          <input
-            aria-label="研究评级产品"
-            maxLength={500}
-            value={selectedProduct}
-            disabled={loading || unresolved}
-            onChange={(e) => setProduct(e.target.value)}
-            placeholder="例如 roller blinds"
-          />
-        </label>
-        <button
-          className="btn primary"
-          disabled={loading || !selectedCountry || !selectedProduct.trim()}
-          onClick={() => void evaluate()}
-        >
-          <RefreshCw size={16} className={loading ? 'spin' : ''} />
-          {loading ? '正在研究并评级…' : unresolved ? '核对并继续本次评估' : '研究并评级'}
-        </button>
-      </div>
-      {message && <p role="status">{message}</p>}
-      {error && (
-        <p role="alert" className="assessment-error">
-          {error}
-        </p>
+          </ul>
+        </section>
       )}
-      <section aria-label="海关采购表现">
-        <h3>后续海关分析</h3>
-        <p>
-          初评完成后独立分析相关产品的进口规模、频率、新近性及中国来源占比，不加到初评分数中。数据接入尚未完成。
-        </p>
-      </section>
-      <div className="assessment-history-heading">
-        <h3>评估历史</h3>
-        <button
-          className="btn secondary"
-          disabled={reading}
-          onClick={() => setRevision((v) => v + 1)}
-        >
-          刷新历史
-        </button>
-      </div>
-      <p>显示最近100次评估，完整历史同时保存在T12。</p>
-      {historyError && (
-        <p role="alert" className="assessment-error">
-          {historyError}
-        </p>
+      {!!presentation.limitations.length && (
+        <section className="assessment-notes" aria-label="研究限制">
+          <h4>研究限制</h4>
+          {presentation.limitations.map((text) => (
+            <p key={text}>{formatBeijingText(text)}</p>
+          ))}
+        </section>
       )}
-      {reading ? (
-        <p>正在读取评估记录…</p>
-      ) : !history.length ? (
-        <p>尚无自动评估历史。研究评级完成后会在这里和T12保留记录。</p>
-      ) : (
-        history.map((entry) => (
-          <details className="assessment-history-entry" key={entry.id}>
-            <summary>
-              {time(entry.evaluatedAt)} · {entry.grade || entry.status || '未评级'} · 已支持
-              {entry.score}分 · {entry.ruleVersion}{' '}
-              <Badge>{entry.sync?.status === 'synced' ? 'T12已同步' : 'T12待核对'}</Badge>
-            </summary>
-            <p className="assessment-reason">{entry.evidenceReason || entry.reason}</p>
-            {entry.sync?.error && <p className="assessment-error">{entry.sync.error}</p>}
-            {entry.sync?.status !== 'synced' && (
-              <button
-                className="btn secondary"
-                disabled={!!retrying || loading}
-                onClick={() => void retry(entry)}
-              >
-                {retrying === entry.id ? '核对中…' : '核对T12同步'}
-              </button>
+      {hasEvidence && (
+        <details className="assessment-full-evidence" aria-label="完整评级依据">
+          <summary>完整评级记录</summary>
+          <AssessmentRecord text={presentation.fullRecord} />
+          {presentation.supplementalRecord && (
+            <>
+              <h4>补充评级记录</h4>
+              <AssessmentRecord text={presentation.supplementalRecord} />
+            </>
+          )}
+        </details>
+      )}
+      {(assessment || hasEvidence) && (
+        <details className="assessment-technical">
+          <summary>技术信息</summary>
+          <dl>
+            {(assessment?.id || legacyId) && (
+              <>
+                <dt>评估编号</dt>
+                <dd>{assessment?.id || legacyId}</dd>
+              </>
             )}
-          </details>
-        ))
+            {(assessment?.ruleVersion || legacyRule) && (
+              <>
+                <dt>规则版本</dt>
+                <dd>{assessment?.ruleVersion || legacyRule}</dd>
+              </>
+            )}
+          </dl>
+          <p>评级口径：A/B/C 表示初始开发优先级，未知项不补分。</p>
+        </details>
       )}
     </section>
   );

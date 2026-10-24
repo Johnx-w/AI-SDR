@@ -89,7 +89,9 @@ export interface WorkflowInput {
   country: string;
   region: string;
   product: string;
-  acquisition_channel: 'tavily_web';
+  acquisition_channel: 'web' | 'customs' | 'dual' | 'tavily_web';
+  customs_record_budget?: number;
+  research_budget?: number;
   search_query: string;
 }
 export interface ProductSelection {
@@ -112,11 +114,50 @@ export interface SearchMetric {
   queued: number;
   researched: number;
   inserted: number;
+  qualified?: number;
   updated: number;
   rejected: number;
   review: number;
   failed: number;
   ratings: Record<string, number>;
+  source_kind?: 'web' | 'customs';
+  family?: string;
+  usage?: {
+    returned_records?: number;
+    charged_records?: number;
+    cache_hits?: number;
+    run_reserved_records?: number;
+    credits?: number | null;
+  } | null;
+}
+export interface DiscoveryQuery {
+  country: string;
+  query: string;
+  source_kind?: 'web' | 'customs';
+  family?: string;
+}
+export interface CustomsBuyerEvidence {
+  id: string;
+  name: string;
+  product_family: string;
+  records: {
+    id: string;
+    provider?: string;
+    date?: string | null;
+    description?: string;
+    bill_of_lading_number?: string | null;
+    source_url?: string | null;
+    quantity?: { value: number; unit: string | null } | null;
+    weight?: { value: number; unit: string | null } | null;
+  }[];
+  metrics?: {
+    record_count: number;
+    bill_of_lading_count: number;
+    unnumbered_record_count: number;
+    active_months: string[];
+    last_event_date: string | null;
+  };
+  match?: { status: 'verified' | 'name_only' | 'pending' | 'conflict' | string; reason: string };
 }
 export interface IntegrationStatus {
   configured: boolean;
@@ -127,6 +168,9 @@ export interface IntegrationStatus {
   editorUrl: string;
   transport: 'webhook' | 'direct';
   note: string;
+  customs?: { configured: boolean; missing: string[]; provider: string };
+  webProvider?: string;
+  modelProvider?: string;
 }
 export interface WorkflowRun {
   requestId: string;
@@ -149,7 +193,9 @@ export interface AcquisitionJob {
   id: string;
   status: 'running' | 'stopping' | 'paused' | 'completed' | 'partial';
   target: number;
+  countPolicy?: string;
   inserted: number;
+  qualified?: number;
   updated: number;
   skipped: number;
   rejected: number;
@@ -158,14 +204,18 @@ export interface AcquisitionJob {
   searches: number;
   researched: number;
   review?: number;
+  customsUsedRecords?: number;
+  researchUsage?: ResearchUsage;
   searchStats?: SearchMetric[];
-  queryPlan?: { country: string; query: string }[];
+  queryPlan?: DiscoveryQuery[];
   message: string;
   createdAt: string;
   completedAt?: string;
   rows: {
-    domain: string;
-    source_url: string;
+    domain?: string;
+    source_url?: string;
+    source_kind?: 'web' | 'customs';
+    customs_evidence?: CustomsBuyerEvidence;
     result: string;
     name?: string;
     reason?: string;
@@ -174,6 +224,14 @@ export interface AcquisitionJob {
     search_id?: string;
     search_query?: string;
     assessment?: { grade?: string | null; score: number; status: string } | null;
+    qualified?: boolean;
+    qualification_retraction?: { reason: string; at: string };
+    handoff?: {
+      ready: boolean;
+      reasons: string[];
+      contact_verified?: boolean;
+      contacts?: { kind: string; value: string; source_url: string; quote: string }[];
+    };
     preferenceEvidence?: { value: string; quote: string; source_url: string }[];
     requirementChecks?: {
       condition: string;
@@ -183,11 +241,36 @@ export interface AcquisitionJob {
     }[];
   }[];
 }
+export interface ResearchUsage {
+  model_calls: number;
+  cache_hits: number;
+  input_chars: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  omitted_pages?: number;
+  truncated_pages?: number;
+}
 
 export interface ConnectionSettings {
   provider: string;
   ready: boolean;
-  fields: { key: string; label: string; secret: boolean; configured: boolean; value: string }[];
+  fields: {
+    key: string;
+    label: string;
+    secret: boolean;
+    configured: boolean;
+    value: string;
+    maskedValue?: string;
+    effectiveValue?: string;
+    required?: boolean;
+    description?: string;
+  }[];
+}
+export interface ConnectionModelCatalog {
+  status: 'available' | 'unsupported';
+  provider: string;
+  models: { id: string; name?: string; ownedBy?: string; contextWindow?: number }[];
+  message?: string;
 }
 
 export interface ScheduleTiming {

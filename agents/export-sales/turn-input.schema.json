@@ -1,6 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "出口业务员 Agent 单轮业务上下文",
+  "$id": "turn-input.schema.json",
+  "title": "出口业务员 Agent 单轮业务上下文（审核与接管分离）",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -17,7 +18,7 @@
     "policy"
   ],
   "properties": {
-    "contract_version": { "const": "1.2" },
+    "contract_version": { "const": "1.3" },
     "agent_id": { "$ref": "#/definitions/agentId" },
     "evaluation_time": { "type": "string", "minLength": 1 },
     "event": {
@@ -40,7 +41,9 @@
         "channel",
         "language",
         "buyer_status",
-        "history_summary"
+        "history_summary",
+        "ownership",
+        "handoff_ack_sent"
       ],
       "properties": {
         "id": { "type": "string", "minLength": 1 },
@@ -49,7 +52,9 @@
         "channel": { "type": "string", "minLength": 1 },
         "language": { "type": "string", "minLength": 1 },
         "buyer_status": { "enum": ["b2b", "personal", "unknown"] },
-        "history_summary": { "type": "string" }
+        "history_summary": { "type": "string" },
+        "ownership": { "enum": ["ai", "pending_human", "human"] },
+        "handoff_ack_sent": { "type": "boolean" }
       }
     },
     "company_context": {
@@ -99,7 +104,11 @@
           "missing_fields",
           "sales_stage",
           "handoff_ack_sent",
-          "human_return_note"
+          "human_return_note",
+          "repeated_negotiation",
+          "nonprogress_exchanges",
+          "large_order_match",
+          "knowledge_resolution"
         ],
         "properties": {
           "id": { "type": "string", "minLength": 1 },
@@ -178,16 +187,50 @@
               "qualification",
               "requirements",
               "selection",
-              "quote_human",
+              "quote_review",
               "sample",
               "follow_up",
-              "negotiation_human",
+              "negotiation_review",
               "won",
               "closed"
             ]
           },
           "handoff_ack_sent": { "type": "boolean" },
-          "human_return_note": { "type": ["string", "null"] }
+          "human_return_note": { "type": ["string", "null"] },
+          "repeated_negotiation": { "type": "boolean" },
+          "nonprogress_exchanges": { "type": "integer", "minimum": 0 },
+          "large_order_match": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["matched", "rule_id"],
+            "properties": {
+              "matched": { "type": "boolean" },
+              "rule_id": { "type": ["string", "null"], "minLength": 1 }
+            },
+            "allOf": [
+              {
+                "if": { "properties": { "matched": { "const": true } } },
+                "then": { "properties": { "rule_id": { "type": "string" } } },
+                "else": { "properties": { "rule_id": { "type": "null" } } }
+              }
+            ]
+          },
+          "knowledge_resolution": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "retrieval_state",
+              "clarification_attempted",
+              "unresolved_critical_question"
+            ],
+            "properties": {
+              "retrieval_state": {
+                "enum": ["not_needed", "not_attempted", "completed", "failed"]
+              },
+              "clarification_attempted": { "type": "boolean" },
+              "unresolved_critical_question": { "type": "boolean" }
+            }
+          }
         }
       }
     },
@@ -201,6 +244,7 @@
         "follow_up_intervals_days",
         "max_follow_ups",
         "send_window",
+        "stagnation_exchange_threshold",
         "available_tools"
       ],
       "properties": {
@@ -211,6 +255,7 @@
           "items": { "type": "number", "exclusiveMinimum": 0 }
         },
         "max_follow_ups": { "type": ["integer", "null"], "minimum": 1 },
+        "stagnation_exchange_threshold": { "type": ["integer", "null"], "minimum": 1 },
         "send_window": {
           "anyOf": [
             { "type": "null" },
@@ -253,7 +298,14 @@
         "category": { "anyOf": [{ "$ref": "#/definitions/agentId" }, { "type": "null" }] },
         "content": { "type": "string", "minLength": 1 },
         "approved": { "const": true },
-        "valid_until": { "type": ["string", "null"] }
+        "valid_until": { "type": ["string", "null"] },
+        "revision": { "type": "string", "minLength": 1 },
+        "market": { "type": ["string", "null"] },
+        "approved_use": {
+          "type": "array",
+          "items": { "enum": ["product_answer", "commercial_terms"] },
+          "uniqueItems": true
+        }
       }
     }
   }
