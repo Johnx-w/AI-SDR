@@ -2,6 +2,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
+const conflict = (message) => Object.assign(new Error(message), { status: 409 });
+
 export class AssessmentStore {
   constructor(path = ':memory:', scope = '') {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
@@ -18,64 +20,57 @@ export class AssessmentStore {
   get(id) {
     const row = this.db.prepare('SELECT data,scope FROM customer_assessments WHERE id=?').get(id);
     if (!row) return null;
-    if (row.scope !== this.scope)
-      throw Object.assign(new Error('评估属于其他客户表'), { status: 409 });
+    if (row.scope !== this.scope) throw conflict('评估属于其他客户表');
     return JSON.parse(row.data);
   }
-  prepare(snapshot, recordId) {
-    const prior = this.get(snapshot.id);
-    if (prior) {
+  latest(recordId) {
+    const row = this.db
+      .prepare(
+        'SELECT data FROM customer_assessments WHERE scope=? AND record_id=? ORDER BY evaluated_at DESC,rowid DESC LIMIT 1',
+      )
+      .get(this.scope, recordId);
+    return row ? JSON.parse(row.data) : null;
+  }
+  saveCurrent(snapshot, recordId) {
+    if (!snapshot.id || !recordId || !Number.isFinite(Date.parse(snapshot.evaluatedAt)))
+      throw conflict('评估编号、客户或评估时间无效');
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const prior = this.get(snapshot.id);
       if (
-        prior.recordId !== recordId ||
-        JSON.stringify(prior.snapshot) !== JSON.stringify(snapshot)
+        prior &&
+        (prior.recordId !== recordId || JSON.stringify(prior.snapshot) !== JSON.stringify(snapshot))
       )
-        throw Object.assign(new Error('同一评估编号不能更换客户或评估内容'), { status: 409 });
-      return prior;
+        throw conflict('同一评估编号不能更换客户或评估内容');
+      const latest = this.latest(recordId);
+      // A recovered older operation must not replace a more recent evaluation.
+      if (latest && Date.parse(latest.snapshot.evaluatedAt) > Date.parse(snapshot.evaluatedAt)) {
+        this.db.exec('COMMIT');
+        return latest;
+      }
+      const now = new Date().toISOString();
+      const entry = {
+        id: snapshot.id,
+        recordId,
+        snapshot,
+        createdAt: prior?.createdAt || now,
+        savedAt: prior?.savedAt || now,
+      };
+      this.db
+        .prepare('DELETE FROM customer_assessments WHERE scope=? AND record_id=?')
+        .run(this.scope, recordId);
+      this.db
+        .prepare('INSERT INTO customer_assessments VALUES(?,?,?,?,?)')
+        .run(entry.id, this.scope, recordId, snapshot.evaluatedAt, JSON.stringify(entry));
+      const persisted = this.get(entry.id);
+      if (JSON.stringify(persisted) !== JSON.stringify(entry))
+        throw conflict('最新评估保存后核对失败');
+      this.db.exec('COMMIT');
+      return persisted;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
     }
-    const entry = {
-      id: snapshot.id,
-      recordId,
-      snapshot,
-      historyStatus: 'pending',
-      historyReasonFormat: 'evidence-v1',
-      createdAt: new Date().toISOString(),
-    };
-    this.db
-      .prepare('INSERT INTO customer_assessments VALUES(?,?,?,?,?)')
-      .run(entry.id, this.scope, recordId, snapshot.evaluatedAt, JSON.stringify(entry));
-    return entry;
-  }
-  save(entry) {
-    entry.updatedAt = new Date().toISOString();
-    this.db
-      .prepare('UPDATE customer_assessments SET data=? WHERE id=? AND scope=?')
-      .run(JSON.stringify(entry), entry.id, this.scope);
-    return entry;
-  }
-  claimHistoryWrite(entry) {
-    entry.updatedAt = new Date().toISOString();
-    const result = this.db
-      .prepare(
-        "UPDATE customer_assessments SET data=? WHERE id=? AND scope=? AND json_extract(data,'$.historyStatus')='pending'",
-      )
-      .run(JSON.stringify(entry), entry.id, this.scope);
-    return result.changes === 1;
-  }
-  history(recordId, limit = 100) {
-    return this.db
-      .prepare(
-        'SELECT data FROM customer_assessments WHERE scope=? AND record_id=? ORDER BY evaluated_at DESC,rowid DESC LIMIT ?',
-      )
-      .all(this.scope, recordId, limit)
-      .map((row) => JSON.parse(row.data));
-  }
-  pending(limit = 50) {
-    return this.db
-      .prepare(
-        "SELECT data FROM customer_assessments WHERE scope=? AND json_extract(data,'$.historyStatus')!='synced' ORDER BY COALESCE(json_extract(data,'$.updatedAt'),evaluated_at) LIMIT ?",
-      )
-      .all(this.scope, limit)
-      .map((row) => JSON.parse(row.data));
   }
   close() {
     this.db.close();

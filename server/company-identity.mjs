@@ -1,4 +1,6 @@
-// Also embedded in legacy workflow Code nodes; keep this function self-contained.
+import { thirdPartyCompanySource } from './website-identity.mjs';
+
+// Also embedded with the shared website-source policy in legacy Code nodes.
 export function verifyCompanyIdentity(facts, pages, sourceUrl) {
   const literal = (value) =>
     String(value || '')
@@ -22,6 +24,24 @@ export function verifyCompanyIdentity(facts, pages, sourceUrl) {
       .toLowerCase()
       .replace(/^www\./, '') || null;
   const sourceHost = host(sourceUrl);
+  if (
+    thirdPartyCompanySource({
+      url: sourceUrl,
+      text: (pages || [])
+        .filter((page) => host(page.source_url) === sourceHost)
+        .map((page) => page.text || '')
+        .join('\n'),
+    })
+  )
+    return {
+      name: null,
+      website_name: null,
+      legal_name: null,
+      aliases: [],
+      status: 'third_party_source',
+      customs_match_status: 'requires_identity_match',
+      evidence: [],
+    };
   const fields = ['company_name', 'legal_company_name', 'trading_names'];
   const accepted = (facts || []).filter((fact) => {
     if (
@@ -54,6 +74,12 @@ export function verifyCompanyIdentity(facts, pages, sourceUrl) {
     // A valid excerpt can still name a supplier, competitor or website designer.
     if (
       /(?:\b(?:website|site|design|powered|processed) by|\b(?:dealers?|distributors?|suppliers?|partners?) (?:for|of)|\b(?:affiliated|associated|endorsed|sponsored) (?:with|by)|\b(?:trademark|manufactured|manufactured exclusively) (?:of|by))$/.test(
+        before,
+      )
+    )
+      return false;
+    if (
+      /(?:\b(?:we|they) (?:sell|stock|supply|offer|represent)|\b(?:our|their) (?:brands?|customers?|clients?|suppliers?|partners?) (?:include|includes|are)|\b(?:import|export|shipment|shipping|trade) (?:data|records?|history) (?:for|of)|\b(?:products?|brands?) (?:from|by))$/.test(
         before,
       )
     )

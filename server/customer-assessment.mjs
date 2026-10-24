@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
 import { domainKey } from './website-identity.mjs';
+import { customerWebsite } from './customer-fields.mjs';
+import { businessProductRelation, windowProductDirections } from './relevance.mjs';
 
-export const ASSESSMENT_RULE_VERSION = 'acquisition-v3.0';
+export const ASSESSMENT_RULE_VERSION = 'acquisition-v3.2';
 export const directionNames = { finished: '成品', materials: '材料配件', samples: '样本展示' };
 export const ASSESSMENT_HISTORY_FORMAT = 'evidence-v1';
 export function assessmentRating(snapshot) {
@@ -12,9 +14,9 @@ export function assessmentRating(snapshot) {
 }
 const labels = {
   P: '产品契合',
-  R: '采购角色',
+  R: '经营角色',
   D: '持续经营',
-  V: '供货能力需求',
+  V: '定制与系统特征',
   I: '海关采购表现',
 };
 const maximums = { P: 40, R: 30, D: 20, V: 10 };
@@ -58,7 +60,7 @@ function dimensionScore(opportunity, at) {
       ['installation_only', 10],
       ['no_supply_role', 0],
     ],
-    '是否承担该品类供货尚待核实',
+    '该品类经营角色尚未取得充分依据',
   );
   const productConflict =
     (of('unrelated_product').length &&
@@ -138,7 +140,7 @@ function dimensionScore(opportunity, at) {
 }
 
 function gradeOpportunity(opportunity, dimensions, research) {
-  const { P, R, D } = dimensions;
+  const { P, R } = dimensions;
   const supported = Object.values(dimensions).reduce((sum, d) => sum + (d.score ?? 0), 0);
   const has = (...kinds) => (opportunity.facts || []).some((f) => kinds.includes(f.kind));
   let grade = null,
@@ -148,12 +150,15 @@ function gradeOpportunity(opportunity, dimensions, research) {
   else if (research.entity_type === 'individual' || P.score === 0 || R.score === 0)
     status = '暂不开发';
   else if (research.entity_type !== 'business') status = '待核实';
-  else if (P.score === null || R.score === null) status = '待核实';
-  else if (P.score < 30 || R.score < 25) {
+  else if (P.score === null || R.score === null) {
+    // Business/product evidence has already passed source verification. Unknown
+    // score dimensions lower the initial priority without erasing that prospect.
     grade = 'C';
-    status = '暂缓开发';
-  } else if (D.score === null) status = '待补全';
-  else if (supported >= 75) {
+    status = '常规开发';
+  } else if (P.score < 30 || R.score < 25) {
+    grade = 'C';
+    status = '常规开发';
+  } else if (supported >= 75) {
     grade = 'A';
     status = '优先开发';
   } else if (supported >= 60) {
@@ -161,13 +166,41 @@ function gradeOpportunity(opportunity, dimensions, research) {
     status = '可开发';
   } else {
     grade = 'C';
-    status = '暂缓开发';
+    status = '常规开发';
   }
   return { grade, status, score: supported };
 }
 
 export function assessCompany({ research, target, at = Date.now(), id }) {
-  const opportunities = (research.assessment_opportunities || []).map((opportunity) => {
+  let sourceOpportunities = research.assessment_opportunities || [];
+  // A verified product catalog is enough for an initial C priority when the
+  // richer score facts are unavailable. This does not assert input purchasing.
+  if (!sourceOpportunities.length && research.entity_type === 'business') {
+    const productFact = (research.facts || []).find(
+      (fact) =>
+        fact.field === 'products' &&
+        typeof fact.value === 'string' &&
+        fact.quote &&
+        domainKey(fact.source_url) === domainKey(research.source_url) &&
+        businessProductRelation([fact.value], target).status === 'matched' &&
+        windowProductDirections(fact.value).length === 1,
+    );
+    if (productFact) {
+      const relation = businessProductRelation([productFact.value], target);
+      sourceOpportunities = [
+        {
+          direction: windowProductDirections(productFact.value)[0],
+          product: productFact.value,
+          relationship: relation.kind,
+          facts: [
+            { ...productFact, kind: 'secondary_product' },
+            { ...productFact, kind: 'general_supply', value: '官网经营相关产品线，采购方式待沟通' },
+          ],
+        },
+      ];
+    }
+  }
+  const opportunities = sourceOpportunities.map((opportunity) => {
     const dimensions = dimensionScore(opportunity, at);
     const result = gradeOpportunity(opportunity, dimensions, research);
     const missing = Object.values(dimensions)
@@ -199,6 +232,26 @@ export function assessCompany({ research, target, at = Date.now(), id }) {
             : 1;
   opportunities.sort((a, b) => rank(b) - rank(a) || b.score - a.score);
   const best = opportunities[0];
+  const relation =
+    (best?.relationship === 'potential_input'
+      ? { kind: 'potential_input', basis_product: best.product }
+      : research.product_relation) ||
+    businessProductRelation(
+      research.products?.length
+        ? research.products
+        : opportunities.map((opportunity) => opportunity.product),
+      target,
+    );
+  const supplyOpportunity =
+    relation.kind === 'potential_input'
+      ? {
+          kind: 'potential_input',
+          basisProduct: relation.basis_product || best?.product,
+          targetProduct: target.product,
+          procurementStatus: 'unconfirmed',
+          note: '相关成品经营已有证据；材料或配件采购方式、规格、数量与负责人待沟通',
+        }
+      : null;
   const snapshot = {
     id,
     ruleVersion: ASSESSMENT_RULE_VERSION,
@@ -240,7 +293,10 @@ export function assessCompany({ research, target, at = Date.now(), id }) {
     checkedUrls: research.checked_urls || [],
     assumed: false,
     incompleteReason: research.incomplete_reason || null,
+    supplyOpportunity,
   };
+  if (supplyOpportunity)
+    snapshot.missing = [...new Set([...snapshot.missing, supplyOpportunity.note])];
   snapshot.reason = formatAssessmentReason(snapshot);
   return snapshot;
 }
@@ -250,12 +306,21 @@ export function formatAssessmentReason(snapshot) {
     '[自动评估 ' + snapshot.id + ']',
     '规则版本：' + snapshot.ruleVersion,
     '评估时间：' + snapshot.evaluatedAt,
-    '拟供方向：' + (directionNames[snapshot.direction] || '待核实') + ' · ' + snapshot.product,
+    '经营证据方向：' + (directionNames[snapshot.direction] || '待核实') + ' · ' + snapshot.product,
+    '评级口径：A/B/C表示初始开发优先级；资料完整度、采购需求与触达反馈另行记录',
+    ...(snapshot.supplyOpportunity
+      ? [
+          '潜在供货机会：' +
+            snapshot.supplyOpportunity.targetProduct +
+            '；' +
+            snapshot.supplyOpportunity.note,
+        ]
+      : []),
     '用户评级：' + assessmentRating(snapshot) + '；' + snapshot.status,
     '已支持分数：' +
       snapshot.score +
       '/100；' +
-      (snapshot.complete ? '资料完整' : '部分数据缺失，未按比例补满'),
+      (snapshot.complete ? '评分维度依据齐全' : '部分评分依据缺失，未按比例补满'),
     ...Object.entries(snapshot.dimensions).map(
       ([key, d]) =>
         key + ' ' + labels[key] + '：' + (d.score === null ? '未知' : d.score) + '/' + d.maximum,
@@ -273,7 +338,18 @@ export function formatAssessmentReason(snapshot) {
     const key = fact.source_url + '\n' + fact.quote;
     if (used.has(key)) continue;
     used.add(key);
-    lines.push('依据：' + fact.quote + '\n来源：' + fact.source_url);
+    lines.push(
+      '依据：' +
+        fact.quote +
+        '\n来源：' +
+        (fact.origin === 'manual'
+          ? '人工确认 · ' +
+            fact.confirmedBy +
+            ' · ' +
+            fact.confirmedAt +
+            (fact.source_url ? '\n来源：' + fact.source_url : '')
+          : fact.source_url),
+    );
     if (used.size >= 18) break;
   }
   if (snapshot.opportunities.length > 1) {
@@ -304,9 +380,9 @@ export function formatAssessmentEvidence(snapshot) {
     installation_only: '仅安装服务',
     no_supply_role: '无适用采购角色',
     current_supply_process: '当前供货流程',
-    custom_made: '定制能力需求',
-    motorized_system: '电动系统需求',
-    commercial_specification: '工程规格需求',
+    custom_made: '定制特征',
+    motorized_system: '电动系统特征',
+    commercial_specification: '工程规格特征',
     company_since: '企业经营起始',
     company_years: '企业持续经营',
     operating_outlet: '现营网点',
@@ -316,6 +392,17 @@ export function formatAssessmentEvidence(snapshot) {
     identity_conflict: '主体冲突',
     mandatory_requirement: '强制条件',
   };
+  // T12 comparisons must retain the exact formatting used by older snapshots.
+  if (
+    !snapshot.ruleVersion ||
+    /^acquisition-v[12]\./.test(snapshot.ruleVersion) ||
+    snapshot.ruleVersion === 'acquisition-v3.0'
+  )
+    Object.assign(factLabels, {
+      custom_made: '定制能力需求',
+      motorized_system: '电动系统需求',
+      commercial_specification: '工程规格需求',
+    });
   const lines = [];
   if (snapshot.incompleteReason) lines.push('研究限制：' + snapshot.incompleteReason);
   const seen = new Set();
@@ -332,7 +419,14 @@ export function formatAssessmentEvidence(snapshot) {
       lines.push(
         (factLabels[fact.kind] || '业务事实') + '：' + fact.value,
         '原文：' + fact.quote,
-        '来源：' + fact.source_url,
+        '来源：' +
+          (fact.origin === 'manual'
+            ? '人工确认 · ' +
+              fact.confirmedBy +
+              ' · ' +
+              fact.confirmedAt +
+              (fact.source_url ? '\n来源：' + fact.source_url : '')
+            : fact.source_url),
       );
     }
   }
@@ -355,14 +449,14 @@ export function readAssessmentSummary(value) {
     score,
     ruleVersion,
     evaluatedAt,
-    complete: reason.includes('；资料完整'),
+    complete: reason.includes('；资料完整') || reason.includes('；评分维度依据齐全'),
     assumed: false,
   };
 }
 
 export function assertAssessmentIdentity(snapshot, record) {
   const expected = domainKey(snapshot.website);
-  const actual = domainKey(record.fields?.['来源链接']?.[0]?.text || record.fields?.['来源链接']);
+  const actual = domainKey(customerWebsite(record));
   if (!snapshot.id || snapshot.assumed || !expected || !actual || expected !== actual)
     throw Object.assign(new Error('评估与客户官网主体不一致，停止同步'), { status: 409 });
 }

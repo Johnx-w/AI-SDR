@@ -20,10 +20,76 @@
   border-radius: 12px;
   background: #f7faf9;
 }
-.assessment-current > span:last-of-type {
+.assessment-dates {
+  display: grid;
+  gap: 5px;
   width: 100%;
   font-size: 12px;
   color: #667872;
+}
+.assessment-override-note {
+  width: 100%;
+  font-size: 12px;
+  color: #667872;
+}
+.assessment-panel h4 {
+  margin: 0 0 10px;
+  font-size: 13px;
+}
+.assessment-evidence-current {
+  margin-top: 0;
+}
+.assessment-other-directions {
+  border-top: 1px solid #e2e8e7;
+  padding-top: 12px;
+}
+.assessment-supplementary {
+  margin-top: 14px;
+  font-size: 12px;
+}
+.assessment-supplementary summary {
+  cursor: pointer;
+  color: #667872;
+}
+.assessment-notes {
+  padding: 14px 16px;
+  border-left: 3px solid #cbd8be;
+  background: #f7faf5;
+  font-size: 12px;
+}
+.assessment-notes ul {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.8;
+}
+.assessment-technical {
+  border-top: 1px solid #e2e8e7;
+  padding-top: 14px;
+  font-size: 12px;
+}
+.assessment-technical summary {
+  cursor: pointer;
+  color: #667872;
+}
+.assessment-technical dl {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 8px 12px;
+  margin: 16px 0;
+}
+.assessment-technical dt {
+  color: #667872;
+}
+.assessment-technical dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.assessment-technical pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.8;
+  font: inherit;
 }
 .assessment-dimensions {
   display: grid;
@@ -39,26 +105,107 @@
 .assessment-dimensions strong {
   font-size: 16px;
 }
-.assessment-form {
+.assessment-dimension-list {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(180px, 2fr) auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.assessment-dimension-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+}
+.assessment-dimension-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
   gap: 12px;
-  align-items: end;
 }
-.assessment-form label {
-  display: grid;
-  gap: 8px;
-  font-size: 13px;
+.assessment-dimension-heading h4 {
+  margin-bottom: 8px;
 }
-.assessment-form input,
-.assessment-form select {
-  width: 100%;
-  min-height: 40px;
-  padding: 9px 12px;
-  border: 1px solid #dce4e1;
-  border-radius: 8px;
-  background: white;
-  color: inherit;
+.assessment-dimension-heading strong {
+  color: #2e5e41;
+  font-size: 19px;
+  white-space: nowrap;
+}
+.assessment-dimension-heading small {
+  color: #7e8d7a;
+  font-size: 11px;
+  font-weight: 400;
+}
+.assessment-panel .assessment-dimension-conclusion {
+  font-size: 12px;
+  font-weight: 500;
+  margin: 4px 0 8px;
+}
+.assessment-dimension-basis {
+  color: #6d806b;
+  margin: 0 0 12px;
+  padding-left: 16px;
+  font-size: 12px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.assessment-dimension-missing {
+  color: #8a745b;
+  font-size: 12px;
+}
+.assessment-dimension-sources {
+  margin-top: auto;
+  padding-top: 10px;
+  font-size: 12px;
+}
+.assessment-dimension-sources summary,
+.assessment-full-evidence summary {
+  cursor: pointer;
+  color: #65805e;
+}
+.assessment-source-fact {
+  margin-top: 12px;
+  padding: 12px;
+  background: #f7f9f4;
+  border-radius: 7px;
+  overflow-wrap: anywhere;
+}
+.assessment-source-fact + .assessment-source-fact {
+  border-top: 1px solid var(--border);
+}
+.assessment-source-fact blockquote {
+  margin: 8px 0;
+  padding-left: 10px;
+  border-left: 2px solid #ccd9c3;
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+.assessment-source-fact a,
+.assessment-full-record a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #3f7050;
+  text-decoration: underline;
+}
+.assessment-source-fact > span {
+  color: #82907d;
+}
+.assessment-full-evidence {
+  font-size: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+.assessment-full-evidence h4 {
+  margin-top: 16px;
+}
+.assessment-full-record {
+  margin: 14px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.8;
+  font: inherit;
 }
 .assessment-history-heading {
   display: flex;
@@ -82,11 +229,112 @@
 .assessment-error {
   color: #a23830;
 }
+.customs-evidence {
+  display: grid;
+  gap: 10px;
+}
+.customs-buyer {
+  border: 1px solid #e2e8e7;
+  border-radius: 10px;
+  padding: 14px;
+}
+.customs-buyer-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+.customs-product-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.customs-product-table th {
+  text-align: left;
+  color: #667872;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 10px 0;
+  border-bottom: 1px solid #e2e8e7;
+}
+.customs-product-table th:last-child {
+  width: 33%;
+}
+.customs-product-table th:first-child {
+  width: 24%;
+}
+.customs-product-table td {
+  padding: 14px 0;
+  border-bottom: 1px solid #e2e8e7;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.customs-product-table td:not(:last-child) {
+  padding-right: 14px;
+}
+.customs-product-table td > strong {
+  display: block;
+  font-weight: 500;
+  line-height: 1.7;
+}
+.customs-record-quantity {
+  font-weight: 600;
+  line-height: 1.7;
+}
+.customs-record-date {
+  font-size: 12px;
+  color: #667872;
+}
+.customs-record-count {
+  font-size: 12px;
+  color: #667872;
+}
+.customs-shared-bill {
+  display: block;
+  margin-top: 5px;
+  font-size: 10px;
+  font-weight: 400;
+  color: #667872;
+}
+.customs-record-details {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.customs-record-details summary {
+  color: #667872;
+  cursor: pointer;
+}
+.customs-record-source {
+  padding-top: 8px;
+  overflow-wrap: anywhere;
+}
+.customs-record-source + .customs-record-source {
+  margin-top: 8px;
+  border-top: 1px solid #e2e8e7;
+}
 @media (max-width: 720px) {
-  .assessment-form {
-    grid-template-columns: 1fr;
+  .assessment-dimension-list {
+    grid-template-columns: minmax(0, 1fr);
   }
   .assessment-dimensions {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+.assessment-supplement-link {
+  display: inline-block;
+  font-size: 12px;
+  margin: 4px 0 8px;
+}
+.assessment-notes li .assessment-supplement-link {
+  margin-left: 12px;
+}
+.assessment-manual-source {
+  display: block;
+  color: #5e795e;
+  margin-bottom: 6px;
+  font-size: 11px;
 }

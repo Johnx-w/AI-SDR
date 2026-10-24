@@ -1,5 +1,5 @@
 {
-  "contract_version": "1.2",
+  "contract_version": "1.3",
   "agent_id": "indoor",
   "evaluation_time": "2026-10-23T15:00:00+08:00",
   "event": {
@@ -14,7 +14,9 @@
     "channel": "email",
     "language": "en",
     "buyer_status": "b2b",
-    "history_summary": "虚构协议演示：该经销商已使用 demo-shutter.example 对应邮箱沟通。本轮首次询问卷帘。"
+    "history_summary": "虚构协议演示：该经销商已使用 demo-shutter.example 对应邮箱沟通。本轮首次询问卷帘。",
+    "ownership": "ai",
+    "handoff_ack_sent": false
   },
   "company_context": {
     "name": null,
@@ -51,7 +53,15 @@
       "missing_fields": ["size_range", "quantities", "fabric_requirements"],
       "sales_stage": "requirements",
       "handoff_ack_sent": false,
-      "human_return_note": null
+      "human_return_note": null,
+      "repeated_negotiation": false,
+      "nonprogress_exchanges": 0,
+      "large_order_match": { "matched": false, "rule_id": null },
+      "knowledge_resolution": {
+        "retrieval_state": "not_needed",
+        "clarification_attempted": false,
+        "unresolved_critical_question": false
+      }
     }
   ],
   "drawing_context": {
@@ -71,6 +81,7 @@
     "follow_up_enabled": false,
     "follow_up_intervals_days": null,
     "max_follow_ups": null,
+    "stagnation_exchange_threshold": null,
     "send_window": null,
     "available_tools": []
   }

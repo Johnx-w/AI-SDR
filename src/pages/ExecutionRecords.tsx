@@ -109,7 +109,7 @@ export function ExecutionRecords({ selectedId }: { selectedId?: string }) {
                 {states[job.status]}
               </Badge>
               <strong>
-                已新增 {job.inserted} / {job.target} 家
+                新增收录 {job.inserted} / {job.target} 家
               </strong>
               <small>{expanded === job.id ? '收起详情' : '查看详情'}</small>
             </span>

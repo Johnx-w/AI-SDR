@@ -2,6 +2,7 @@ import { normalizePhone, normalizePhoneLines } from './phone-format.mjs';
 import { formatRelatedProducts } from './product-format.mjs';
 import { readAssessmentSummary } from './customer-assessment.mjs';
 import { domainKey } from './website-identity.mjs';
+import { customerSource, customerWebsite, fieldValue } from './customer-fields.mjs';
 
 export const fieldText = (value) => {
   if (value == null) return '';
@@ -17,7 +18,7 @@ export function mapFeishuRecord(record) {
   } catch {
     /* 原始字段仍可查看。 */
   }
-  const read = (key) => fieldText(f[key]);
+  const read = (key) => fieldText(fieldValue(f, key));
   const grade = read('用户评级') || read('客户等级') || read('用户等级');
   const assessment = readAssessmentSummary(read('评级依据'));
   const contactEvidence = Array.isArray(profile.latest_research?.contact_evidence)
@@ -30,7 +31,7 @@ export function mapFeishuRecord(record) {
   return {
     id: record.record_id,
     name: read('公司名称') || read('客户名称') || profile.company_name || '未命名公司',
-    domain: domainKey(read('来源链接')) || profile.website_key || '',
+    domain: domainKey(customerWebsite(record)) || profile.website_key || '',
     market: read('国家') || '待核实',
     type:
       {
@@ -67,11 +68,15 @@ export function mapFeishuRecord(record) {
       ...(profile.website_metadata?.addresses || []),
       ...(profile.website_metadata?.service_areas || []),
     ],
-    contact: read('联系人'),
-    email: read('邮箱') || values('email'),
-    phone: normalizePhoneLines(read('电话') || values('phone'), read('国家')),
-    website: read('来源链接'),
-    source: '',
+    contact: profile.manual_contacts?.contact?.value ?? read('联系人'),
+    email: profile.manual_contacts?.email?.value ?? (read('邮箱') || values('email')),
+    phone:
+      profile.manual_contacts?.phone?.value ??
+      normalizePhoneLines(read('电话') || values('phone'), read('国家')),
+    website: customerWebsite(record),
+    source: customerSource(record),
+    supplyOpportunity: read('主要供货机会'),
+    pendingQuestions: read('待确认事项'),
     mainProductPreference: read('主营产品偏好'),
     advertisingCodes: read('广告代码'),
     demandProducts: read('需求产品'),

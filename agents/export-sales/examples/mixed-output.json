@@ -1,5 +1,5 @@
 {
-  "contract_version": "1.2",
+  "contract_version": "1.3",
   "agent_id": "venetian",
   "conversation_id": "demo-mixed-001",
   "based_on_revision": 4,
@@ -8,6 +8,9 @@
     {
       "demand_id": "demo-demand-blind",
       "action": "reply",
+      "approval_gate": "none",
+      "approval_reason": null,
+      "handoff_scope": null,
       "route_to": null,
       "reply_fragment": "Cut Down blinds are intended for adjustment locally within the limits of the specific product, while Custom Made blinds are made to the final dimensions you confirm. Which approach suits your distribution range? If you have a size list, please share the dimensions, units and quantities per size.",
       "handoff_reason": null,
@@ -22,6 +25,9 @@
     {
       "demand_id": "demo-demand-shutter",
       "action": "internal_only",
+      "approval_gate": "none",
+      "approval_reason": null,
+      "handoff_scope": null,
       "route_to": null,
       "reply_fragment": null,
       "handoff_reason": null,

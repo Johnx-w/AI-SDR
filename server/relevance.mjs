@@ -148,7 +148,7 @@ const sampleProductPattern =
 const sampleProductDescriptions =
   /\b(?:(?:window\s+(?:coverings?|furnishings?|treatments?)|blinds?|shades?|curtains?|awnings?)\s+)?(?:fabrics?\s+)?(?:samples?(?:\s+(?:books?|cards?|kits?))?|swatches?|display\s+(?:kits?|cases?))(?:\s+(?:for|of)\s+(?:window\s+)?(?:coverings?|furnishings?|blinds?|shades?|curtains?|fabrics?))?\b|(?:窗饰|窗帘|面料)?(?:样本册|样本|样册|样卡|展示套件|展示箱)/gi;
 const windowMaterialsPattern =
-  /\b(?:semi[- ]?finished|components?|parts?|motors?|brackets?|headrails?|springs?|slats?|tubes?|tracks?|rails?|profiles?|extrusions?|hardware|accessories|mechanisms?|chains?|cords?)\b|\b(?:curtain|blind|blinds|shade|shades|awning|awnings)\s+fabrics?\b|\bfabrics?\s+for\s+(?:curtains?|blinds?|shades?|awnings?)\b|半成品|材料|配件|零件|电机|制头|弹簧|安装码|叶片|型材|轨道|面料|卷管/i;
+  /\b(?:semi[- ]?finished|components?|parts?|motors?|brackets?|headrails?|springs?|slats?|tubes?|tracks?|rails?|profiles?|extrusions?|hardware|accessories|mechanisms?|clutch(?:es)?|chains?|cords?)\b|\b(?:curtain|blind|blinds|shade|shades|awning|awnings)\s+fabrics?\b|\bfabrics?\s+for\s+(?:curtains?|blinds?|shades?|awnings?)\b|半成品|材料|配件|零件|电机|制头|弹簧|安装码|叶片|型材|轨道|面料|卷管/i;
 
 function broadWindowProductStatus(text, allowSampleMentions = false) {
   const original = String(text || '').trim();
@@ -327,6 +327,49 @@ export function productsRelevant(products, target = {}) {
     }
   }
   return 'not_matched';
+}
+
+// A finished-product business can be a prospect for related inputs even when
+// it does not publicly sell or request those inputs. Keep that relationship
+// explicit so a catalog fact never becomes a procurement fact.
+export function businessProductRelation(products, target = {}) {
+  const list = (Array.isArray(products) ? products : []).filter((p) => typeof p === 'string');
+  const direct = productsRelevant(list, target);
+  if (isAllProductScope(target) || direct === 'unrestricted')
+    return { status: direct, kind: direct === 'matched' ? 'catalog_related' : null };
+  const inputs =
+    /\b(?:semi[- ]?finished|components?|parts?|motors?|fabrics?|textiles?|cloth|brackets?|headrails?|springs?|slats?|tubes?|tracks?|rails?|profiles?|extrusions?|hardware|accessories|mechanisms?|clutch(?:es)?|chains?|cords?)\b|半成品|材料|配件|零件|电机|制头|弹簧|安装码|叶片|型材|轨道|面料|卷管/gi;
+  let potential;
+  for (const term of productTerms(target).flatMap(targetProductTerms)) {
+    inputs.lastIndex = 0;
+    const inputTarget = inputs.test(term);
+    const family = term.replace(inputs, ' ').replace(/\s+/g, ' ').trim();
+    for (const product of list) {
+      if (
+        /\b(?:vehicle|caravan|automotive|car|truck|marine|boat|rv)\b|房车|车载|汽车/i.test(product)
+      )
+        continue;
+      const forms = windowProductDirections(product);
+      const matched =
+        productsRelevant([product], { product_scope: 'specific', product: term }) === 'matched';
+      if (matched && (!inputTarget || forms.includes('materials')))
+        return { status: 'matched', kind: 'catalog_related', basis_product: product };
+      if (!inputTarget || !forms.includes('finished')) continue;
+      const familyMatch =
+        matched ||
+        (family &&
+          productsRelevant([product], { product_scope: 'specific', product: family }) ===
+            'matched') ||
+        (/^(?:window\s+(?:coverings?|furnishings?|treatments?)|blinds?|shades?)$/i.test(family) &&
+          /\b(?:blinds?|shades?|shutters?|window\s+(?:coverings?|furnishings?|treatments?))\b|卷帘|百叶|斑马|窗帘/i.test(
+            product,
+          )) ||
+        (/sunscreen/i.test(family) && /solar\s+(?:roller\s+)?shades?|阳光卷帘/i.test(product));
+      if (familyMatch)
+        potential = { status: 'matched', kind: 'potential_input', basis_product: product };
+    }
+  }
+  return potential || { status: direct, kind: direct === 'matched' ? 'catalog_related' : null };
 }
 
 // Normalize country names for the market check; returns '' when unmappable.

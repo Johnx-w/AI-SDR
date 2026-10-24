@@ -17,19 +17,26 @@
     "delivery_history"
   ],
   "properties": {
-    "contract_version": { "const": "1.0" },
+    "contract_version": { "const": "1.1" },
     "evaluation_time": { "type": "string", "minLength": 1 },
     "agent_id": { "$ref": "#/definitions/agentId" },
     "campaign": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "status", "sending_mode", "revision"],
+      "required": ["id", "status", "sending_mode", "revision", "approved_automatic_revision"],
       "properties": {
         "id": { "type": "string", "minLength": 1 },
         "status": { "enum": ["draft", "active", "paused", "closed"] },
         "sending_mode": { "enum": ["draft_only", "review_required", "automatic"] },
-        "revision": { "type": "integer", "minimum": 0 }
-      }
+        "revision": { "type": "integer", "minimum": 0 },
+        "approved_automatic_revision": { "type": ["integer", "null"], "minimum": 0 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "sending_mode": { "const": "automatic" } } },
+          "then": { "properties": { "approved_automatic_revision": { "type": "integer" } } }
+        }
+      ]
     },
     "operation_id": { "type": "string", "minLength": 1 },
     "event": {
@@ -194,13 +201,13 @@
         "sent_to_domain_today": { "type": "integer", "minimum": 0 },
         "approved_footer": { "type": ["string", "null"] },
         "unsubscribe_instruction": { "type": ["string", "null"] },
-        "sequence_follow_up_enabled": { "type": "boolean" }
+        "sequence_follow_up_enabled": { "const": false }
       }
     },
     "delivery_history": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["sent_operation_ids", "last_sent_at", "reply_received"],
+      "required": ["sent_operation_ids", "last_sent_at", "reply_received", "first_touch_sent"],
       "properties": {
         "sent_operation_ids": {
           "type": "array",
@@ -208,7 +215,8 @@
           "uniqueItems": true
         },
         "last_sent_at": { "type": ["string", "null"] },
-        "reply_received": { "type": "boolean" }
+        "reply_received": { "type": "boolean" },
+        "first_touch_sent": { "type": "boolean" }
       }
     }
   },

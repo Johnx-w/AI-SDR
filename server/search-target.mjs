@@ -1,6 +1,7 @@
 import { markets, groupedMarkets } from './markets.mjs';
 import { marketRegions } from './market-regions.mjs';
 import acquisition from '../src/data/acquisition.json' with { type: 'json' };
+import { customsFamilies } from './customs-products.mjs';
 import {
   MAX_SELECTED_PRODUCTS,
   MAX_SELECTED_PRODUCT_CHARACTERS,
@@ -127,8 +128,22 @@ export function validateTarget(input) {
     result.query_mode = 'auto';
   } else if (allProducts) result.query_mode = 'auto';
   const channel = input.acquisition_channel ?? 'tavily_web';
-  if (channel !== 'tavily_web') throw invalid('该获客渠道尚未接入，当前仅支持网页搜索');
+  if (!['tavily_web', 'web', 'customs', 'dual'].includes(channel))
+    throw invalid('该获客渠道尚未接入');
   result.acquisition_channel = channel;
+  if (['customs', 'dual'].includes(channel)) {
+    if (!['United States', 'Canada'].includes(result.country))
+      throw invalid('首期海关逐票发现仅支持美国和加拿大');
+    if (!customsFamilies(result).length)
+      throw invalid(
+        '海关未识别到支持的窗饰产品，请选择窗饰面料、组件、透气窗、室内成品、户外遮阳或窗饰样本',
+      );
+    const budget = input.customs_record_budget ?? 300;
+    if (!Number.isInteger(budget) || budget < 1 || budget > 300)
+      throw invalid('海关逐票读取预算必须是1–300的整数');
+    result.customs_record_budget = budget;
+    result.query_mode = 'auto';
+  }
   const audience = input.audience ?? 'BC';
   if (!['B', 'C', 'BC'].includes(audience)) throw invalid('客群选项必须是 B、C 或 BC');
   result.audience = audience;

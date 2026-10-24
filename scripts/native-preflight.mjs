@@ -1,4 +1,5 @@
-import { acquisitionConfig } from '../server/acquisition-config.mjs';
+import { acquisitionConfig, researchProviderConfig } from '../server/acquisition-config.mjs';
+import { customsConfig } from '../server/customs-discovery.mjs';
 import { FeishuClient } from '../server/feishu-direct.mjs';
 import { connectionEnvironment } from '../server/api-connections.mjs';
 const env = connectionEnvironment();
@@ -11,13 +12,14 @@ if (!config.nativeReady) {
     const client = new FeishuClient({ env });
     const fields = await client.fields();
     const leads = await client.readLeads();
-    const response = await fetch('https://api.deepseek.com/models', {
-      headers: { Authorization: 'Bearer ' + env.DEEPSEEK_API_KEY },
+    const research = researchProviderConfig(env);
+    const response = await fetch(research.model.baseUrl + '/models', {
+      headers: { Authorization: 'Bearer ' + research.model.apiKey },
       redirect: 'error',
       signal: AbortSignal.timeout(15000),
     });
     const body = await response.json();
-    const model = env.DEEPSEEK_MODEL || 'deepseek-flash';
+    const model = research.model.model;
     const available = response.ok && body.data?.some((m) => m.id === model);
     console.log(
       JSON.stringify({
@@ -26,9 +28,12 @@ if (!config.nativeReady) {
         feishuRead: true,
         records: leads.total,
         fields: fields.length,
-        deepseekModel: model,
+        researchModel: model,
+        modelProvider: research.model.provider,
         modelAvailable: available,
-        tavilyConfigured: true,
+        webSearchProvider: research.web.provider,
+        webSearchConfigured: true,
+        customs: customsConfig(env),
         writesPerformed: 0,
       }),
     );

@@ -1,0 +1,28 @@
+.customer-business-summary p {
+  color: #647767;
+  line-height: 1.75;
+}
+.customer-business-summary h3 {
+  margin: 24px 0 12px;
+  font-size: 15px;
+}
+.business-summary-links {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 18px 0;
+}
+.business-summary-row {
+  display: grid;
+  gap: 7px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+.business-summary-row span {
+  color: #738271;
+  font-size: 12px;
+}
+.business-summary-row a {
+  color: var(--green);
+  font-size: 12px;
+}

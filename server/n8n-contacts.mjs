@@ -1,6 +1,7 @@
 import { extractContacts } from './contact-extractor.mjs';
 import { phoneHelpers } from './phone-format.mjs';
 import { mergeResearchFields } from './company-research.mjs';
+import { customerFieldHelpers } from './customer-fields.mjs';
 
 export function upgradePhoneWriteDecision(original) {
   const start = original.lastIndexOf("const rec=$('可查询?')");
@@ -18,7 +19,9 @@ export function upgradePhoneWriteDecision(original) {
     code.slice(0, fieldsStart) +
     'const fields=mergeResearchFields(old.fields,rec.update_fields);' +
     code.slice(updateStart);
-  return phoneHelpers + '\n' + mergeResearchFields.toString() + '\n' + code;
+  return (
+    phoneHelpers + '\n' + customerFieldHelpers + '\n' + mergeResearchFields.toString() + '\n' + code
+  );
 }
 
 // 只替换既有入库节点的联系提取段，不改业务画像、分流、去重及写入逻辑。

@@ -19,6 +19,7 @@ import { acquisitionApi } from '../services/acquisition';
 import type { LocationOptions } from '../services/acquisition';
 import type {
   AcquisitionJob,
+  DiscoveryQuery,
   IntegrationStatus,
   ProductSelection,
   ScheduleTiming,
@@ -57,7 +58,8 @@ const initialInput: WorkflowInput = {
   environment_preference: 'all',
   product: ALL_PRODUCTS_VALUE,
   products: [],
-  acquisition_channel: 'tavily_web',
+  acquisition_channel: 'web',
+  customs_record_budget: 300,
   search_query: '',
 };
 function readSubmission(): Submission | null {
@@ -114,7 +116,7 @@ export function Automation() {
   const [locationError, setLocationError] = useState('');
   const [locationsLoading, setLocationsLoading] = useState(true);
   const [revision, setRevision] = useState(0);
-  const [preview, setPreview] = useState<{ country: string; query: string }[]>([]);
+  const [preview, setPreview] = useState<DiscoveryQuery[]>([]);
   const [previewError, setPreviewError] = useState('');
   const [previewLoading, setPreviewLoading] = useState(false);
   const [active, setActive] = useState<AcquisitionJob | null>(null);
@@ -133,6 +135,12 @@ export function Automation() {
     selected.length > 0 ||
     (input.product_scope === undefined && !!input.product.trim());
   const environmentPreference = input.environment_preference || 'all';
+  const channel = input.acquisition_channel === 'tavily_web' ? 'web' : input.acquisition_channel;
+  const usesCustoms = channel === 'customs' || channel === 'dual';
+  const customsAvailable = status?.provider === 'native' && !!status.customs?.configured;
+  const customsMarketSupported = ['United States', 'Canada'].includes(input.country);
+  const customsBudget = input.customs_record_budget ?? 300;
+  const channelLabels = { web: '官网搜索', customs: '海关记录找买家', dual: '双通道' };
   const environmentLabels = {
     all: '室内室外均可',
     indoor: '优先室内窗饰',
@@ -256,6 +264,12 @@ export function Automation() {
     !previewError &&
     !previewLoading &&
     hasProductSelection &&
+    (!usesCustoms ||
+      (customsAvailable &&
+        customsMarketSupported &&
+        Number.isInteger(customsBudget) &&
+        customsBudget >= 1 &&
+        customsBudget <= 300)) &&
     Number.isInteger(targetCount) &&
     targetCount >= 1 &&
     targetCount <= 200 &&
@@ -324,6 +338,13 @@ export function Automation() {
       </div>
       <dl>
         <div>
+          <dt>发现通道</dt>
+          <dd>
+            {channelLabels[channel]}
+            {usesCustoms && <small>每轮最多读取 {customsBudget} 条海关记录</small>}
+          </dd>
+        </div>
+        <div>
           <dt>目标市场</dt>
           <dd>
             {marketLabel}
@@ -387,7 +408,7 @@ export function Automation() {
         <div>
           <dt>每轮目标</dt>
           <dd>
-            <b>{Number.isFinite(targetCount) ? targetCount : '—'}</b> 家新增企业
+            <b>{Number.isFinite(targetCount) ? targetCount : '—'}</b> 家去重后新增收录企业
           </dd>
         </div>
         <div>
@@ -427,9 +448,6 @@ export function Automation() {
         {submitting ? '正在提交…' : runMode === 'scheduled' ? '保存定时计划' : '开始获客'}
         <ArrowRight size={16} />
       </button>
-      <p className="acq-summary-note">
-        按去重后的新增入库企业计数；研究受限或达到运行上限时，保留已完成结果并说明原因。
-      </p>
       {active && (
         <Link className="acq-active-link" to={'/automation?tab=runs&job=' + active.id}>
           已有任务{active.status === 'paused' ? '待核对' : '进行中'} · 查看进度{' '}
@@ -517,6 +535,42 @@ export function Automation() {
                       <p>选择希望向哪类市场销售什么产品</p>
                     </div>
                   </header>
+                  <div className="acq-field-label">发现通道</div>
+                  <div className="acq-environment-options" role="radiogroup" aria-label="发现通道">
+                    {(['web', 'customs', 'dual'] as const).map((value) => (
+                      <label key={value} className={channel === value ? 'selected' : ''}>
+                        <input
+                          type="radio"
+                          name="acquisition-channel"
+                          value={value}
+                          checked={channel === value}
+                          disabled={value !== 'web' && !customsAvailable}
+                          onChange={() => patch({ acquisition_channel: value })}
+                        />
+                        {channelLabels[value]}
+                      </label>
+                    ))}
+                  </div>
+                  <p className="acq-preference-help">
+                    官网搜索按经营产品发现企业；海关记录找买家先用具体产品查进口货运记录，再核实收货买方的官网与经营主体。两种来源复用官网核实、企业去重与初步评分，海关记录不直接加分。
+                  </p>
+                  {!customsAvailable && status && (
+                    <p className="acq-preference-help">
+                      海关记录找买家与双通道需启用直连引擎并配置海关数据服务。
+                      <Link to="/settings">前往 API 连接</Link>
+                    </p>
+                  )}
+                  {usesCustoms && (
+                    <div className="acq-business-scope" role="status">
+                      <Search size={19} />
+                      <div>
+                        <strong>海关发现范围：成品帘、面料、组件、透气窗、户外遮阳和样本册</strong>
+                        <p>
+                          当前读取美国进口披露记录，核实在美国或加拿大经营的买方。指定产品以查询预览为准；其他目标市场请使用官网搜索。
+                        </p>
+                      </div>
+                    </div>
+                  )}
                   <div className="acq-form-grid">
                     <label>
                       目标国家／市场
@@ -558,6 +612,11 @@ export function Automation() {
                       {locationsLoading && <small>正在读取地区…</small>}
                     </label>
                   </div>
+                  {usesCustoms && !customsMarketSupported && (
+                    <p className="error-message" role="alert">
+                      当前海关发现仅支持美国或加拿大，请调整目标市场或改用官网搜索。
+                    </p>
+                  )}
                   {locationError && (
                     <p className="error-message" role="alert">
                       {locationError}
@@ -729,7 +788,9 @@ export function Automation() {
                       placeholder="例如：优先经营电动卷帘，有酒店工程经验"
                       onChange={(e) => patch({ preferred_requirements: e.target.value })}
                     />
-                    <small>缺少这些特征的证据不会单独排除企业。</small>
+                    <small>
+                      用于补充官网搜索词和核实企业特征，不单独加分；未查到相关证据仍可收录。
+                    </small>
                   </label>
                   <details className="acq-advanced">
                     <summary>
@@ -779,7 +840,7 @@ export function Automation() {
                     </div>
                   </header>
                   <label className="acq-block-label">
-                    每轮新增企业目标
+                    每轮新增收录企业目标
                     <div className="acq-quantity">
                       <input
                         aria-label="本次新增客户目标"
@@ -806,6 +867,25 @@ export function Automation() {
                       </button>
                     ))}
                   </div>
+                  {usesCustoms && (
+                    <label className="acq-block-label">
+                      每轮海关记录读取上限
+                      <input
+                        aria-label="每轮海关记录读取上限"
+                        type="number"
+                        min={1}
+                        max={300}
+                        step={1}
+                        required
+                        value={Number.isNaN(customsBudget) ? '' : customsBudget}
+                        onChange={(e) => patch({ customs_record_budget: e.target.valueAsNumber })}
+                      />
+                      <small>
+                        1–300
+                        条；这是海关记录预算，不是新增企业数，也不限制官网核实的搜索或模型用量。实际计费由所选服务商决定。
+                      </small>
+                    </label>
+                  )}
                   <div className="acq-run-mode" role="radiogroup" aria-label="执行方式">
                     {[
                       ['now', '立即获客'],
@@ -941,7 +1021,7 @@ export function Automation() {
                     </span>
                   </summary>
                   <p className="muted">
-                    系统根据产品、市场和客户条件生成词组。执行后可在记录中查看实际使用的词及产出。
+                    系统根据产品、市场和客户条件生成查询。预览不读取付费海关记录；执行后可在记录中查看实际来源与产出。
                   </p>
                   {previewError && (
                     <p className="error-message" role="alert">
@@ -950,9 +1030,11 @@ export function Automation() {
                   )}
                   <ol>
                     {preview.map((q, i) => (
-                      <li key={q.query}>
+                      <li key={`${q.source_kind || 'web'}:${q.country}:${q.query}`}>
                         <small>
-                          {i + 1} · {q.country}
+                          {i + 1} · {q.source_kind === 'customs' ? '海关记录找买家' : '官网搜索'} ·{' '}
+                          {q.country}
+                          {q.family && ` · ${q.family}`}
                         </small>
                         <span>{q.query}</span>
                       </li>

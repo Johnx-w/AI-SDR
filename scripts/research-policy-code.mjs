@@ -21,11 +21,16 @@ export const researchPolicyCode =
   '\n' +
   (
     await Promise.all(
-      ['relevance', 'customer-eligibility', 'assessment-evidence', 'company-identity'].map(
-        async (name) =>
-          (await readFile(new URL(`../server/${name}.mjs`, import.meta.url), 'utf8'))
-            .replace(/^import\b[^;]*;\r?$/gm, '')
-            .replace(/^export /gm, ''),
+      [
+        'relevance',
+        'customer-eligibility',
+        'assessment-evidence',
+        'website-identity',
+        'company-identity',
+      ].map(async (name) =>
+        (await readFile(new URL(`../server/${name}.mjs`, import.meta.url), 'utf8'))
+          .replace(/^import\b[^;]*;\r?$/gm, '')
+          .replace(/^export /gm, ''),
       ),
     )
   ).join('\n');

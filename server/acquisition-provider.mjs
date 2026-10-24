@@ -2,6 +2,7 @@ import { acquisitionConfig } from './acquisition-config.mjs';
 import { readFeishu } from './feishu.mjs';
 import { FeishuClient } from './feishu-direct.mjs';
 import { NativeAcquisition } from './native-acquisition.mjs';
+import { customsConfig } from './customs-discovery.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
@@ -21,8 +22,11 @@ export function createAcquisitionProvider({ env, fetchImpl = fetch, nativeImpl }
         workflowId: '',
         editorUrl: '',
         transport: 'direct',
+        customs: customsConfig(env),
+        webProvider: config.webSearchProvider,
+        modelProvider: config.researchModelProvider,
         note: config.nativeReady
-          ? 'Node.js 后端直连 Tavily、DeepSeek 与飞书；配置齐备，真实任务结果见任务记录。'
+          ? '后端直连网页检索、研究模型与飞书；海关发现独立配置，真实任务结果见任务记录。'
           : '后端直连配置缺失：' + config.missing.join('、'),
       },
       readLeads: async () => {
@@ -31,8 +35,10 @@ export function createAcquisitionProvider({ env, fetchImpl = fetch, nativeImpl }
       },
       assessmentInfo: () => service().assessmentInfo(),
       assessRecord: (...args) => service().assessRecord(...args),
+      updateContacts: (...args) => service().updateContacts(...args),
+      supplementRecord: (...args) => service().supplementRecord(...args),
+      pendingSupplement: (...args) => service().pendingSupplement(...args),
       assessmentHistory: (...args) => service().assessmentHistory(...args),
-      retryAssessment: (...args) => service().retryAssessment(...args),
       discover: (...args) => service().discover(...args),
       research: (...args) => service().research(...args),
       status: (id) => service().status(id),

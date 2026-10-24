@@ -230,6 +230,100 @@ export function extractContacts({ content, sourceUrl, country = '' }) {
         text.slice(Math.max(0, m.index - 90), m.index + m[0].length + 120),
       );
     }
+  // A contact page link is not proof of a usable enquiry form. Keep actual
+  // HTML controls and their submission path as auditable source evidence;
+  // never submit the form or infer JavaScript-only handlers.
+  const attributes = (tag) =>
+    Object.fromEntries(
+      [...tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g)].map((match) => [
+        match[1].toLowerCase(),
+        decode(match[2] ?? match[3] ?? match[4] ?? ''),
+      ]),
+    );
+  const formHtml = html
+    .replace(/<!--[^]*?-->/g, ' ')
+    .replace(/<(script|style|svg|template|noscript)\b[^>]*>[^]*?<\/\1\s*>/gi, ' ');
+  for (const form of formHtml.matchAll(/<form\b([^>]*)>([^]*?)<\/form\s*>/gi)) {
+    if (form[0].length > 32000) continue;
+    const attrs = attributes(form[1]);
+    if (
+      String(attrs.method || '').toLowerCase() !== 'post' ||
+      /\bhidden\b/i.test(form[1]) ||
+      attrs['aria-hidden'] === 'true' ||
+      /display\s*:\s*none|visibility\s*:\s*hidden/i.test(attrs.style || '')
+    )
+      continue;
+    const controls = [...form[2].matchAll(/<(input|textarea)\b([^>]*)>/gi)]
+      .filter((control) => !/\b(?:disabled|hidden|readonly)\b/i.test(control[2]))
+      .map((control) => ({ tag: control[1].toLowerCase(), ...attributes(control[2]) }));
+    if (controls.some((control) => /^(?:password|search)$/i.test(control.type || ''))) continue;
+    const email = controls.some(
+      (control) =>
+        /^(?:email)$/i.test(control.type || '') ||
+        (!/^(?:hidden|submit|button|checkbox|radio|file)$/i.test(control.type || '') &&
+          /(?:^|[^a-z])e[-_]?mail(?:$|[^a-z])/i.test(control.name || '')),
+    );
+    const message = controls.some(
+      (control) =>
+        control.tag === 'textarea' ||
+        (!/^(?:hidden|submit|button|checkbox|radio|file)$/i.test(control.type || '') &&
+          /(?:^|[^a-z])(?:message|enquiry|inquiry)(?:$|[^a-z])/i.test(control.name || '')),
+    );
+    const submitButtons = [...form[2].matchAll(/<button\b([^>]*)>([^]*?)<\/button\s*>/gi)]
+      .filter(
+        (button) =>
+          !/\bdisabled\b/i.test(button[1]) &&
+          /^(?:submit)?$/i.test(attributes(button[1]).type || ''),
+      )
+      .map((button) => visible(button[2]));
+    const submitInputs = controls
+      .filter((control) => /^(?:submit|image)$/i.test(control.type || ''))
+      .map((control) => control.value || control.alt || '');
+    const submits = [...submitButtons, ...submitInputs];
+    if (!email || !message || !submits.length) continue;
+    // Classify the form's own identity/action/primary submission, rather than
+    // optional newsletter checkboxes inside a genuine sales enquiry form.
+    const purpose = [attrs.id, attrs.name, attrs.action, ...submits]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+      .replace(/[^a-z]+/g, ' ');
+    if (
+      /\b(?:newsletter|subscribe|login|signin|signup|register|registration|password|search|download|comments?|reviews?|careers?|jobs?)\b|\bsign (?:in|up)\b|\blog in\b/.test(
+        purpose,
+      )
+    )
+      continue;
+    let source, action;
+    try {
+      source = new URL(sourceUrl);
+      action = new URL(attrs.action || source.href, source);
+      if (
+        [source, action].some(
+          (url) =>
+            url.protocol !== 'https:' ||
+            url.username ||
+            url.password ||
+            !url.hostname.includes('.') ||
+            /^[\d.]+$/.test(url.hostname) ||
+            /(?:^|\.)(?:localhost|local|internal|lan|home|test|invalid)$/.test(url.hostname),
+        )
+      )
+        continue;
+    } catch {
+      continue;
+    }
+    found.push({
+      kind: 'form',
+      value: source.href,
+      normalized: action.href,
+      action_url: action.href,
+      source_url: sourceUrl,
+      quote: form[0],
+      method: 'business_contact_form',
+      status: '公开未验证',
+    });
+  }
   return [...new Map(found.map((c) => [c.kind + ':' + c.normalized, c])).values()]
     .map((c) => {
       const first = found.find((f) => f.kind === c.kind && f.normalized === c.normalized);
