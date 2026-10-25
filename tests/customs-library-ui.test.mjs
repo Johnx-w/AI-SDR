@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import ts from 'typescript';
+import { summarizeLead } from '../server/lead-library.mjs';
 
 const buyer = {
   id: 'buyer-1',
@@ -57,8 +58,17 @@ const lead = {
 
 // Render the real library and its real TSX children with deterministic loaded
 // data; replace only browser routing, initial state and the workspace context.
-function renderLibrary(tab = '客户画像', customers = [lead]) {
+function renderLibrary(tab = '客户画像', customers = [lead], options = {}) {
   const cache = new Map();
+  const snapshot = {
+    leads: customers.map(summarizeLead),
+    syncedAt: '2026-10-25T01:00:00.000Z',
+    total: customers.length,
+    source: 'feishu',
+    scope: 'fixture',
+    sync: { refreshing: false, stale: false, error: '', revision: 1 },
+    ...options.snapshot,
+  };
   const entry = new URL('../src/pages/LeadLibrary.tsx', import.meta.url);
   function load(path) {
     const key = path.href;
@@ -72,14 +82,7 @@ function renderLibrary(tab = '客户画像', customers = [lead]) {
           return {
             ...React,
             useEffect: () => {},
-            useState: (initial) => [
-              initial === null
-                ? { leads: customers, syncedAt: '' }
-                : initial === '客户画像'
-                  ? tab
-                  : initial,
-              () => {},
-            ],
+            useState: (initial) => [initial === '客户画像' ? tab : initial, () => {}],
           };
         if (specifier === 'react-router-dom')
           return {
@@ -88,6 +91,14 @@ function renderLibrary(tab = '客户画像', customers = [lead]) {
         if (specifier === '../app/WorkspaceProvider')
           return { useWorkspace: () => ({ notify() {} }) };
         if (specifier === '../services/workspace') return { exportCsv() {} };
+        if (specifier === '../services/leadLibrary')
+          return {
+            leadLibrary: {
+              cachedList: () => snapshot,
+              cachedDetail: (id) =>
+                options.pending ? null : customers.find((item) => item.id === id),
+            },
+          };
       }
       if (specifier.endsWith('.css')) return {};
       if (specifier.startsWith('.')) {
@@ -117,6 +128,71 @@ test('客户库列表和档案直接提供海关记录入口，不必到评分�
   const html = renderLibrary();
   assert.match(html, />海关记录<\/button>/);
   assert.match(html, /海关记录 1 条/);
+});
+
+test('后台同步保留精简列表，档案尚未加载时显示独立加载状态', () => {
+  const html = renderLibrary('客户画像', [lead], {
+    pending: true,
+    snapshot: {
+      sync: { refreshing: true, stale: true, error: '', revision: 1 },
+    },
+  });
+  assert.match(html, /Acme Screens/);
+  assert.match(html, /reference-lead-table/);
+  assert.match(html, /海关记录 1 条/);
+  assert.match(html, /正在后台同步/);
+  assert.match(html, /正在读取客户档案/);
+  assert.doesNotMatch(html, /BL-100/);
+});
+
+test('同步失败时保留客户列表，并展示最近同步时间与错误', () => {
+  const html = renderLibrary('客户画像', [lead], {
+    snapshot: {
+      sync: { refreshing: false, stale: true, error: '飞书暂时不可用', revision: 1 },
+    },
+  });
+  assert.match(html, /reference-lead-table/);
+  assert.match(html, /最近同步/);
+  assert.match(html, /保留已有客户：飞书暂时不可用/);
+});
+
+test('同步耗时与变更计数集中在默认折叠的同步详情中', () => {
+  const html = renderLibrary('客户画像', [lead], {
+    snapshot: {
+      sync: {
+        refreshing: false,
+        stale: false,
+        error: '',
+        revision: 1,
+        mode: 'idle',
+        intervalMs: 300000,
+        metrics: {
+          attempts: 3,
+          successes: 2,
+          failures: 1,
+          last: {
+            status: 'success',
+            durationMs: 1234,
+            upstreamMs: 1200,
+            writeMs: 4,
+            inserted: 1,
+            updated: 2,
+            deleted: 3,
+            unchanged: 10,
+          },
+        },
+      },
+    },
+  });
+  const disclosure = html.match(/<details class="library-sync-details">([\s\S]*?)<\/details>/)?.[0];
+  assert.ok(disclosure);
+  assert.doesNotMatch(disclosure, /<details[^>]*\sopen(?:=|[\s>])/);
+  const text = disclosure.replace(/<[^>]*>/g, '');
+  assert.match(text, /同步详情/);
+  assert.match(text, /空闲时每 300 秒同步/);
+  assert.match(text, /已尝试 3 次 · 成功 2 次 · 失败 1 次/);
+  assert.match(text, /最近一次成功，耗时 1\.23 秒/);
+  assert.match(text, /新增 1 位 · 更新 2 位 · 移除 3 位 · 未变化 10 位/);
 });
 
 test('海关记录标签展示真实买方身份、提单、货物描述和来源', () => {

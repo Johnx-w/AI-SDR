@@ -4,6 +4,7 @@ const app = createApp({
   env: {
     ...process.env,
     BATCH_DB_PATH: process.env.BATCH_DB_PATH || '.data/acquisition.sqlite',
+    LEAD_LIBRARY_DB_PATH: process.env.LEAD_LIBRARY_DB_PATH || '.data/lead-library.sqlite',
     CONNECTIONS_PATH: process.env.CONNECTIONS_PATH || '.data/api-connections.json',
     SCHEDULE_DB_PATH: process.env.SCHEDULE_DB_PATH || '.data/acquisition-schedules.sqlite',
   },

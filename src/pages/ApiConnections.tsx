@@ -4,6 +4,7 @@ import { PageHeading } from '../components/PageHeading';
 import { Badge } from '../components/ui';
 import { useWorkspace } from '../app/WorkspaceProvider';
 import { connectionsApi } from '../services/acquisition';
+import { leadLibrary } from '../services/leadLibrary';
 import type { ConnectionModelCatalog, ConnectionSettings } from '../domain/types';
 import {
   createConnectionForm,
@@ -118,6 +119,7 @@ export function ApiConnections() {
     try {
       const payload = connectionFormPayload(settings, form);
       accept(await connectionsApi.save(payload.values, payload.clear));
+      leadLibrary.reset();
       notify('API 配置已保存，直连引擎已使用新配置');
     } catch (e) {
       setError(e instanceof Error ? e.message : '保存失败');
