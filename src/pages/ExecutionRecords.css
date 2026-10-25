@@ -1,0 +1,46 @@
+.acq-captures {
+  padding: 20px;
+}
+.acq-captures h2 {
+  margin: 0 0 8px;
+  font-size: 17px;
+}
+.acq-captures .acq-list-toolbar {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.acq-captures .acq-list-toolbar > div {
+  flex: 1 1 300px;
+}
+.acq-capture-note {
+  padding: 12px 14px;
+  border-radius: 7px;
+  color: #5c7559;
+  background: #f1f6ec;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.acq-capture-table {
+  width: 100%;
+  min-width: 610px;
+  border-collapse: collapse;
+  text-align: left;
+}
+.acq-capture-table th,
+.acq-capture-table td {
+  padding: 14px;
+  border-bottom: 1px solid #e8eee3;
+  line-height: 1.6;
+}
+.acq-capture-table th {
+  color: #6e8169;
+  font-weight: 500;
+}
+.acq-capture-table td > small {
+  display: block;
+  color: #778570;
+  overflow-wrap: anywhere;
+}
+.acq-execution-card[id] {
+  scroll-margin: 90px;
+}

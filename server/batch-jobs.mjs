@@ -104,6 +104,49 @@ export class BatchJobs {
       .all()
       .map((r) => JSON.parse(r.data));
   }
+  overview() {
+    // The persisted identity ledger is the source of confirmed new companies.
+    // Neither the last 100 jobs nor a customer's last research time can replace it.
+    const entities = this.db
+      .prepare('SELECT record_id,domain,data FROM handoff_entities WHERE scope=?')
+      .all(this.scope)
+      .map((row) => ({ ...row, data: JSON.parse(row.data) }));
+    const relatedJobs = new Set(
+      entities.flatMap((row) => [row.data.created_job, row.data.qualified_job]).filter(Boolean),
+    );
+    const jobs = this.db
+      .prepare('SELECT data FROM jobs ORDER BY rowid DESC')
+      .all()
+      .map((row) => JSON.parse(row.data))
+      .filter((job) => job.scope === this.scope || (!job.scope && relatedJobs.has(job.id)))
+      .map((job) => ({
+        id: job.id,
+        input: job.input,
+        status: job.status,
+        countPolicy: job.countPolicy,
+        inserted: job.inserted,
+        target: job.target,
+        updated: job.updated,
+        pending: job.pending,
+        reason: job.reason,
+        message: labels[job.reason] || '',
+        createdAt: job.createdAt,
+        updatedAt: job.updatedAt,
+      }));
+    const captures = entities
+      .filter(
+        (row) =>
+          row.data.count_policy === 'broad-business-v1' &&
+          Number.isFinite(Date.parse(row.data.captured_at)),
+      )
+      .map((row) => ({
+        customerId: row.record_id,
+        domain: row.domain,
+        capturedAt: row.data.captured_at,
+        jobId: row.data.created_job || '',
+      }));
+    return { jobs, captures, scope: this.scope };
+  }
   active() {
     return this.list().find((j) => ['running', 'stopping', 'paused'].includes(j.status));
   }
@@ -127,6 +170,7 @@ export class BatchJobs {
     const job = {
       id: randomUUID(),
       provider: this.provider,
+      scope: this.scope,
       input,
       status: 'running',
       reason: '',

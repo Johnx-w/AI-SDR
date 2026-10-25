@@ -66,6 +66,7 @@ export class AcquisitionSchedules {
     available,
     checkInput = () => {},
     now = Date.now,
+    scope = '',
   }) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
@@ -77,6 +78,7 @@ export class AcquisitionSchedules {
     this.available = available;
     this.checkInput = checkInput;
     this.now = now;
+    this.scope = scope;
   }
   list() {
     return this.db
@@ -124,6 +126,7 @@ export class AcquisitionSchedules {
       throw fail(409, '最多保留 100 个未结束的定时计划，请先关闭不需要的计划');
     const plan = {
       id: randomUUID(),
+      scope: typeof this.scope === 'function' ? this.scope() : this.scope,
       name: name.trim(),
       input,
       timing: normalized,
@@ -170,6 +173,10 @@ export class AcquisitionSchedules {
     for (const plan of this.list()
       .filter((p) => p.status === 'enabled')
       .sort((a, b) => Date.parse(a.nextRunAt) - Date.parse(b.nextRunAt))) {
+      const currentScope = typeof this.scope === 'function' ? this.scope() : this.scope;
+      // Keep an explicitly scoped plan dormant while another customer table is
+      // selected. Returning to its table resumes its own persisted schedule.
+      if (plan.scope && plan.scope !== currentScope) continue;
       if (!plan.nextRunAt || Date.parse(plan.nextRunAt) > this.now()) continue;
       const manager = this.jobs();
       const key = `schedule-${plan.id}-${Date.parse(plan.nextRunAt)}`;

@@ -35,6 +35,24 @@
   border-color: #f0d9cb;
   color: #96513b;
 }
+.business-filter-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 20px;
+  color: #537157;
+  background: #f0f5eb;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.business-focused-record {
+  background: #eff6e8;
+  outline: 2px solid #8ba875;
+  outline-offset: -2px;
+  scroll-margin: 100px;
+}
 .business-filters {
   display: flex;
   align-items: center;

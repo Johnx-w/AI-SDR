@@ -28,6 +28,9 @@ import { ApiConnections } from '../pages/ApiConnections';
 import { LeadLibrary } from '../pages/LeadLibrary';
 import { Automation } from '../pages/Automation';
 import { CustomerBusiness } from '../pages/CustomerBusiness';
+import { overviewApi } from '../services/overview';
+import type { OverviewData } from '../services/overview';
+import { OverviewReminders } from '../components/OverviewReminders';
 
 const nav = [
   { path: '/', name: '运营总览', icon: LayoutDashboard },
@@ -39,7 +42,7 @@ const nav = [
   { path: '/settings', name: 'API 连接', icon: Settings2 },
 ];
 export function App() {
-  const { data, toast, notify } = useWorkspace();
+  const { toast, notify } = useWorkspace();
   const searchRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
@@ -56,14 +59,35 @@ export function App() {
   const [search, setSearch] = useState('');
   const [mobile, setMobile] = useState(false);
   const [notifications, setNotifications] = useState(false);
+  const [reminders, setReminders] = useState<OverviewData | null>(null);
+  const [reminderLoading, setReminderLoading] = useState(false);
+  const [reminderError, setReminderError] = useState('');
+  useEffect(() => {
+    if (!notifications) return;
+    const controller = new AbortController();
+    setReminderLoading(true);
+    setReminderError('');
+    setReminders(null);
+    void overviewApi
+      .get('7d', controller.signal)
+      .then(
+        (value) => {
+          if (!controller.signal.aborted) setReminders(value);
+        },
+        () => {
+          if (!controller.signal.aborted) setReminderError('提醒读取失败，请关闭后重试');
+        },
+      )
+      .finally(() => {
+        if (!controller.signal.aborted) setReminderLoading(false);
+      });
+    return () => controller.abort();
+  }, [notifications]);
   const current = nav.find((item) => item.path === location.pathname);
-  if (!data)
-    return (
-      <div className="boot">
-        <div className="brand-mark">S</div>
-        <p>正在准备你的工作台…</p>
-      </div>
-    );
+  const reminderCount =
+    (reminders?.metrics.dueTasks || 0) +
+    (reminders?.work.paused || 0) +
+    (reminders?.products.draft || 0);
   return (
     <div className="app-shell">
       {mobile && (
@@ -108,10 +132,10 @@ export function App() {
           ))}
         </nav>
         <div className="sidebar-market">
-          <span className="tiny-label">当前目标市场</span>
+          <span className="tiny-label">获客范围</span>
           <div>
             <Globe2 size={16} />
-            <span>美国 & 澳大利亚</span>
+            <span>按任务与计划设置</span>
           </div>
           <p>从发现潜客，到持续跟进。</p>
         </div>
@@ -177,7 +201,7 @@ export function App() {
               onClick={() => setNotifications(!notifications)}
             >
               <Bell size={18} />
-              <i />
+              {reminderCount > 0 && <i />}
             </button>
             <div className="topbar-divider" />
             <button
@@ -190,28 +214,15 @@ export function App() {
           </div>
         </header>
         {notifications && (
-          <div className="notification-panel">
-            <h3>待处理提醒</h3>
-            {data.tasks
-              .filter((task) => !task.done)
-              .map((task) => (
-                <button
-                  key={task.id}
-                  onClick={() => {
-                    setNotifications(false);
-                    navigate('/');
-                  }}
-                >
-                  <span className="status-dot" />
-                  <div>
-                    <strong>{task.title}</strong>
-                    <small>{task.time} · 演示待办</small>
-                  </div>
-                  <ChevronRight size={14} />
-                </button>
-              ))}
-            {data.tasks.every((task) => task.done) && <p>今日待办已全部完成。</p>}
-          </div>
+          <OverviewReminders
+            data={reminders}
+            loading={reminderLoading}
+            error={reminderError}
+            onOpen={(to) => {
+              setNotifications(false);
+              navigate(to);
+            }}
+          />
         )}
         <main>
           <Routes>

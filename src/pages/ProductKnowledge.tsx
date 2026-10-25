@@ -139,7 +139,7 @@ async function request<T>(
 }
 
 export function ProductKnowledgePage() {
-  const [productParams] = useSearchParams();
+  const [productParams, setProductParams] = useSearchParams();
   const focusedProduct = productParams.get('product');
   const [products, setProducts] = useState<ProductKnowledge[]>([]);
   const [feishu, setFeishu] = useState<ProductList['feishu']>();
@@ -150,7 +150,10 @@ export function ProductKnowledgePage() {
   useEffect(() => {
     if (focusedProduct) setQuery(focusedProduct);
   }, [focusedProduct]);
-  const [status, setStatus] = useState('active');
+  const requestedStatus = productParams.get('status') || '';
+  const status = ['active', 'draft', 'approved', 'archived', 'all'].includes(requestedStatus)
+    ? requestedStatus
+    : 'active';
   const [editor, setEditor] = useState<Editor | null>(null);
   const [formError, setFormError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -395,7 +398,14 @@ export function ProductKnowledgePage() {
           <select
             aria-label="产品审核状态"
             value={status}
-            onChange={(event) => setStatus(event.target.value)}
+            onChange={(event) =>
+              setProductParams((current) => {
+                const next = new URLSearchParams(current);
+                if (event.target.value === 'active') next.delete('status');
+                else next.set('status', event.target.value);
+                return next;
+              })
+            }
           >
             <option value="active">在用资料</option>
             <option value="draft">待审核</option>

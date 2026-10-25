@@ -13,6 +13,12 @@ import {
 import { PageHeading } from '../components/PageHeading';
 import { Badge, Empty, Modal } from '../components/ui';
 import { BusinessRequestError, customerBusinessApi } from '../services/customerBusiness';
+import {
+  businessNavigation,
+  matchesDemandNavigation,
+  matchesTaskNavigation,
+  updateBusinessNavigation,
+} from '../domain/business-navigation.mjs';
 import type {
   BusinessChannel,
   BusinessConversation,
@@ -213,16 +219,14 @@ export function CustomerBusiness() {
   const [params, setParams] = useSearchParams();
   const customerId = params.get('customerId') || '';
   const productId = params.get('productId') || '';
-  const tab: Tab = ['demands', 'messages', 'tasks'].includes(params.get('tab') || '')
-    ? (params.get('tab') as Tab)
-    : 'demands';
+  const navigation = businessNavigation(params);
+  const { tab, state, bucket, focusedId } = navigation;
   const [data, setData] = useState<BusinessWorkspace>(emptyWorkspace);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [query, setQuery] = useState('');
-  const [state, setState] = useState('all');
+  const query = params.get('q') || '';
   const [editor, setEditor] = useState<Editor | null>(null);
   const [formError, setFormError] = useState('');
   const [refreshRequired, setRefreshRequired] = useState(false);
@@ -250,8 +254,11 @@ export function CustomerBusiness() {
     return () => controller.abort();
   }, [load]);
   useEffect(() => {
-    setState('all');
-  }, [tab]);
+    if (loading || !focusedId) return;
+    const row = document.getElementById(`business-record-${focusedId}`);
+    row?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    row?.focus({ preventScroll: true });
+  }, [loading, focusedId, tab, data]);
   const customerName = (id: string) =>
     data.customers.find((customer) => customer.id === id)?.name || id;
   const conversationName = (id?: string) =>
@@ -273,7 +280,7 @@ export function CustomerBusiness() {
   const matches = (values: string[]) => !term || values.join(' ').toLowerCase().includes(term);
   const demands = data.demands.filter(
     (demand) =>
-      (state === 'all' || demand.stage === state) &&
+      matchesDemandNavigation(demand, navigation) &&
       matches([
         demand.title,
         demand.productText,
@@ -297,7 +304,7 @@ export function CustomerBusiness() {
   const tasks = data.tasks
     .filter(
       (task) =>
-        (state === 'all' || task.status === state) &&
+        matchesTaskNavigation(task, navigation) &&
         matches([task.title, task.owner, task.notes, customerName(task.customerId)]),
     )
     .sort((a, b) => a.dueAt.localeCompare(b.dueAt));
@@ -307,12 +314,7 @@ export function CustomerBusiness() {
   );
 
   function filter(key: string, value: string) {
-    setParams((current) => {
-      const next = new URLSearchParams(current);
-      if (value) next.set(key, value);
-      else next.delete(key);
-      return next;
-    });
+    setParams((current) => updateBusinessNavigation(current, key, value), { replace: key === 'q' });
   }
   function newEditor(
     entity: BusinessEntity,
@@ -739,9 +741,9 @@ export function CustomerBusiness() {
   const sourceMessages = data.messages.filter(
     (message) => demandSource(message) && (!formCustomer || message.customerId === formCustomer),
   );
-  const stateOptions =
+  const stateOptions: Record<string, string> =
     tab === 'demands'
-      ? stages
+      ? { active: '进行中需求', ...stages }
       : tab === 'tasks'
         ? taskStates
         : { inbound: '收到', outbound: '发出', note: '纪要' };
@@ -948,14 +950,14 @@ export function CustomerBusiness() {
             <input
               aria-label="搜索客户业务记录"
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => filter('q', event.target.value)}
               placeholder="搜索标题、正文、客户或负责人"
             />
           </div>
           <select
             aria-label="业务记录状态"
             value={state}
-            onChange={(event) => setState(event.target.value)}
+            onChange={(event) => filter('state', event.target.value)}
           >
             <option value="all">全部状态</option>
             {Object.entries(stateOptions).map(([key, label]) => (
@@ -964,6 +966,19 @@ export function CustomerBusiness() {
               </option>
             ))}
           </select>
+          {tab === 'tasks' && (
+            <select
+              aria-label="跟进任务到期分组"
+              value={bucket}
+              onChange={(event) => filter('bucket', event.target.value)}
+            >
+              <option value="">全部时间</option>
+              <option value="due">当前到期跟进</option>
+              <option value="overdue">逾期待执行</option>
+              <option value="today">今日待执行</option>
+              <option value="paused">暂停待核对</option>
+            </select>
+          )}
           <button
             className="btn secondary"
             disabled={
@@ -989,6 +1004,42 @@ export function CustomerBusiness() {
                 : '创建跟进任务'}
           </button>
         </div>
+        {(state !== 'all' || bucket || focusedId) && (
+          <div className="business-filter-summary" role="status">
+            <span>
+              当前筛选：
+              {bucket
+                ? {
+                    due: '到期跟进',
+                    overdue: '逾期待执行',
+                    today: '今日待执行',
+                    paused: '暂停待核对',
+                  }[bucket as 'due' | 'overdue' | 'today' | 'paused']
+                : state !== 'all'
+                  ? stateOptions[state]
+                  : '指定记录'}
+              {focusedId && ' · 已定位指定记录'}
+              {bucket &&
+                navigation.frozen &&
+                ` · 按 ${dateText(navigation.range.asOf)} 分组（北京时间）`}
+              {!loading &&
+                ` · 共 ${tab === 'tasks' ? tasks.length : tab === 'demands' ? demands.length : messages.length} 条`}
+            </span>
+            <button
+              className="text-link"
+              onClick={() => {
+                setParams((current) => {
+                  const next = new URLSearchParams(current);
+                  for (const key of ['state', 'bucket', 'asOf', 'task', 'demand', 'message'])
+                    next.delete(key);
+                  return next;
+                });
+              }}
+            >
+              清除筛选
+            </button>
+          </div>
+        )}
         {loading ? (
           <p className="business-loading" role="status">
             正在读取客户业务…
@@ -1040,7 +1091,14 @@ export function CustomerBusiness() {
                     </thead>
                     <tbody>
                       {demands.map((demand) => (
-                        <tr key={demand.id}>
+                        <tr
+                          key={demand.id}
+                          id={`business-record-${demand.id}`}
+                          tabIndex={focusedId === demand.id ? -1 : undefined}
+                          className={
+                            focusedId === demand.id ? 'business-focused-record' : undefined
+                          }
+                        >
                           <td>
                             <strong>{demand.title}</strong>
                             <Link to={linkToCustomer(demand.customerId)}>
@@ -1104,8 +1162,18 @@ export function CustomerBusiness() {
                 </div>
               ) : (
                 <Empty
-                  title="暂无采购需求"
-                  detail="录入客户实际来信、留言或已核实通话纪要后，引用依据整理需求。同一条沟通可以关联多项采购需求。"
+                  title={
+                    focusedId
+                      ? '指定采购需求当前不可见'
+                      : state !== 'all'
+                        ? '没有符合筛选的采购需求'
+                        : '暂无采购需求'
+                  }
+                  detail={
+                    focusedId || state !== 'all'
+                      ? '可清除上方筛选，核对当前客户和需求状态；已经变更的记录会按最新事实显示。'
+                      : '录入客户实际来信、留言或已核实通话纪要后，引用依据整理需求。同一条沟通可以关联多项采购需求。'
+                  }
                 />
               ))}
             {tab === 'messages' &&
@@ -1204,7 +1272,12 @@ export function CustomerBusiness() {
                     </thead>
                     <tbody>
                       {tasks.map((task) => (
-                        <tr key={task.id}>
+                        <tr
+                          key={task.id}
+                          id={`business-record-${task.id}`}
+                          tabIndex={focusedId === task.id ? -1 : undefined}
+                          className={focusedId === task.id ? 'business-focused-record' : undefined}
+                        >
                           <td>
                             <strong>{task.title}</strong>
                             <Link to={linkToCustomer(task.customerId)}>
@@ -1312,8 +1385,18 @@ export function CustomerBusiness() {
                 </div>
               ) : (
                 <Empty
-                  title="暂无跟进任务"
-                  detail="从企业或具体采购需求安排下一步行动，并明确执行时间、负责人和实际结果。"
+                  title={
+                    focusedId
+                      ? '指定跟进任务当前不可见'
+                      : bucket || state !== 'all'
+                        ? '没有符合筛选的跟进任务'
+                        : '暂无跟进任务'
+                  }
+                  detail={
+                    focusedId || bucket || state !== 'all'
+                      ? '可清除上方筛选，核对当前客户和任务状态；已完成或已暂停的任务不会继续计入到期催办。'
+                      : '从企业或具体采购需求安排下一步行动，并明确执行时间、负责人和实际结果。'
+                  }
                 />
               ))}
           </>

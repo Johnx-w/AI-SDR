@@ -19,6 +19,7 @@ import { MailService } from './mail-service.mjs';
 import { validateContactEdit } from './lead-contacts.mjs';
 import { LeadLibrary } from './lead-library.mjs';
 import { LeadPerformance } from './lead-performance.mjs';
+import { OverviewService } from './overview.mjs';
 
 class ApiError extends Error {
   constructor(status, message) {
@@ -142,19 +143,21 @@ export function createApp({
     return (await loadLeads()).leads;
   };
   let running = 0;
+  const acquisitionScope = () =>
+    createHash('sha256')
+      .update(
+        JSON.stringify([
+          connections.environment().FEISHU_APP_TOKEN || '',
+          connections.environment().FEISHU_TABLE_ID || '',
+        ]),
+      )
+      .digest('hex');
   let batch;
   const jobs = () =>
     (batch ??= new BatchJobs({
       path: env.BATCH_DB_PATH || ':memory:',
       provider: provider.info.provider,
-      scope: createHash('sha256')
-        .update(
-          JSON.stringify([
-            connections.environment().FEISHU_APP_TOKEN || '',
-            connections.environment().FEISHU_TABLE_ID || '',
-          ]),
-        )
-        .digest('hex'),
+      scope: acquisitionScope(),
       discover: (...args) => provider.discover(...args),
       research: (...args) => provider.research(...args),
       status: (id) => provider.status(id),
@@ -206,7 +209,25 @@ export function createApp({
       ready: () => provider.info.configured,
       available: () => running === 0 && ![...runs.values()].some((run) => run.status === 'unknown'),
       checkInput: (input) => checkCapabilities(input),
+      scope: acquisitionScope,
     }));
+  const overview = new OverviewService({
+    customers: () => library().list(),
+    customerSnapshot: () => library().snapshot(),
+    business: () => business.state().store.view(),
+    acquisition: () => ({ ...jobs().overview(), schedules: plans().list() }),
+    products: () => knowledge().list(),
+    scope: () =>
+      createHash('sha256')
+        .update(
+          JSON.stringify([
+            acquisitionScope(),
+            connections.environment().ACQUISITION_PROVIDER || 'n8n',
+            connections.environment().FEISHU_READ_WEBHOOK_URL || '',
+          ]),
+        )
+        .digest('hex'),
+  });
   const completeRun = (requestId, hash, output) => {
     let summary;
     try {
@@ -267,6 +288,17 @@ export function createApp({
           throw new ApiError(403, '不允许跨站调用');
         if (url.pathname === '/api/health' && request.method === 'GET')
           return json(response, 200, { ok: true });
+        if (url.pathname === '/api/v1/overview') {
+          if (request.method !== 'GET') throw new ApiError(405, '总览仅支持读取');
+          return json(
+            response,
+            200,
+            await overview.read({
+              period: url.searchParams.get('period') || '7d',
+              asOf: url.searchParams.get('asOf') || undefined,
+            }),
+          );
+        }
         if (url.pathname.startsWith('/api/v1/mail/')) {
           requireMailOperator(request, env.MAIL_OPERATOR_TOKEN);
           if (url.pathname === '/api/v1/mail/status' && request.method === 'GET')
@@ -350,6 +382,7 @@ export function createApp({
             leadLibrary?.close();
             leadLibrary = undefined;
             leadPerformance = new LeadPerformance();
+            overview.reset();
             business.reset();
             provider.close();
             batch?.close();
