@@ -16,21 +16,21 @@
   align-items: center;
   gap: 10px;
   padding: 18px;
-  border: 1px solid #e2e8e7;
+  border: 1px solid var(--color-border);
   border-radius: 12px;
-  background: #f7faf9;
+  background: var(--color-surface-muted);
 }
 .assessment-dates {
   display: grid;
   gap: 5px;
   width: 100%;
   font-size: 12px;
-  color: #667872;
+  color: var(--color-text-muted);
 }
 .assessment-override-note {
   width: 100%;
   font-size: 12px;
-  color: #667872;
+  color: var(--color-text-muted);
 }
 .assessment-panel h4 {
   margin: 0 0 10px;
@@ -40,7 +40,7 @@
   margin-top: 0;
 }
 .assessment-other-directions {
-  border-top: 1px solid #e2e8e7;
+  border-top: 1px solid var(--color-border);
   padding-top: 12px;
 }
 .assessment-supplementary {
@@ -49,12 +49,12 @@
 }
 .assessment-supplementary summary {
   cursor: pointer;
-  color: #667872;
+  color: var(--color-text-muted);
 }
 .assessment-notes {
   padding: 14px 16px;
-  border-left: 3px solid #cbd8be;
-  background: #f7faf5;
+  border-left: 3px solid var(--color-border-strong);
+  background: var(--color-surface-hover);
   font-size: 12px;
 }
 .assessment-notes ul {
@@ -63,13 +63,13 @@
   line-height: 1.8;
 }
 .assessment-technical {
-  border-top: 1px solid #e2e8e7;
+  border-top: 1px solid var(--color-border);
   padding-top: 14px;
   font-size: 12px;
 }
 .assessment-technical summary {
   cursor: pointer;
-  color: #667872;
+  color: var(--color-text-muted);
 }
 .assessment-technical dl {
   display: grid;
@@ -78,7 +78,7 @@
   margin: 16px 0;
 }
 .assessment-technical dt {
-  color: #667872;
+  color: var(--color-text-muted);
 }
 .assessment-technical dd {
   margin: 0;
@@ -114,8 +114,8 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
   padding: 16px;
 }
 .assessment-dimension-heading {
@@ -128,12 +128,12 @@
   margin-bottom: 8px;
 }
 .assessment-dimension-heading strong {
-  color: #2e5e41;
+  color: var(--color-text);
   font-size: 19px;
   white-space: nowrap;
 }
 .assessment-dimension-heading small {
-  color: #7e8d7a;
+  color: var(--color-text-muted);
   font-size: 11px;
   font-weight: 400;
 }
@@ -143,7 +143,7 @@
   margin: 4px 0 8px;
 }
 .assessment-dimension-basis {
-  color: #6d806b;
+  color: var(--color-text-secondary);
   margin: 0 0 12px;
   padding-left: 16px;
   font-size: 12px;
@@ -151,7 +151,7 @@
   overflow-wrap: anywhere;
 }
 .assessment-dimension-missing {
-  color: #8a745b;
+  color: var(--color-warning);
   font-size: 12px;
 }
 .assessment-dimension-sources {
@@ -162,22 +162,22 @@
 .assessment-dimension-sources summary,
 .assessment-full-evidence summary {
   cursor: pointer;
-  color: #65805e;
+  color: var(--color-primary-text);
 }
 .assessment-source-fact {
   margin-top: 12px;
   padding: 12px;
-  background: #f7f9f4;
-  border-radius: 7px;
+  background: var(--color-surface-muted);
+  border-radius: 8px;
   overflow-wrap: anywhere;
 }
 .assessment-source-fact + .assessment-source-fact {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--color-border);
 }
 .assessment-source-fact blockquote {
   margin: 8px 0;
   padding-left: 10px;
-  border-left: 2px solid #ccd9c3;
+  border-left: 2px solid var(--color-border-strong);
   line-height: 1.8;
   white-space: pre-wrap;
 }
@@ -186,15 +186,15 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: #3f7050;
+  color: var(--color-primary-text);
   text-decoration: underline;
 }
 .assessment-source-fact > span {
-  color: #82907d;
+  color: var(--color-text-muted);
 }
 .assessment-full-evidence {
   font-size: 12px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--color-border);
   padding-top: 14px;
 }
 .assessment-full-evidence h4 {
@@ -213,8 +213,8 @@
   align-items: center;
 }
 .assessment-history-entry {
-  border: 1px solid #e2e8e7;
-  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
   padding: 14px;
 }
 .assessment-history-entry summary {
@@ -227,15 +227,15 @@
   font-size: 13px;
 }
 .assessment-error {
-  color: #a23830;
+  color: var(--color-danger);
 }
 .customs-evidence {
   display: grid;
   gap: 10px;
 }
 .customs-buyer {
-  border: 1px solid #e2e8e7;
-  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
   padding: 14px;
 }
 .customs-buyer-heading {
@@ -254,11 +254,11 @@
 }
 .customs-product-table th {
   text-align: left;
-  color: #667872;
+  color: var(--color-text-muted);
   font-size: 12px;
   font-weight: 500;
   padding: 10px 0;
-  border-bottom: 1px solid #e2e8e7;
+  border-bottom: 1px solid var(--color-border);
 }
 .customs-product-table th:last-child {
   width: 33%;
@@ -268,7 +268,7 @@
 }
 .customs-product-table td {
   padding: 14px 0;
-  border-bottom: 1px solid #e2e8e7;
+  border-bottom: 1px solid var(--color-border);
   vertical-align: top;
   overflow-wrap: anywhere;
 }
@@ -286,18 +286,18 @@
 }
 .customs-record-date {
   font-size: 12px;
-  color: #667872;
+  color: var(--color-text-muted);
 }
 .customs-record-count {
   font-size: 12px;
-  color: #667872;
+  color: var(--color-text-muted);
 }
 .customs-shared-bill {
   display: block;
   margin-top: 5px;
   font-size: 10px;
   font-weight: 400;
-  color: #667872;
+  color: var(--color-text-muted);
 }
 .customs-record-details {
   margin-top: 10px;
@@ -305,7 +305,7 @@
   line-height: 1.7;
 }
 .customs-record-details summary {
-  color: #667872;
+  color: var(--color-text-muted);
   cursor: pointer;
 }
 .customs-record-source {
@@ -314,7 +314,7 @@
 }
 .customs-record-source + .customs-record-source {
   margin-top: 8px;
-  border-top: 1px solid #e2e8e7;
+  border-top: 1px solid var(--color-border);
 }
 @media (max-width: 720px) {
   .assessment-dimension-list {
@@ -334,7 +334,7 @@
 }
 .assessment-manual-source {
   display: block;
-  color: #5e795e;
+  color: var(--color-text-secondary);
   margin-bottom: 6px;
   font-size: 11px;
 }

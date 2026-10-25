@@ -215,14 +215,25 @@ function CaptureTrend({ data }: { data: OverviewData }) {
         {known.length === points.length && (
           <path
             d={`${path} L${points.at(-1)?.x},${bottom} L${points[0].x},${bottom} Z`}
-            fill="#edf4ed"
+            fill="var(--color-primary-soft)"
           />
         )}
-        <path d={path} fill="none" stroke="#4d7d5c" strokeWidth="2.5" strokeLinejoin="round" />
+        <path
+          d={path}
+          fill="none"
+          stroke="var(--chart-1)"
+          strokeWidth="2.5"
+          strokeLinejoin="round"
+        />
         {points.map((item, i) => (
           <g key={item.date}>
             {item.y !== null && (
-              <circle cx={item.x} cy={item.y} r={data.trend.length > 10 ? 2.7 : 4} fill="#4d7d5c">
+              <circle
+                cx={item.x}
+                cy={item.y}
+                r={data.trend.length > 10 ? 2.7 : 4}
+                fill="var(--chart-1)"
+              >
                 <title>{`${item.date}：已记录新增 ${item.count} 家`}</title>
               </circle>
             )}

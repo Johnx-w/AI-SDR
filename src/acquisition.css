@@ -1,6 +1,6 @@
 .acq-page {
-  --acq-ink: #263c33;
-  --acq-soft: #f4f7f1;
+  --acq-ink: var(--color-text);
+  --acq-soft: var(--color-surface-muted);
   color: var(--acq-ink);
 }
 .acq-page .acq-topline {
@@ -12,7 +12,7 @@
 }
 .acq-topline p {
   margin: 0;
-  color: #6c7d71;
+  color: var(--color-text-muted);
   font-size: 13px;
 }
 .acq-page .badge {
@@ -23,7 +23,7 @@
 .acq-page-tabs {
   display: flex;
   gap: 25px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--color-border);
   margin-bottom: 24px;
 }
 .acq-page-tabs button {
@@ -31,13 +31,13 @@
   background: transparent;
   border: 0;
   border-bottom: 3px solid transparent;
-  color: #7c897d;
+  color: var(--color-text-muted);
   font-size: 14px;
   font-weight: 600;
 }
 .acq-page-tabs button.selected {
-  color: var(--green);
-  border-bottom-color: var(--green);
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
 }
 .acq-create-layout {
   display: grid;
@@ -73,8 +73,8 @@
   align-items: center;
   justify-content: center;
   border-radius: 10px;
-  background: #edf3e7;
-  color: #658357;
+  background: var(--color-surface-muted);
+  color: var(--color-text-secondary);
   font-size: 12px;
   font-weight: 700;
 }
@@ -87,7 +87,7 @@
 .acq-config-section header p,
 .acq-summary-heading p {
   font-size: 12px;
-  color: #7a887b;
+  color: var(--color-text-muted);
   margin: 0;
 }
 .acq-page input:not([type='checkbox']):not([type='radio']),
@@ -95,9 +95,9 @@
 .acq-page textarea {
   width: 100%;
   min-width: 0;
-  border: 1px solid #dfe5da;
-  background: #fff;
-  color: #31483c;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
   border-radius: 8px;
   padding: 10px 12px;
   font: inherit;
@@ -108,12 +108,12 @@
 .acq-page input:focus-visible,
 .acq-page select:focus-visible,
 .acq-page textarea:focus-visible {
-  outline: 2px solid #b5c9a9;
+  outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }
 .acq-page input[type='checkbox'],
 .acq-page input[type='radio'] {
-  accent-color: var(--green);
+  accent-color: var(--color-primary);
 }
 .acq-page textarea {
   resize: vertical;
@@ -135,14 +135,14 @@
   gap: 8px;
   font-size: 13px;
   font-weight: 500;
-  color: #425648;
+  color: var(--color-text-secondary);
 }
 .acq-span-2 {
   grid-column: span 2;
 }
 .acq-form-grid label small,
 .acq-block-label > small {
-  color: #7b897d;
+  color: var(--color-text-muted);
   font-size: 12px;
   font-weight: 400;
   line-height: 1.7;
@@ -152,7 +152,7 @@
 }
 .acq-block-label > span {
   font-size: 11px;
-  color: #81917f;
+  color: var(--color-text-muted);
   font-weight: 400;
 }
 .acq-field-label {
@@ -165,7 +165,7 @@
   margin: 22px 0 12px;
 }
 .acq-field-label > span {
-  color: #85917f;
+  color: var(--color-text-muted);
   font-size: 11px;
   font-weight: 400;
 }
@@ -174,12 +174,12 @@
   align-items: flex-start;
   gap: 11px;
   padding: 16px;
-  border: 1px solid #dce6d4;
+  border: 1px solid var(--color-border);
   border-radius: 9px;
-  background: #f5f8f1;
+  background: var(--color-surface-muted);
 }
 .acq-business-scope > svg {
-  color: #76935f;
+  color: var(--color-text-muted);
   flex-shrink: 0;
   margin-top: 1px;
 }
@@ -192,7 +192,7 @@
   margin: 7px 0 0;
   font-size: 11px;
   line-height: 1.8;
-  color: #7b8974;
+  color: var(--color-text-muted);
 }
 .acq-environment-options {
   display: flex;
@@ -204,7 +204,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid #e1e6dc;
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 10px 12px;
   font-size: 12px;
@@ -212,9 +212,9 @@
 }
 .acq-environment-options > label.selected,
 .acq-scope-options > label.selected {
-  background: #edf4e7;
-  border-color: #bdcfae;
-  color: var(--green);
+  background: var(--color-primary-soft);
+  border-color: var(--color-border);
+  color: var(--color-primary);
 }
 .acq-scope-options {
   display: grid;
@@ -225,7 +225,7 @@
 .acq-scope-options small {
   display: block;
   margin-top: 5px;
-  color: #7b8974;
+  color: var(--color-text-muted);
   font-size: 10px;
   line-height: 1.7;
 }
@@ -246,13 +246,13 @@
   gap: 10px;
   padding: 9px 11px;
   border-radius: 8px;
-  border: 1px solid #d9e5d1;
-  background: #f2f7ed;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-muted);
   font-size: 12px;
 }
 .acq-product-tag small {
   display: block;
-  color: #7c9173;
+  color: var(--color-text-muted);
   font-size: 10px;
   margin-bottom: 3px;
 }
@@ -262,14 +262,14 @@
   align-items: center;
   justify-content: center;
   background: transparent;
-  color: #718568;
+  color: var(--color-text-muted);
   border: 0;
   padding: 4px;
   border-radius: 5px;
 }
 .acq-product-menu {
   margin-top: 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
 }
 .acq-product-menu > summary {
@@ -283,7 +283,7 @@
 }
 .acq-product-menu > summary > span {
   margin-left: auto;
-  color: #899780;
+  color: var(--color-text-muted);
   font-size: 11px;
 }
 .acq-product-menu summary::-webkit-details-marker,
@@ -292,14 +292,14 @@
   display: none;
 }
 .acq-product-browser {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--color-border);
   padding: 12px;
 }
 .acq-search-field {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #82957a;
+  color: var(--color-text-muted);
 }
 .acq-page .acq-search-field input {
   border: 0;
@@ -313,18 +313,18 @@
 }
 .acq-direction-tabs button,
 .acq-quantity-presets button {
-  border: 1px solid #e1e7dc;
-  background: white;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
   padding: 6px 10px;
   font-size: 12px;
   border-radius: 6px;
-  color: #6a7e61;
+  color: var(--color-text-muted);
 }
 .acq-direction-tabs button.selected,
 .acq-quantity-presets button.selected {
-  background: #eaf1e3;
-  border-color: #b9cda9;
-  color: var(--green);
+  background: var(--color-primary-soft);
+  border-color: var(--color-border);
+  color: var(--color-primary);
 }
 .acq-product-options {
   max-height: 310px;
@@ -339,21 +339,21 @@
   margin: 14px 0 8px;
 }
 .acq-product-options h4 {
-  color: #7c8b74;
+  color: var(--color-text-muted);
   font-size: 11px;
   margin: 0;
 }
 .acq-product-options .acq-product-select-all {
   border: 0;
   background: transparent;
-  color: var(--green);
+  color: var(--color-primary);
   padding: 3px 6px;
   font-size: 11px;
   border-radius: 5px;
 }
 .acq-product-options .acq-product-select-all:hover,
 .acq-product-options .acq-product-select-all[aria-pressed='true'] {
-  background: #eaf1e3;
+  background: var(--color-surface-hover);
 }
 .acq-product-options section {
   margin: 0;
@@ -363,21 +363,21 @@
   align-items: center;
   gap: 9px;
   width: 100%;
-  background: white;
+  background: var(--color-surface);
   border: 0;
   border-radius: 7px;
   text-align: left;
   padding: 9px 8px;
-  color: #425843;
+  color: var(--color-text-secondary);
   font-size: 12px;
 }
 .acq-product-options section > button:hover,
 .acq-product-options section > button.selected {
-  background: #f0f5ea;
+  background: var(--color-surface-hover);
 }
 .acq-product-options button small {
   display: block;
-  color: #8b9785;
+  color: var(--color-text-muted);
   font-size: 10px;
   margin-top: 3px;
 }
@@ -387,8 +387,8 @@
   justify-content: center;
   height: 16px;
   width: 16px;
-  border: 1px solid #bfccb5;
-  color: var(--green);
+  border: 1px solid var(--color-border);
+  color: var(--color-primary);
   border-radius: 4px;
   flex-shrink: 0;
 }
@@ -399,13 +399,13 @@
   border: 0;
   background: transparent;
   padding: 10px 0;
-  color: var(--green);
+  color: var(--color-primary);
   font-size: 12px;
 }
 .acq-new-product {
   padding: 16px;
-  border: 1px dashed #becdb4;
-  background: #f8faf5;
+  border: 1px dashed var(--color-border);
+  background: var(--color-surface);
   border-radius: 9px;
   margin-top: 5px;
 }
@@ -415,7 +415,7 @@
   align-items: center;
   margin: 15px 0;
   font-size: 12px;
-  color: #64765b;
+  color: var(--color-text-secondary);
 }
 .acq-role-options {
   display: flex;
@@ -427,18 +427,18 @@
   align-items: center;
   gap: 7px;
   padding: 9px 12px;
-  border: 1px solid #e1e6dc;
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   font-size: 12px;
   cursor: pointer;
 }
 .acq-role-options > label.selected {
-  background: #edf4e7;
-  border-color: #bdcfae;
-  color: var(--green);
+  background: var(--color-primary-soft);
+  border-color: var(--color-border);
+  color: var(--color-primary);
 }
 .acq-advanced {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--color-border);
   margin-top: 20px;
   padding-top: 14px;
 }
@@ -447,7 +447,7 @@
   align-items: center;
   justify-content: space-between;
   font-size: 12px;
-  color: #7b8b74;
+  color: var(--color-text-muted);
   list-style: none;
   cursor: pointer;
 }
@@ -460,7 +460,7 @@
   width: 135px;
 }
 .acq-quantity > span {
-  color: #809276;
+  color: var(--color-text-muted);
 }
 .acq-quantity-presets {
   display: flex;
@@ -477,20 +477,20 @@
   display: flex;
   align-items: center;
   gap: 9px;
-  border: 1px solid #e1e6dc;
+  border: 1px solid var(--color-border);
   border-radius: 9px;
   padding: 14px;
   font-size: 13px;
   cursor: pointer;
 }
 .acq-run-mode label.selected {
-  background: #f0f5e9;
-  border-color: #adc49e;
+  background: var(--color-primary-soft);
+  border-color: var(--color-border);
 }
 .acq-schedule-config {
-  background: #f7f9f3;
+  background: var(--color-surface-muted);
   padding: 18px;
-  border: 1px solid #dce6d4;
+  border: 1px solid var(--color-border);
   border-radius: 9px;
   margin-top: 12px;
 }
@@ -523,17 +523,17 @@
   position: sticky;
   top: 22px;
   padding: 22px;
-  border-top: 3px solid #7e9e66;
+  border-top: 3px solid var(--color-border-strong);
 }
 .acq-summary dl {
   margin: 0;
 }
 .acq-summary dl > div {
   padding: 12px 0;
-  border-bottom: 1px solid #edf0e8;
+  border-bottom: 1px solid var(--color-border);
 }
 .acq-summary dt {
-  color: #85947b;
+  color: var(--color-text-muted);
   font-size: 11px;
   margin-bottom: 6px;
 }
@@ -545,13 +545,13 @@
 }
 .acq-summary dd small {
   display: block;
-  color: #86917f;
+  color: var(--color-text-muted);
   font-size: 10px;
   margin-top: 4px;
 }
 .acq-summary dd b {
   font-size: 23px;
-  color: #3f6336;
+  color: var(--color-text-secondary);
   font-weight: 650;
 }
 .acq-summary dd > span {
@@ -572,7 +572,7 @@
 }
 .acq-summary-note {
   font-size: 10px;
-  color: #909b85;
+  color: var(--color-text-muted);
   line-height: 1.8;
   margin-bottom: 0;
 }
@@ -580,11 +580,11 @@
   display: flex;
   gap: 5px;
   align-items: center;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--color-border);
   padding-top: 13px;
   margin-top: 15px;
   font-size: 11px;
-  color: var(--green);
+  color: var(--color-primary);
 }
 .acq-search-strategy {
   padding: 18px 22px;
@@ -604,7 +604,7 @@
   align-items: center;
 }
 .acq-search-strategy summary > span + span {
-  color: #8b977f;
+  color: var(--color-text-muted);
   font-size: 10px;
   font-weight: 400;
 }
@@ -617,13 +617,13 @@
 }
 .acq-search-strategy li {
   padding: 10px 0;
-  border-bottom: 1px solid #edf0e7;
+  border-bottom: 1px solid var(--color-border);
   font-size: 12px;
   overflow-wrap: anywhere;
 }
 .acq-search-strategy li small {
   display: block;
-  color: #88987c;
+  color: var(--color-text-muted);
   font-size: 10px;
   margin-bottom: 4px;
 }
@@ -636,8 +636,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  background: #faf7eb;
-  border: 1px solid #e9dfbc;
+  background: var(--color-warning-soft);
+  border: 1px solid var(--color-warning-border);
   padding: 14px;
   border-radius: 8px;
   font-size: 12px;
@@ -651,7 +651,7 @@
 .acq-notice > button:not(.btn) {
   background: transparent;
   border: 0;
-  color: var(--green);
+  color: var(--color-primary);
 }
 .acq-list-toolbar {
   display: flex;
@@ -696,7 +696,7 @@
 }
 .acq-execution-heading small {
   font-size: 11px;
-  color: #8b977e;
+  color: var(--color-text-muted);
   overflow-wrap: anywhere;
 }
 .acq-execution-card > .batch-progress {
@@ -710,7 +710,7 @@
 .keyword-effect-table th,
 .keyword-effect-table td {
   padding: 10px 8px;
-  border-bottom: 1px solid #e5ebde;
+  border-bottom: 1px solid var(--color-border);
   text-align: left;
 }
 .keyword-effect-table td:first-child {
@@ -720,12 +720,12 @@
 }
 .keyword-effect-table small {
   display: block;
-  color: #849077;
+  color: var(--color-text-muted);
   margin-top: 4px;
 }
 .assessment-evidence-current {
   margin-top: 14px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--color-border);
   padding-top: 14px;
 }
 .assessment-evidence-current summary {
@@ -737,7 +737,7 @@
   display: -webkit-box;
   font-size: 10px;
   line-height: 1.7;
-  color: #839078;
+  color: var(--color-text-muted);
   max-width: 230px;
   margin-top: 6px;
   overflow-wrap: anywhere;

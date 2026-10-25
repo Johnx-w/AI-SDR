@@ -5,9 +5,9 @@
 }
 .profile-overview {
   padding: 18px 20px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: #f8faf5;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface-muted);
 }
 .profile-overview-heading,
 .profile-priority {
@@ -48,7 +48,7 @@
 .profile-confirmations article {
   margin-top: 14px;
   padding: 14px 0;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--color-border);
   line-height: 1.7;
   overflow-wrap: anywhere;
 }
@@ -60,11 +60,11 @@
 }
 .profile-confirmations small,
 .profile-public-demand h4 small {
-  color: #7d927b;
+  color: var(--color-text-muted);
   font-weight: 400;
 }
 .profile-priority > span:last-child {
-  color: #66816a;
+  color: var(--color-text-secondary);
   font-size: 12px;
 }
 .profile-introduction {
@@ -82,10 +82,18 @@
 .profile-facts > div {
   display: flex;
   gap: 8px;
+  max-width: 100%;
+}
+.profile-facts dt {
+  flex-shrink: 0;
+}
+.profile-facts dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .profile-facts dt,
 .profile-extra-fields dt {
-  color: #7d927b;
+  color: var(--color-text-muted);
 }
 .profile-facts dd,
 .profile-extra-fields dd {
@@ -104,8 +112,8 @@
 .profile-product-tags > span {
   padding: 6px 10px;
   border-radius: 6px;
-  background: #f2f5ed;
-  color: #4c6d50;
+  background: var(--color-surface-muted);
+  color: var(--color-text-secondary);
   font-size: 11px;
   overflow-wrap: anywhere;
 }
@@ -116,8 +124,8 @@
 }
 .profile-business-card {
   padding: 16px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
 }
 .profile-business-card ul {
   padding-left: 17px;
@@ -129,17 +137,17 @@
   margin-top: 6px;
 }
 .profile-pending {
-  background: #fcfcf7;
+  background: var(--color-surface-hover);
 }
 .profile-empty {
-  color: #84907b;
+  color: var(--color-text-muted);
   font-size: 12px;
   margin: 0;
 }
 .profile-public-demand {
   margin-top: 14px;
   padding-top: 12px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--color-border);
 }
 .profile-public-demand h4 {
   font-size: 12px;
@@ -154,7 +162,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px 24px;
-  color: #82907c;
+  color: var(--color-text-muted);
   font-size: 11px;
   line-height: 1.7;
 }
@@ -168,10 +176,10 @@
 .profile-more-details summary,
 .profile-more-products summary {
   cursor: pointer;
-  color: #5e795e;
+  color: var(--color-text-secondary);
 }
 .profile-more-details {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--color-border);
   padding-top: 16px;
 }
 .profile-more-products .profile-product-tags {

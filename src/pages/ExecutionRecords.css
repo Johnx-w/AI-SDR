@@ -15,8 +15,8 @@
 .acq-capture-note {
   padding: 12px 14px;
   border-radius: 7px;
-  color: #5c7559;
-  background: #f1f6ec;
+  color: var(--color-primary-text);
+  background: var(--color-surface-muted);
   font-size: 12px;
   line-height: 1.8;
 }
@@ -29,16 +29,16 @@
 .acq-capture-table th,
 .acq-capture-table td {
   padding: 14px;
-  border-bottom: 1px solid #e8eee3;
+  border-bottom: 1px solid var(--color-border);
   line-height: 1.6;
 }
 .acq-capture-table th {
-  color: #6e8169;
+  color: var(--color-text-secondary);
   font-weight: 500;
 }
 .acq-capture-table td > small {
   display: block;
-  color: #778570;
+  color: var(--color-text-muted);
   overflow-wrap: anywhere;
 }
 .acq-execution-card[id] {

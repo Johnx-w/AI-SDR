@@ -21,14 +21,14 @@ export function TrendChart({ period = '14' }: { period?: string }) {
     >
       <defs>
         <linearGradient id="trend-fill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#4b8d6c" stopOpacity=".2" />
-          <stop offset="100%" stopColor="#4b8d6c" stopOpacity="0" />
+          <stop offset="0%" stopColor="var(--chart-1)" stopOpacity=".2" />
+          <stop offset="100%" stopColor="var(--chart-1)" stopOpacity="0" />
         </linearGradient>
       </defs>
       {[40, 80, 120, 160, 200].map((y, index) => (
         <g key={y}>
-          <line x1="48" x2="695" y1={y} y2={y} stroke="#edf0ed" strokeDasharray="3 5" />
-          <text x="29" y={y + 4} textAnchor="end" fill="#9a9e97" fontSize="10">
+          <line x1="48" x2="695" y1={y} y2={y} stroke="var(--color-border)" strokeDasharray="3 5" />
+          <text x="29" y={y + 4} textAnchor="end" fill="var(--color-text-muted)" fontSize="11">
             {160 - index * 40}
           </text>
         </g>
@@ -37,7 +37,7 @@ export function TrendChart({ period = '14' }: { period?: string }) {
       <path
         d={second}
         fill="none"
-        stroke="#b6c89b"
+        stroke="var(--chart-3)"
         strokeWidth="2"
         strokeDasharray="5 5"
         strokeLinejoin="round"
@@ -45,7 +45,7 @@ export function TrendChart({ period = '14' }: { period?: string }) {
       <path
         d={curve}
         fill="none"
-        stroke="#36775a"
+        stroke="var(--chart-1)"
         strokeWidth="2.5"
         strokeLinejoin="round"
         strokeLinecap="round"
@@ -54,12 +54,12 @@ export function TrendChart({ period = '14' }: { period?: string }) {
         cx="692"
         cy={190 - base.at(-1)!}
         r="4"
-        fill="#36775a"
-        stroke="white"
+        fill="var(--chart-1)"
+        stroke="var(--color-surface)"
         strokeWidth="2"
       />
       {['起始日', '第 3 天', '第 5 天', '第 7 天', '第 10 天', '最近'].map((text, index) => (
-        <text key={text} x={48 + index * 128} y="226" fill="#9a9e97" fontSize="10">
+        <text key={text} x={48 + index * 128} y="226" fill="var(--color-text-muted)" fontSize="11">
           {text}
         </text>
       ))}

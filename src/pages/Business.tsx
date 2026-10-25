@@ -234,7 +234,7 @@ export function Campaigns() {
       {viewing && (
         <Modal title={viewing.name} onClose={() => setViewing(null)}>
           <div className="modal-body">
-            <Badge tone="green">演示计划</Badge>
+            <Badge tone="neutral">演示计划</Badge>
             <p className="muted">
               {viewing.market} · {viewing.channel} · 目标 {viewing.total} 人
             </p>
@@ -290,7 +290,7 @@ export function Inbox() {
         title="每一次回应，都值得认真对待。"
         description="在一个工作台里查看消息，整理需求，准备下一步沟通。"
       >
-        <Badge tone="green">
+        <Badge tone="blue">
           {data.conversations.filter((item) => item.unread).length} 条未读 · 演示
         </Badge>
       </PageHeading>
@@ -425,7 +425,7 @@ export function Inbox() {
               <p>
                 {lead.market} · {lead.city}
               </p>
-              <Badge tone="green">
+              <Badge tone="blue">
                 {lead.grade} 级 · {lead.score} 分
               </Badge>
               <hr />
@@ -555,7 +555,7 @@ export function Reports() {
                 <td>{row.count}</td>
                 <td>{row.a}</td>
                 <td>
-                  <Badge tone="green">
+                  <Badge tone="blue">
                     {row.count ? Math.round((row.a / row.count) * 100) : 0}%
                   </Badge>
                 </td>
