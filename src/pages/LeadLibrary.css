@@ -1,0 +1,33 @@
+.library-sync-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin: -8px 0 18px;
+  color: #61756f;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.library-sync-warning {
+  color: #996426;
+}
+
+.library-sync-details {
+  margin: -8px 0 18px;
+  color: #61756f;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.library-sync-details summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.library-sync-details > div {
+  padding: 4px 0 0 14px;
+}
+
+.library-sync-details p {
+  margin: 5px 0;
+}

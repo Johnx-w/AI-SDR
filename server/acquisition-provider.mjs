@@ -35,7 +35,15 @@ export function createAcquisitionProvider({ env, fetchImpl = fetch, nativeImpl }
       },
       assessmentInfo: () => service().assessmentInfo(),
       assessRecord: (...args) => service().assessRecord(...args),
-      updateContacts: (...args) => service().updateContacts(...args),
+      updateContacts: async (...args) => {
+        const result = await service().updateContacts(...args);
+        return {
+          ...result,
+          lead: service().decorateLeads
+            ? service().decorateLeads({ leads: [result.lead] }).leads[0]
+            : result.lead,
+        };
+      },
       supplementRecord: (...args) => service().supplementRecord(...args),
       pendingSupplement: (...args) => service().pendingSupplement(...args),
       assessmentHistory: (...args) => service().assessmentHistory(...args),

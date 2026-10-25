@@ -17,6 +17,8 @@ import { CustomerBusinessApi } from './customer-business-api.mjs';
 import { searchPlan } from './search-plan.mjs';
 import { MailService } from './mail-service.mjs';
 import { validateContactEdit } from './lead-contacts.mjs';
+import { LeadLibrary } from './lead-library.mjs';
+import { LeadPerformance } from './lead-performance.mjs';
 
 class ApiError extends Error {
   constructor(status, message) {
@@ -96,23 +98,48 @@ export function createApp({
     fetchImpl,
     nativeImpl,
   });
-  const readLeads = () => provider.readLeads();
   const runs = new Map();
-  const realLeads = new Map();
   const brandingCache = new Map();
   let readingLeads;
-  const loadLeads = async () => {
+  const readLeads = () => {
     if (!readingLeads)
-      readingLeads = readLeads()
-        .then((data) => {
-          realLeads.clear();
-          data.leads.forEach((lead) => realLeads.set(lead.id, lead));
-          return data;
-        })
-        .finally(() => {
-          readingLeads = undefined;
-        });
+      readingLeads = provider.readLeads().finally(() => {
+        readingLeads = undefined;
+      });
     return readingLeads;
+  };
+  let leadLibrary;
+  let leadPerformance = new LeadPerformance();
+  const library = () => {
+    if (!leadLibrary) {
+      const current = connections.environment();
+      leadLibrary = new LeadLibrary({
+        path: env.LEAD_LIBRARY_DB_PATH || env.BATCH_DB_PATH || ':memory:',
+        scope: createHash('sha256')
+          .update(
+            JSON.stringify([
+              current.ACQUISITION_PROVIDER || 'n8n',
+              current.FEISHU_APP_ID || '',
+              current.FEISHU_APP_TOKEN || '',
+              current.FEISHU_TABLE_ID || '',
+              current.FEISHU_READ_WEBHOOK_URL || '',
+            ]),
+          )
+          .digest('hex'),
+        readLeads,
+        ...(env.LEAD_LIBRARY_TTL_MS !== undefined
+          ? { ttlMs: Number(env.LEAD_LIBRARY_TTL_MS) }
+          : {}),
+      });
+      leadLibrary.start();
+    }
+    return leadLibrary;
+  };
+  const loadLeads = () => library().all();
+  // Task deduplication and write verification must always use a fresh upstream read.
+  const verifiedLeads = async () => {
+    await library().refresh({ afterCurrent: true });
+    return (await loadLeads()).leads;
   };
   let running = 0;
   let batch;
@@ -131,7 +158,7 @@ export function createApp({
       discover: (...args) => provider.discover(...args),
       research: (...args) => provider.research(...args),
       status: (id) => provider.status(id),
-      readLeads: async () => (await readLeads()).leads,
+      readLeads: verifiedLeads,
     }));
   let schedules;
   let products;
@@ -195,15 +222,34 @@ export function createApp({
       completedAt: new Date().toISOString(),
     };
     runs.set(requestId, { hash, status: 'completed', result });
+    leadLibrary?.invalidate();
     return result;
   };
-  const json = (response, status, body) => {
+  const json = (response, status, body, serialized = JSON.stringify(body)) => {
     response.writeHead(status, {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store',
       'X-Content-Type-Options': 'nosniff',
     });
-    response.end(JSON.stringify(body));
+    response.end(serialized);
+  };
+  const leadJson = async (response, operation, read) => {
+    const started = performance.now();
+    // Keep measurements scoped to the connection that started this request.
+    const metrics = leadPerformance;
+    try {
+      const body = await read();
+      const serialized = JSON.stringify(body);
+      const durationMs = performance.now() - started;
+      metrics.record(operation, { durationMs, bytes: Buffer.byteLength(serialized) });
+      response.setHeader('Server-Timing', `${operation};dur=${durationMs.toFixed(2)}`);
+      return json(response, 200, body, serialized);
+    } catch (error) {
+      const durationMs = performance.now() - started;
+      metrics.record(operation, { durationMs, error: true });
+      response.setHeader('Server-Timing', `${operation};dur=${durationMs.toFixed(2)}`);
+      throw error;
+    }
   };
   const server = createServer(async (request, response) => {
     try {
@@ -295,11 +341,15 @@ export function createApp({
               running ||
               business.active ||
               readingLeads ||
+              leadLibrary?.refreshing ||
               jobs().active() ||
               [...runs.values()].some((r) => r.status === 'unknown')
             )
               throw new ApiError(409, '请先完成或核对当前任务，再修改 API 连接');
             const result = connections.update(body);
+            leadLibrary?.close();
+            leadLibrary = undefined;
+            leadPerformance = new LeadPerformance();
             business.reset();
             provider.close();
             batch?.close();
@@ -309,7 +359,6 @@ export function createApp({
               fetchImpl,
               nativeImpl,
             });
-            realLeads.clear();
             brandingCache.clear();
             return json(response, 200, result);
           }
@@ -410,8 +459,27 @@ export function createApp({
               url.searchParams.get('region') || '',
             ),
           );
+        if (url.pathname === '/api/v1/leads/real/metrics' && request.method === 'GET')
+          return json(response, 200, {
+            scope: library().scope,
+            sync: {
+              ...library().metrics(),
+              mode: library().mode,
+              intervalMs: library().intervalMs,
+            },
+            performance: leadPerformance.snapshot(),
+          });
+        if (url.pathname === '/api/v1/leads/real/list' && request.method === 'GET') {
+          if (request.headers['x-lead-library-activity'] === 'active') library().touch();
+          return await leadJson(response, 'list', () => library().list());
+        }
+        if (url.pathname === '/api/v1/leads/real/refresh' && request.method === 'POST')
+          return await leadJson(response, 'refresh', () => library().refresh());
         if (url.pathname === '/api/v1/leads/real' && request.method === 'GET')
-          return json(response, 200, await loadLeads());
+          return await leadJson(response, 'export', loadLeads);
+        const leadRoute = url.pathname.match(/^\/api\/v1\/leads\/real\/([\w-]{1,100})$/);
+        if (leadRoute && request.method === 'GET')
+          return await leadJson(response, 'detail', () => library().detail(leadRoute[1]));
         const supplementRoute = url.pathname.match(
           /^\/api\/v1\/leads\/real\/([\w-]{1,100})\/supplements$/,
         );
@@ -434,7 +502,7 @@ export function createApp({
               key,
               business.state().store,
             );
-            realLeads.set(result.lead.id, result.lead);
+            library().upsert(result.lead);
             return json(response, 200, result);
           } finally {
             running--;
@@ -459,7 +527,7 @@ export function createApp({
           running++;
           try {
             const result = await provider.updateContacts(contactRoute[1], input);
-            realLeads.set(result.lead.id, { ...realLeads.get(result.lead.id), ...result.lead });
+            library().upsert(result.lead);
             return json(response, 200, result);
           } finally {
             running--;
@@ -475,8 +543,7 @@ export function createApp({
         if (assessmentRoute) {
           if (!provider.assessRecord) throw new ApiError(503, '自动评级目前需要后端直连引擎');
           const [, recordId, evaluationId] = assessmentRoute;
-          if (!realLeads.size) await loadLeads();
-          if (!realLeads.has(recordId)) throw new ApiError(404, '客户不存在，请刷新客户库');
+          await library().detail(recordId);
           if (request.method === 'GET' && !evaluationId)
             return json(response, 200, provider.assessmentHistory(recordId));
           if (request.method === 'POST' && evaluationId)
@@ -502,7 +569,10 @@ export function createApp({
             running++;
             try {
               const output = await provider.assessRecord(recordId, body, 'rating-' + key);
-              realLeads.clear();
+              library().invalidate();
+              void library()
+                .refresh({ afterCurrent: true })
+                .catch(() => {});
               return json(response, 200, output);
             } finally {
               running--;
@@ -512,9 +582,7 @@ export function createApp({
         }
         const branding = url.pathname.match(/^\/api\/v1\/leads\/real\/([\w-]+)\/branding$/);
         if (branding && request.method === 'GET') {
-          if (!realLeads.size) await loadLeads();
-          const lead = realLeads.get(branding[1]);
-          if (!lead) throw new ApiError(404, '客户不存在');
+          const { lead } = await library().detail(branding[1]);
           let cached = brandingCache.get(lead.website);
           if (!cached || cached.expires < Date.now()) {
             if (brandingCache.size >= 500) brandingCache.clear();
@@ -640,6 +708,7 @@ export function createApp({
     });
   });
   server.on('close', () => {
+    leadLibrary?.close();
     mail.close();
     products?.close();
     productKnowledge?.close();
