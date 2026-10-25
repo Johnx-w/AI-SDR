@@ -3,18 +3,18 @@
   flex-wrap: wrap;
   gap: 6px 18px;
   margin: -8px 0 18px;
-  color: #61756f;
+  color: var(--color-text-muted);
   font-size: 12px;
   line-height: 1.6;
 }
 
 .library-sync-warning {
-  color: #996426;
+  color: var(--color-warning);
 }
 
 .library-sync-details {
   margin: -8px 0 18px;
-  color: #61756f;
+  color: var(--color-text-muted);
   font-size: 12px;
   line-height: 1.7;
 }

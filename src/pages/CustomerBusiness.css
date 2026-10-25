@@ -6,7 +6,7 @@
   margin-bottom: 18px;
 }
 .business-overview > svg {
-  color: var(--green);
+  color: var(--color-primary);
   flex-shrink: 0;
   margin-top: 2px;
 }
@@ -15,25 +15,25 @@
 }
 .business-overview p {
   margin: 8px 0;
-  color: #647b67;
+  color: var(--color-text-secondary);
   line-height: 1.7;
 }
 .business-overview small {
-  color: #82917e;
+  color: var(--color-text-muted);
 }
 .business-alert {
   padding: 13px 16px;
   margin: 14px 0;
-  border: 1px solid #dce7d7;
+  border: 1px solid var(--color-border);
   border-radius: 7px;
-  background: #edf3e5;
-  color: #3e6348;
+  background: var(--color-surface-muted);
+  color: var(--color-text-secondary);
   line-height: 1.7;
 }
 .business-alert.error {
-  background: #fff3ee;
-  border-color: #f0d9cb;
-  color: #96513b;
+  background: var(--color-danger-soft);
+  border-color: var(--color-danger-border);
+  color: var(--color-danger);
 }
 .business-filter-summary {
   display: flex;
@@ -42,14 +42,14 @@
   flex-wrap: wrap;
   gap: 10px;
   padding: 12px 20px;
-  color: #537157;
-  background: #f0f5eb;
+  color: var(--color-text-secondary);
+  background: var(--color-surface-muted);
   font-size: 12px;
   line-height: 1.6;
 }
 .business-focused-record {
-  background: #eff6e8;
-  outline: 2px solid #8ba875;
+  background: var(--color-primary-soft);
+  outline: 2px solid var(--color-primary);
   outline-offset: -2px;
   scroll-margin: 100px;
 }
@@ -65,38 +65,38 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  color: #6f846f;
+  color: var(--color-text-muted);
 }
 .business-filters select {
   padding: 9px 12px;
   min-width: 200px;
   max-width: 340px;
-  background: white;
+  background: var(--color-surface);
 }
 .business-tabs {
   display: flex;
   gap: 20px;
   padding: 0 20px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--color-border);
 }
 .business-tabs > button {
   padding: 18px 3px 15px;
   border: 0;
   border-bottom: 3px solid transparent;
   background: transparent;
-  color: #7d8c7a;
+  color: var(--color-text-muted);
   display: flex;
   gap: 10px;
   align-items: center;
 }
 .business-tabs > button.active {
-  color: var(--green);
-  border-bottom-color: var(--green);
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
   font-weight: 650;
 }
 .business-tabs > button > span {
   font-size: 11px;
-  background: #f0f3eb;
+  background: var(--color-surface-muted);
   padding: 2px 7px;
   border-radius: 8px;
 }
@@ -106,7 +106,7 @@
   flex-wrap: wrap;
   gap: 12px;
   padding: 18px 20px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--color-border);
 }
 .business-toolbar .search-field {
   flex: 1;
@@ -114,11 +114,11 @@
 }
 .business-toolbar > select {
   padding: 9px 12px;
-  background: white;
+  background: var(--color-surface);
 }
 .business-loading {
   padding: 35px 22px;
-  color: #7d8c7a;
+  color: var(--color-text-muted);
 }
 .business-table {
   min-width: 900px;
@@ -146,12 +146,12 @@
   margin-top: 7px;
 }
 .business-table td > a {
-  color: #557b49;
+  color: var(--color-primary-text);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
 .business-table td > small {
-  color: #7e8e7a;
+  color: var(--color-text-muted);
 }
 .business-quote {
   white-space: pre-line;
@@ -166,7 +166,7 @@
   white-space: nowrap;
 }
 .business-conversations {
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--color-border);
   padding: 18px 20px;
   display: flex;
   flex-wrap: wrap;
@@ -178,12 +178,12 @@
   font-size: 13px;
 }
 .business-conversations > p {
-  color: #7e8e7a;
+  color: var(--color-text-muted);
   line-height: 1.7;
 }
 .business-conversation {
-  background: #fafbf7;
-  border: 1px solid #e3eadc;
+  background: var(--color-surface-hover);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   display: flex;
   text-align: left;
@@ -193,14 +193,14 @@
   max-width: 100%;
 }
 .business-conversation > svg {
-  color: #7c9772;
+  color: var(--color-text-secondary);
   flex-shrink: 0;
 }
 .business-conversation small {
   display: block;
   margin-top: 6px;
   font-size: 11px;
-  color: #81917c;
+  color: var(--color-text-muted);
   overflow-wrap: anywhere;
 }
 .business-message-list {
@@ -209,8 +209,8 @@
   gap: 17px;
 }
 .business-message {
-  border: 1px solid #e2e9dc;
-  border-radius: 9px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
   padding: 20px;
 }
 .business-message header {
@@ -226,7 +226,7 @@
   gap: 8px;
 }
 .business-message time {
-  color: #83927e;
+  color: var(--color-text-muted);
   font-size: 11px;
 }
 .business-message h3 {
@@ -234,13 +234,13 @@
   font-size: 15px;
 }
 .business-message-meta {
-  color: #7d8c78;
+  color: var(--color-text-muted);
   font-size: 12px;
   line-height: 1.9;
   overflow-wrap: anywhere;
 }
 .business-message-meta a {
-  color: #507344;
+  color: var(--color-primary-text);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
@@ -254,7 +254,7 @@
   max-height: 420px;
   overflow: auto;
   padding: 15px;
-  background: #f8faf5;
+  background: var(--color-surface-muted);
   border-radius: 6px;
 }
 .business-attachment {
@@ -266,9 +266,9 @@
   gap: 14px;
   justify-content: space-between;
   align-items: center;
-  border-top: 1px solid #eaf0e4;
+  border-top: 1px solid var(--color-border);
   padding-top: 14px;
-  color: #809079;
+  color: var(--color-text-muted);
   font-size: 12px;
 }
 .business-form fieldset {
@@ -287,15 +287,15 @@
   flex-direction: column;
   gap: 8px;
   font-size: 12px;
-  color: #637963;
+  color: var(--color-text-secondary);
   min-width: 0;
 }
 .business-field input,
 .business-field select,
 .business-field textarea {
   width: 100%;
-  background: white;
-  border: 1px solid #dce6d7;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   padding: 10px 11px;
 }
 .business-field textarea {
@@ -306,13 +306,13 @@
   grid-column: 1/-1;
 }
 .business-form-note {
-  color: #82917e;
+  color: var(--color-text-muted);
   font-size: 12px;
   line-height: 1.8;
   margin: 0;
 }
 .business-form-meta {
-  color: #83927e;
+  color: var(--color-text-muted);
   font-size: 11px;
   overflow-wrap: anywhere;
 }
@@ -320,7 +320,7 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
-  border: 1px solid #e2e9dc;
+  border: 1px solid var(--color-border);
   padding: 12px;
   border-radius: 6px;
   max-height: 180px;
@@ -340,14 +340,14 @@
   flex-shrink: 0;
 }
 .business-choices small {
-  color: #82917e;
+  color: var(--color-text-muted);
 }
 .business-confirm {
   display: flex;
   align-items: flex-start;
   gap: 9px;
   line-height: 1.7;
-  color: #4b6c44;
+  color: var(--color-text-secondary);
 }
 .business-confirm input {
   margin-top: 5px;
@@ -355,13 +355,13 @@
 }
 .business-source {
   padding: 15px;
-  background: #f6f9f1;
-  border: 1px solid #e1e9d8;
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
   border-radius: 7px;
 }
 .business-source > strong {
   font-size: 12px;
-  color: #57754b;
+  color: var(--color-text);
 }
 .business-source textarea {
   display: block;
@@ -369,7 +369,7 @@
   margin: 10px 0;
   padding: 12px;
   line-height: 1.7;
-  background: white;
+  background: var(--color-surface);
 }
 .business-action-title {
   font-weight: 650;
@@ -385,12 +385,12 @@
 }
 .business-audit {
   margin-top: 10px;
-  color: #7e8e7a;
+  color: var(--color-text-muted);
   font-size: 11px;
 }
 .business-audit summary {
   cursor: pointer;
-  color: #547746;
+  color: var(--color-primary-text);
 }
 .business-audit ol {
   padding-left: 18px;
@@ -406,8 +406,8 @@
   bottom: -26px;
   padding: 15px 0;
   margin-bottom: -12px;
-  background: white;
-  border-top: 1px solid var(--border);
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
 }
 .business-preflight p,
 .business-preflight li {

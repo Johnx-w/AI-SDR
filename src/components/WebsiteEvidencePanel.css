@@ -7,16 +7,16 @@
   flex-wrap: wrap;
   justify-content: space-between;
   gap: 8px;
-  color: #81917e;
+  color: var(--color-text-muted);
   font-size: 11px;
 }
 .website-evidence-list {
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
   overflow: hidden;
 }
 .website-evidence-item + .website-evidence-item {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--color-border);
 }
 .website-evidence-item > summary {
   display: grid;
@@ -31,21 +31,21 @@
   display: none;
 }
 .website-evidence-item > summary:hover {
-  background: #f8faf5;
+  background: var(--color-surface-muted);
 }
 .website-evidence-item > summary:focus-visible {
-  outline: 2px solid #79a27d;
+  outline: 2px solid var(--color-primary);
   outline-offset: -3px;
 }
 .website-evidence-chevron {
   align-self: center;
-  color: #8a9d82;
+  color: var(--color-text-muted);
 }
 .website-evidence-item[open] > summary .website-evidence-chevron {
   transform: rotate(90deg);
 }
 .website-evidence-category {
-  color: #517552;
+  color: var(--color-text-secondary);
   font-size: 11px;
 }
 .website-evidence-summary {
@@ -54,7 +54,7 @@
   overflow-wrap: anywhere;
 }
 .website-evidence-count {
-  color: #8a9a83;
+  color: var(--color-text-muted);
   white-space: nowrap;
   font-size: 10px;
 }
@@ -65,15 +65,15 @@
 }
 .website-evidence-original {
   padding: 14px;
-  border: 1px solid #e5eadf;
-  border-radius: 7px;
-  background: #f9fbf6;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-muted);
   font-size: 12px;
   overflow-wrap: anywhere;
 }
 .website-evidence-record-type {
   font-size: 10px;
-  color: #7c9076;
+  color: var(--color-text-muted);
 }
 .website-evidence-value {
   line-height: 1.8;
@@ -81,7 +81,7 @@
   margin: 8px 0;
 }
 .website-evidence-original blockquote {
-  border-left: 2px solid #cbd9be;
+  border-left: 2px solid var(--color-border-strong);
   padding-left: 12px;
   margin: 10px 0;
   line-height: 1.8;
@@ -91,12 +91,12 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: #3c6b4a;
+  color: var(--color-primary-text);
   text-decoration: underline;
   font-size: 11px;
 }
 .website-evidence-source-missing {
-  color: #85947d;
+  color: var(--color-text-muted);
   font-size: 11px;
 }
 @media (max-width: 640px) {

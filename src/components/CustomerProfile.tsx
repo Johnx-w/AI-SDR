@@ -175,7 +175,7 @@ export function CustomerProfile({
       <div className="profile-overview">
         <div className="profile-overview-heading">
           <div className="profile-priority">
-            <Badge tone={lead.grade === 'A' ? 'green' : 'neutral'}>
+            <Badge tone={lead.grade === 'A' ? 'blue' : 'neutral'}>
               {lead.grade}
               {priority[lead.grade] ? ' · ' + priority[lead.grade] : ''}
             </Badge>
