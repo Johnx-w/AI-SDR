@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import { decorateLeadDevelopment } from './lead-development.mjs';
 import { BrandingCache } from './branding-cache.mjs';
 import { summarizeRunOutput } from './run-outcome.mjs';
 import { validateTarget, locationOptions } from './search-target.mjs';
@@ -271,7 +272,7 @@ export function createApp({
     // Keep measurements scoped to the connection that started this request.
     const metrics = leadPerformance;
     try {
-      const body = await read();
+      const body = decorateLeadDevelopment(await read(), business.state().store.contexts());
       const serialized = JSON.stringify(body);
       const durationMs = performance.now() - started;
       metrics.record(operation, { durationMs, bytes: Buffer.byteLength(serialized) });

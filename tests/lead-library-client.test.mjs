@@ -184,6 +184,31 @@ test('同步确认客户已删除后，清除对应档案而不继续展示旧�
   assert.equal(client.cachedDetail(lead.id), null);
 });
 
+test('保存开发控制后的重读等待旧列表请求结束，再读取保存后的状态', async () => {
+  const pending = deferred();
+  let reads = 0;
+  const current = versionedSnapshot(1);
+  const client = new LeadLibraryClient(async () => {
+    reads++;
+    if (reads === 2) return pending.promise;
+    return Response.json(current);
+  });
+  await client.list();
+  const earlier = client.list();
+  const updated = client.revalidateList();
+  current.leads = current.leads.map((lead) => ({
+    ...lead,
+    status: '暂缓开发',
+    version: `${lead.version}:development:1`,
+  }));
+  pending.resolve(Response.json(versionedSnapshot(1)));
+  await earlier;
+  const result = await updated;
+  assert.equal(reads, 3);
+  assert.equal(result.leads[0].status, '暂缓开发');
+  assert.equal(client.cachedList().leads[0].status, '暂缓开发');
+});
+
 test('切换连接后立即清空缓存，切换前的读取和刷新不能重新填回旧表', async () => {
   for (const kind of ['list', 'refresh', 'detail']) {
     const old = deferred();

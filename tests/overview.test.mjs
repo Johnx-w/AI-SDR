@@ -87,6 +87,32 @@ function fixture(overrides = {}) {
   return { graph, config, service: new OverviewService(config) };
 }
 
+test('客户复查按北京时间跨日到期，读取不确认、未来日期及已恢复客户不提醒', async () => {
+  const graph = {
+    conversations: [],
+    messages: [],
+    demands: [],
+    tasks: [],
+    customerContexts: [
+      {
+        customerId: '1',
+        development: { paused: true, reviewDate: '2026-10-25', reason: '我方暂缓' },
+      },
+      { customerId: '2', development: { paused: true, reviewDate: '2026-10-26', reason: '其他' } },
+      { customerId: '3', development: { paused: false, reviewDate: '2026-10-25', reason: '其他' } },
+      { customerId: '4', development: { paused: true, reviewDate: '', reason: '其他' } },
+    ],
+  };
+  const { service } = fixture({ business: () => graph });
+  assert.deepEqual((await service.read({ asOf: '2026-10-24T15:59:59Z' })).developmentReviews, []);
+  for (let i = 0; i < 2; i++) {
+    const result = await service.read({ asOf: '2026-10-24T16:00:00Z' });
+    assert.equal(result.developmentReviews.length, 1);
+    assert.equal(result.developmentReviews[0].customerId, '1');
+    assert.equal(result.developmentReviews[0].to, '/leads?lead=1');
+  }
+});
+
 test('总览按实际收录时间统计新增，待办不随成果范围改变且暂停不催办', async () => {
   const { service } = fixture();
   const result = await service.read();

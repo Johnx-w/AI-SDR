@@ -30,6 +30,23 @@ const render = (data, props = {}) =>
     }),
   );
 
+test('到期复查提醒展示客户和原因并提供档案入口，不冒充空待办', () => {
+  const data = fixture();
+  data.developmentReviews = [
+    {
+      customerId: 'one',
+      name: 'ABC Blinds',
+      reason: '客户要求稍后联系',
+      reviewDate: '2026-10-25',
+      to: '/leads?lead=one',
+    },
+  ];
+  const html = render(data);
+  assert.match(html, /ABC Blinds · 暂缓到期复查/);
+  assert.match(html, /2026-10-25 到期 · 客户要求稍后联系/);
+  assert.doesNotMatch(html, /当前没有到期或待核对事项/);
+});
+
 test('提醒仅在两个来源均成功读取且计数为零时报告无待办', () => {
   assert.match(render(fixture()), /当前没有到期或待核对事项/);
   for (const source of ['business', 'products']) {

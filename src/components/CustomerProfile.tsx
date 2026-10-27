@@ -1,11 +1,13 @@
 import { ArrowUpRight } from 'lucide-react';
 import { Badge } from './ui';
+import { CustomerDevelopment } from './CustomerDevelopment';
 import { formatBeijingText, formatBeijingTime } from '../domain/date-time.mjs';
 import type { AssessmentSummary } from './AssessmentPanel';
 import type { ManualConfirmation, SupplementContext } from '../services/leadSupplements';
 import './CustomerProfile.css';
 
 interface ProfileLead {
+  id?: string;
   name: string;
   grade: string;
   score: number | null;
@@ -216,6 +218,7 @@ export function CustomerProfile({
           </div>
         </dl>
       </div>
+      {lead.id && <CustomerDevelopment customerId={lead.id} />}
       <section className="profile-products" aria-label="主营产品">
         <h3>主营产品</h3>
         {products.length ? (

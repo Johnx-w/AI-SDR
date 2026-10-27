@@ -23,6 +23,11 @@ import { leadLibrary, startLeadLibraryPolling } from '../services/leadLibrary';
 import type { LeadList, Prospect } from '../services/leadLibrary';
 import { exportCsv } from '../services/csv';
 import { formatBeijingText, formatBeijingTime } from '../domain/date-time.mjs';
+import {
+  developmentStatuses,
+  leadProductCategories,
+  marketLabel,
+} from '../domain/lead-library-filters';
 import './LeadLibrary.css';
 
 const typeNames: Record<string, string> = {
@@ -39,12 +44,6 @@ const typeNames: Record<string, string> = {
   service_provider: '服务商',
   unknown: '待核实',
 };
-const marketNames: Record<string, string> = {
-  'United States': '美国',
-  Australia: '澳大利亚',
-  'United Kingdom': '英国',
-};
-const marketLabel = (s: string) => marketNames[s] || s;
 const safeUrl = (s: string) => {
   try {
     const u = new URL(s);
@@ -104,6 +103,16 @@ export function LeadLibrary() {
     };
   }, []);
   const selectedId = params.get('lead');
+  useEffect(() => {
+    const refresh = () => {
+      void leadLibrary.revalidateList().then(
+        () => mounted.current && setError(''),
+        (error: Error) => mounted.current && setError(error.message),
+      );
+    };
+    window.addEventListener('customer-development-changed', refresh);
+    return () => window.removeEventListener('customer-development-changed', refresh);
+  }, []);
   const selectedVersion =
     remote?.leads.find((lead) => lead.id === selectedId)?.version || remote?.sync.revision;
   const viewed = leadLibrary.cachedDetail(selectedId);
@@ -137,7 +146,7 @@ export function LeadLibrary() {
           .includes(query.toLowerCase())) &&
       (!market || marketLabel(l.market) === market) &&
       (!grade || l.grade === grade) &&
-      (!product || l.product === product) &&
+      (!product || leadProductCategories(l.product).includes(product)) &&
       (!status || l.status === status),
   );
   const pages = Math.max(1, Math.ceil(filtered.length / 8));
@@ -311,19 +320,19 @@ export function LeadLibrary() {
               label: '评级',
               val: grade,
               set: setGrade,
-              options: [...new Set(leads.map((l) => l.grade))],
+              options: [...new Set(['A', 'B', 'C', '待核实', ...leads.map((l) => l.grade)])],
             },
             {
               label: '产品',
               val: product,
               set: setProduct,
-              options: [...new Set(leads.map((l) => l.product))],
+              options: [...new Set(leads.flatMap((l) => leadProductCategories(l.product)))],
             },
             {
               label: '状态',
               val: status,
               set: setStatus,
-              options: [...new Set(leads.map((l) => l.status))],
+              options: [...new Set([...developmentStatuses, ...leads.map((l) => l.status)])],
             },
           ].map((f) => (
             <select
@@ -338,13 +347,14 @@ export function LeadLibrary() {
               <option value="">全部{f.label}</option>
               {f.options.map((o) => (
                 <option value={o} key={o}>
-                  {o.length > 25 ? o.slice(0, 25) + '…' : o}
+                  {f.label === '状态' && o === '未记录' ? '未记录（待确认）' : o}
                 </option>
               ))}
             </select>
           ))}
           <button
             className="text-link"
+            title="清空搜索词和全部筛选条件，不修改客户资料"
             onClick={() => {
               setMarket('');
               setGrade('');
@@ -352,9 +362,14 @@ export function LeadLibrary() {
               setStatus('');
               setQuery('');
               setPage(1);
+              if (params.has('q')) {
+                const next = new URLSearchParams(params);
+                next.delete('q');
+                setParams(next);
+              }
             }}
           >
-            重置
+            清空筛选
           </button>
           <span>共 {filtered.length} 条线索</span>
         </div>

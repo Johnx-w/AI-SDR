@@ -18,6 +18,12 @@ export function OverviewReminders({
         { title: '今日待跟进', count: data.work.today, to: data.links.today },
         { title: '暂停待核对', count: data.work.paused, to: data.links.paused },
         { title: '产品资料待审核', count: data.products.draft, to: data.products.to },
+        ...(data.developmentReviews || []).map((review) => ({
+          title: `${review.name} · 暂缓到期复查`,
+          count: 1,
+          to: review.to,
+          detail: `${review.reviewDate} 到期 · ${review.reason} · 查看客户`,
+        })),
       ]
     : [];
   const ready = data?.sources.business.state === 'ready' && data.sources.products.state === 'ready';
@@ -51,7 +57,7 @@ export function OverviewReminders({
             <span className="status-dot" />
             <div>
               <strong>{item.title}</strong>
-              <small>{item.count} 项 · 查看对应明细</small>
+              <small>{'detail' in item ? item.detail : `${item.count} 项 · 查看对应明细`}</small>
             </div>
             <ChevronRight size={14} />
           </button>

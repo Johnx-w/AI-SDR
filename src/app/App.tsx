@@ -58,15 +58,39 @@ export function App() {
   const [search, setSearch] = useState('');
   const [mobile, setMobile] = useState(false);
   const [notifications, setNotifications] = useState(false);
+  const notificationButton = useRef<HTMLButtonElement>(null);
+  const notificationPanel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!notifications) return;
+    const dismiss = (event: PointerEvent) => {
+      if (
+        event.target instanceof Node &&
+        !notificationButton.current?.contains(event.target) &&
+        !notificationPanel.current?.contains(event.target)
+      )
+        setNotifications(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setNotifications(false);
+        notificationButton.current?.focus();
+      }
+    };
+    document.addEventListener('pointerdown', dismiss);
+    document.addEventListener('keydown', escape);
+    return () => {
+      document.removeEventListener('pointerdown', dismiss);
+      document.removeEventListener('keydown', escape);
+    };
+  }, [notifications]);
   const [reminders, setReminders] = useState<OverviewData | null>(null);
   const [reminderLoading, setReminderLoading] = useState(false);
   const [reminderError, setReminderError] = useState('');
+  const [reminderRevision, setReminderRevision] = useState(0);
   useEffect(() => {
-    if (!notifications) return;
     const controller = new AbortController();
     setReminderLoading(true);
     setReminderError('');
-    setReminders(null);
     void overviewApi
       .get('7d', controller.signal)
       .then(
@@ -81,12 +105,28 @@ export function App() {
         if (!controller.signal.aborted) setReminderLoading(false);
       });
     return () => controller.abort();
-  }, [notifications]);
+  }, [notifications, reminderRevision]);
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState !== 'hidden') setReminderRevision((value) => value + 1);
+    };
+    const timer = window.setInterval(refresh, 60000);
+    window.addEventListener('focus', refresh);
+    window.addEventListener('customer-development-changed', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('customer-development-changed', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, []);
   const current = nav.find((item) => item.path === location.pathname);
   const reminderCount =
     (reminders?.metrics.dueTasks || 0) +
     (reminders?.work.paused || 0) +
-    (reminders?.products.draft || 0);
+    (reminders?.products.draft || 0) +
+    (reminders?.developmentReviews?.length || 0);
   return (
     <div className="app-shell">
       {mobile && (
@@ -195,8 +235,11 @@ export function App() {
               </kbd>
             </form>
             <button
+              ref={notificationButton}
               className="icon-button notification-button"
               aria-label="通知"
+              aria-expanded={notifications}
+              aria-controls="notification-panel"
               onClick={() => setNotifications(!notifications)}
             >
               <Bell size={18} />
@@ -213,15 +256,17 @@ export function App() {
           </div>
         </header>
         {notifications && (
-          <OverviewReminders
-            data={reminders}
-            loading={reminderLoading}
-            error={reminderError}
-            onOpen={(to) => {
-              setNotifications(false);
-              navigate(to);
-            }}
-          />
+          <div ref={notificationPanel} id="notification-panel">
+            <OverviewReminders
+              data={reminders}
+              loading={reminderLoading}
+              error={reminderError}
+              onOpen={(to) => {
+                setNotifications(false);
+                navigate(to);
+              }}
+            />
+          </div>
         )}
         <main>
           <Routes>

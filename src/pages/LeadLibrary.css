@@ -1,3 +1,8 @@
+.library-filters select[aria-label='产品筛选'] {
+  min-width: 215px;
+  max-width: 250px;
+}
+
 .library-sync-status {
   display: flex;
   flex-wrap: wrap;

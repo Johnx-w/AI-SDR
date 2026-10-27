@@ -25,6 +25,7 @@ import type {
 import { Badge, Empty } from './ui';
 import { MailMessageBody } from './MailMessageBody';
 import { MailReplyComposer } from './MailReplyComposer';
+import { CustomerDevelopment } from './CustomerDevelopment';
 import '../mail-conversations.css';
 
 const formatTime = (value?: string | null) => {
@@ -78,6 +79,14 @@ export function MailConversationTimeline({
           )}
         </div>
       </header>
+      {conversation.customerId ? (
+        <CustomerDevelopment customerId={conversation.customerId} />
+      ) : (
+        <p className="mail-conversation-source">
+          此会话尚未明确关联客户，请先<Link to="/leads?dataset=real">到客户库选择客户</Link>
+          ，再操作暂缓开发。
+        </p>
+      )}
       <div className="mail-conversation-timeline">
         {messages.length ? (
           messages.map((mail) => {
