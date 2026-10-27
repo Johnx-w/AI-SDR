@@ -22,7 +22,6 @@ import {
   Zap,
 } from 'lucide-react';
 import { useWorkspace } from './WorkspaceProvider';
-import { Campaigns, Reports } from '../pages/Business';
 import { Dashboard, Communication, Materials } from '../pages/Workbench';
 import { ApiConnections } from '../pages/ApiConnections';
 import { LeadLibrary } from '../pages/LeadLibrary';
@@ -41,10 +40,6 @@ const nav = [
   { path: '/materials', name: '产品与资料', icon: FolderOpen },
   { path: '/settings', name: 'API 连接', icon: Settings2 },
 ];
-const pageTitles: Record<string, string> = {
-  '/campaigns': '触达计划',
-  '/reports': '数据洞察',
-};
 export function App() {
   const { toast, notify } = useWorkspace();
   const searchRef = useRef<HTMLInputElement>(null);
@@ -175,7 +170,7 @@ export function App() {
             </button>
             <span>工作空间</span>
             <ChevronRight size={14} />
-            <strong>{current?.name || pageTitles[location.pathname] || '工作空间'}</strong>
+            <strong>{current?.name || '工作空间'}</strong>
           </div>
           <div className="topbar-right">
             <form
@@ -235,10 +230,10 @@ export function App() {
             <Route path="/tasks" element={<Navigate to="/business?tab=tasks" replace />} />
             <Route path="/business" element={<CustomerBusiness />} />
             <Route path="/materials" element={<Materials />} />
-            <Route path="/campaigns" element={<Campaigns />} />
+            <Route path="/campaigns" element={<Navigate to="/inbox?tab=campaigns" replace />} />
             <Route path="/inbox" element={<Communication />} />
             <Route path="/automation" element={<Automation />} />
-            <Route path="/reports" element={<Reports />} />
+            <Route path="/reports" element={<Navigate to="/" replace />} />
             <Route path="/settings" element={<ApiConnections />} />
             <Route
               path="*"

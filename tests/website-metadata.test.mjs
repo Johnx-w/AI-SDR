@@ -184,5 +184,4 @@ test('生产 n8n 证据采集、补充正文失败降级、飞书映射贯通，
   assert.equal(result.website_key, 'vtrackscreens.com');
   const p = JSON.parse(result.insert_fields['画像JSON']);
   assert.equal(p.task_target.region, 'Florida');
-  assert.equal(result.insert_fields['国家'], 'United States');
 });

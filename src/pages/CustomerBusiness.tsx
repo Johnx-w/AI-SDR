@@ -87,6 +87,7 @@ const ownership = { auto: '自动接待', human: '人工接管' };
 const delivery = {
   received: '已收到',
   sent: '已发送',
+  accepted: '服务商已接受',
   failed: '失败',
   unknown: '结果未知',
   recorded: '已记载',

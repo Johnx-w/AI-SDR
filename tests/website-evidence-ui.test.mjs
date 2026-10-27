@@ -1,41 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import ts from 'typescript';
+import { loadModule } from './helpers/modules.mjs';
 
-const cache = new Map();
-function loadComponent(path) {
-  if (cache.has(path.href)) return cache.get(path.href).exports;
-  const module = { exports: {} };
-  cache.set(path.href, module);
-  const normalRequire = createRequire(path);
-  const require = (specifier) => {
-    if (specifier.endsWith('.css')) return {};
-    if (specifier.startsWith('.')) {
-      for (const extension of ['', '.tsx', '.ts']) {
-        const child = new URL(specifier + extension, path);
-        if (existsSync(child) && /\.tsx?$/.test(child.pathname)) return loadComponent(child);
-      }
-    }
-    return normalRequire(specifier);
-  };
-  const compiled = ts.transpileModule(readFileSync(path, 'utf8'), {
-    fileName: fileURLToPath(path),
-    compilerOptions: {
-      module: ts.ModuleKind.CommonJS,
-      target: ts.ScriptTarget.ES2022,
-      jsx: ts.JsxEmit.ReactJSX,
-      esModuleInterop: true,
-    },
-  }).outputText;
-  new Function('require', 'module', 'exports', compiled)(require, module, module.exports);
-  return module.exports;
-}
-const { WebsiteEvidencePanel } = loadComponent(
+const { WebsiteEvidencePanel } = loadModule(
   new URL('../src/components/WebsiteEvidencePanel.tsx', import.meta.url),
 );
 const render = (facts, identityEvidence = []) =>

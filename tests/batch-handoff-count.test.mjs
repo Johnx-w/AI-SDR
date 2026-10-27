@@ -69,6 +69,7 @@ for (const [name, assessment, handoff] of [
     { grade: 'A', score: 80, status: '优先开发' },
     { ...ready, ready: false, contact_verified: false, contacts: [] },
   ],
+  ['A类初评级且资料未补全', { grade: 'A', score: 80, status: '优先开发', complete: false }, ready],
 ])
   test(`新增入库${name}仍计入宽泛收录目标`, async () => {
     const { manager } = setup(output(assessment, handoff));
@@ -84,25 +85,10 @@ for (const [name, assessment, handoff] of [
       assert.equal(saved.status, 'completed');
       assert.equal(saved.reason, 'target_reached');
       assert.equal(saved.inserted, 1, '真实新增入库仍保留');
-      assert.equal(saved.inserted, 1);
     } finally {
       manager.close();
     }
   });
-
-test('A类初评级与去重新增收录目标分开统计', async () => {
-  const { manager } = setup(output({ grade: 'A', score: 80, status: '优先开发', complete: false }));
-  try {
-    const job = manager.create(target, 'handoff-ready-v-unknown');
-    await manager.work(job.id);
-    const saved = manager.get(job.id);
-    assert.equal(saved.status, 'completed');
-    assert.equal(saved.inserted, 1);
-    assert.equal(saved.inserted, 1);
-  } finally {
-    manager.close();
-  }
-});
 
 test('研究预算足够小批筛选但仍有绝对上限与输入校验', () => {
   const { manager } = setup({});
@@ -147,14 +133,12 @@ test('跨任务重启后同一企业更新不重复计入新增目标', async ()
     const first = manager.create({ ...target, research_budget: 1 }, 'pending-company-first');
     await manager.work(first.id);
     assert.equal(manager.get(first.id).inserted, 1);
-    assert.equal(manager.get(first.id).inserted, 1);
     manager.close();
     manager = open();
     result = output({ grade: 'A', status: '优先开发' }, ready, 'updated');
     const second = manager.create({ ...target, research_budget: 1 }, 'pending-company-refresh');
     await manager.work(second.id);
     const claimed = manager.get(second.id);
-    assert.equal(claimed.inserted, 0);
     assert.equal(claimed.inserted, 0);
     assert.equal(claimed.rows[0].inserted_new, false);
     assert.equal(claimed.rows[0].qualification_reason, 'already_in_lead_library');
@@ -190,7 +174,6 @@ test('宽泛收录任务不创建销售交接资格认领', async () => {
     const job = manager.create({ ...target, research_budget: 1 }, 'broad-capture-no-claim');
     await manager.work(job.id);
     const saved = manager.get(job.id);
-    assert.equal(saved.inserted, 1);
     assert.equal(saved.inserted, 1);
     assert.equal(saved.rows[0].handoff.ready, false);
     assert.equal(saved.rows[0].qualification_reason, 'new_business_record');

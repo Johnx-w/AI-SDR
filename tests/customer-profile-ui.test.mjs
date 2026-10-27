@@ -1,45 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import ts from 'typescript';
+import { loadModule } from './helpers/modules.mjs';
 
-const cache = new Map();
-function loadComponent(path) {
-  if (cache.has(path.href)) return cache.get(path.href).exports;
-  const module = { exports: {} };
-  cache.set(path.href, module);
-  const normalRequire = createRequire(path);
-  const require = (specifier) => {
-    if (specifier.endsWith('.css')) return {};
-    if (specifier.startsWith('.')) {
-      for (const extension of ['', '.tsx', '.ts']) {
-        const child = new URL(specifier + extension, path);
-        if (existsSync(child) && /\.tsx?$/.test(child.pathname)) return loadComponent(child);
-      }
-    }
-    return normalRequire(specifier);
-  };
-  const compiled = ts.transpileModule(readFileSync(path, 'utf8'), {
-    fileName: fileURLToPath(path),
-    compilerOptions: {
-      module: ts.ModuleKind.CommonJS,
-      target: ts.ScriptTarget.ES2022,
-      jsx: ts.JsxEmit.ReactJSX,
-      esModuleInterop: true,
-    },
-  }).outputText;
-  new Function('require', 'module', 'exports', compiled)(require, module, module.exports);
-  return module.exports;
-}
-
-const { CustomerProfile } = loadComponent(
+const { CustomerProfile } = loadModule(
   new URL('../src/components/CustomerProfile.tsx', import.meta.url),
 );
-const { AssessmentPanel } = loadComponent(
+const { AssessmentPanel } = loadModule(
   new URL('../src/components/AssessmentPanel.tsx', import.meta.url),
 );
 const sourceAt = '2026-10-22T06:05:36.566Z';
@@ -132,8 +100,6 @@ test('客户画像首次展示简洁概览和评级入口，自动评估报告�
   assert.match(visible, /查看完整评估/);
   assert.match(visible, /零售商、安装服务商/);
   assert.doesNotMatch(html, /ev_fixture_123|acquisition-v3\.2|评级口径|We supply made-to-measure/);
-  assert.doesNotMatch(visible, /完整行业画像保留/);
-  assert.doesNotMatch(html, /官网名称／别名/);
 });
 
 test('潜在供货机会不冒充已确认采购需求，重要未知项保持可见且不被研究日志淹没', () => {

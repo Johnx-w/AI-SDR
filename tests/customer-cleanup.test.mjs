@@ -62,7 +62,6 @@ test('搜索词由结构化筛选确定，无需模型；多产品以 OR 分组�
   assert.match(q, /^\("outdoor zip screens" OR pergolas\)/);
   assert.match(q, /manufacturer factory/);
   assert.ok(q.endsWith('Florida United States'));
-  assert.equal(q, buildSearchQuery(input));
   assert.doesNotMatch(
     buildSearchQuery({ product: 'shades', country: 'United Kingdom', region: '', audience: 'C' }),
     /Florida/,

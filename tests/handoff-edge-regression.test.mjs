@@ -56,7 +56,7 @@ test('有效业务联系表单可满足公司级入口而不强求公开邮箱�
   );
 });
 
-test('同企业已经认领后不同操作重放旧新增结果不能再虚增新增入库数', async () => {
+test('同企业不同操作重放旧新增结果不会重复计入新增', async () => {
   const ready = {
     policy: 'sales-handoff-v1',
     ready: true,
@@ -103,7 +103,6 @@ test('同企业已经认领后不同操作重放旧新增结果不能再虚增�
     assert.equal(manager.get(first.id).inserted, 1);
     const second = manager.create(target, 'edge-replayed-second');
     await manager.work(second.id);
-    assert.equal(manager.get(second.id).inserted, 0);
     assert.equal(manager.get(second.id).inserted, 0);
   } finally {
     manager.close();

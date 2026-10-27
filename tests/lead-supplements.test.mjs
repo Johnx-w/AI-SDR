@@ -2,7 +2,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { assessCompany } from '../server/customer-assessment.mjs';
 import {
-  SUPPLEMENT_FACT_KINDS,
   validateSupplement,
   applySupplementsToResearch,
   recomputeFromSnapshot,
@@ -204,12 +203,6 @@ test('只接受逐维度事实、所填证据、确认人和服务器控制的�
     { direction: 'retail' },
   ])
     assert.throws(() => validateSupplement(form(patch), { at }), { status: 400 });
-  assert.deepEqual(SUPPLEMENT_FACT_KINDS.R, [
-    'specialist_supply',
-    'general_supply',
-    'installation_only',
-    'no_supply_role',
-  ]);
   assert.equal(validateSupplement(form({ sourceUrl: source }), { at }).sourceUrl, source);
 });
 

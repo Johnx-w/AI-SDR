@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { customerEligibility } from '../server/customer-eligibility.mjs';
-import { companyResearchSchema, parseCompanyResearch } from '../server/company-research.mjs';
+import { companyResearchSchema } from '../server/company-research.mjs';
 import { researchPolicyCode } from '../scripts/research-policy-code.mjs';
 
 const business = {
@@ -49,7 +49,7 @@ test('Schema 中准入字段必填但允许无证据返回 null，数组独立�
   for (const key of ['entity_type', 'production_model', 'operating_model', 'manufactured_products'])
     assert.ok(companyResearchSchema.required.includes(key), key);
   for (const key of ['entity_type', 'production_model', 'operating_model'])
-    assert.equal(companyResearchSchema.properties[key].anyOf[1].type, 'null');
+    assert.ok(companyResearchSchema.properties[key].anyOf.some((branch) => branch.type === 'null'));
   assert.equal(
     companyResearchSchema.properties.manufactured_products.items.required.includes('quote'),
     true,

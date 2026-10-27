@@ -1,26 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import ts from 'typescript';
+import { loadModule } from './helpers/modules.mjs';
 
-const component = new URL('../src/components/OverviewReminders.tsx', import.meta.url);
-const compiled = ts.transpileModule(readFileSync(component, 'utf8'), {
-  compilerOptions: {
-    module: ts.ModuleKind.CommonJS,
-    target: ts.ScriptTarget.ES2022,
-    jsx: ts.JsxEmit.ReactJSX,
-  },
-}).outputText;
-const module = { exports: {} };
-new Function('require', 'module', 'exports', compiled)(
-  createRequire(component),
-  module,
-  module.exports,
+const { OverviewReminders } = loadModule(
+  new URL('../src/components/OverviewReminders.tsx', import.meta.url),
 );
-const { OverviewReminders } = module.exports;
 const ready = { state: 'ready', updatedAt: '2026-10-25T02:00:00Z', error: '' };
 const fixture = () => ({
   asOf: '2026-10-25T02:00:00Z',
@@ -60,13 +46,15 @@ test('未知来源、请求失败与加载中不冒充空待办，有事项时�
   const data = fixture();
   data.sources.products.state = 'unavailable';
   data.products.draft = null;
-  assert.match(render(data), /部分提醒暂时无法统计/);
-  assert.doesNotMatch(render(data), /当前没有到期或待核对事项/);
+  const unavailable = render(data);
+  assert.match(unavailable, /部分提醒暂时无法统计/);
+  assert.doesNotMatch(unavailable, /当前没有到期或待核对事项/);
   assert.doesNotMatch(render(fixture(), { error: '读取失败' }), /当前没有到期或待核对事项/);
   assert.doesNotMatch(render(null, { loading: true }), /当前没有到期或待核对事项/);
   const actionable = fixture();
   actionable.work.overdue = 2;
-  assert.match(render(actionable), /逾期跟进/);
-  assert.match(render(actionable), /2 项/);
-  assert.doesNotMatch(render(actionable), /当前没有到期或待核对事项/);
+  const html = render(actionable);
+  assert.match(html, /逾期跟进/);
+  assert.match(html, /2 项/);
+  assert.doesNotMatch(html, /当前没有到期或待核对事项/);
 });

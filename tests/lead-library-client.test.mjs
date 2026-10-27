@@ -1,15 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import ts from 'typescript';
+import { loadModule } from './helpers/modules.mjs';
 
-const compiled = ts.transpileModule(
-  readFileSync(new URL('../src/services/leadLibrary.ts', import.meta.url), 'utf8'),
-  { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
-).outputText;
-const module = { exports: {} };
-new Function('exports', compiled)(module.exports);
-const { LeadLibraryClient, startLeadLibraryPolling } = module.exports;
+const { LeadLibraryClient, startLeadLibraryPolling } = loadModule(
+  new URL('../src/services/leadLibrary.ts', import.meta.url),
+);
 
 const lead = { id: 'customer-1', name: 'Acme', facts: [{ quote: 'Full detail' }], fields: {} };
 const snapshot = (scope = 'one', revision = 1) => ({

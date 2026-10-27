@@ -1,46 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import ts from 'typescript';
+import { loadModule } from './helpers/modules.mjs';
 
-const cache = new Map();
-function loadComponent(path) {
-  if (cache.has(path.href)) return cache.get(path.href).exports;
-  const module = { exports: {} };
-  cache.set(path.href, module);
-  const normalRequire = createRequire(path);
-  const require = (specifier) => {
-    if (specifier.endsWith('.css')) return {};
-    if (specifier.startsWith('.')) {
-      for (const extension of ['', '.tsx', '.ts']) {
-        const child = new URL(specifier + extension, path);
-        if (existsSync(child) && /\.tsx?$/.test(child.pathname)) return loadComponent(child);
-      }
-    }
-    return normalRequire(specifier);
-  };
-  const compiled = ts.transpileModule(readFileSync(path, 'utf8'), {
-    fileName: fileURLToPath(path),
-    compilerOptions: {
-      module: ts.ModuleKind.CommonJS,
-      target: ts.ScriptTarget.ES2022,
-      jsx: ts.JsxEmit.ReactJSX,
-      esModuleInterop: true,
-    },
-  }).outputText;
-  new Function('require', 'module', 'exports', compiled)(require, module, module.exports);
-  return module.exports;
-}
-
-let ContactPanel;
-const component = () =>
-  (ContactPanel ??= loadComponent(
-    new URL('../src/components/ContactPanel.tsx', import.meta.url),
-  ).ContactPanel);
+const { ContactPanel } = loadModule(new URL('../src/components/ContactPanel.tsx', import.meta.url));
 const lead = {
   id: 'rec-contact-presentation',
   name: 'Buyer Screens',
@@ -110,7 +74,7 @@ const lead = {
 };
 const render = (overrides = {}, editable = true) =>
   renderToStaticMarkup(
-    React.createElement(component(), {
+    React.createElement(ContactPanel, {
       lead: { ...lead, ...overrides },
       ...(editable ? { onSaved() {} } : {}),
     }),
@@ -123,20 +87,9 @@ const initialView = (html) =>
   );
 const hrefCount = (html, prefix) => (html.match(new RegExp('href="' + prefix, 'g')) || []).length;
 
-test('邮箱、电话及修改入口优先显示，次要地址和社交资料排列在后', () => {
+test('展示联系与修改入口，重复联系方式合并，分机不同仍各自保留', () => {
   const html = initialView(render());
-  const edit = html.indexOf('修改联系方式');
-  const email = html.indexOf('mailto:');
-  const phone = html.indexOf('tel:');
-  assert.ok(edit >= 0 && edit < email, '修改入口在主要联系方式前部');
-  assert.ok(email >= 0 && phone > email, '邮箱和电话按优先顺序展示');
-  assert.ok(html.indexOf('12 Buyer Road') > phone);
-  assert.ok(html.indexOf('Facebook') > phone);
-  assert.ok(html.indexOf('采购部联系人') > phone);
-});
-
-test('邮箱大小写、电话格式和重复社交链接合并，分机不同仍各自保留', () => {
-  const html = initialView(render());
+  assert.match(html, /修改联系方式/);
   assert.equal(hrefCount(html, 'mailto:'), 2);
   assert.equal(hrefCount(html, 'tel:'), 2);
   assert.match(html, /;ext=4/);

@@ -5,6 +5,16 @@ import { NativeAcquisition, selectWebsiteCandidates } from '../server/native-acq
 import { CustomsDiscovery, customsSearchPlan } from '../server/customs-discovery.mjs';
 import { normalizeShipment } from '../server/customs-provider.mjs';
 
+const researchEnv = {
+  ACQUISITION_PROVIDER: 'native',
+  TAVILY_API_KEY: 'fixture-search',
+  DEEPSEEK_API_KEY: 'fixture-model',
+  FEISHU_APP_ID: 'fixture-app',
+  FEISHU_APP_SECRET: 'fixture-secret',
+  FEISHU_APP_TOKEN: 'fixture-table',
+  FEISHU_TABLE_ID: 'fixture-id',
+};
+
 test('逐票买方中明确的 transportation 经营名在查官网前排除', () => {
   assert.equal(obviousLogisticsBuyer('HECNY TRANSPORTATION INC.'), true);
   assert.equal(obviousLogisticsBuyer('Maxxmar Inc.'), false);
@@ -278,15 +288,7 @@ test('海关供应商已给名称相符官网时不虚增 web search 调用或�
 
 function collectionFixture({ readPage, extract }) {
   return new NativeAcquisition({
-    env: {
-      ACQUISITION_PROVIDER: 'native',
-      TAVILY_API_KEY: 'fixture-search',
-      DEEPSEEK_API_KEY: 'fixture-model',
-      FEISHU_APP_ID: 'fixture-app',
-      FEISHU_APP_SECRET: 'fixture-secret',
-      FEISHU_APP_TOKEN: 'fixture-table',
-      FEISHU_TABLE_ID: 'fixture-id',
-    },
+    env: researchEnv,
     readPage,
     feishu: { records: async () => [] },
     providers: {
@@ -395,15 +397,7 @@ test('模型前规则拒绝仍将补采账单读数保存到企业研究 operati
 test('已排队的 ImportKey 贸易档案直接研究也只能待核实，不采集、不调用模型或写远端', async () => {
   const calls = { read: 0, extract: 0, model: 0, write: 0 };
   const service = new NativeAcquisition({
-    env: {
-      ACQUISITION_PROVIDER: 'native',
-      TAVILY_API_KEY: 'fixture-search',
-      DEEPSEEK_API_KEY: 'fixture-model',
-      FEISHU_APP_ID: 'fixture-app',
-      FEISHU_APP_SECRET: 'fixture-secret',
-      FEISHU_APP_TOKEN: 'fixture-table',
-      FEISHU_TABLE_ID: 'fixture-id',
-    },
+    env: researchEnv,
     readPage: async () => {
       calls.read++;
       return { html: '<p>Window blinds and roller blind fabrics for trade suppliers.</p>' };
@@ -471,13 +465,7 @@ test('已有第三方贸易档案只更新待核实评级与最新依据，保�
   const calls = { read: 0, extract: 0, model: 0 };
   const service = new NativeAcquisition({
     env: {
-      ACQUISITION_PROVIDER: 'native',
-      TAVILY_API_KEY: 'fixture-search',
-      DEEPSEEK_API_KEY: 'fixture-model',
-      FEISHU_APP_ID: 'fixture-app',
-      FEISHU_APP_SECRET: 'fixture-secret',
-      FEISHU_APP_TOKEN: 'fixture-table',
-      FEISHU_TABLE_ID: 'fixture-id',
+      ...researchEnv,
       FEISHU_ASSESSMENT_TABLE_ID: 'fixture-t12',
     },
     readPage: async () => {

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ApiConnections, maskConnectionSecret } from '../server/api-connections.mjs';
-import { createApp } from '../server/app.mjs';
+import { withApp } from './helpers/http.mjs';
 
 const env = {
   ACQUISITION_PROVIDER: 'native',
@@ -121,36 +121,35 @@ test('通用模型标识允许兼容服务命名空间，拒绝空白与控制�
 
 test('HTTP 读取与保存均只返回脱敏值，不请求外部平台', async () => {
   let externalCalls = 0;
-  const app = createApp({
-    env,
-    fetchImpl: async () => {
-      externalCalls++;
-      throw new Error('must not call');
+  await withApp(
+    {
+      env,
+      fetchImpl: async () => {
+        externalCalls++;
+        throw new Error('must not call');
+      },
     },
-  });
-  await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
-  const url = 'http://127.0.0.1:' + app.address().port + '/api/v1/connections';
-  try {
-    const response = await fetch(url);
-    const view = await response.json();
-    assert.equal(field(view, 'TAVILY_API_KEY').maskedValue, 'tvly********1234');
-    const saved = await fetch(url, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ values: { DEEPSEEK_MODEL: 'second-model' } }),
-    });
-    assert.equal(saved.status, 200);
-    const body = await saved.json();
-    assert.equal(field(body, 'DEEPSEEK_MODEL').value, 'second-model');
-    for (const key of [
-      'TAVILY_API_KEY',
-      'DEEPSEEK_API_KEY',
-      'FEISHU_APP_SECRET',
-      'FEISHU_APP_TOKEN',
-    ])
-      assert.equal(JSON.stringify(body).includes(env[key]), false);
-    assert.equal(externalCalls, 0);
-  } finally {
-    await new Promise((resolve) => app.close(resolve));
-  }
+    async (base) => {
+      const url = base + '/api/v1/connections';
+      const response = await fetch(url);
+      const view = await response.json();
+      assert.equal(field(view, 'TAVILY_API_KEY').maskedValue, 'tvly********1234');
+      const saved = await fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values: { DEEPSEEK_MODEL: 'second-model' } }),
+      });
+      assert.equal(saved.status, 200);
+      const body = await saved.json();
+      assert.equal(field(body, 'DEEPSEEK_MODEL').value, 'second-model');
+      for (const key of [
+        'TAVILY_API_KEY',
+        'DEEPSEEK_API_KEY',
+        'FEISHU_APP_SECRET',
+        'FEISHU_APP_TOKEN',
+      ])
+        assert.equal(JSON.stringify(body).includes(env[key]), false);
+      assert.equal(externalCalls, 0);
+    },
+  );
 });

@@ -48,6 +48,7 @@ const taskStatuses = {
 const messageDirections = { inbound: '收到', outbound: '发出', note: '纪要' };
 const messageStatuses = {
   received: '已收到',
+  accepted: '服务商已接受',
   sent: '已发送',
   failed: '发送失败',
   unknown: '结果未知',
