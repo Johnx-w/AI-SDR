@@ -95,6 +95,33 @@ function renderLibrary(tab = '客户画像', customers = [lead], options = {}) {
   return renderToStaticMarkup(React.createElement(load(entry).LeadLibrary));
 }
 
+test('客户库筛选展示中文市场、固定评级顺序和完整开发状态，保留历史值', () => {
+  const html = renderLibrary('客户画像', [
+    { ...lead, market: 'Canada', grade: 'C', status: '未记录' },
+    { ...lead, id: 'other', grade: 'A', status: '人工跟进中' },
+  ]);
+  assert.match(html, /<option value="加拿大">加拿大<\/option>/);
+  assert.doesNotMatch(html, /<option[^>]*>Canada<\/option>/);
+  assert.match(
+    html,
+    /<option value="A">A<\/option><option value="B">B<\/option><option value="C">C<\/option><option value="待核实">待核实<\/option>/,
+  );
+  for (const status of [
+    '待开发',
+    '已联系',
+    '已回复',
+    '跟进中',
+    '已成交',
+    '暂缓开发',
+    '停止开发',
+    '人工跟进中',
+  ])
+    assert.ok(html.includes(`<option value="${status}">${status}</option>`));
+  assert.match(html, /<option value="未记录">未记录（待确认）<\/option>/);
+  assert.match(html, /Materials &amp; Parts（面料与配件）/);
+  assert.match(html, /清空筛选/);
+});
+
 test('客户库列表和档案直接提供海关记录入口，不必到评分历史中寻找', () => {
   const html = renderLibrary();
   assert.match(html, />海关记录<\/button>/);

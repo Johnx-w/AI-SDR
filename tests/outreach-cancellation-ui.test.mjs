@@ -16,7 +16,7 @@ const textContent = (node) => {
   return typeof node === 'string' || typeof node === 'number' ? String(node) : '';
 };
 
-function setup(status = 'ready', { cancelError } = {}) {
+function setup(status = 'ready', { cancelError, deliveryStatus = 'accepted' } = {}) {
   let campaign = {
     id: 'campaign-one',
     name: 'Australia first outreach',
@@ -45,7 +45,7 @@ function setup(status = 'ready', { cancelError } = {}) {
       from: 'sales@example.org',
       subject: 'Original submitted subject',
       bodyText: 'Original submitted message',
-      status: 'accepted',
+      status: deliveryStatus,
       createdAt: '2026-10-26T08:00:00Z',
       sentAt: '2026-10-26T08:00:00Z',
       messageId: '<original-message@example.org>',
@@ -110,6 +110,10 @@ function setup(status = 'ready', { cancelError } = {}) {
           requests.push({ path, init });
           if (path === '/state') return structuredClone(state());
           if (path === '/campaigns/campaign-one') return structuredClone({ campaign, deliveries });
+          if (path === '/campaigns/campaign-one/approve') {
+            deliveries[0].status = 'queued';
+            return structuredClone({ campaign, deliveries });
+          }
           if (path === '/campaigns/campaign-one/cancel') {
             if (cancelError) throw new Error(cancelError);
             campaign = { ...campaign, status: 'cancelled', revision: campaign.revision + 1 };
@@ -160,6 +164,36 @@ function setup(status = 'ready', { cancelError } = {}) {
     writes: () => requests.filter(({ init }) => init.method === 'POST'),
   };
 }
+
+test('活跃计划里的恢复后草稿保留明确审核入口，查看详情不会直接发送', async () => {
+  const h = setup('active', { deliveryStatus: 'draft' });
+  await h.ready();
+  h.click('样稿与详情');
+  h.render();
+  await flush();
+  assert.ok(h.button('审核并加入发送队列'));
+  assert.deepEqual(h.writes(), []);
+  h.click('审核并加入发送队列');
+  await flush();
+  assert.equal(h.writes().length, 1);
+  assert.equal(h.writes()[0].path, '/campaigns/campaign-one/approve');
+  assert.deepEqual(JSON.parse(h.writes()[0].init.body), { revision: 7 });
+});
+
+test('暂停计划仍可核对恢复后草稿，审核与恢复计划是两个独立操作', async () => {
+  const h = setup('paused', { deliveryStatus: 'draft' });
+  await h.ready();
+  h.click('样稿与详情');
+  h.render();
+  await flush();
+  assert.ok(h.button('审核待发送样稿'));
+  assert.ok(h.button('恢复计划'));
+  assert.deepEqual(h.writes(), []);
+  h.click('审核待发送样稿');
+  await flush();
+  assert.equal(h.writes().length, 1);
+  assert.equal(h.writes()[0].path, '/campaigns/campaign-one/approve');
+});
 
 test('unfinished outreach plans offer cancellation after an explicit confirmation, with an option to keep the plan', async () => {
   for (const status of ['draft', 'preparing', 'ready', 'active', 'paused']) {

@@ -318,6 +318,10 @@ export class LeadLibraryClient {
       .catch(() => {});
     return request;
   }
+  async revalidateList(): Promise<LeadList> {
+    if (this.listRequest) await this.listRequest.catch(() => {});
+    return this.list();
+  }
   refresh(): Promise<LeadList> {
     if (this.refreshRequest) return this.refreshRequest;
     const sequence = ++this.sequence;

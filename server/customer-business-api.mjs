@@ -3,6 +3,7 @@ import { CustomerBusiness } from './customer-business.mjs';
 import { CustomerBusinessFeishu } from './customer-business-feishu.mjs';
 import { ProductKnowledgeFeishu } from './product-knowledge-feishu.mjs';
 import { FeishuClient } from './feishu-direct.mjs';
+import { fieldText } from './feishu.mjs';
 
 export const CUSTOMER_BUSINESS_VERSION = 't1-t3-t4-v1';
 const kinds = new Set(['conversations', 'messages', 'demands', 'tasks']);
@@ -140,6 +141,26 @@ export class CustomerBusinessApi {
       if (suffix.length === 1 && suffix[0] === 'sync' && request.method === 'POST')
         return { status: 200, body: { feishu: await this.synchronize() } };
       const [kind, id, action] = suffix;
+      if (kind === 'customers' && suffix.length === 3 && action === 'development') {
+        if (!id || !/^[\w-]{1,100}$/u.test(id)) throw fail(400, '客户编号无效');
+        const store = this.state().store;
+        let customer;
+        if (request.method === 'GET') customer = await store.actualCustomer(id);
+        else if (request.method === 'POST') {
+          const body = await readJson(request);
+          if (!body || typeof body !== 'object' || Array.isArray(body))
+            throw fail(400, '开发操作格式不正确');
+          customer = await store.actualCustomer(id);
+          await store.actDevelopment(id, body, customer);
+        } else throw fail(405, '不支持的开发控制操作');
+        return {
+          status: 200,
+          body: {
+            ...store.developmentView(id),
+            sourceStatus: fieldText(customer.fields?.['开发状态']),
+          },
+        };
+      }
       if (!kinds.has(kind) || suffix.length > 3) throw fail(404, '业务记录入口不存在');
       if (id && !/^[\w-]{1,100}$/.test(id)) throw fail(400, '业务记录编号无效');
       const store = this.state().store;

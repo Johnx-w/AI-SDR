@@ -94,6 +94,18 @@ const actualEmail = (message) =>
   message.channel === 'email' &&
   ((message.direction === 'inbound' && message.deliveryStatus === 'received') ||
     (message.direction === 'outbound' && ['sent', 'accepted'].includes(message.deliveryStatus)));
+const developmentState = (value = {}) => ({
+  version: 0,
+  paused: false,
+  reason: '',
+  notes: '',
+  reviewDate: '',
+  pausedAt: '',
+  updatedAt: '',
+  resumeNotes: '',
+  audit: [],
+  ...value,
+});
 
 // This graph records real business activity. It does not fetch mail, send mail,
 // turn acquisition scores into inquiries, or share the technical mailbox pilot.
@@ -147,16 +159,158 @@ export class CustomerBusiness {
     const row = this.db
       .prepare('SELECT data FROM customer_business_contexts WHERE scope=? AND customer_id=?')
       .get(this.scope, customerId);
-    return row
+    const context = row
       ? JSON.parse(row.data)
       : { customerId, fixedEmail: '', doNotContact: false, refusalMessageId: '', updatedAt: '' };
+    return { ...context, development: developmentState(context.development) };
+  }
+  contexts() {
+    return this.db
+      .prepare('SELECT data FROM customer_business_contexts WHERE scope=? ORDER BY rowid')
+      .all(this.scope)
+      .map(({ data }) => {
+        const context = JSON.parse(data);
+        return { ...context, development: developmentState(context.development) };
+      });
+  }
+  development(customerId) {
+    return this.context(customerId).development;
+  }
+  developmentView(customerId) {
+    const context = this.context(customerId);
+    const messages = this.all('messages')
+      .filter((message) => message.customerId === customerId && actualEmail(message))
+      .sort(
+        (left, right) =>
+          right.occurredAt.localeCompare(left.occurredAt) || right.id.localeCompare(left.id),
+      );
+    const tasks = this.all('tasks').filter(
+      (task) =>
+        task.customerId === customerId &&
+        task.channel === 'email' &&
+        ['pending', 'paused'].includes(task.status),
+    );
+    const reviewToken = hash({
+      messages: messages.map(({ id, version, updatedAt }) => ({ id, version, updatedAt })),
+      tasks: tasks.map(({ id, version, updatedAt }) => ({ id, version, updatedAt })),
+      fixedEmail: context.fixedEmail,
+      doNotContact: context.doNotContact,
+    });
+    return {
+      customerId,
+      development: context.development,
+      reviewToken,
+      messages: messages.slice(0, 10),
+      tasks,
+      doNotContact: context.doNotContact,
+      fixedEmail: context.fixedEmail,
+    };
   }
   putContext(context) {
+    const current = this.context(context.customerId);
     this.db
       .prepare(
         'INSERT INTO customer_business_contexts VALUES(?,?,?) ON CONFLICT(scope,customer_id) DO UPDATE SET data=excluded.data',
       )
-      .run(this.scope, context.customerId, JSON.stringify(context));
+      .run(this.scope, context.customerId, JSON.stringify({ ...current, ...context }));
+  }
+  async actDevelopment(customerId, value = {}, verifiedCustomer) {
+    text(customerId, '客户编号', 180, true);
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+      throw fail(400, '开发操作格式不正确');
+    const action = choice(value.action, ['pause', 'review', 'resume'], undefined, '开发操作');
+    const reason =
+      action === 'pause'
+        ? choice(value.reason, ['客户要求稍后联系', '我方暂缓', '其他'], undefined, '暂缓原因')
+        : '';
+    const notes = action === 'pause' ? text(value.notes, '暂缓说明', 2000, reason === '其他') : '';
+    const resumeNotes =
+      action === 'resume' ? text(value.resumeNotes, '新的发送安排', 2000, true) : '';
+    if (action === 'resume' && value.reviewed !== true)
+      throw fail(400, '请先核对最新沟通和下一步发送安排');
+    if (action === 'resume') text(value.reviewToken, '沟通核对版本', 64, true);
+    let reviewDate = '';
+    if (action !== 'resume') {
+      if (action === 'review' && value.reviewDate === undefined)
+        throw fail(400, '请填写复查日期，或明确清空日期以继续暂缓');
+      reviewDate = text(value.reviewDate, '复查日期', 10);
+      if (reviewDate) {
+        const parsed = Date.parse(reviewDate + 'T00:00:00Z');
+        if (
+          !/^\d{4}-\d{2}-\d{2}$/u.test(reviewDate) ||
+          !Number.isFinite(parsed) ||
+          new Date(parsed).toISOString().slice(0, 10) !== reviewDate
+        )
+          throw fail(400, '复查日期必须是有效日期');
+        const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(
+          new Date(this.timestamp()),
+        );
+        if (reviewDate < today) throw fail(400, '复查日期不能早于北京时间今天');
+      }
+    }
+    const customer = verifiedCustomer || (await this.actualCustomer(customerId));
+    if (customer.record_id !== customerId) throw fail(404, '客户不存在，请先核对企业档案');
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const context = this.context(customerId);
+      const prior = context.development;
+      if (!Number.isInteger(value.expectedVersion) || value.expectedVersion !== prior.version)
+        throw fail(409, '客户开发控制已更新，请刷新后再操作');
+      if (action === 'pause' ? prior.paused : !prior.paused)
+        throw fail(409, action === 'pause' ? '客户已经暂缓开发' : '客户当前未暂缓开发');
+      if (action === 'resume' && value.reviewToken !== this.developmentView(customerId).reviewToken)
+        throw fail(409, '客户沟通或任务已更新，请重新核对最新情况后恢复');
+      const at = this.timestamp();
+      const development = {
+        ...prior,
+        version: prior.version + 1,
+        paused: action !== 'resume',
+        reason: action === 'pause' ? reason : prior.reason,
+        notes: action === 'pause' ? notes : prior.notes,
+        reviewDate,
+        pausedAt: action === 'pause' ? at : prior.pausedAt,
+        updatedAt: at,
+        resumeNotes: action === 'resume' ? resumeNotes : '',
+      };
+      development.audit = [
+        ...prior.audit,
+        {
+          action,
+          at,
+          actor: '人工操作',
+          reason: development.reason,
+          notes: development.notes,
+          reviewDate,
+          ...(action === 'resume' ? { resumeNotes } : {}),
+        },
+      ];
+      this.putContext({ ...context, development, updatedAt: at });
+      if (action === 'pause') {
+        for (const task of this.all('tasks').filter(
+          (row) =>
+            row.customerId === customerId &&
+            row.channel === 'email' &&
+            row.executionMode === 'automatic' &&
+            row.status === 'pending' &&
+            communicationKinds.has(row.kind),
+        ))
+          this.put('tasks', {
+            ...task,
+            status: 'paused',
+            version: task.version + 1,
+            updatedAt: at,
+            audit: [
+              ...task.audit,
+              { action: 'customer_development_pause', at, reasons: ['客户已暂缓自动邮件开发'] },
+            ],
+          });
+      }
+      this.db.exec('COMMIT');
+      return development;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
   put(kind, record) {
     this.db
@@ -227,13 +381,18 @@ export class CustomerBusiness {
     const customerIds = new Set(
       [...conversations, ...messages, ...demands, ...tasks].map((record) => record.customerId),
     );
+    const contexts = this.contexts();
+    if (!productId)
+      for (const context of contexts)
+        if (!customerId || context.customerId === customerId) customerIds.add(context.customerId);
     if (customerId) customerIds.add(customerId);
+    const contextMap = new Map(contexts.map((context) => [context.customerId, context]));
     return {
       conversations,
       messages,
       demands,
       tasks,
-      customerContexts: [...customerIds].map((id) => this.context(id)),
+      customerContexts: [...customerIds].map((id) => contextMap.get(id) || this.context(id)),
     };
   }
   async save(kind, value, options, normalize, after) {
@@ -730,6 +889,12 @@ export class CustomerBusiness {
     const reasons = [];
     if (!communicationKinds.has(task.kind)) return reasons;
     const context = this.context(task.customerId);
+    if (
+      task.channel === 'email' &&
+      task.executionMode === 'automatic' &&
+      context.development.paused
+    )
+      reasons.push('客户已暂缓自动邮件开发，请先恢复客户开发并重新核对任务');
     if (context.doNotContact) reasons.push('客户已明确拒绝联系，所有渠道的沟通任务暂停');
     const conversation = task.conversationId
       ? this.get('conversations', task.conversationId)

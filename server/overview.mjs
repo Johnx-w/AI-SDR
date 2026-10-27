@@ -153,11 +153,35 @@ export class OverviewService {
         if (bucket) work[bucket]++;
       }
     const activeDemands = graph?.demands.filter(activeDemand) || [];
+    const reviewDay = new Date(Date.parse(range.asOf) + 8 * 3600000).toISOString().slice(0, 10);
+    const developmentReviews = graph
+      ? (graph.customerContexts || [])
+          .filter(
+            (context) =>
+              context.development?.paused &&
+              context.development.reviewDate &&
+              context.development.reviewDate <= reviewDay,
+          )
+          .sort(
+            (a, b) =>
+              a.development.reviewDate.localeCompare(b.development.reviewDate) ||
+              a.customerId.localeCompare(b.customerId),
+          )
+          .map((context) => ({
+            customerId: context.customerId,
+            name:
+              customerMap.get(context.customerId)?.name ||
+              `${context.customerId}（企业资料暂不可用）`,
+            reason: context.development.reason,
+            reviewDate: context.development.reviewDate,
+            to: link('/leads', { lead: context.customerId }),
+          }))
+      : null;
     const priority = [];
     const selected = new Set();
     const suppressed = new Set([
       ...(graph?.customerContexts || [])
-        .filter((context) => context.doNotContact)
+        .filter((context) => context.doNotContact || context.development?.paused)
         .map((context) => context.customerId),
       ...customers
         .filter((customer) =>
@@ -312,6 +336,7 @@ export class OverviewService {
         dueTasks: graph ? work.overdue + work.today : null,
       },
       work,
+      developmentReviews,
       links: {
         companies: '/leads',
         newCompanies: link('/automation', {

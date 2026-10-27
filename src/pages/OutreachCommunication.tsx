@@ -1986,9 +1986,12 @@ export function OutreachCommunication() {
                   <span>版本 {shownDetail.campaign.revision}</span>
                   {shownDetail.campaign.status !== 'cancelled' && (
                     <span>
-                      {shownDetail.campaign.approvedRevision === shownDetail.campaign.revision
-                        ? '当前版本已审核'
-                        : '当前版本待审核'}
+                      {shownDetail.campaign.status === 'active' &&
+                      shownDetail.deliveries.some((delivery) => delivery.status === 'draft')
+                        ? '有新样稿待审核'
+                        : shownDetail.campaign.approvedRevision === shownDetail.campaign.revision
+                          ? '当前版本已审核'
+                          : '当前版本待审核'}
                     </span>
                   )}
                 </div>
@@ -2150,13 +2153,18 @@ export function OutreachCommunication() {
                             ? '正在准备样稿…'
                             : '准备样稿'}
                         </button>
-                        {shownDetail.campaign.approvedRevision !==
-                          shownDetail.campaign.revision && (
+                        {(shownDetail.campaign.approvedRevision !== shownDetail.campaign.revision ||
+                          (['active', 'paused'].includes(shownDetail.campaign.status) &&
+                            shownDetail.deliveries.some(
+                              (delivery) => delivery.status === 'draft',
+                            ))) && (
                           <button
                             className="btn secondary"
                             disabled={
                               !!busy ||
-                              shownDetail.campaign.status !== 'ready' ||
+                              !['ready', 'active', 'paused'].includes(
+                                shownDetail.campaign.status,
+                              ) ||
                               !shownDetail.deliveries.some(
                                 (delivery) =>
                                   delivery.status === 'draft' &&
@@ -2172,12 +2180,18 @@ export function OutreachCommunication() {
                                 'approve',
                                 pathFor('campaigns', shownDetail.campaign.id, 'approve'),
                                 { revision: shownDetail.campaign.revision },
-                                '当前计划版本已审核，尚未启动发送。',
+                                shownDetail.campaign.status === 'active'
+                                  ? '已审核的样稿已加入发送队列，将按计划节奏发送。'
+                                  : '当前计划版本已审核，尚未启动发送。',
                               )
                             }
                           >
                             <Check size={15} />
-                            批准此版本与样稿
+                            {shownDetail.campaign.status === 'active'
+                              ? '审核并加入发送队列'
+                              : shownDetail.campaign.status === 'paused'
+                                ? '审核待发送样稿'
+                                : '批准此版本与样稿'}
                           </button>
                         )}
                         {shownDetail.campaign.status === 'active' ? (

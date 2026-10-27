@@ -394,6 +394,25 @@ export class OutreachService {
     const { identities, blocked } = this.contactState(ignoreDelivery);
     return this.identities(candidate).some((k) => identities.has(k) || blocked.has(k));
   }
+  development(customerId) {
+    return (
+      this.businessState().customerContexts?.find((row) => row.customerId === customerId)
+        ?.development || { version: 0, paused: false }
+    );
+  }
+  developmentReason(delivery) {
+    const current = this.development(delivery.customerId);
+    if (current.paused) return '客户已暂缓开发，自动邮件暂停';
+    return (current.version || 0) !== (delivery.developmentVersion || 0)
+      ? '客户开发安排已更新，请重新准备并审核邮件'
+      : '';
+  }
+  developmentReviewed(delivery) {
+    return (
+      !delivery.developmentVersion ||
+      delivery.developmentReviewedVersion === delivery.developmentVersion
+    );
+  }
   async candidates(c, ignoreDelivery) {
     const loaded = await this.loadLeads();
     const leads = Array.isArray(loaded) ? loaded : loaded.leads;
@@ -440,9 +459,12 @@ export class OutreachService {
     const eligible = [],
       blocked = [...result.blocked];
     for (const candidate of result.eligible) {
-      if (this.isReserved(candidate, ignoreDelivery))
+      const development = this.development(candidate.customerId);
+      if (development.paused)
+        blocked.push({ ...candidate, reason: '客户已暂缓开发，自动邮件暂停' });
+      else if (this.isReserved(candidate, ignoreDelivery))
         blocked.push({ ...candidate, reason: '已有发送安排、沟通记录或停止联系标记' });
-      else eligible.push(candidate);
+      else eligible.push({ ...candidate, developmentVersion: development.version || 0 });
     }
     return { eligible, blocked };
   }
@@ -478,6 +500,15 @@ export class OutreachService {
   async prepareDrafts(id, revision, wasActive) {
     const c = this.campaign(id);
     if (this.closed || c.revision !== revision || c.status === 'paused') return;
+    for (const draft of this.deliveries().filter(
+      (row) => row.mode === 'production' && ['draft', 'queued'].includes(row.status),
+    )) {
+      const reason = this.developmentReason(draft);
+      if (reason) {
+        this.putDelivery({ ...draft, status: 'blocked', reason });
+        this.release(draft.id);
+      }
+    }
     const result = await this.candidates(c);
     const latest = this.campaign(id);
     if (
@@ -557,6 +588,7 @@ export class OutreachService {
           matchReason: candidate.matchReason,
           createdAt: iso(this.now),
           candidate,
+          developmentVersion: candidate.developmentVersion,
           revision,
           senderVersion: senderVersion(mailbox),
           productVersion: product.version,
@@ -591,6 +623,12 @@ export class OutreachService {
             this.release(d.id);
             continue;
           }
+          const developmentReason = this.developmentReason(d);
+          if (developmentReason) {
+            this.putDelivery({ ...d, status: 'blocked', reason: developmentReason });
+            this.release(d.id);
+            continue;
+          }
           if (!generated.subject || !generated.bodyText || /[\r\n]/.test(generated.subject))
             throw fail(422, '邮件生成结果无效');
           const signature = renderMailboxSignature(mailbox);
@@ -601,10 +639,15 @@ export class OutreachService {
             subject: generated.subject,
             bodyText,
             bodyHtml,
-            status: wasActive && current.approvedRevision === revision ? 'queued' : 'draft',
+            status:
+              wasActive && current.approvedRevision === revision && !d.developmentVersion
+                ? 'queued'
+                : 'draft',
             reason: '',
             sourceIds: generated.sourceIds || [],
           });
+          if (d.developmentVersion && !wasActive)
+            this.putCampaign({ ...this.campaign(id), approvedRevision: null });
         } catch (error) {
           if (this.closed) return;
           const current = this.campaign(id);
@@ -632,11 +675,32 @@ export class OutreachService {
   }
   approve(id, revision) {
     const c = this.campaign(id);
-    if (c.revision !== revision || c.status !== 'ready' || this.preparing.has(id))
+    if (
+      c.revision !== revision ||
+      !['ready', 'active', 'paused'].includes(c.status) ||
+      this.preparing.has(id)
+    )
       throw fail(409, '请等待草稿准备完成并检查当前版本');
-    if (!this.deliveries(id).some((d) => d.status === 'draft' && d.subject))
-      throw fail(400, '尚无可审核的开发信');
-    return this.putCampaign({ ...c, approvedRevision: revision, approvedAt: iso(this.now) });
+    const drafts = this.deliveries(id).filter((d) => d.status === 'draft' && d.subject);
+    if (!drafts.length) throw fail(400, '尚无可审核的开发信');
+    const valid = [];
+    for (const draft of drafts) {
+      const reason = this.developmentReason(draft);
+      if (reason) {
+        this.putDelivery({ ...draft, status: 'blocked', reason });
+        this.release(draft.id);
+      } else valid.push(draft);
+    }
+    if (!valid.length) throw fail(409, '客户开发安排已变化，请重新准备并审核邮件');
+    return this.transaction(() => {
+      for (const draft of valid)
+        this.putDelivery({
+          ...draft,
+          developmentReviewedVersion: draft.developmentVersion || 0,
+          status: c.status === 'active' ? 'queued' : 'draft',
+        });
+      return this.putCampaign({ ...c, approvedRevision: revision, approvedAt: iso(this.now) });
+    });
   }
   approveReview(approved) {
     if (approved !== true) throw fail(400, '请明确确认已共同检查内部测试邮件');
@@ -661,7 +725,8 @@ export class OutreachService {
     if (!['ready', 'paused'].includes(c.status)) throw fail(409, '计划当前不能启动');
     this.transaction(() => {
       for (const d of this.deliveries(id))
-        if (d.status === 'draft' && d.subject) this.putDelivery({ ...d, status: 'queued' });
+        if (d.status === 'draft' && d.subject && this.developmentReviewed(d))
+          this.putDelivery({ ...d, status: 'queued' });
       this.putCampaign({
         ...c,
         status: 'active',
@@ -895,7 +960,7 @@ export class OutreachService {
       } else if (
         c.mode === 'production' &&
         !c.continuous &&
-        !rows.some((d) => ['queued', 'sending'].includes(d.status)) &&
+        !rows.some((d) => ['draft', 'queued', 'sending'].includes(d.status)) &&
         !this.preparing.has(c.id)
       )
         this.putCampaign({ ...current, status: 'completed' });
@@ -919,6 +984,14 @@ export class OutreachService {
       return;
     }
     if (c.mode === 'production') {
+      const reason =
+        this.developmentReason(d) ||
+        (!this.developmentReviewed(d) ? '恢复后的邮件尚未重新审核，请先核对样稿' : '');
+      if (reason) {
+        this.putDelivery({ ...d, status: 'blocked', reason });
+        this.release(d.id);
+        return;
+      }
       let result;
       try {
         result = await this.candidates(this.campaign(c.id), d.id);
@@ -992,13 +1065,37 @@ export class OutreachService {
     });
     if (!claimed) return;
     try {
-      const result = await this.mailboxes.send(m.id, {
-        to: d.to,
-        subject: d.subject,
-        text: d.bodyText,
-        ...(d.bodyHtml ? { html: d.bodyHtml } : {}),
-        messageId: pending.messageId,
-      });
+      const result = await this.mailboxes.send(
+        m.id,
+        {
+          to: d.to,
+          subject: d.subject,
+          text: d.bodyText,
+          ...(d.bodyHtml ? { html: d.bodyHtml } : {}),
+          messageId: pending.messageId,
+        },
+        {
+          beforeSend: () => {
+            const campaign = this.campaign(c.id);
+            const reason =
+              (c.mode === 'production' && campaign.scope !== this.getScope()
+                ? '客户数据来源已改变，邮件尚未提交发送'
+                : '') ||
+              (c.mode === 'production' && this.developmentReason(d)) ||
+              (c.mode === 'production' && !this.developmentReviewed(d)
+                ? '恢复后的邮件尚未重新审核，请先核对样稿'
+                : '') ||
+              (campaign.status !== 'active' || campaign.revision !== c.revision
+                ? '计划已暂停或更新，邮件尚未提交发送'
+                : '') ||
+              (c.mode === 'production' && this.isReserved(d.candidate, d.id)
+                ? '客户联系安排已变化，请重新检查'
+                : '');
+            if (reason)
+              throw Object.assign(fail(409, reason), { code: 'OUTREACH_PRE_SEND_BLOCKED' });
+          },
+        },
+      );
       const accepted = result.accepted?.some(
         (address) =>
           String(typeof address === 'object' ? address.address : address).toLowerCase() ===
@@ -1032,6 +1129,11 @@ export class OutreachService {
         }
       }
     } catch (error) {
+      if (error.code === 'OUTREACH_PRE_SEND_BLOCKED') {
+        this.putDelivery({ ...d, status: 'blocked', reason: safeError(error) });
+        this.release(d.id);
+        return;
+      }
       const definite = /AUTH|NOT_CONFIGURED|PAUSED|NOT_VERIFIED|INVALID|REJECTED/.test(
         error.code || '',
       );

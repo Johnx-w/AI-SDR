@@ -685,7 +685,7 @@ export class OutreachMailboxes {
       return publicMailbox(checked);
     });
   }
-  send(id, message) {
+  send(id, message, { beforeSend } = {}) {
     return this.runSerial(async () => {
       const record = this.required(id);
       requireExpectedAccount(record, message);
@@ -697,6 +697,8 @@ export class OutreachMailboxes {
       let transport;
       try {
         transport = await this.transport(record);
+        // Keep the final customer check synchronous with handing the message to SMTP.
+        beforeSend?.();
         const result = await transport.sendMail(mail);
         const matches = (values) =>
           (Array.isArray(values) ? values : []).some(
@@ -708,7 +710,8 @@ export class OutreachMailboxes {
           messageId,
         };
       } catch (error) {
-        if (error instanceof OutreachMailboxError) throw error;
+        if (error instanceof OutreachMailboxError || error.code === 'OUTREACH_PRE_SEND_BLOCKED')
+          throw error;
         throw fail('MAILBOX_SEND_FAILED', 503);
       } finally {
         try {
