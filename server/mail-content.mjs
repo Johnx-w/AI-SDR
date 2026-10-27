@@ -1,5 +1,6 @@
 import sanitizeHtml from 'sanitize-html';
 import { createHash } from 'node:crypto';
+import { signatureImage } from './mail-signature.mjs';
 
 export const MAX_REPLY_ATTACHMENTS = 10;
 export const MAX_REPLY_ATTACHMENT_BYTES = 10 * 1024 * 1024;
@@ -41,12 +42,14 @@ export function sanitizeReplyHtml(value) {
       'hr',
       'pre',
       'code',
+      'img',
     ],
     allowedAttributes: {
       '*': ['style'],
       a: ['href', 'title', 'target', 'rel'],
       th: ['colspan', 'rowspan'],
       td: ['colspan', 'rowspan'],
+      img: ['src', 'alt', 'width'],
     },
     allowedStyles: {
       '*': {
@@ -59,10 +62,20 @@ export function sanitizeReplyHtml(value) {
       },
     },
     allowedSchemes: ['http', 'https', 'mailto'],
+    allowedSchemesByTag: { img: ['data'] },
     allowProtocolRelative: false,
     transformTags: {
       a: sanitizeHtml.simpleTransform('a', { target: '_blank', rel: 'noopener noreferrer' }),
+      img: (_tag, attributes) => ({
+        tagName: 'img',
+        attribs: {
+          src: attributes.src || '',
+          alt: (attributes.alt || 'Company logo').slice(0, 160),
+          width: String(Math.max(80, Math.min(320, Number(attributes.width) || 160))),
+        },
+      }),
     },
+    exclusiveFilter: (frame) => frame.tag === 'img' && !signatureImage(frame.attribs.src),
   });
 }
 

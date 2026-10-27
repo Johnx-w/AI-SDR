@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { normalizeAttachments, normalizeReplyContent } from './mail-content.mjs';
+import { renderMailboxSignature } from '../src/domain/mail-signature.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const digest = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -147,6 +148,7 @@ export class MailReplies {
       mailboxId: mailbox.id,
       from: mailbox.email,
       signature: mailbox.signature || '',
+      signatureHtml: renderMailboxSignature(mailbox).html,
       replyToMessageId: selected.id,
       sourceMessageId: selected.id,
       to,

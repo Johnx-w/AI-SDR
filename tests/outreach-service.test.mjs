@@ -176,6 +176,79 @@ function deferred() {
   return { promise, resolve };
 }
 
+const signatureDesign = () => ({
+  closing: 'Best regards,',
+  companyName: 'Example & Co.',
+  address: 'Dongguan, China',
+  website: 'https://brand-a.example.org',
+  logo: {
+    name: 'logo.png',
+    contentType: 'image/png',
+    contentBase64:
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9XcAAAAASUVORK5CYII=',
+  },
+  logoWidth: 160,
+});
+
+test('开发信与内部测试保留排版签名及Logo，生成正文按纯文本转义', async (t) => {
+  const h = harness();
+  t.after(() => h.service.close());
+  h.boxes[0].displayName = 'Alice <Sales>';
+  h.boxes[0].signatureDesign = signatureDesign();
+  await enableProduction(h);
+  const testMail = h.deliveries.find((row) => row.mailboxId === h.boxes[0].id);
+  assert.ok(testMail.text.endsWith(h.boxes[0].email));
+  assert.match(testMail.html, /<strong>Alice &lt;Sales&gt;<\/strong>/u);
+  assert.match(testMail.html, /<img src="data:image\/png;base64,/u);
+  h.service.generator.generate = async () => ({
+    subject: 'A business introduction',
+    bodyText: 'Hello <buyer>,\nApproved & available.',
+    sourceIds: [],
+  });
+  const campaign = await prepare(h);
+  const draft = h.service.deliveries(campaign.id)[0];
+  assert.equal(draft.status, 'draft');
+  assert.match(draft.bodyHtml, /^Hello &lt;buyer&gt;,<br>Approved &amp; available\./u);
+  assert.match(draft.bodyHtml, /<strong>Alice &lt;Sales&gt;<\/strong>/u);
+  assert.match(draft.bodyHtml, /<a href="https:\/\/brand-a\.example\.org\/">/u);
+  assert.equal(draft.bodyText.match(/Best regards,/gu).length, 1);
+  h.service.approve(campaign.id, campaign.revision);
+  h.service.activate(campaign.id, campaign.revision);
+  await h.service.tick();
+  const sent = h.deliveries.find((row) => row.to === draft.to);
+  assert.equal(sent.html, draft.bodyHtml);
+  assert.equal(sent.text, draft.bodyText);
+});
+
+test('仅修改Logo也使内部测试失效，补测后仍阻止旧签名草稿发送', async (t) => {
+  const h = harness();
+  t.after(() => h.service.close());
+  h.boxes[0].signatureDesign = signatureDesign();
+  await enableProduction(h);
+  const campaign = await prepare(h);
+  h.service.approve(campaign.id, campaign.revision);
+  const draft = h.service.deliveries(campaign.id)[0];
+  const previousText = h.boxes[0].signature;
+  h.boxes[0].signatureDesign.logo.contentBase64 =
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+  assert.equal(h.boxes[0].signature, previousText);
+  assert.equal(h.service.review().productionApproved, false);
+  assert.throws(() => h.service.activate(campaign.id, campaign.revision), { status: 409 });
+  await internalTest(h, 'internal-test-updated-logo');
+  h.service.approveReview(true);
+  h.state.clock += 31000;
+  h.service.activate(campaign.id, campaign.revision);
+  await h.service.tick();
+  const blocked = h.service.delivery(draft.id);
+  assert.equal(blocked.status, 'blocked');
+  assert.match(blocked.reason, /签名/u);
+  assert.equal(blocked.bodyHtml, draft.bodyHtml);
+  assert.equal(
+    h.deliveries.some((row) => row.to === draft.to),
+    false,
+  );
+});
+
 test('内部测试只在预览过的已配置公司邮箱间形成环，重试不重发', async (t) => {
   const h = harness();
   t.after(() => h.service.close());

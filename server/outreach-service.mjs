@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { selectOutreachCandidates, createOutreachGenerator } from './outreach-content.mjs';
 import { MailConversations } from './mail-conversations.mjs';
 import { MailReplies } from './mail-replies.mjs';
+import { renderMailboxSignature, signaturePlainTextHtml } from '../src/domain/mail-signature.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -14,7 +15,14 @@ const list = (value) =>
 const iso = (now) => new Date(now()).toISOString();
 const terminal = new Set(['accepted', 'failed', 'unknown', 'blocked', 'cancelled']);
 const senderVersion = (m) =>
-  hash([m.id, m.email, m.displayName, m.signature, [...(m.productIds || [])].sort()]);
+  hash([
+    m.id,
+    m.email,
+    m.displayName,
+    m.signature,
+    ...(m.signatureDesign ? [m.signatureDesign] : []),
+    [...(m.productIds || [])].sort(),
+  ]);
 const day = (date) =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date(date));
 const safeError = (error) =>
@@ -218,7 +226,7 @@ export class OutreachService {
       this.mailboxes
         .list()
         .filter((m) => m.configured)
-        .map((m) => [m.id, m.email]),
+        .map((m) => [m.id, m.email, m.displayName, m.signature, m.signatureDesign]),
     );
   }
   review() {
@@ -583,13 +591,16 @@ export class OutreachService {
             this.release(d.id);
             continue;
           }
-          const bodyText = generated.bodyText + '\n\n' + mailbox.signature;
           if (!generated.subject || !generated.bodyText || /[\r\n]/.test(generated.subject))
             throw fail(422, '邮件生成结果无效');
+          const signature = renderMailboxSignature(mailbox);
+          const bodyText = generated.bodyText + '\n\n' + signature.text;
+          const bodyHtml = signaturePlainTextHtml(generated.bodyText) + '<br><br>' + signature.html;
           this.putDelivery({
             ...d,
             subject: generated.subject,
             bodyText,
+            bodyHtml,
             status: wasActive && current.approvedRevision === revision ? 'queued' : 'draft',
             reason: '',
             sourceIds: generated.sourceIds || [],
@@ -754,6 +765,8 @@ export class OutreachService {
       boxes.forEach((m, i) => {
         const recipient = boxes[(i + 1) % boxes.length];
         const marker = randomUUID();
+        const body = `This is a company-controlled technical test of the outbound email workflow.\n\nSender: ${m.email}\nRecipient: ${recipient.email}\nWebsite identity: ${m.website}\nTest reference: ${marker}\n\nThis message is not a customer outreach email. No reply is required.`;
+        const signature = renderMailboxSignature(m);
         this.putDelivery({
           id: marker,
           campaignId: id,
@@ -763,7 +776,9 @@ export class OutreachService {
           mailboxId: m.id,
           from: m.email,
           subject: `[ShadeFlow-Test:${marker}] Internal outbound workflow test`,
-          bodyText: `This is a company-controlled technical test of the outbound email workflow.\n\nSender: ${m.email}\nRecipient: ${recipient.email}\nWebsite identity: ${m.website}\nTest reference: ${marker}\n\nThis message is not a customer outreach email. No reply is required.`,
+          bodyText: body + (signature.text ? '\n\n' + signature.text : ''),
+          bodyHtml:
+            signaturePlainTextHtml(body) + (signature.html ? '<br><br>' + signature.html : ''),
           status: 'queued',
           reason: '',
           matchReason: '已连接公司邮箱之间的内部测试',
@@ -981,6 +996,7 @@ export class OutreachService {
         to: d.to,
         subject: d.subject,
         text: d.bodyText,
+        ...(d.bodyHtml ? { html: d.bodyHtml } : {}),
         messageId: pending.messageId,
       });
       const accepted = result.accepted?.some(

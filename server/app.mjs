@@ -324,7 +324,9 @@ export function createApp({
                   input,
                   /^\/api\/v1\/outreach\/conversations\/[\w-]+\/(?:draft|reply)$/.test(url.pathname)
                     ? 16 * 1024 * 1024
-                    : maxJsonBytes,
+                    : /^\/api\/v1\/outreach\/mailboxes(?:\/[\w-]+)?$/.test(url.pathname)
+                      ? 512 * 1024
+                      : maxJsonBytes,
                 ),
               idempotencyKey: requireIdempotencyKey,
             }),

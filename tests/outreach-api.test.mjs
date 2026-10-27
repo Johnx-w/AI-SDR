@@ -3,6 +3,49 @@ import assert from 'node:assert/strict';
 import { createApp } from '../server/app.mjs';
 import { OutreachService } from '../server/outreach-service.mjs';
 
+test('mailbox signature uploads accept a logo above 32 KB while enforcing the mailbox request limit', async (t) => {
+  const saved = [];
+  const server = createApp({
+    env: { ACQUISITION_PROVIDER: 'n8n' },
+    outreachServiceFactory: () => ({
+      mailboxes: {
+        save: (input) => {
+          saved.push(input);
+          return { id: 'sales' };
+        },
+      },
+      close: async () => {},
+    }),
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}/api/v1/outreach/mailboxes`;
+  const body = { signatureDesign: { logo: { contentBase64: 'A'.repeat(100_000) } } };
+  for (const [path, method] of [
+    ['', 'POST'],
+    ['/sales', 'PUT'],
+  ]) {
+    const response = await fetch(base + path, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    assert.equal(response.status, 200);
+  }
+  assert.equal(saved.length, 2);
+  assert.equal(
+    (
+      await fetch(base + '/sales', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ signature: 'A'.repeat(512 * 1024) }),
+      })
+    ).status,
+    413,
+  );
+  assert.equal(saved.length, 2);
+});
+
 test('多邮箱接口可直接访问并限制本机来源，内部测试需要确认及幂等编号', async () => {
   const calls = [];
   const service = {
