@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { OutreachMailboxes } from '../server/outreach-mailboxes.mjs';
 import { simpleParser } from 'mailparser';
+import { renderMailboxSignature } from '../src/domain/mail-signature.mjs';
 
 const secret = 'synthetic-test-password';
 const address = 'sales@example.com';
@@ -23,6 +24,75 @@ const mail = {
   text: 'Non-marketing connection test.',
   messageId: '<unique-operation@example.com>',
 };
+
+const signatureDesign = {
+  closing: 'Best regards,',
+  companyName: 'Example Company',
+  address: 'Dongguan, China',
+  website: 'https://example.com',
+  logoWidth: 160,
+  logo: {
+    name: 'logo.png',
+    contentType: 'image/png',
+    contentBase64:
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=',
+  },
+};
+
+test('structured signatures persist per account and follow identity edits without replacing old plain signatures', async (t) => {
+  const { registry, config } = fixture(t);
+  await registry.save({ ...settings, signature: 'Existing plain signature' });
+  assert.equal(
+    (await registry.save({ id: settings.id, dailyLimit: 30 })).signature,
+    'Existing plain signature',
+  );
+  await registry.save({ id: settings.id, signatureDesign });
+  const renamed = await registry.save({ id: settings.id, displayName: 'Alice' });
+  assert.match(renamed.signature, /^Best regards,\nAlice\n/);
+  assert.deepEqual(renamed.signatureDesign.logo, signatureDesign.logo);
+  const other = await registry.save({ email: 'second@example.org', signature: 'Other team' });
+  assert.equal(other.signatureDesign, undefined);
+  assert.equal(other.signature, 'Other team');
+  assert.deepEqual(
+    new OutreachMailboxes(config).get(settings.id).signatureDesign,
+    renamed.signatureDesign,
+  );
+  assert.equal(new OutreachMailboxes(config).get(settings.id).signature, renamed.signature);
+  const plain = await registry.save({
+    id: settings.id,
+    signatureDesign: null,
+    signature: 'Plain again',
+  });
+  assert.equal(plain.signature, 'Plain again');
+  assert.equal(plain.signatureDesign, undefined);
+});
+
+test('SMTP and the saved Sent copy contain the same inline logo with the approved size and MIME bytes', async (t) => {
+  const imap = sentImap();
+  const { registry, sent } = fixture(t, { imapFactory: imap.factory });
+  const mailbox = await registry.save({ ...settings, signatureDesign, clientPassword: secret });
+  await registry.verify(settings.id);
+  const signature = renderMailboxSignature(mailbox);
+  const message = {
+    ...mail,
+    text: 'Hello\n\n' + signature.text,
+    html: '<p>Hello</p>' + signature.html,
+  };
+  await registry.send(settings.id, message);
+  await registry.saveSent(settings.id, message);
+  assert.equal(sent[0].attachments.length, 1);
+  assert.equal(sent[0].attachments[0].contentDisposition, 'inline');
+  assert.match(sent[0].html, /src="cid:/);
+  const raw = imap.calls.find((call) => call[0] === 'append')[2];
+  const parsed = await simpleParser(raw, { skipImageLinks: true });
+  assert.equal(parsed.html, sent[0].html);
+  assert.equal(parsed.attachments[0].cid, sent[0].attachments[0].cid);
+  assert.deepEqual(
+    parsed.attachments[0].content,
+    Buffer.from(signatureDesign.logo.contentBase64, 'base64'),
+  );
+  assert.match(parsed.html, /width="160"/);
+});
 
 function fixture(t, options = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'outreach-mailboxes-'));

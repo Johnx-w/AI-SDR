@@ -3,7 +3,20 @@ import { Code2, Image, LayoutTemplate } from 'lucide-react';
 import type { MailMessage } from '../services/mailConversations';
 import { makeMailFrame } from '../services/mailHtml';
 
-export function MailMessageBody({ message }: { message: MailMessage }) {
+export function MailMessageBody({
+  message,
+}: {
+  message: Pick<
+    MailMessage,
+    | 'subject'
+    | 'bodyText'
+    | 'bodyHtml'
+    | 'inlineImages'
+    | 'bodyUnavailable'
+    | 'bodyFormatVersion'
+    | 'source'
+  >;
+}) {
   const [mode, setMode] = useState<'html' | 'text'>(message.bodyHtml ? 'html' : 'text');
   const [externalImages, setExternalImages] = useState(false);
   const [height, setHeight] = useState(180);

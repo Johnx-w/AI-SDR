@@ -78,6 +78,7 @@ export interface MailReplyContext {
   from: string;
   to: string;
   signature: string;
+  signatureHtml?: string;
   canReply: boolean;
   canSend?: boolean;
   reason?: string;

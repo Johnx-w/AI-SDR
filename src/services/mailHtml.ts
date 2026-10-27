@@ -1,4 +1,5 @@
 import DOMPurify from 'dompurify';
+import { MAX_SIGNATURE_LOGO_BYTES } from '../domain/mail-signature.mjs';
 import type {
   MailInlineImage,
   MailMessage,
@@ -160,7 +161,7 @@ export function makeMailFrame(
 export function sanitizeReplyHtml(value: string) {
   if (typeof window === 'undefined' || !DOMPurify.isSupported)
     return plainTextHtml(value.replace(/<[^>]+>/g, ''));
-  return DOMPurify.sanitize(value, {
+  const fragment = DOMPurify.sanitize(value, {
     ALLOWED_TAGS: [
       'p',
       'br',
@@ -175,10 +176,26 @@ export function sanitizeReplyHtml(value: string) {
       'blockquote',
       'div',
       'span',
+      'img',
     ],
-    ALLOWED_ATTR: ['href'],
+    ALLOWED_ATTR: ['href', 'src', 'alt', 'width'],
     ALLOW_DATA_ATTR: false,
+    RETURN_DOM: true,
+  }) as HTMLElement;
+  fragment.querySelectorAll('img').forEach((element) => {
+    const source = element.getAttribute('src') || '';
+    if (
+      source.length > MAX_SIGNATURE_LOGO_BYTES * 1.4 + 100 ||
+      !/^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/.test(source)
+    )
+      element.remove();
+    else
+      element.setAttribute(
+        'width',
+        String(Math.max(80, Math.min(320, Number(element.getAttribute('width')) || 160))),
+      );
   });
+  return fragment.innerHTML;
 }
 export function replyRecipient(message: MailMessage | undefined, context: MailReplyContext) {
   const preferred = message?.replyTo?.[0];

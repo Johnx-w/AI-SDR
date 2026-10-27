@@ -1,3 +1,5 @@
+import type { MailSignatureDesign } from './domain/mail-signature.mjs';
+
 export interface OutreachProduct {
   id: string;
   label?: string;
@@ -16,6 +18,7 @@ export interface OutreachMailbox {
   brandName: string;
   displayName: string;
   signature: string;
+  signatureDesign?: MailSignatureDesign | null;
   productIds: string[];
   priority: number;
   dailyLimit: number;
@@ -68,6 +71,7 @@ export interface OutreachDelivery {
   from: string;
   subject: string;
   bodyText: string;
+  bodyHtml?: string;
   status: OutreachDeliveryStatus;
   reason?: string | null;
   matchReason?: string | null;

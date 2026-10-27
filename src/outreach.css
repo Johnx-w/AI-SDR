@@ -336,6 +336,84 @@
   line-height: 1.65;
   color: var(--color-text-secondary);
 }
+.mail-signature-card-preview {
+  max-height: 240px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  color: #333;
+  font-size: 12px;
+  line-height: 1.65;
+}
+.mail-signature-card-preview img {
+  max-width: 100%;
+  height: auto;
+}
+.mail-signature-designer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 24px;
+}
+.mail-signature-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.mail-signature-preview-column {
+  min-width: 0;
+  position: sticky;
+  top: 0;
+}
+.mail-signature-preview {
+  margin-top: 10px;
+  padding: 22px 18px;
+  min-height: 240px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: #fff;
+  color: #333;
+  overflow-wrap: anywhere;
+  font-family: Arial, sans-serif;
+  font-size: 13px;
+  line-height: 1.65;
+}
+.mail-signature-preview img {
+  max-width: 100%;
+  height: auto;
+}
+.mail-signature-logo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.mail-signature-logo > span,
+.mail-signature-logo > small,
+.mail-signature-logo > label:not(.mail-signature-upload) {
+  width: 100%;
+}
+.outreach-form .mail-signature-upload {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+.mail-signature-upload input[type='file'] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.mail-signature-upload:focus-within {
+  outline: 2px solid var(--outreach-accent);
+  outline-offset: 2px;
+}
+.outreach-form .mail-signature-error {
+  color: var(--color-danger, #b42318);
+}
 .outreach-brand-mark.mark-1 {
   color: #977047;
   background: #f6efe7;
@@ -1040,6 +1118,13 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+@media (max-width: 760px) {
+  .outreach-form .modal-actions {
+    margin: 4px -20px -20px;
+    padding: 18px 20px;
+    bottom: -20px;
+  }
+}
 @media (max-width: 650px) {
   .outreach-tabs {
     gap: 16px;
@@ -1054,8 +1139,12 @@
   .outreach-mailbox-grid,
   .outreach-form-grid,
   .outreach-form-grid.three,
+  .mail-signature-designer,
   .outreach-mailbox-options {
     grid-template-columns: 1fr;
+  }
+  .mail-signature-preview-column {
+    position: static;
   }
   .outreach-section-heading {
     align-items: flex-start;

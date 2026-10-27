@@ -175,6 +175,33 @@ test('rich replies retain basic formatting, derive meaningful plain text and rem
   });
 });
 
+test('manual reply signature HTML survives draft saving and sending exactly once', async (t) => {
+  const h = harness(t);
+  const thread = h.add();
+  h.boxes[0].displayName = 'Alice';
+  h.boxes[0].signatureDesign = {
+    closing: 'Best regards,',
+    companyName: 'Example Company',
+    address: 'China',
+    website: 'https://example.com',
+    logoWidth: 160,
+    logo: {
+      name: 'logo.png',
+      contentType: 'image/png',
+      contentBase64:
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=',
+    },
+  };
+  const context = h.replies.detailExtras(thread.id).replyContext;
+  assert.match(context.signatureHtml, /<strong>Alice<\/strong>/);
+  const draft = save(h, thread, { bodyHtml: '<p>Hello Buyer</p>' + context.signatureHtml });
+  assert.match(draft.bodyHtml, /data:image\/png;base64,/);
+  await send(h, thread, draft);
+  assert.equal((h.sends[0].message.html.match(/<img /g) || []).length, 1);
+  assert.match(h.sends[0].message.text, /Best regards,\nAlice/);
+  assert.equal(h.archives[0].message.html, h.sends[0].message.html);
+});
+
 test('attachments use decoded bytes and canonical filenames, discard URL/path options and enforce aggregate limits', () => {
   const normalized = normalizeAttachments([
     {

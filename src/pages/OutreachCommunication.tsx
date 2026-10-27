@@ -26,6 +26,10 @@ import {
 } from 'lucide-react';
 import { PageHeading } from '../components/PageHeading';
 import { MailConversations } from '../components/MailConversations';
+import { MailMessageBody } from '../components/MailMessageBody';
+import { MailSignatureFields, defaultSignatureDesign } from '../components/MailSignatureFields';
+import { renderMailboxSignature } from '../domain/mail-signature.mjs';
+import type { MailSignatureDesign } from '../domain/mail-signature.mjs';
 import { Badge, Empty, Modal } from '../components/ui';
 import { outreachApi } from '../outreachApi';
 import type {
@@ -42,8 +46,8 @@ import '../outreach.css';
 type Tab = 'mailboxes' | 'campaigns' | 'deliveries' | 'conversations';
 type MailboxInput = Omit<
   OutreachMailbox,
-  'id' | 'configured' | 'smtpStatus' | 'lastCheckedAt' | 'lastError'
-> & { clientPassword?: string };
+  'id' | 'configured' | 'smtpStatus' | 'lastCheckedAt' | 'lastError' | 'signature'
+> & { signature?: string; clientPassword?: string };
 type CampaignInput = Pick<
   OutreachCampaign,
   | 'name'
@@ -196,10 +200,19 @@ function MailboxEditor({
   onSave: (input: MailboxInput) => Promise<void>;
 }) {
   const [selectedProducts, setSelectedProducts] = useState(mailbox?.productIds || []);
+  const [email, setEmail] = useState(mailbox?.email || '');
+  const [displayName, setDisplayName] = useState(mailbox?.displayName || '');
+  const [signature, setSignature] = useState(mailbox?.signature || '');
+  const [signatureDesign, setSignatureDesign] = useState<MailSignatureDesign | null>(
+    mailbox?.signatureDesign ||
+      (mailbox?.signature ? null : defaultSignatureDesign(mailbox?.brandName, mailbox?.website)),
+  );
+  const [uploadingLogo, setUploadingLogo] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (busy || uploadingLogo) return;
     const form = new FormData(event.currentTarget);
     const password = String(form.get('password') || '');
     const address = String(form.get('email')).trim();
@@ -214,7 +227,7 @@ function MailboxEditor({
           mailbox?.email === address && mailbox.website ? mailbox.website : `https://${domain}`,
         brandName: mailbox?.brandName || displayName || domain,
         displayName,
-        signature: String(form.get('signature')).trim(),
+        ...(signatureDesign ? { signatureDesign } : { signature }),
         productIds: selectedProducts,
         priority: mailbox?.priority ?? 100,
         dailyLimit: Number(form.get('dailyLimit')),
@@ -234,7 +247,7 @@ function MailboxEditor({
       wide
       title={mailbox ? '邮箱设置' : '添加邮箱'}
       onClose={() => {
-        if (!busy) onClose();
+        if (!busy && !uploadingLogo) onClose();
       }}
     >
       <form
@@ -281,19 +294,22 @@ function MailboxEditor({
             <input
               name="email"
               type="email"
-              defaultValue={mailbox?.email}
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
               required
               placeholder="sales@example.com"
               autoComplete="off"
             />
           </label>
           <label>
-            发件人显示名称
+            业务员姓名 / 发件人名称
             <input
               name="displayName"
-              defaultValue={mailbox?.displayName}
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
               required
-              placeholder="客户看到的发件人名称"
+              placeholder="例如 Alice，客户看到的姓名"
+              maxLength={160}
             />
           </label>
           <label className="outreach-full">
@@ -309,17 +325,23 @@ function MailboxEditor({
             />
             <small>仅提交到服务器，不保存在浏览器本地。</small>
           </label>
-          <label className="outreach-full">
-            固定邮件签名
-            <textarea
-              name="signature"
-              defaultValue={mailbox?.signature}
-              rows={4}
-              required
-              placeholder={'姓名 | 公司\n商务联系方式'}
-            />
-          </label>
         </div>
+        <div className="outreach-form-section">
+          <h3>邮件签名</h3>
+          <p>填写公司资料，自动排版为此邮箱的专属签名。</p>
+        </div>
+        <MailSignatureFields
+          email={email}
+          displayName={displayName}
+          signature={signature}
+          design={signatureDesign}
+          defaultCompany={mailbox?.brandName || ''}
+          defaultWebsite={mailbox?.website || ''}
+          disabled={busy || uploadingLogo}
+          onChange={setSignatureDesign}
+          onLegacyChange={setSignature}
+          onUploadingChange={setUploadingLogo}
+        />
         <div className="outreach-form-grid">
           <label>
             每日发送上限
@@ -346,14 +368,118 @@ function MailboxEditor({
           </label>
         </div>
         <div className="modal-actions">
-          <button type="button" className="btn secondary" disabled={busy} onClick={onClose}>
+          <button
+            type="button"
+            className="btn secondary"
+            disabled={busy || uploadingLogo}
+            onClick={onClose}
+          >
             取消
           </button>
-          <button className="btn primary" disabled={busy}>
+          <button className="btn primary" disabled={busy || uploadingLogo}>
             <BusyIcon busy={busy}>
               <Check size={15} />
             </BusyIcon>
             保存邮箱
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function MailboxSignatureEditor({
+  mailbox,
+  onClose,
+  onSave,
+}: {
+  mailbox: OutreachMailbox;
+  onClose: () => void;
+  onSave: (input: {
+    displayName: string;
+    signatureDesign?: MailSignatureDesign;
+    signature?: string;
+  }) => Promise<void>;
+}) {
+  const [displayName, setDisplayName] = useState(mailbox.displayName);
+  const [signature, setSignature] = useState(mailbox.signature);
+  const [design, setDesign] = useState<MailSignatureDesign | null>(
+    mailbox.signatureDesign ||
+      (mailbox.signature ? null : defaultSignatureDesign(mailbox.brandName, mailbox.website)),
+  );
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy || uploadingLogo) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onSave({
+        displayName: displayName.trim(),
+        ...(design ? { signatureDesign: design } : { signature }),
+      });
+      onClose();
+    } catch (reason) {
+      setError(message(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal
+      wide
+      title="业务员与邮件签名"
+      onClose={() => {
+        if (!busy && !uploadingLogo) onClose();
+      }}
+    >
+      <form className="modal-body outreach-form" onSubmit={(event) => void save(event)}>
+        <InlineError value={error} />
+        <div className="outreach-form-grid">
+          <label>
+            业务员姓名 / 发件人名称
+            <input
+              required
+              value={displayName}
+              maxLength={160}
+              disabled={busy}
+              placeholder="例如 Alice"
+              onChange={(event) => setDisplayName(event.target.value)}
+            />
+          </label>
+          <label>
+            发件邮箱
+            <input value={mailbox.email} readOnly />
+          </label>
+        </div>
+        <MailSignatureFields
+          email={mailbox.email}
+          displayName={displayName}
+          signature={signature}
+          design={design}
+          defaultCompany={mailbox.brandName}
+          defaultWebsite={mailbox.website}
+          disabled={busy || uploadingLogo}
+          onChange={setDesign}
+          onLegacyChange={setSignature}
+          onUploadingChange={setUploadingLogo}
+        />
+        <div className="modal-actions">
+          <button
+            type="button"
+            className="btn secondary"
+            disabled={busy || uploadingLogo}
+            onClick={onClose}
+          >
+            取消
+          </button>
+          <button className="btn primary" disabled={busy || uploadingLogo}>
+            <BusyIcon busy={busy}>
+              <Check size={15} />
+            </BusyIcon>
+            保存签名
           </button>
         </div>
       </form>
@@ -840,7 +966,11 @@ function MessagePreview({
         </div>
       )}
       <h3>{delivery.subject || '尚未生成主题'}</h3>
-      <div className="outreach-message-body">{delivery.bodyText || '邮件内容尚未生成。'}</div>
+      {delivery.bodyText || delivery.bodyHtml ? (
+        <MailMessageBody message={{ ...delivery, source: 'outreach' }} />
+      ) : (
+        <div className="outreach-message-body">邮件内容尚未生成。</div>
+      )}
       {delivery.reason && <div className="outreach-alert">{delivery.reason}</div>}
       {delivery.mode === 'internal_test' && delivery.receivedVerifiedAt && (
         <div className="outreach-alert success">
@@ -895,6 +1025,7 @@ export function OutreachCommunication() {
   const [mailboxEditor, setMailboxEditor] = useState<{ value: OutreachMailbox | null } | null>(
     null,
   );
+  const [signatureEditor, setSignatureEditor] = useState<OutreachMailbox | null>(null);
   const [campaignEditor, setCampaignEditor] = useState<{ value: OutreachCampaign | null } | null>(
     null,
   );
@@ -1433,7 +1564,7 @@ export function OutreachCommunication() {
                           </span>
                           <div>
                             <h3>{mailbox.email}</h3>
-                            <p>发件人：{mailbox.displayName || '待设置'}</p>
+                            <p>业务员：{mailbox.displayName || '待设置'}</p>
                           </div>
                           <Badge tone={mailbox.paused ? 'amber' : tone(mailbox.smtpStatus)}>
                             {mailbox.paused
@@ -1465,9 +1596,16 @@ export function OutreachCommunication() {
                         </div>
                         <div className="outreach-mailbox-signature">
                           <span>邮件签名</span>
-                          <p title={mailbox.signature || undefined}>
-                            {mailbox.signature || '尚未填写；请在邮箱设置中完善。'}
-                          </p>
+                          {mailbox.signature ? (
+                            <div
+                              className="mail-signature-card-preview"
+                              dangerouslySetInnerHTML={{
+                                __html: renderMailboxSignature(mailbox).html,
+                              }}
+                            />
+                          ) : (
+                            <p>尚未填写；请点击编辑签名完善。</p>
+                          )}
                         </div>
                         <div className="outreach-mailbox-numbers">
                           <div>
@@ -1492,6 +1630,14 @@ export function OutreachCommunication() {
                           最近验证 {formatTime(mailbox.lastCheckedAt)}
                         </p>
                         <div className="outreach-card-actions">
+                          <button
+                            className="btn secondary"
+                            disabled={!!busy}
+                            onClick={() => setSignatureEditor(mailbox)}
+                          >
+                            <FileText size={15} />
+                            编辑签名
+                          </button>
                           <button
                             className="btn subtle"
                             onClick={() => openMailboxConversations(mailbox.id)}
@@ -1776,6 +1922,20 @@ export function OutreachCommunication() {
           products={products}
           onClose={() => setMailboxEditor(null)}
           onSave={saveMailbox}
+        />
+      )}
+      {signatureEditor && (
+        <MailboxSignatureEditor
+          mailbox={signatureEditor}
+          onClose={() => setSignatureEditor(null)}
+          onSave={async (input) => {
+            await outreachApi(pathFor('mailboxes', signatureEditor.id), {
+              method: 'PUT',
+              body: JSON.stringify(input),
+            });
+            await refresh();
+            setNotice('业务员与签名已保存，待发送样稿请重新准备并核对。');
+          }}
         />
       )}
       {importOpen && (

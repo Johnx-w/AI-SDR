@@ -6,6 +6,8 @@ import nodemailer from 'nodemailer';
 import MailComposer from 'nodemailer/lib/mail-composer';
 import { ImapFlow } from 'imapflow';
 import { createMailboxReader, MailboxReadError } from './mailbox-reader.mjs';
+import { normalizeSignatureDesign, embedSignatureImages } from './mail-signature.mjs';
+import { renderMailboxSignature } from '../src/domain/mail-signature.mjs';
 
 const SMTP = Object.freeze({ host: 'smtp.qiye.aliyun.com', port: 465, secure: true });
 const IMAP = Object.freeze({ host: 'imap.qiye.aliyun.com', port: 993, secure: true });
@@ -203,17 +205,20 @@ function outgoing(record, message) {
       throw fail();
     date = new Date(message.sentAt);
   }
+  const embedded = html ? embedSignatureImages(html) : { html, attachments: [] };
   return {
     from: { name: record.displayName, address: record.email },
     replyTo: record.email,
     to,
     subject,
     text: body,
-    ...(html ? { html } : {}),
+    ...(embedded.html ? { html: embedded.html } : {}),
     messageId,
     ...(inReplyTo ? { inReplyTo } : {}),
     ...(references.length ? { references } : {}),
-    ...(attachments.length ? { attachments } : {}),
+    ...(attachments.length || embedded.attachments.length
+      ? { attachments: [...attachments, ...embedded.attachments] }
+      : {}),
     ...(date ? { date } : {}),
     envelope: { from: record.email, to: [to] },
     disableFileAccess: true,
@@ -359,6 +364,7 @@ function normalize(input, previous) {
     'brandName',
     'displayName',
     'signature',
+    'signatureDesign',
     'productIds',
     'priority',
     'dailyLimit',
@@ -378,7 +384,8 @@ function normalize(input, previous) {
   if (!Array.isArray(productIds) || productIds.length > 500) throw fail();
   const paused = value.paused ?? true;
   if (typeof paused !== 'boolean') throw fail();
-  return {
+  const signatureDesign = normalizeSignatureDesign(value.signatureDesign);
+  const record = {
     id,
     email: address,
     website: site,
@@ -386,6 +393,7 @@ function normalize(input, previous) {
     brandName: text(value.brandName ?? defaultBrand, 160),
     displayName: text(value.displayName ?? defaultBrand, 160),
     signature: text(value.signature ?? '', 8000, false, true),
+    ...(signatureDesign ? { signatureDesign } : {}),
     productIds: [...new Set(productIds.map((id) => text(id, 180, true)))],
     priority: integer(value.priority ?? 100, 0, 10000),
     dailyLimit: integer(value.dailyLimit ?? 50, 1, 500),
@@ -393,6 +401,8 @@ function normalize(input, previous) {
     paused,
     sendingEnabled: false,
   };
+  if (signatureDesign) record.signature = renderMailboxSignature(record).text;
+  return record;
 }
 
 /** Credentials are server-only; connection verification never grants campaign authorization. */
@@ -447,7 +457,7 @@ export class OutreachMailboxes {
           )
             throw fail();
           if (
-            credential !== undefined &&
+            credential != null &&
             (typeof credential !== 'string' ||
               credential.length > 64000 ||
               ![DPAPI, AES].includes(credentialProtection))

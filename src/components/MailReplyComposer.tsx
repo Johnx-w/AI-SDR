@@ -99,11 +99,11 @@ export function MailReplyComposer({
   const seed = useCallback(
     (target = initialTarget): MailDraftContent => ({
       replyToMessageId: target,
-      bodyHtml: `<p><br></p>${replyContext?.signature ? `<p><br></p><div>${plainTextHtml(replyContext.signature)}</div>` : ''}`,
+      bodyHtml: `<p><br></p>${replyContext?.signature ? `<p><br></p><div>${replyContext.signatureHtml || plainTextHtml(replyContext.signature)}</div>` : ''}`,
       bodyText: replyContext?.signature ? `\n\n${replyContext.signature}` : '',
       attachments: [],
     }),
-    [initialTarget, replyContext?.signature],
+    [initialTarget, replyContext?.signature, replyContext?.signatureHtml],
   );
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
