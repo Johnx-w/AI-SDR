@@ -76,6 +76,34 @@ export class AcquisitionStore {
       .get(this.scope, recordId);
     return row ? JSON.parse(row.data) : {};
   }
+  researchEmailEvidence(recordId, website) {
+    const domain = domainKey(website);
+    if (!recordId || !domain) return [];
+    const operation = this.db
+      .prepare(
+        `SELECT data FROM acquisition_operations
+         WHERE json_extract(data,'$.scope')=?
+           AND json_extract(data,'$.recordId')=?
+           AND json_extract(data,'$.state')='completed'
+         ORDER BY COALESCE(json_extract(data,'$.recordVerifiedAt'),
+           json_extract(data,'$.updatedAt'),json_extract(data,'$.createdAt'),'') DESC,id DESC`,
+      )
+      .all(this.scope, recordId)
+      .map((row) => JSON.parse(row.data))
+      .find((item) => domainKey(item.source_url) === domain);
+    // The latest completed matching operation is authoritative. Missing evidence
+    // must stay missing; do not resurrect contacts from an older research pass.
+    return (Array.isArray(operation?.evidence?.contacts) ? operation.evidence.contacts : []).filter(
+      (contact) =>
+        contact?.kind === 'email' &&
+        typeof contact.value === 'string' &&
+        typeof contact.source_url === 'string' &&
+        typeof contact.quote === 'string' &&
+        contact.value.trim() &&
+        contact.source_url.trim() &&
+        contact.quote.trim(),
+    );
+  }
   saveContactCorrections(recordId, corrections) {
     this.db
       .prepare(

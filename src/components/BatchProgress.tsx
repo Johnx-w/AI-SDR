@@ -70,6 +70,92 @@ function CargoDetails({ buyer }: { buyer: CustomsBuyerEvidence }) {
     </details>
   );
 }
+function DetailRows({ rows }: { rows: AcquisitionJob['rows'] }) {
+  return (
+    <table className="lead-table">
+      <thead>
+        <tr>
+          <th>企业 / 官网</th>
+          <th>结果</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row, index) => (
+          <tr key={`${row.domain}-${index}`}>
+            <td>
+              {safeUrl(row.source_url) ? (
+                <a href={safeUrl(row.source_url)} target="_blank" rel="noopener noreferrer">
+                  {row.name || row.domain || row.customs_evidence?.name || '待核实企业'}
+                </a>
+              ) : (
+                <span>{row.name || row.domain || row.customs_evidence?.name || '待核实企业'}</span>
+              )}
+              {!safeUrl(row.source_url) && row.customs_evidence && (
+                <small>尚未关联可核实官网</small>
+              )}
+              {row.reason && <small>{row.reason}</small>}
+              {row.qualification_retraction ? (
+                <small>交接已撤销：{row.qualification_retraction.reason}</small>
+              ) : (
+                row.handoff && (
+                  <small>
+                    {row.handoff.contact_verified
+                      ? '已找到有来源的公司级联系入口'
+                      : '本轮未找到官网公司级联系入口，可后续补充'}
+                  </small>
+                )
+              )}
+              {row.search_query && <small>发现词：{row.search_query}</small>}
+              {row.handoff?.contacts?.map(
+                (contact, i) =>
+                  safeUrl(contact.source_url) && (
+                    <small key={`handoff-contact-${i}`}>
+                      <a
+                        href={safeUrl(contact.source_url)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        {contact.kind === 'form'
+                          ? '业务联系表单'
+                          : `${contact.kind === 'email' ? '邮箱' : '电话'}：${contact.value}`}
+                      </a>
+                    </small>
+                  ),
+              )}
+              {row.customs_evidence && <CargoDetails buyer={row.customs_evidence} />}
+              {!!row.requirementChecks?.length && (
+                <small>
+                  必需条件：
+                  {row.requirementChecks
+                    .map(
+                      (check) =>
+                        `${check.condition}（${
+                          check.verdict === 'matched'
+                            ? '符合'
+                            : check.verdict === 'not_matched'
+                              ? '不符合'
+                              : '待核实'
+                        }）`,
+                    )
+                    .join('；')}
+                </small>
+              )}
+            </td>
+            <td>
+              {resultNames[row.result] || row.result}
+              {row.assessment && (
+                <small>
+                  {row.assessment.grade || row.assessment.status || '未定级'} · 已支持
+                  {row.assessment.score}分
+                </small>
+              )}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
 export function BatchProgress({
   job,
   control,
@@ -238,95 +324,40 @@ export function BatchProgress({
           </p>
         </details>
       )}
-      {job.rows.length > 0 && (
-        <details className="batch-details">
-          <summary>查看客户明细（{job.rows.length}）</summary>
-          <table className="lead-table">
-            <thead>
-              <tr>
-                <th>企业 / 官网</th>
-                <th>结果</th>
-              </tr>
-            </thead>
-            <tbody>
-              {job.rows.map((row, index) => (
-                <tr key={`${row.domain}-${index}`}>
-                  <td>
-                    {safeUrl(row.source_url) ? (
-                      <a href={safeUrl(row.source_url)} target="_blank" rel="noopener noreferrer">
-                        {row.name || row.domain || row.customs_evidence?.name || '待核实企业'}
-                      </a>
-                    ) : (
-                      <span>
-                        {row.name || row.domain || row.customs_evidence?.name || '待核实企业'}
-                      </span>
-                    )}
-                    {!safeUrl(row.source_url) && row.customs_evidence && (
-                      <small>尚未关联可核实官网</small>
-                    )}
-                    {row.reason && <small>{row.reason}</small>}
-                    {row.qualification_retraction ? (
-                      <small>交接已撤销：{row.qualification_retraction.reason}</small>
-                    ) : (
-                      row.handoff && (
-                        <small>
-                          {row.handoff.contact_verified
-                            ? '已找到有来源的公司级联系入口'
-                            : '本轮未找到官网公司级联系入口，可后续补充'}
-                        </small>
-                      )
-                    )}
-                    {row.search_query && <small>发现词：{row.search_query}</small>}
-                    {row.handoff?.contacts?.map(
-                      (contact, i) =>
-                        safeUrl(contact.source_url) && (
-                          <small key={`handoff-contact-${i}`}>
-                            <a
-                              href={safeUrl(contact.source_url)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                            >
-                              {contact.kind === 'form'
-                                ? '业务联系表单'
-                                : `${contact.kind === 'email' ? '邮箱' : '电话'}：${contact.value}`}
-                            </a>
-                          </small>
-                        ),
-                    )}
-                    {row.customs_evidence && <CargoDetails buyer={row.customs_evidence} />}
-                    {!!row.requirementChecks?.length && (
-                      <small>
-                        必需条件：
-                        {row.requirementChecks
-                          .map(
-                            (check) =>
-                              `${check.condition}（${
-                                check.verdict === 'matched'
-                                  ? '符合'
-                                  : check.verdict === 'not_matched'
-                                    ? '不符合'
-                                    : '待核实'
-                              }）`,
-                          )
-                          .join('；')}
-                      </small>
-                    )}
-                  </td>
-                  <td>
-                    {resultNames[row.result] || row.result}
-                    {row.assessment && (
-                      <small>
-                        {row.assessment.grade || row.assessment.status || '未定级'} · 已支持
-                        {row.assessment.score}分
-                      </small>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </details>
-      )}
+      {(() => {
+        const insertedRows = job.rows.filter((row) => row.result === 'inserted');
+        const otherRows = job.rows.filter((row) => row.result !== 'inserted');
+        return (
+          <>
+            {insertedRows.length > 0 && (
+              <details className="batch-details batch-result-details" open>
+                <summary>本轮新增（{insertedRows.length}）</summary>
+                <div
+                  className="batch-result-list"
+                  role="region"
+                  aria-label="本轮新增结果列表"
+                  tabIndex={0}
+                >
+                  <DetailRows rows={insertedRows} />
+                </div>
+              </details>
+            )}
+            {otherRows.length > 0 && (
+              <details className="batch-details batch-result-details">
+                <summary>其他处理结果（{otherRows.length}）</summary>
+                <div
+                  className="batch-result-list"
+                  role="region"
+                  aria-label="其他处理结果列表"
+                  tabIndex={0}
+                >
+                  <DetailRows rows={otherRows} />
+                </div>
+              </details>
+            )}
+          </>
+        );
+      })()}
     </section>
   );
 }

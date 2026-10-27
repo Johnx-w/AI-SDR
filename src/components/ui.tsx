@@ -1,21 +1,9 @@
 import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { ArrowUpRight, X } from 'lucide-react';
-import type { Lead } from '../domain/types';
 
 export function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: string }) {
   return <span className={`badge ${tone}`}>{children}</span>;
-}
-export function Avatar({
-  lead,
-  small = false,
-}: {
-  lead: Pick<Lead, 'initials' | 'color'>;
-  small?: boolean;
-}) {
-  return (
-    <span className={`company-avatar ${lead.color} ${small ? 'small' : ''}`}>{lead.initials}</span>
-  );
 }
 export function SectionTitle({
   title,

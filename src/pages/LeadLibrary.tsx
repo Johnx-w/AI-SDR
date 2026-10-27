@@ -21,7 +21,7 @@ import { CustomerBusinessSummary } from '../components/CustomerBusinessSummary';
 import { AssessmentPanel, CustomsEvidence } from '../components/AssessmentPanel';
 import { leadLibrary, startLeadLibraryPolling } from '../services/leadLibrary';
 import type { LeadList, Prospect } from '../services/leadLibrary';
-import { exportCsv } from '../services/workspace';
+import { exportCsv } from '../services/csv';
 import { formatBeijingText, formatBeijingTime } from '../domain/date-time.mjs';
 import './LeadLibrary.css';
 
@@ -397,7 +397,7 @@ export function LeadLibrary() {
                   >
                     <td>
                       <div className="company-cell">
-                        <CompanyLogo id={l.id} name={l.name} />
+                        <CompanyLogo id={l.id} name={l.name} website={l.website} />
                         <div>
                           <strong>{l.name}</strong>
                           <span className="subtext">{l.domain || '域名待核实'}</span>
@@ -559,7 +559,12 @@ export function LeadLibrary() {
                   </div>
                 )}
                 <div className="prospect-title">
-                  <CompanyLogo key={viewed.id} id={viewed.id} name={viewed.name} />
+                  <CompanyLogo
+                    key={viewed.id}
+                    id={viewed.id}
+                    name={viewed.name}
+                    website={viewed.website}
+                  />
                   <div>
                     <h2>{viewed.name}</h2>
                     <p>

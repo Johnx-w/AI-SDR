@@ -484,7 +484,7 @@ export function Automation() {
         ))}
       </nav>
       {tab === 'schedules' ? (
-        <ScheduledAcquisition embedded />
+        <ScheduledAcquisition />
       ) : tab === 'runs' ? (
         <ExecutionRecords selectedId={params.get('job') || undefined} />
       ) : (

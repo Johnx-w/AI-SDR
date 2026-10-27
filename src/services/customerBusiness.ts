@@ -41,7 +41,7 @@ export interface BusinessMessage extends BusinessRecord {
   to: string;
   account: string;
   occurredAt: string;
-  deliveryStatus: 'received' | 'sent' | 'failed' | 'unknown' | 'recorded';
+  deliveryStatus: 'received' | 'sent' | 'accepted' | 'failed' | 'unknown' | 'recorded';
   classification: 'normal' | 'auto_reply' | 'unsubscribe' | 'hard_bounce' | 'complaint';
   externalId: string;
   attachments: string[];

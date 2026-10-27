@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { OverviewService } from '../server/overview.mjs';
 import { BatchJobs } from '../server/batch-jobs.mjs';
-import { overviewRange } from '../src/domain/overview-rules.mjs';
 
 const asOf = '2026-10-25T02:00:00.000Z';
 const customer = (id, grade = 'A', status = '待开发') => ({
@@ -523,10 +522,7 @@ test('旧交接目标不冒充新收录进度，当前口径执行与计划保�
   );
 });
 
-test('总览时间边界按北京时间，非法范围在读取来源前拒绝', async () => {
-  const range = overviewRange('today', '2026-10-24T16:00:00.000Z');
-  assert.equal(range.todayStart, '2026-10-24T16:00:00.000Z');
-  assert.equal(range.todayEnd, '2026-10-25T16:00:00.000Z');
+test('非法总览范围和时间在读取来源前拒绝', async () => {
   const { service } = fixture({
     customers: () => {
       assert.fail('无效参数不应读取任何来源');

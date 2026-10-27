@@ -1,3 +1,3 @@
 export { Dashboard } from './Dashboard';
-export { RealCommunication as Communication } from './RealCommunication';
+export { OutreachCommunication as Communication } from './OutreachCommunication';
 export { ProductKnowledgePage as Materials } from './ProductKnowledge';

@@ -4,16 +4,9 @@
 
 ## 业务数据
 
-演示工作台通过 `useWorkspace()` 访问状态，由 `WorkspaceRepository` 承担读写。默认 `MockWorkspaceRepository` 使用 `shadeflow:workspace:v3` 浏览器存储键。客户库只使用 `/api/v1/leads/real` 的真实数据，不回退演示客户。业务模型统一放在 `src/domain/types.ts`，样本与页面分离。
+网页通过各自的真实服务端接口读写业务数据；`useWorkspace()` 仅负责界面通知，不再加载或保存浏览器演示工作区。客户库读取 `/api/v1/leads/real`，CSV 导出使用独立工具。旧演示收件箱、触达计划、报表及未启用的整库 HTTP 仓储已移除；`/campaigns` 跳转沟通中心计划，`/reports` 跳转真实总览。
 
-沟通中心不经过 `WorkspaceRepository`，而是直接读取本机 `/api/v1/mail/*` 服务和独立 SQLite 邮件试点库。当前服务端硬性限定发件地址 `SL01@shutterblindssolutions.com` 与测试收件地址 `SL01@honeybadgerblinds.com`，只处理接通后带测试标记的新线程；它不是通用客户收件箱，也不导入历史邮件。
-
-`HttpWorkspaceRepository` 已预留以下契约，但业务后端尚未实现，当前不启用：
-
-- `GET /api/v1/workspace` → `Workspace`
-- `PUT /api/v1/workspace`，body 为完整 `Workspace` → 2xx
-
-正式接入建议拆成 customers / contacts / evidence / campaigns / messages / tasks 的资源接口，数据库做唯一性、权限和版本控制，而不是长期整库 PUT。替换仓储与状态管理后不必重写页面布局。
+沟通中心读取本机 `/api/v1/outreach/*` 与 SQLite 触达库。首封依据客户经营证据、具体产品及有效官网覆盖分配邮箱；邮件会话通过手动只读 IMAP 同步并按账号持久化。打开页面仅读缓存，人工回复由用户逐封发送并保存独立草稿及幂等台账；首封开发仍沿用独立批准和队列。旧固定双邮箱试点接口和后台轮询已退役，详见 [沟通中心](outreach-first-touch.md)。
 
 ## 已实现的 n8n 服务端接口
 
@@ -45,28 +38,27 @@
 
 `completed` 仅指成功收到 JSON，不能单凭此字段推断业务入库成功。错误状态：400 无效输入、403 不允许的来源、409 幂等冲突或结果不确定、413 请求体过大、415 内容类型错误、429 并发限制、502 上游错误、503 未配置、504 未确认远端结果。对错误不自动降级成 mock。
 
-## 已实现的受控邮箱试点接口
+## 邮箱与邮件会话接口
 
-所有 `/api/v1/mail/*` 请求均须在 `X-Mail-Operator-Token` 提供本机沟通中心操作者口令；服务端要求该口令至少 32 字符。网页只把口令保存在当前浏览器会话，它与邮箱客户端安全密码分离。
+沟通中心可直接访问，所有 `/api/v1/outreach/*` 请求保留本机来源校验。邮箱凭证加密保存于后端，不写入浏览器存储。
 
-| 方法 | 路径                                   | 行为                                                                 |
-| ---- | -------------------------------------- | -------------------------------------------------------------------- |
-| GET  | `/api/v1/mail/status`                  | 返回仅测试模式、固定邮箱配置、IMAP/SMTP 与 Agent 暂停状态            |
-| GET  | `/api/v1/mail/conversations`           | 列出本机已收录的固定测试线程，不返回历史或真实客户收件箱             |
-| GET  | `/api/v1/mail/conversations/:id`       | 读取测试线程、消息和待审草稿                                         |
-| PUT  | `/api/v1/mail/conversations/:id/draft` | 按修订号保存人工回复草稿，不发送                                     |
-| POST | `/api/v1/mail/test-send`               | 经明确确认和幂等键向固定公司测试地址发送一次固定非营销技术测试信     |
-| POST | `/api/v1/mail/sync`                    | 经明确确认后同步基线之后、地址和测试线程标记均匹配的新邮件           |
-| POST | `/api/v1/mail/conversations/:id/reply` | 经明确确认、草稿修订核对和幂等键后，仅向固定测试地址执行真实测试回信 |
+| 方法           | 路径                                       | 行为                                            |
+| -------------- | ------------------------------------------ | ----------------------------------------------- |
+| GET            | `/api/v1/outreach/conversations`           | 读取本地会话，支持 `mailboxId`、`q`、`unread=1` |
+| GET            | `/api/v1/outreach/conversations/:id`       | 查看原始收发人、HTML/纯文本正文、草稿与实际状态 |
+| POST           | `/api/v1/outreach/conversations/sync`      | 按 `mailboxId` 手动只读同步最近邮件及后续增量   |
+| POST           | `/api/v1/outreach/conversations/:id/read`  | `unread:false` 仅修改本工作台已读标记           |
+| GET/PUT/DELETE | `/api/v1/outreach/conversations/:id/draft` | 读取、按版本保存或丢弃服务器回复草稿            |
+| POST           | `/api/v1/outreach/conversations/:id/reply` | 按已保存草稿及幂等操作编号发送单人回复          |
 
-当前代码具备上述本机固定双公司地址测试能力，但尚未取得并配置新生成的本机邮箱客户端安全密码与操作者口令，因此尚未完成真实邮箱联通。真实产品资料仍缺失，主动开发规则会输出 `suppress`；真实潜客发信、自动回信与自动追信均保持关闭。邮箱连接成功只证明技术收发能力，不构成发信授权。
+收件箱与可识别已发件箱的游标和消息在同一事务提交，失败保留原位置。消息编号和引用仅在同一邮箱内归并会话；同主题不直接合并，账号身份变化后隔离旧缓存。系统发送记录中的服务商接受与邮箱中的实际邮件状态分开显示。此入口不回信、不生成采购需求，也不修改原邮箱标记。旧 `/api/v1/mail/*` 返回 404；公司内部试发继续由多邮箱触达服务承担。
 
 ## 后续开发顺序
 
 1. 完成 n8n Webhook 与结果汇总的真实联调，确定稳定输出 schema。
 2. 服务端加入数据库、认证与持久化任务模型，将同步请求改为可恢复的异步任务。
 3. 独立实现真实客户 repository，给每个字段保留来源证据；真实结果转换时进行去重及人工复核。
-4. 在现有固定双公司地址邮件试点之外，另行审核产品资料、触达计划、发件身份与抑制状态后，再实现真实客户邮箱适配和授权范围；发送前审核、退订与停止跟进规则必须由服务端执行。WhatsApp 仍需独立实现服务端适配器。
+4. 在首封触达服务上继续补齐真实客户的公开联系来源和产品资料；回复、追信与 WhatsApp 适配分别建设。现有服务端发送前复核、停止联系和企业去重规则继续生效。
 5. 部署前配置 HTTPS、身份认证、权限、配额、速率限制、审计日志和数据备份；本机版本不直接绑定公网。
 
 ## 实现取舍
@@ -78,7 +70,8 @@
 - `status` 核对批量任务的企业操作；`recoverRun` 核对结果不明的单次运行。n8n 旧单次协议不支持恢复查询，因此返回未确认，不能套用批量协议或重放原请求。
 - `server/batch-jobs.mjs` 只负责批量任务调度、预算、持久化和读回计数，通过注入的引擎方法执行工作。`search-plan.mjs` 负责搜索计划，`website-identity.mjs` 负责域名身份；单次引擎和飞书客户端不依赖批量调度器。
 - 客户研究、准入、字段合并和联系方式规则仍是 n8n 与 native 共用的业务函数。n8n 沙箱通过生成代码加载这些函数，不能直接套用 Node.js 模块导入方式。
-- `server/mail-service.mjs` 负责固定测试会话、草稿修订、幂等发送状态和本机 SQLite 持久化；`server/mail-transport.mjs` 负责阿里企业邮箱的 IMAP/SMTP 传输，并在传输层再次限制固定地址和测试线程。HTTP 层还要求独立本机操作者口令，任何一层都不能把技术连接解释为真实潜客发信授权。
+- `server/mail-conversations.mjs` 管理会话、原文、HTML、已读状态与账号同步位置；`server/mailbox-reader.mjs` 负责只读 IMAP、有界正文及 CID 图片读取。`server/mail-replies.mjs` 管理版本化草稿与独立幂等发送台账，`server/mail-content.mjs` 规范富文本和附件，`server/mail-conversation-business.mjs` 登记明确匹配的客户沟通事实。收件与发送使用同一加密账号配置，副本归档失败不能触发 SMTP 重发。人工回复不套用开发日额度、营销时段或首封审批，账号暂停和连接校验仍适用。
+- `server/outreach-service.mjs` 管理首封计划、适用邮箱分配、企业占用和队列；`outreach-content.mjs` 按客户证据匹配具体产品及有效官网覆盖并生成草稿；`outreach-mailboxes.mjs` 保护凭证并固定实际发件地址；`outreach-business.mjs` 仅将 SMTP 已接受的真实首封记录到客户业务库。SMTP 已接受与实际送达分别记录。
 
 本次检查的取舍与后续维护建议见 [可维护性检查](maintenance-review.md)。
 

@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarDays, Pause, Play, Plus, RefreshCw, X } from 'lucide-react';
-import { PageHeading } from '../components/PageHeading';
+import { CalendarDays, Pause, Play, X } from 'lucide-react';
 import { Badge, Empty } from '../components/ui';
 import { BatchProgress } from '../components/BatchProgress';
 import { acquisitionApi } from '../services/acquisition';
@@ -28,7 +27,7 @@ const time = (value: string | null) =>
       })
     : '—';
 
-export function ScheduledAcquisition({ embedded = false }: { embedded?: boolean }) {
+export function ScheduledAcquisition() {
   const [plans, setPlans] = useState<AcquisitionSchedule[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState('');
@@ -84,25 +83,12 @@ export function ScheduledAcquisition({ embedded = false }: { embedded?: boolean 
   );
   return (
     <>
-      {embedded ? (
-        <div className="acq-list-toolbar">
-          <p className="muted">管理计划与查看最近一轮执行结果</p>
-          <Link className="btn primary" to="/automation?mode=scheduled">
-            新建定时计划
-          </Link>
-        </div>
-      ) : (
-        <PageHeading eyebrow="ACQUISITION SCHEDULES" title="定时计划">
-          <button className="btn secondary" disabled={loading} onClick={() => void load()}>
-            <RefreshCw size={15} />
-            刷新
-          </button>
-          <Link className="btn primary" to="/automation?mode=scheduled">
-            <Plus size={16} />
-            新建定时任务
-          </Link>
-        </PageHeading>
-      )}
+      <div className="acq-list-toolbar">
+        <p className="muted">管理计划与查看最近一轮执行结果</p>
+        <Link className="btn primary" to="/automation?mode=scheduled">
+          新建定时计划
+        </Link>
+      </div>
       <p className="muted schedule-help">
         按北京时间执行，每个时间点各运行一次；上一轮未完成时按时间顺序排队。本机后端服务需保持启动。暂停或关闭计划会停止后续触发，本轮在当前企业处理结束后停止。
       </p>

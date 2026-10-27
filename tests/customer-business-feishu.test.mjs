@@ -301,7 +301,7 @@ test('创建表结果未知时写日志并阻止盲目重复创建', async () =>
   assert.equal(f.writes.length, count);
 });
 
-test('信息检查发现关联目标或多选配置错误时不允许同步', async () => {
+test('信息检查发现关联目标错误时不允许同步', async () => {
   const f = fixture();
   f.fields.get('t1').find((field) => field.field_name === '来源沟通').property.table_id = 't5';
   const result = await f.bridge.info();
@@ -396,7 +396,7 @@ test('插入已提交但响应丢失时只读回核对，稳定编号不产生�
   );
 });
 
-test('重启后持久化未知写入日志阻止再次插入，内存模式不生成文件', async () => {
+test('重启后持久化未知写入日志阻止再次插入', async () => {
   const root = mkdtempSync(join(tmpdir(), 'business-mirror-'));
   const path = join(root, 'journal.json');
   try {

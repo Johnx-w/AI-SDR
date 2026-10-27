@@ -10,7 +10,7 @@ import {
   nextOccurrence,
 } from '../server/acquisition-schedules.mjs';
 import { BatchJobs } from '../server/batch-jobs.mjs';
-import { createApp } from '../server/app.mjs';
+import { withApp } from './helpers/http.mjs';
 
 const input = {
   country: 'United States',
@@ -181,61 +181,59 @@ test('API 未配置时计划等待；暂停后恢复跳过暂停期间时间点�
 });
 
 test('HTTP 保存连接即时生效；计划接口校验和幂等生效，未知单次结果阻止更换连接', async () => {
-  const app = createApp({
-    env: nativeEnv,
-    fetchImpl: async () => {
-      throw new Error('Unexpected external request');
-    },
-    nativeImpl: {
-      run: async () => {
-        throw Object.assign(new Error('结果待核对'), { status: 409 });
+  await withApp(
+    {
+      env: nativeEnv,
+      fetchImpl: async () => {
+        throw new Error('Unexpected external request');
       },
-      close() {},
+      nativeImpl: {
+        run: async () => {
+          throw Object.assign(new Error('结果待核对'), { status: 409 });
+        },
+        close() {},
+      },
     },
-  });
-  await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
-  const base = `http://127.0.0.1:${app.address().port}`;
-  const write = (path, body, method = 'POST', key = 'http-schedules-01') =>
-    fetch(base + path, {
-      method,
-      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
-      body: JSON.stringify(body),
-    });
-  try {
-    const saved = await write(
-      '/api/v1/connections',
-      { values: { DEEPSEEK_MODEL: 'fixture-model' } },
-      'PUT',
-    );
-    assert.equal(saved.status, 200);
-    assert.equal(
-      (await saved.json()).fields.find((f) => f.key === 'DEEPSEEK_MODEL').value,
-      'fixture-model',
-    );
-    const body = { name: '接口计划', input, timing };
-    const created = await write('/api/v1/acquisition/schedules', body);
-    assert.equal(created.status, 201);
-    const plan = await created.json();
-    const repeat = await write('/api/v1/integrations/n8n/schedules', body);
-    assert.equal((await repeat.json()).id, plan.id);
-    assert.equal(
-      (await write('/api/v1/acquisition/schedules', { ...body, name: '冲突计划' })).status,
-      409,
-    );
-    assert.equal(
-      (
-        await write(
-          '/api/v1/acquisition/schedules',
-          { ...body, input: { ...input, target_count: 0 } },
-          'POST',
-          'invalid-count-01',
-        )
-      ).status,
-      400,
-    );
-    assert.equal((await write('/api/v1/acquisition/runs', input)).status, 409);
-    assert.equal((await write('/api/v1/connections', { values: {} }, 'PUT')).status, 409);
-  } finally {
-    await new Promise((resolve) => app.close(resolve));
-  }
+    async (base) => {
+      const write = (path, body, method = 'POST', key = 'http-schedules-01') =>
+        fetch(base + path, {
+          method,
+          headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+          body: JSON.stringify(body),
+        });
+      const saved = await write(
+        '/api/v1/connections',
+        { values: { DEEPSEEK_MODEL: 'fixture-model' } },
+        'PUT',
+      );
+      assert.equal(saved.status, 200);
+      assert.equal(
+        (await saved.json()).fields.find((f) => f.key === 'DEEPSEEK_MODEL').value,
+        'fixture-model',
+      );
+      const body = { name: '接口计划', input, timing };
+      const created = await write('/api/v1/acquisition/schedules', body);
+      assert.equal(created.status, 201);
+      const plan = await created.json();
+      const repeat = await write('/api/v1/integrations/n8n/schedules', body);
+      assert.equal((await repeat.json()).id, plan.id);
+      assert.equal(
+        (await write('/api/v1/acquisition/schedules', { ...body, name: '冲突计划' })).status,
+        409,
+      );
+      assert.equal(
+        (
+          await write(
+            '/api/v1/acquisition/schedules',
+            { ...body, input: { ...input, target_count: 0 } },
+            'POST',
+            'invalid-count-01',
+          )
+        ).status,
+        400,
+      );
+      assert.equal((await write('/api/v1/acquisition/runs', input)).status, 409);
+      assert.equal((await write('/api/v1/connections', { values: {} }, 'PUT')).status, 409);
+    },
+  );
 });

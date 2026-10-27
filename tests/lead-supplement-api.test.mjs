@@ -168,6 +168,7 @@ function fixture({ gradeOnly = false, potentialInput = false } = {}) {
       if (!engineClosed) engine.close();
       business.close();
       rmSync(folder, { recursive: true, force: true });
+      assert.deepEqual(externalCalls, []);
     },
     fetchImpl: async (url, options = {}) => {
       const path = new URL(url).pathname;
@@ -254,7 +255,6 @@ test('补齐R和V按规则55→85→95，缺项逐项清除，人工证据与官
     assert.deepEqual(refreshed.assessment.dimensions, beforeRestart.assessment.dimensions);
     assert.equal(refreshed.status, beforeRestart.status);
     assert.equal(f.writes(), 2);
-    assert.deepEqual(f.externalCalls, []);
   } finally {
     f.dispose();
   }
@@ -276,7 +276,6 @@ test('幂等重试不重复写入，变更相同编号内容、旧版本及错�
     );
     assert.equal(f.writes(), 1);
     assert.equal(f.lead().confirmations.length, 1);
-    assert.deepEqual(f.externalCalls, []);
   } finally {
     f.dispose();
   }
@@ -330,7 +329,6 @@ test('人工确认后官网研究失败沿用此前完整事实和人工依据�
       false,
     );
     assert.equal(f.engine.store.get(item.operation_id).state, 'completed');
-    assert.deepEqual(f.externalCalls, []);
     f.restart();
     assert.equal(f.lead().score, 85);
     assert.equal(f.lead().confirmations[0].id, confirmed.confirmation.id);
@@ -366,7 +364,6 @@ test('远端提交后响应丢失通过读回确认；未提交时不激活事�
       const before = f.writes();
       await f.save(input);
       assert.equal(f.writes(), before);
-      assert.deepEqual(f.externalCalls, []);
     } finally {
       f.dispose();
     }
@@ -392,7 +389,6 @@ test('仅初评结果一列的精简T2仍能补资料，资料历史按客户表
     } finally {
       foreign.close();
     }
-    assert.deepEqual(f.externalCalls, []);
   } finally {
     f.dispose();
   }
@@ -428,7 +424,6 @@ test('待核对保存遇到远端字段变化或新评估时停止覆盖，保�
       assert.equal(result.lead.score, 85);
       assert.equal(result.lead.confirmations.length, 1);
       assert.equal(f.writes(), 2);
-      assert.deepEqual(f.externalCalls, []);
     } finally {
       f.dispose();
     }
@@ -501,7 +496,6 @@ test('法人和实际采购确认更新档案，采购依据必须来自同客�
     f.restart();
     assert.equal(f.lead().companyIdentity.legal_name, 'Buyer Blinds LLC');
     assert.equal(f.lead().confirmations.length, 2);
-    assert.deepEqual(f.externalCalls, []);
   } finally {
     f.dispose();
   }
@@ -558,7 +552,6 @@ test('人工采购确认只清除对应材料产品的采购缺项，普通备�
       'confirmed',
     );
     assert.equal(f.record().fields.公开采购需求, undefined);
-    assert.deepEqual(f.externalCalls, []);
   } finally {
     f.dispose();
   }
@@ -585,7 +578,6 @@ test('采购确认接受真实电话纪要，保留引用原文与沟通关联',
     assert.equal(result.confirmation.sourceMessageId, phone.id);
     assert.equal(result.confirmation.evidence, '客户确认需要200套卷帘');
     assert.equal(result.lead.score, 55);
-    assert.deepEqual(f.externalCalls, []);
   } finally {
     f.dispose();
   }
@@ -619,7 +611,6 @@ test('实际HTTP补充入口验证保存编号和跨站请求，保存及刷新�
     assert.equal(refreshed.leads[0].score, 85);
     assert.equal(refreshed.leads[0].confirmations[0].confirmedBy, '张工');
     assert.equal(f.writes(), 1);
-    assert.deepEqual(f.externalCalls, []);
   } finally {
     await new Promise((resolve) => app.close(resolve));
     f.dispose({ engineClosed: true });
@@ -651,7 +642,6 @@ test('HTTP可恢复原未确认表单与保存编号，核对成功后不再提�
     assert.equal((await saved.json()).lead.score, 85);
     assert.deepEqual(await (await fetch(url)).json(), { pending: null });
     assert.equal(f.writes(), 2);
-    assert.deepEqual(f.externalCalls, []);
   } finally {
     await new Promise((resolve) => app.close(resolve));
     f.dispose({ engineClosed: true });

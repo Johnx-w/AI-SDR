@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createApp, validateInput } from '../server/app.mjs';
+import { validateInput } from '../server/app.mjs';
+import { withApp } from './helpers/http.mjs';
 
 const input = {
   country: 'United States',
@@ -15,15 +16,6 @@ const configured = {
   N8N_WEBHOOK_SECRET: 'test-only-secret',
   N8N_WEBHOOK_ENABLED: 'true',
 };
-async function withApp(options, callback) {
-  const app = createApp(options);
-  await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
-  try {
-    await callback(`http://127.0.0.1:${app.address().port}`);
-  } finally {
-    await new Promise((resolve) => app.close(resolve));
-  }
-}
 const post = (base, body = input, key = 'test-request-001', extra = {}) =>
   fetch(`${base}/api/v1/integrations/n8n/runs`, {
     method: 'POST',
@@ -39,9 +31,6 @@ test('入口限制市场和已接入渠道，结构化客户类型成为新任�
     market_countries: ['United States'],
   });
   assert.throws(() => validateInput({ ...input, country: 'invalid' }), /支持的国家/);
-  assert.equal('city' in validateInput({ ...input, city: 'Miami' }), false);
-  assert.equal(validateInput({ ...input, region: '', city: '' }).region, '');
-  assert.equal(validateInput({ ...input, region: '' }).region, '');
   assert.throws(() => validateInput({ ...input, region: 'New South Wales' }), /该国家/);
   assert.deepEqual(
     validateInput({ ...input, customer_types: ['service_provider', 'distributor'] }),

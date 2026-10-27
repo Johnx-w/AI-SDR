@@ -44,7 +44,10 @@ function fixture(pages, options = {}) {
   return { discovery, calls };
 }
 
-test('North American plan covers six product packs; HS is an independent lane', () => {
+test('North American plan covers six product packs without expanding source markets; HS is an independent lane', () => {
+  const broad = customsSearchPlan({ country: 'Canada', product_scope: 'all' });
+  assert.equal(broad.length, 6);
+  assert.ok(broad.every((p) => p.country === 'Canada' && p.source_markets.join() === 'US'));
   const plan = customsSearchPlan({
     country: 'Canada',
     product_scope: 'all',
@@ -61,6 +64,10 @@ test('North American plan covers six product packs; HS is an independent lane', 
       'outdoor_shading',
       'samples',
     ],
+  );
+  assert.deepEqual(
+    broad.map((p) => p.family),
+    [...new Set(plan.map((p) => p.family))],
   );
   assert.ok(plan.every((p) => p.products.length === 0 || !p.hs_codes));
   assert.ok(plan.every((p) => p.source_markets[0] === 'US'));

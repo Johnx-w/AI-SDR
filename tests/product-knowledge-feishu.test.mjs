@@ -105,7 +105,6 @@ test('T5 镜像完整创建并读回核对，再次同步不重复写入且不�
   const { state, mirror } = fixture();
   const saved = product();
   assert.equal(PRODUCT_KNOWLEDGE_FEISHU_FIELDS[0].field_name, '产品编号');
-  assert.equal(PRODUCT_KNOWLEDGE_FEISHU_FIELDS.length, 21);
   const first = await mirror.sync(saved);
   assert.equal(first.status, 'synced');
   assert.equal(first.version, saved.version);

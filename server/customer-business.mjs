@@ -93,7 +93,7 @@ const isActualReply = (message) =>
 const actualEmail = (message) =>
   message.channel === 'email' &&
   ((message.direction === 'inbound' && message.deliveryStatus === 'received') ||
-    (message.direction === 'outbound' && message.deliveryStatus === 'sent'));
+    (message.direction === 'outbound' && ['sent', 'accepted'].includes(message.deliveryStatus)));
 
 // This graph records real business activity. It does not fetch mail, send mail,
 // turn acquisition scores into inquiries, or share the technical mailbox pilot.
@@ -409,13 +409,14 @@ export class CustomerBusiness {
     );
     const deliveryStatus = choice(
       value.deliveryStatus,
-      ['received', 'sent', 'failed', 'unknown', 'recorded'],
+      ['received', 'sent', 'accepted', 'failed', 'unknown', 'recorded'],
       undefined,
       '消息实际状态',
     );
     if (
       (direction === 'inbound' && deliveryStatus !== 'received') ||
-      (direction === 'outbound' && !['sent', 'failed', 'unknown'].includes(deliveryStatus)) ||
+      (direction === 'outbound' &&
+        !['sent', 'accepted', 'failed', 'unknown'].includes(deliveryStatus)) ||
       (direction === 'note' && deliveryStatus !== 'recorded')
     )
       throw fail(400, '消息方向与实际收发状态不一致，草稿不能记为已发送');

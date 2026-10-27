@@ -44,7 +44,7 @@ test('结构化产品、角色和条件经过校验，并由同一快照生成�
 
 test('室内和室外成品可以同时全选并提交', () => {
   const finishedProducts = builtinProducts.filter((product) => product.direction === 'finished');
-  assert.equal(finishedProducts.length, 30);
+  assert.ok(finishedProducts.length > 0);
   const target = validateTarget({
     query_mode: 'auto',
     products: finishedProducts,
@@ -55,8 +55,8 @@ test('室内和室外成品可以同时全选并提交', () => {
     audience: 'BC',
     acquisition_channel: 'tavily_web',
   });
-  assert.equal(target.products.length, 30);
-  assert.equal(target.product.split(', ').length, 30);
+  assert.equal(target.products.length, finishedProducts.length);
+  assert.equal(target.product.split(', ').length, finishedProducts.length);
 });
 
 test('产品数量仍受任务上限保护', () => {

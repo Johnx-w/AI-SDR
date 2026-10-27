@@ -239,8 +239,32 @@ export class NativeAcquisition {
       ...data,
       leads: data.leads.map((lead) => {
         lead = applyContactCorrections(lead, this.store.contactCorrections(lead.id));
+        const currentEmails = new Set(
+          String(lead.email || '')
+            .split(/[\s,;，；、]+/u)
+            .filter(Boolean)
+            .map((value) => value.toLowerCase()),
+        );
+        const contactEvidence = [
+          ...new Map(
+            [
+              ...(lead.contactEvidence || []),
+              ...(this.store.researchEmailEvidence?.(lead.id, lead.website) || []),
+            ]
+              .filter(
+                (contact) =>
+                  contact.kind !== 'email' ||
+                  currentEmails.has(String(contact.value).toLowerCase()),
+              )
+              .map((contact) => [
+                JSON.stringify([contact.kind, contact.value, contact.source_url, contact.quote]),
+                contact,
+              ]),
+          ).values(),
+        ];
         lead = {
           ...lead,
+          contactEvidence,
           companyIdentity: this.store.companyIdentity(lead.id, lead.website, lead.name),
           customsEvidence: this.store.customsEvidence(lead.website),
         };

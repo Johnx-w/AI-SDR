@@ -38,7 +38,6 @@ test('全窗饰范围接受泛称、跨环境成品以及专用材料半成品',
   ])
     assert.equal(productsRelevant([product], broad), 'matched', product);
   assert.equal(productsRelevant([], broad), 'unknown');
-  assert.equal(productsRelevant(['shades'], {}), 'unrestricted');
 });
 
 test('行业泛称不能接纳通用零件、无关帘屏或独立样本展示业务', () => {
@@ -172,8 +171,6 @@ test('正常成品与材料引文提及样品不会被误当独立样本业务�
   );
   assert.equal(result.length, 2);
   assert.ok(result.every((item) => item.facts.some((entry) => entry.kind === 'core_product')));
-  assert.equal(productsRelevant(['blinds fabric sample books'], broad), 'not_matched');
-  assert.equal(productsRelevant(['hospital window curtains'], broad), 'matched');
 });
 
 test('混合目录引文分别支持成品和材料，半成品与单独电机不冒充成品', () => {

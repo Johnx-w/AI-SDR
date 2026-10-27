@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createApp, validateInput } from '../server/app.mjs';
+import { validateInput } from '../server/app.mjs';
 import { locationOptions, validateTarget } from '../server/search-target.mjs';
 import { difyResearchBody, searchTargetConfig } from '../server/n8n-search-target.mjs';
 import vm from 'node:vm';
+import { withApp } from './helpers/http.mjs';
 
 const target = {
   country: 'United States',
@@ -48,15 +49,6 @@ test('n8n 配置忽略旧客户类型，手动和 API 搜索均不追加角色�
     assert.equal('city' in config, false);
   }
 });
-async function withApp(options, callback) {
-  const app = createApp(options);
-  await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
-  try {
-    await callback(`http://127.0.0.1:${app.address().port}`);
-  } finally {
-    await new Promise((resolve) => app.close(resolve));
-  }
-}
 test('国家与州联动，接口不再提供城市筛选选项', () => {
   const florida = locationOptions('United States', 'Florida');
   assert.equal(florida.regions.length, 51);

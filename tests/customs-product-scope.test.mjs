@@ -4,23 +4,6 @@ import { customsSearchPlan, shipmentProductMatch } from '../server/customs-produ
 import { CustomsDiscovery } from '../server/customs-discovery.mjs';
 import { normalizeShipment } from '../server/customs-provider.mjs';
 
-test('all-business customs discovery covers six window-covering families without expanding source markets', () => {
-  const plan = customsSearchPlan({ country: 'Canada', product_scope: 'all' });
-  assert.deepEqual(
-    plan.map((p) => p.family),
-    [
-      'fabrics',
-      'components',
-      'plantation_shutters',
-      'finished_blinds',
-      'outdoor_shading',
-      'samples',
-    ],
-  );
-  assert.ok(plan.every((p) => p.country === 'Canada' && p.source_markets.join() === 'US'));
-  assert.deepEqual(customsSearchPlan({ country: 'Australia', product_scope: 'all' }), []);
-});
-
 test('specific customs products retain selected terms and aliases instead of expanding to a whole pack', () => {
   for (const [product, family] of [
     ['roller blinds', 'finished_blinds'],

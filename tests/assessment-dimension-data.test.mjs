@@ -103,7 +103,7 @@ test('维度只输出可检查的事实字段，不把内部元数据混进前�
   const { engine, stored, lead } = fixture();
   stored.dimensions.P.facts[0].internal_analysis = 'internal-only';
   const [entry] = engine.decorateLeads({ leads: [lead] }).leads[0].assessment.dimensions.P.facts;
-  assert.deepEqual(Object.keys(entry), ['kind', 'value', 'quote', 'source_url']);
+  assert.deepEqual(Object.keys(entry).sort(), ['kind', 'quote', 'source_url', 'value']);
   assert.equal(entry.quote, stored.dimensions.P.facts[0].quote);
   assert.equal(entry.source_url, stored.dimensions.P.facts[0].source_url);
 });

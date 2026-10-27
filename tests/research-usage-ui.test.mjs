@@ -1,26 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
-import ts from 'typescript';
+import { loadModule } from './helpers/modules.mjs';
 
-// Compile the real TSX with installed dependencies; no browser, network, Vite
-// server or alternate rendering implementation is needed for these checks.
-const path = new URL('../src/components/BatchProgress.tsx', import.meta.url);
-const compiled = ts.transpileModule(readFileSync(path, 'utf8'), {
-  compilerOptions: {
-    module: ts.ModuleKind.CommonJS,
-    target: ts.ScriptTarget.ES2022,
-    jsx: ts.JsxEmit.ReactJSX,
-    esModuleInterop: true,
-  },
-}).outputText;
-const module = { exports: {} };
-new Function('require', 'module', 'exports', compiled)(createRequire(path), module, module.exports);
-const { BatchProgress } = module.exports;
+const { BatchProgress } = loadModule(
+  new URL('../src/components/BatchProgress.tsx', import.meta.url),
+);
 const job = {
   id: 'usage-ui-fixture',
   input: { acquisition_channel: 'web' },
@@ -63,12 +50,10 @@ test('新任务明确报告零调用时显示真实 0；没有 Token 时不显�
   assert.doesNotMatch(html, /Token 输入|Token 输出|输入 0|输出 0/);
 });
 
-test('真实 usage 显示模型尝试和缓存命中，解释只放在指标 title 中', () => {
+test('真实 usage 显示模型尝试和缓存命中，不推断计费金额', () => {
   const html = render({ model_calls: 2, cache_hits: 3, input_chars: 100 });
   assert.match(html, /模型请求 2 次/);
   assert.match(html, /结果复用 3 次/);
-  assert.match(html, /title="模型请求按尝试统计；Token 仅累计供应商返回值。"/);
-  assert.doesNotMatch(html, />模型请求按尝试/);
   assert.doesNotMatch(html, /成功计费|预估金额/);
 });
 

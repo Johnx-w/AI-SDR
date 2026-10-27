@@ -1,12 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import ts from 'typescript';
 import { summarizeLead } from '../server/lead-library.mjs';
+import { createModuleLoader } from './helpers/modules.mjs';
 
 const buyer = {
   id: 'buyer-1',
@@ -59,7 +56,6 @@ const lead = {
 // Render the real library and its real TSX children with deterministic loaded
 // data; replace only browser routing, initial state and the workspace context.
 function renderLibrary(tab = '客户画像', customers = [lead], options = {}) {
-  const cache = new Map();
   const snapshot = {
     leads: customers.map(summarizeLead),
     syncedAt: '2026-10-25T01:00:00.000Z',
@@ -70,57 +66,32 @@ function renderLibrary(tab = '客户画像', customers = [lead], options = {}) {
     ...options.snapshot,
   };
   const entry = new URL('../src/pages/LeadLibrary.tsx', import.meta.url);
-  function load(path) {
+  const load = createModuleLoader((specifier, path) => {
     const key = path.href;
-    if (cache.has(key)) return cache.get(key).exports;
-    const module = { exports: {} };
-    cache.set(key, module);
-    const normalRequire = createRequire(path);
-    const require = (specifier) => {
-      if (key === entry.href) {
-        if (specifier === 'react')
-          return {
-            ...React,
-            useEffect: () => {},
-            useState: (initial) => [initial === '客户画像' ? tab : initial, () => {}],
-          };
-        if (specifier === 'react-router-dom')
-          return {
-            useSearchParams: () => [new URLSearchParams({ lead: 'lead-1' }), () => {}],
-          };
-        if (specifier === '../app/WorkspaceProvider')
-          return { useWorkspace: () => ({ notify() {} }) };
-        if (specifier === '../services/workspace') return { exportCsv() {} };
-        if (specifier === '../services/leadLibrary')
-          return {
-            leadLibrary: {
-              cachedList: () => snapshot,
-              cachedDetail: (id) =>
-                options.pending ? null : customers.find((item) => item.id === id),
-            },
-          };
-      }
-      if (specifier.endsWith('.css')) return {};
-      if (specifier.startsWith('.')) {
-        for (const extension of ['', '.tsx', '.ts']) {
-          const child = new URL(specifier + extension, path);
-          if (existsSync(child) && /\.tsx?$/.test(child.pathname)) return load(child);
-        }
-      }
-      return normalRequire(specifier);
-    };
-    const compiled = ts.transpileModule(readFileSync(path, 'utf8'), {
-      fileName: fileURLToPath(path),
-      compilerOptions: {
-        module: ts.ModuleKind.CommonJS,
-        target: ts.ScriptTarget.ES2022,
-        jsx: ts.JsxEmit.ReactJSX,
-        esModuleInterop: true,
-      },
-    }).outputText;
-    new Function('require', 'module', 'exports', compiled)(require, module, module.exports);
-    return module.exports;
-  }
+    if (key === entry.href) {
+      if (specifier === 'react')
+        return {
+          ...React,
+          useEffect: () => {},
+          useState: (initial) => [initial === '客户画像' ? tab : initial, () => {}],
+        };
+      if (specifier === 'react-router-dom')
+        return {
+          useSearchParams: () => [new URLSearchParams({ lead: 'lead-1' }), () => {}],
+        };
+      if (specifier === '../app/WorkspaceProvider')
+        return { useWorkspace: () => ({ notify() {} }) };
+      if (specifier === '../services/csv') return { exportCsv() {} };
+      if (specifier === '../services/leadLibrary')
+        return {
+          leadLibrary: {
+            cachedList: () => snapshot,
+            cachedDetail: (id) =>
+              options.pending ? null : customers.find((item) => item.id === id),
+          },
+        };
+    }
+  });
   return renderToStaticMarkup(React.createElement(load(entry).LeadLibrary));
 }
 
@@ -138,7 +109,7 @@ test('后台同步保留精简列表，档案尚未加载时显示独立加载�
     },
   });
   assert.match(html, /Acme Screens/);
-  assert.match(html, /reference-lead-table/);
+  assert.match(html, /<table\b[^>]*>[\s\S]*Acme Screens[\s\S]*?<\/table>/);
   assert.match(html, /海关记录 1 条/);
   assert.match(html, /正在后台同步/);
   assert.match(html, /正在读取客户档案/);
@@ -151,7 +122,7 @@ test('同步失败时保留客户列表，并展示最近同步时间与错误',
       sync: { refreshing: false, stale: true, error: '飞书暂时不可用', revision: 1 },
     },
   });
-  assert.match(html, /reference-lead-table/);
+  assert.match(html, /<table\b[^>]*>[\s\S]*Acme Screens[\s\S]*?<\/table>/);
   assert.match(html, /最近同步/);
   assert.match(html, /保留已有客户：飞书暂时不可用/);
 });

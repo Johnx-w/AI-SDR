@@ -1,8 +1,8 @@
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
-import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
-import { discoverBranding } from './branding.mjs';
+import { createHash, randomUUID } from 'node:crypto';
+import { BrandingCache } from './branding-cache.mjs';
 import { summarizeRunOutput } from './run-outcome.mjs';
 import { validateTarget, locationOptions } from './search-target.mjs';
 import { BatchJobs, validateCount, validateResearchBudget } from './batch-jobs.mjs';
@@ -15,7 +15,11 @@ import { ProductKnowledge } from './product-knowledge.mjs';
 import { ProductKnowledgeFeishu } from './product-knowledge-feishu.mjs';
 import { CustomerBusinessApi } from './customer-business-api.mjs';
 import { searchPlan } from './search-plan.mjs';
-import { MailService } from './mail-service.mjs';
+import { OutreachMailboxes } from './outreach-mailboxes.mjs';
+import { OutreachService } from './outreach-service.mjs';
+import { handleOutreach } from './outreach-api.mjs';
+import { recordOutreachInBusiness } from './outreach-business.mjs';
+import { recordMailConversation } from './mail-conversation-business.mjs';
 import { validateContactEdit } from './lead-contacts.mjs';
 import { LeadLibrary } from './lead-library.mjs';
 import { LeadPerformance } from './lead-performance.mjs';
@@ -49,14 +53,18 @@ export function validateInput(input) {
     throw new ApiError(400, '参数 search_query 不能为空且不能超过 500 字符');
   return { ...target, search_query: input.search_query.trim() };
 }
-async function readJson(request) {
+async function readJson(request, maximum = maxJsonBytes) {
   if (!request.headers['content-type']?.startsWith('application/json'))
     throw new ApiError(415, '请使用 application/json');
   const chunks = [];
   let size = 0;
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > maxJsonBytes) throw new ApiError(413, '请求体不能超过 32 KB');
+    if (size > maximum)
+      throw new ApiError(
+        413,
+        maximum === maxJsonBytes ? '请求体不能超过 32 KB' : '邮件及附件内容过大',
+      );
     chunks.push(chunk);
   }
   try {
@@ -64,20 +72,6 @@ async function readJson(request) {
   } catch {
     throw new ApiError(400, 'JSON 格式不正确');
   }
-}
-
-function requireMailOperator(request, token) {
-  if (typeof token !== 'string' || token.length < 32)
-    throw new ApiError(503, '请先在本机配置沟通中心操作者口令');
-  const supplied = request.headers['x-mail-operator-token'];
-  if (typeof supplied !== 'string') throw new ApiError(401, '请先解锁沟通中心');
-  const expectedBytes = Buffer.from(token);
-  const suppliedBytes = Buffer.from(supplied);
-  if (
-    expectedBytes.length !== suppliedBytes.length ||
-    !timingSafeEqual(expectedBytes, suppliedBytes)
-  )
-    throw new ApiError(401, '操作者口令无效');
 }
 
 function requireIdempotencyKey(request) {
@@ -91,7 +85,8 @@ export function createApp({
   fetchImpl = fetch,
   dist = resolve('dist'),
   nativeImpl,
-  mailServiceFactory,
+  outreachServiceFactory,
+  brandingOptions,
 } = {}) {
   const connections = new ApiConnections({ env, path: env.CONNECTIONS_PATH });
   let provider = createAcquisitionProvider({
@@ -100,7 +95,7 @@ export function createApp({
     nativeImpl,
   });
   const runs = new Map();
-  const brandingCache = new Map();
+  const brandingCache = new BrandingCache({ path: env.BRANDING_CACHE_PATH, ...brandingOptions });
   let readingLeads;
   const readLeads = () => {
     if (!readingLeads)
@@ -180,7 +175,24 @@ export function createApp({
     knowledge,
     loadCustomers: async () => (await loadLeads()).leads,
   });
-  const mail = mailServiceFactory ? mailServiceFactory({ env }) : new MailService({ env });
+  let outbound;
+  const outreach = () =>
+    (outbound ??= outreachServiceFactory
+      ? outreachServiceFactory({ env })
+      : new OutreachService({
+          path: env.OUTREACH_DB_PATH || ':memory:',
+          mailboxes: new OutreachMailboxes({ env }),
+          loadLeads: async () => (await loadLeads()).leads,
+          products: () => knowledge().list(),
+          getEnv: () => connections.environment(),
+          getScope: acquisitionScope,
+          businessState: () => business.state().store.view(),
+          customers: () => library().snapshot(true).leads,
+          recordAccepted: (delivery) =>
+            recordOutreachInBusiness({ store: business.state().store, delivery }),
+          recordCommunication: (detail) =>
+            recordMailConversation({ store: business.state().store, ...detail }),
+        }));
   const checkCapabilities = (input) => {
     if (['customs', 'dual'].includes(input.acquisition_channel)) {
       if (provider.info.provider !== 'native')
@@ -299,51 +311,24 @@ export function createApp({
             }),
           );
         }
-        if (url.pathname.startsWith('/api/v1/mail/')) {
-          requireMailOperator(request, env.MAIL_OPERATOR_TOKEN);
-          if (url.pathname === '/api/v1/mail/status' && request.method === 'GET')
-            return json(response, 200, mail.status());
-          if (url.pathname === '/api/v1/mail/conversations' && request.method === 'GET')
-            return json(response, 200, mail.listConversations());
-          if (url.pathname === '/api/v1/mail/test-send' && request.method === 'POST') {
-            const body = await readJson(request);
-            return json(
-              response,
-              200,
-              await mail.sendTechnicalTest({
-                confirmed: body?.confirmed,
-                idempotencyKey: requireIdempotencyKey(request),
-              }),
-            );
-          }
-          if (url.pathname === '/api/v1/mail/sync' && request.method === 'POST') {
-            const body = await readJson(request);
-            if (body?.confirmed !== true) throw new ApiError(400, '请先确认测试邮箱同步');
-            return json(response, 200, await mail.sync());
-          }
-          const conversationRoute = url.pathname.match(
-            /^\/api\/v1\/mail\/conversations\/([\w-]{1,100})(?:\/(draft|reply))?$/,
+        if (url.pathname.startsWith('/api/v1/outreach/')) {
+          return json(
+            response,
+            200,
+            await handleOutreach({
+              request,
+              url,
+              service: outreach(),
+              readJson: (input) =>
+                readJson(
+                  input,
+                  /^\/api\/v1\/outreach\/conversations\/[\w-]+\/(?:draft|reply)$/.test(url.pathname)
+                    ? 16 * 1024 * 1024
+                    : maxJsonBytes,
+                ),
+              idempotencyKey: requireIdempotencyKey,
+            }),
           );
-          if (conversationRoute) {
-            const [, id, action] = conversationRoute;
-            if (!action && request.method === 'GET')
-              return json(response, 200, mail.getConversation(id));
-            if (action === 'draft' && request.method === 'PUT')
-              return json(response, 200, mail.saveDraft(id, await readJson(request)));
-            if (action === 'reply' && request.method === 'POST') {
-              const body = await readJson(request);
-              return json(
-                response,
-                200,
-                await mail.sendReply(id, {
-                  draftRevision: body?.draftRevision,
-                  confirmed: body?.confirmed,
-                  idempotencyKey: requireIdempotencyKey(request),
-                }),
-              );
-            }
-          }
-          throw new ApiError(404, '邮件接口不存在');
         }
         if (url.pathname === '/api/v1/connections/models') {
           if (request.method !== 'POST') throw new ApiError(405, '不支持的模型目录操作');
@@ -392,7 +377,7 @@ export function createApp({
               fetchImpl,
               nativeImpl,
             });
-            brandingCache.clear();
+            brandingCache.entries.clear();
             return json(response, 200, result);
           }
           throw new ApiError(405, '不支持的配置操作');
@@ -613,16 +598,30 @@ export function createApp({
           }
           throw new ApiError(405, '不支持的评估操作');
         }
+        const brandAsset = url.pathname.match(/^\/api\/v1\/branding\/assets\/([a-f0-9]{64})$/);
+        if (brandAsset && ['GET', 'HEAD'].includes(request.method)) {
+          const asset = await brandingCache.asset(brandAsset[1]);
+          if (!asset) throw new ApiError(404, '品牌图片不存在');
+          response.setHeader('Content-Type', asset.contentType);
+          response.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          response.setHeader('ETag', asset.etag);
+          response.setHeader('X-Content-Type-Options', 'nosniff');
+          response.setHeader(
+            'Content-Security-Policy',
+            "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox",
+          );
+          if (request.headers['if-none-match'] === asset.etag) {
+            response.writeHead(304);
+            return response.end();
+          }
+          response.setHeader('Content-Length', asset.body.length);
+          response.writeHead(200);
+          return response.end(request.method === 'HEAD' ? undefined : asset.body);
+        }
         const branding = url.pathname.match(/^\/api\/v1\/leads\/real\/([\w-]+)\/branding$/);
         if (branding && request.method === 'GET') {
           const { lead } = await library().detail(branding[1]);
-          let cached = brandingCache.get(lead.website);
-          if (!cached || cached.expires < Date.now()) {
-            if (brandingCache.size >= 500) brandingCache.clear();
-            cached = { promise: discoverBranding(lead), expires: Date.now() + 3600000 };
-            brandingCache.set(lead.website, cached);
-          }
-          return json(response, 200, await cached.promise);
+          return json(response, 200, await brandingCache.get(lead));
         }
         if (url.pathname === `${prefix}/status` && request.method === 'GET')
           return json(response, 200, provider.info);
@@ -736,13 +735,11 @@ export function createApp({
   });
   server.on('listening', () => {
     plans().start();
-    Promise.resolve(mail.start()).catch(() => {
-      // MailService records a safe status; startup must not take down acquisition.
-    });
+    if (env.OUTREACH_DB_PATH) outreach().start();
   });
   server.on('close', () => {
     leadLibrary?.close();
-    mail.close();
+    if (outbound) void outbound.close();
     products?.close();
     productKnowledge?.close();
     business.close();

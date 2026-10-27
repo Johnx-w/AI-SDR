@@ -1,0 +1,1107 @@
+.outreach-page {
+  --outreach-accent: var(--color-primary, #456453);
+  color: var(--color-text);
+}
+.outreach-tabs {
+  display: flex;
+  gap: 28px;
+  border-bottom: 1px solid var(--color-border);
+  margin: 0 0 24px;
+}
+.outreach-tabs > button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 15px 1px;
+  margin-bottom: -1px;
+  color: var(--color-text-muted);
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.outreach-tabs > button.selected {
+  color: var(--outreach-accent);
+  border-bottom-color: var(--outreach-accent);
+  font-weight: 600;
+}
+.outreach-tabs > button > span {
+  min-width: 22px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--color-surface-muted);
+  color: var(--color-text-muted);
+  text-align: center;
+  font-size: 11px;
+}
+.outreach-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.outreach-metric {
+  padding: 20px 22px;
+}
+.outreach-metric > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+.outreach-metric > div svg {
+  color: var(--color-text-muted);
+}
+.outreach-metric > strong {
+  display: block;
+  margin: 12px 0 5px;
+  font-size: 30px;
+  line-height: 1.1;
+  font-weight: 600;
+  letter-spacing: -1px;
+  font-variant-numeric: tabular-nums;
+}
+.outreach-metric > small {
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+.outreach-test-strip {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 0 0 28px;
+  padding: 20px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface-muted);
+}
+.outreach-feature-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 46px;
+  height: 46px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: var(--color-surface);
+  color: var(--outreach-accent);
+  border: 1px solid var(--color-border);
+}
+.outreach-test-strip h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.outreach-test-strip p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.outreach-strip-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.outreach-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 26px 0 16px;
+}
+.outreach-section-heading h2 {
+  margin: 0 0 6px;
+  font-size: 17px;
+  font-weight: 600;
+}
+.outreach-section-heading p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.outreach-section-heading > span {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+.outreach-campaign-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.outreach-campaign {
+  padding: 22px;
+}
+.outreach-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.outreach-card-heading > div {
+  flex: 1;
+  min-width: 0;
+}
+.outreach-card-heading h3 {
+  margin: 0 0 5px;
+  font-size: 15px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.outreach-card-heading p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+.outreach-card-heading p > span {
+  margin: 0 7px;
+}
+.outreach-card-heading > .badge {
+  align-self: flex-start;
+  white-space: nowrap;
+}
+.outreach-campaign-icon,
+.outreach-brand-mark {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 11px;
+  background: var(--color-primary-soft);
+  color: var(--outreach-accent);
+}
+.outreach-campaign-icon.test {
+  background: var(--color-surface-muted);
+  color: var(--color-text-secondary);
+}
+.outreach-campaign-progress {
+  margin: 24px 0 18px;
+}
+.outreach-campaign-progress > div:first-child {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.outreach-campaign-progress strong {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -1px;
+  font-variant-numeric: tabular-nums;
+}
+.outreach-campaign-progress strong > small {
+  font-size: 14px;
+  color: var(--color-text-muted);
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.outreach-campaign-progress > div > span {
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+.outreach-progress-track {
+  height: 5px;
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--color-surface-muted);
+}
+.outreach-progress-track > span {
+  display: block;
+  height: 100%;
+  background: var(--outreach-accent);
+  border-radius: inherit;
+  transition: width 0.2s;
+}
+.outreach-campaign-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+.outreach-campaign-meta > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.outreach-campaign-stats {
+  display: flex;
+  gap: 15px;
+  flex-wrap: wrap;
+  margin: 18px 0 20px;
+  padding: 13px 0;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+.outreach-campaign-stats b {
+  margin-left: 4px;
+  color: var(--color-text);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.outreach-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.outreach-card-actions .btn {
+  min-height: 34px;
+  font-size: 12px;
+}
+.outreach-mailbox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  grid-auto-rows: 1fr;
+  align-items: stretch;
+  gap: 18px;
+}
+.outreach-mailbox-card {
+  display: flex;
+  flex-direction: column;
+  padding: 22px 20px;
+  min-width: 0;
+}
+.outreach-mailbox-card .outreach-card-heading {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: start;
+  min-height: 104px;
+  gap: 10px 12px;
+}
+.outreach-mailbox-card .outreach-card-heading h3 {
+  min-height: 42px;
+  line-height: 1.4;
+  word-break: normal;
+}
+.outreach-mailbox-card .outreach-card-heading p {
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+.outreach-mailbox-card .outreach-card-heading > .badge {
+  grid-column: 2;
+  justify-self: start;
+  margin-left: 0;
+}
+.outreach-mailbox-card .outreach-mailbox-signature {
+  flex: 1;
+}
+.outreach-mailbox-coverage {
+  margin-top: 14px;
+}
+.outreach-mailbox-coverage > span {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+.outreach-mailbox-coverage .outreach-product-tags {
+  min-height: 0;
+}
+.outreach-mailbox-signature {
+  margin: 16px 0 20px;
+  padding: 14px;
+  border-radius: 8px;
+  background: var(--color-surface-muted);
+}
+.outreach-mailbox-signature > span {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+.outreach-mailbox-signature p {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--color-text-secondary);
+}
+.outreach-brand-mark.mark-1 {
+  color: #977047;
+  background: #f6efe7;
+}
+.outreach-brand-mark.mark-2 {
+  color: #65788d;
+  background: #edf1f5;
+}
+.outreach-mailbox-address {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 22px 0 16px;
+}
+.outreach-mailbox-address svg {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+.outreach-mailbox-address strong {
+  font-size: 12px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.outreach-product-tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-height: 52px;
+  align-content: flex-start;
+}
+.outreach-product-tags > span {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 5px;
+  background: var(--color-surface-muted);
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.outreach-product-tags > .outreach-tag-empty {
+  color: var(--color-text-muted);
+}
+.outreach-mailbox-numbers {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  padding: 18px 0;
+  margin-top: 8px;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+.outreach-mailbox-numbers > div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.outreach-mailbox-numbers strong {
+  font-size: 20px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.outreach-mailbox-numbers strong small {
+  margin-left: 4px;
+  font-size: 10px;
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+.outreach-mailbox-numbers span,
+.outreach-last-check {
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+.outreach-last-check {
+  margin: 12px 0 16px;
+}
+.outreach-icon-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 33px;
+  height: 33px;
+  margin-left: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  color: var(--color-text-secondary);
+  background: transparent;
+  cursor: pointer;
+}
+.outreach-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 12px 15px;
+  margin: 12px 0;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-muted);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.outreach-alert svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+.outreach-alert.error {
+  background: var(--color-danger-soft, #fff3f0);
+  border-color: var(--color-danger-border, #efdbd5);
+  color: var(--color-danger, #a64c3e);
+}
+.outreach-alert.success {
+  background: var(--color-primary-soft);
+  color: var(--outreach-accent);
+}
+.outreach-alert .icon-button {
+  margin: -3px -6px -3px auto;
+  flex-shrink: 0;
+}
+.outreach-empty-action {
+  display: flex;
+  justify-content: center;
+  padding: 0 20px 30px;
+}
+.outreach-loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  min-height: 180px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+.outreach-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.outreach-form > p {
+  margin: 0;
+  line-height: 1.7;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+.outreach-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+.outreach-form input:not([type='checkbox']),
+.outreach-form textarea,
+.outreach-form select {
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  font-size: 13px;
+}
+.outreach-form textarea {
+  resize: vertical;
+  line-height: 1.7;
+}
+.outreach-form small {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--color-text-muted);
+  line-height: 1.6;
+}
+.outreach-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.outreach-form-grid.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.outreach-full {
+  grid-column: 1 / -1;
+}
+.outreach-form-section {
+  margin-top: 8px;
+  padding-top: 18px;
+  border-top: 1px solid var(--color-border);
+}
+.outreach-form-section:first-of-type {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+.outreach-form-section h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+.outreach-form-section p,
+.outreach-hint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.outreach-field-label {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+.outreach-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.outreach-form .outreach-choice,
+.outreach-choice {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  background: var(--color-surface);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.outreach-choice.selected {
+  border-color: var(--outreach-accent);
+  background: var(--color-primary-soft);
+}
+.outreach-choice:has(input:disabled) {
+  opacity: 0.6;
+  cursor: default;
+}
+.outreach-choice input,
+.outreach-check-stack input,
+.outreach-review-check input {
+  accent-color: var(--outreach-accent);
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  margin: 0;
+}
+.outreach-choice span {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.outreach-choice strong {
+  font-size: 12px;
+  font-weight: 500;
+}
+.outreach-mailbox-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.outreach-mailbox-options .outreach-choice {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.outreach-check-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  padding: 15px;
+  border-radius: 8px;
+  background: var(--color-surface-muted);
+}
+.outreach-check-stack label,
+.outreach-form .outreach-review-check {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 9px;
+  font-weight: 400;
+  line-height: 1.6;
+}
+.outreach-check-stack input,
+.outreach-review-check input {
+  margin-top: 2px;
+}
+.outreach-form .modal-actions {
+  margin: 4px -24px -24px;
+  padding: 18px 24px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+  position: sticky;
+  bottom: -24px;
+  z-index: 1;
+}
+.outreach-import-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.outreach-import-row {
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  padding: 16px;
+  margin: 0;
+}
+.outreach-import-row legend {
+  padding: 0 6px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+.outreach-import-row .text-link {
+  margin-top: 10px;
+  font-size: 11px;
+}
+.outreach-records {
+  overflow: hidden;
+}
+.outreach-record-pagination {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+.outreach-record-pagination > label,
+.outreach-record-page-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.outreach-record-pagination > label {
+  margin-left: auto;
+}
+.outreach-record-pagination select {
+  font: inherit;
+}
+.outreach-record-page-actions {
+  flex-wrap: wrap;
+}
+.outreach-record-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--color-border);
+}
+.outreach-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 200px;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  padding: 0 11px;
+}
+.outreach-search input {
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  padding: 10px 0;
+}
+.outreach-search input:focus {
+  outline: 0;
+  box-shadow: none;
+}
+.outreach-search:focus-within {
+  outline: 2px solid var(--outreach-accent);
+  outline-offset: 1px;
+}
+.outreach-record-toolbar select {
+  max-width: 220px;
+  font-size: 12px;
+}
+.outreach-table-wrap {
+  overflow-x: auto;
+}
+.outreach-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.outreach-table th {
+  padding: 13px 18px;
+  text-align: left;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  background: var(--color-surface-muted);
+  white-space: nowrap;
+}
+.outreach-table td {
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  vertical-align: middle;
+}
+.outreach-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.outreach-table tbody tr:hover {
+  background: var(--color-surface-hover);
+}
+.outreach-table td strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+.outreach-table td small {
+  display: block;
+  margin-top: 5px;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+.outreach-subject-cell {
+  min-width: 170px;
+  max-width: 290px;
+  overflow-wrap: anywhere;
+}
+.outreach-time-cell {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+.outreach-table .badge {
+  white-space: nowrap;
+}
+.outreach-table td small.outreach-receipt-verified {
+  color: var(--outreach-accent);
+}
+.outreach-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.outreach-detail-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+.outreach-plan-rules {
+  padding: 14px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-muted);
+}
+.outreach-plan-rules summary {
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.outreach-plan-rules dl {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 15px 0;
+  font-size: 11px;
+}
+.outreach-plan-rules dl > div {
+  display: flex;
+  gap: 12px;
+  line-height: 1.7;
+}
+.outreach-plan-rules dt {
+  min-width: 52px;
+  color: var(--color-text-muted);
+}
+.outreach-plan-rules dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-text-secondary);
+}
+.outreach-approved-claim {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border);
+}
+.outreach-approved-claim strong {
+  font-size: 12px;
+  font-weight: 500;
+}
+.outreach-approved-claim small {
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 400;
+  margin-left: 8px;
+}
+.outreach-approved-claim p {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+.outreach-preview-layout {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(0, 2fr);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.outreach-preview-list {
+  border-right: 1px solid var(--color-border);
+  background: var(--color-surface-muted);
+  max-height: 550px;
+  overflow: auto;
+}
+.outreach-preview-list button {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  width: 100%;
+  text-align: left;
+  padding: 16px;
+  border: 0;
+  border-bottom: 1px solid var(--color-border);
+  background: transparent;
+  font: inherit;
+  color: var(--color-text);
+  cursor: pointer;
+}
+.outreach-preview-list button.selected {
+  background: var(--color-surface);
+  box-shadow: inset 3px 0 var(--outreach-accent);
+}
+.outreach-preview-list strong {
+  font-size: 12px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.outreach-preview-list span {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.outreach-preview-list small {
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+.outreach-message {
+  padding: 22px;
+  min-width: 0;
+  background: var(--color-surface);
+}
+.outreach-message-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 20px;
+}
+.outreach-message-top > span:last-child {
+  color: var(--color-text-muted);
+  font-size: 10px;
+}
+.outreach-message dl {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 0 0 18px;
+}
+.outreach-message dl > div {
+  display: flex;
+  gap: 14px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.outreach-message dt {
+  color: var(--color-text-muted);
+  width: 42px;
+  flex-shrink: 0;
+}
+.outreach-message dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-text-secondary);
+}
+.outreach-match {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 11px 12px;
+  background: var(--color-primary-soft);
+  color: var(--outreach-accent);
+  border-radius: 7px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.outreach-match svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.outreach-message h3 {
+  font-size: 17px;
+  line-height: 1.5;
+  font-weight: 600;
+  margin: 22px 0 18px;
+  overflow-wrap: anywhere;
+}
+.outreach-message-body {
+  font-size: 13px;
+  line-height: 1.85;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.outreach-message-id {
+  margin-top: 24px;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+.outreach-suppress {
+  margin-top: 22px;
+  font-size: 11px;
+}
+.outreach-detail-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 9px;
+  padding-top: 8px;
+}
+.outreach-ring {
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  overflow: hidden;
+}
+.outreach-ring > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 15px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 11px;
+}
+.outreach-ring > div:last-child {
+  border-bottom: 0;
+}
+.outreach-ring span,
+.outreach-ring strong {
+  overflow-wrap: anywhere;
+  font-weight: 400;
+  line-height: 1.7;
+}
+.outreach-ring svg {
+  color: var(--outreach-accent);
+}
+.outreach-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.outreach-spin {
+  animation: outreach-spin 1.2s linear infinite;
+}
+@keyframes outreach-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .outreach-spin {
+    animation: none;
+  }
+  .outreach-progress-track > span {
+    transition: none;
+  }
+}
+@media (max-width: 1250px) {
+  .outreach-test-strip {
+    flex-wrap: wrap;
+  }
+  .outreach-strip-actions {
+    margin-left: 62px;
+  }
+}
+@media (max-width: 900px) {
+  .outreach-campaign-list {
+    grid-template-columns: 1fr;
+  }
+  .outreach-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 650px) {
+  .outreach-tabs {
+    gap: 16px;
+  }
+  .outreach-tabs > button {
+    font-size: 12px;
+    gap: 5px;
+  }
+  .outreach-tabs > button > span {
+    display: none;
+  }
+  .outreach-mailbox-grid,
+  .outreach-form-grid,
+  .outreach-form-grid.three,
+  .outreach-mailbox-options {
+    grid-template-columns: 1fr;
+  }
+  .outreach-section-heading {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .outreach-test-strip {
+    padding: 16px;
+    gap: 12px;
+  }
+  .outreach-test-strip > div:not(.outreach-strip-actions) {
+    flex: 1;
+    min-width: 190px;
+  }
+  .outreach-strip-actions {
+    margin-left: 0;
+    width: 100%;
+  }
+  .outreach-metric {
+    padding: 16px;
+  }
+  .outreach-campaign {
+    padding: 18px;
+  }
+  .outreach-metric > strong {
+    font-size: 26px;
+  }
+  .outreach-preview-layout {
+    grid-template-columns: 1fr;
+  }
+  .outreach-preview-list {
+    max-height: 180px;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .outreach-record-toolbar {
+    padding: 14px;
+  }
+  .outreach-search {
+    flex-basis: 100%;
+  }
+  .outreach-record-toolbar select {
+    max-width: 100%;
+    flex: 1;
+    min-width: 0;
+  }
+  .outreach-message {
+    padding: 16px;
+  }
+}

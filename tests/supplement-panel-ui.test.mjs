@@ -1,23 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import ts from 'typescript';
+import { createModuleLoader } from './helpers/modules.mjs';
 
 const componentPath = new URL('../src/components/SupplementPanel.tsx', import.meta.url);
-const normalRequire = createRequire(componentPath);
-const compiled = ts.transpileModule(readFileSync(componentPath, 'utf8'), {
-  fileName: fileURLToPath(componentPath),
-  compilerOptions: {
-    module: ts.ModuleKind.CommonJS,
-    target: ts.ScriptTarget.ES2022,
-    jsx: ts.JsxEmit.ReactJSX,
-    esModuleInterop: true,
-  },
-}).outputText;
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 const allElements = (node) => {
   if (Array.isArray(node)) return node.flatMap(allElements);
@@ -83,10 +70,9 @@ function setup({
       }
     },
   };
-  const module = { exports: {} };
-  const require = (specifier) => {
+  const load = createModuleLoader((specifier, path) => {
+    if (path.href !== componentPath.href) return;
     if (specifier === 'react') return hooks;
-    if (specifier.endsWith('.css')) return {};
     if (specifier === '../services/customerBusiness')
       return { customerBusinessApi: { workspace: workspace || (async () => ({ messages: [] })) } };
     if (specifier === '../services/leadSupplements')
@@ -97,9 +83,8 @@ function setup({
           return save ? save(...args) : { lead: { id: args[0] } };
         },
       };
-    return normalRequire(specifier);
-  };
-  new Function('require', 'module', 'exports', compiled)(require, module, module.exports);
+  });
+  const { SupplementPanel } = load(componentPath);
   const props = {
     leadId: 'rec-buyer',
     assessment: value,
@@ -109,7 +94,7 @@ function setup({
   };
   const render = () => {
     stateIndex = refIndex = effectIndex = 0;
-    const tree = module.exports.SupplementPanel(props);
+    const tree = SupplementPanel(props);
     while (pendingEffects.length) pendingEffects.shift()();
     return tree;
   };

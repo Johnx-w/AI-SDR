@@ -137,7 +137,6 @@ async function serve(folder, remote) {
     PRODUCT_KNOWLEDGE_DB_PATH: join(folder, 'state.sqlite'),
     CUSTOMER_BUSINESS_DB_PATH: join(folder, 'business.sqlite'),
     BUSINESS_MIRROR_JOURNAL_PATH: join(folder, 'mirror.json'),
-    MAIL_DB_PATH: ':memory:',
     SCHEDULE_DB_PATH: ':memory:',
   };
   const app = createApp({

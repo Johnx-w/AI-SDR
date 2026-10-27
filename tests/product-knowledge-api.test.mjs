@@ -20,7 +20,6 @@ async function serve(folder, externalCalls) {
     BATCH_DB_PATH: join(folder, 'products.sqlite'),
     PRODUCT_KNOWLEDGE_DB_PATH: join(folder, 'products.sqlite'),
     PRODUCT_DB_PATH: join(folder, 'products.sqlite'),
-    MAIL_DB_PATH: ':memory:',
     SCHEDULE_DB_PATH: ':memory:',
   };
   const app = createApp({
