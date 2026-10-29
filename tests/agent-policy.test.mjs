@@ -166,6 +166,18 @@ test('会话 1.3 示例显式区分单封审核和接管范围', () => {
   assert.equal(quote.items[0].handoff_reason, null);
 });
 
+test('专业首封可以在准备阶段生成样稿，尚未启动的自动模式不能发送', () => {
+  for (const status of ['draft', 'preparing', 'ready']) {
+    const input = baseInput();
+    input.campaign.status = status;
+    input.campaign.sending_mode = 'draft_only';
+    assert.equal(prepareOutreachDispatch(input, baseDraft()).status, 'draft_only');
+    input.campaign.sending_mode = 'automatic';
+    assert.equal(prepareOutreachDispatch(input, baseDraft()).status, 'blocked');
+    assert.ok(evaluateOutreachReadiness(input).reasons.includes('campaign_inactive'));
+  }
+});
+
 test('产品资料缺失时不生成开发信草稿或发送', async () => {
   const input = baseInput();
   input.product_knowledge.status = 'awaiting_reviewed_product_data';

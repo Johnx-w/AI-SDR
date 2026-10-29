@@ -66,6 +66,7 @@ function renderLibrary(tab = '客户画像', customers = [lead], options = {}) {
     ...options.snapshot,
   };
   const entry = new URL('../src/pages/LeadLibrary.tsx', import.meta.url);
+  let stateIndex = 0;
   const load = createModuleLoader((specifier, path) => {
     const key = path.href;
     if (key === entry.href) {
@@ -73,7 +74,14 @@ function renderLibrary(tab = '客户画像', customers = [lead], options = {}) {
         return {
           ...React,
           useEffect: () => {},
-          useState: (initial) => [initial === '客户画像' ? tab : initial, () => {}],
+          useState: (initial) => [
+            stateIndex++ === 8 && options.market !== undefined
+              ? options.market
+              : initial === '客户画像'
+                ? tab
+                : initial,
+            () => {},
+          ],
         };
       if (specifier === 'react-router-dom')
         return {
@@ -97,11 +105,13 @@ function renderLibrary(tab = '客户画像', customers = [lead], options = {}) {
 
 test('客户库筛选展示中文市场、固定评级顺序和完整开发状态，保留历史值', () => {
   const html = renderLibrary('客户画像', [
-    { ...lead, market: 'Canada', grade: 'C', status: '未记录' },
+    { ...lead, market: 'Canada', grade: 'C', status: '待开发' },
     { ...lead, id: 'other', grade: 'A', status: '人工跟进中' },
   ]);
   assert.match(html, /<option value="加拿大">加拿大<\/option>/);
   assert.doesNotMatch(html, /<option[^>]*>Canada<\/option>/);
+  const marketOptions = html.match(/<select aria-label="市场筛选"[^>]*>([\s\S]*?)<\/select>/)?.[1];
+  assert.equal((marketOptions.match(/<option value="待核实">待核实<\/option>/g) || []).length, 1);
   assert.match(
     html,
     /<option value="A">A<\/option><option value="B">B<\/option><option value="C">C<\/option><option value="待核实">待核实<\/option>/,
@@ -117,9 +127,89 @@ test('客户库筛选展示中文市场、固定评级顺序和完整开发状�
     '人工跟进中',
   ])
     assert.ok(html.includes(`<option value="${status}">${status}</option>`));
-  assert.match(html, /<option value="未记录">未记录（待确认）<\/option>/);
-  assert.match(html, /Materials &amp; Parts（面料与配件）/);
+  assert.doesNotMatch(html, /<option value="未记录">/);
+  const productOptions = html.match(/<select aria-label="产品筛选"[^>]*>([\s\S]*?)<\/select>/)?.[1];
+  assert.ok(productOptions);
+  assert.deepEqual(
+    [...productOptions.matchAll(/<option[^>]*>(.*?)<\/option>/g)].map((match) => match[1]),
+    [
+      '全部产品',
+      'Plantation Shutters（透气窗）',
+      'Venetian Blinds（百叶窗）',
+      'Outdoor Shading（户外遮阳）',
+      'Indoor Window Coverings（室内成品帘）',
+      'Fabrics &amp; Components（面料与配件）',
+    ],
+  );
   assert.match(html, /清空筛选/);
+});
+
+test('待核实市场筛选包含国家空值及未知标记，排除已知国家且选项不重复', () => {
+  const customers = [
+    { ...lead, id: 'known', name: 'Known Country', market: 'Canada' },
+    { ...lead, id: 'empty', name: 'Empty Country', market: '' },
+    { ...lead, id: 'blank', name: 'Blank Country', market: '  ' },
+    { ...lead, id: 'unknown', name: 'Unknown Country', market: 'unknown' },
+    { ...lead, id: 'unrecorded', name: 'Unrecorded Country', market: '未记录' },
+  ];
+  const originalMarkets = customers.map((customer) => customer.market);
+  const html = renderLibrary('客户画像', customers, { market: '待核实', pending: true });
+  const table = html.match(/<table\b[^>]*>([\s\S]*?)<\/table>/)?.[1];
+  assert.ok(table);
+  assert.doesNotMatch(table, /Known Country/);
+  for (const name of ['Empty Country', 'Blank Country', 'Unknown Country', 'Unrecorded Country'])
+    assert.ok(table.includes(name), name);
+  const marketOptions = html.match(/<select aria-label="市场筛选"[^>]*>([\s\S]*?)<\/select>/)?.[1];
+  assert.equal((marketOptions.match(/<option value="待核实"/g) || []).length, 1);
+  assert.match(marketOptions, /<option value="待核实" selected="">待核实<\/option>/);
+  assert.doesNotMatch(marketOptions, /value="unknown"|value="未记录"/);
+  assert.deepEqual(
+    customers.map((customer) => customer.market),
+    originalMarkets,
+  );
+  const knownHtml = renderLibrary('客户画像', customers, { market: '加拿大', pending: true });
+  assert.match(knownHtml, /Known Country/);
+  assert.doesNotMatch(knownHtml, /Empty Country|Blank Country|Unknown Country|Unrecorded Country/);
+});
+
+test('客户列表为空时全部市场下仍提供待核实选项', () => {
+  const html = renderLibrary('客户画像', [], { pending: true });
+  const marketOptions = html.match(/<select aria-label="市场筛选"[^>]*>([\s\S]*?)<\/select>/)?.[1];
+  assert.equal(
+    marketOptions,
+    '<option value="" selected="">全部市场</option><option value="待核实">待核实</option>',
+  );
+});
+
+test('客户库在分页前按首次录入时间倒序，研究更新不置顶，时间相同及未知时保持原顺序', () => {
+  const customers = [
+    { ...lead, id: 'unknown-1', name: 'Unknown First', createdAt: null, updatedAt: 9999999999999 },
+    ...Array.from({ length: 8 }, (_, index) => ({
+      ...lead,
+      id: `old-${index}`,
+      name: `Old Customer ${index}`,
+      createdAt: 1000,
+    })),
+    { ...lead, id: 'unknown-2', name: 'Unknown Second' },
+    { ...lead, id: 'new', name: 'Newest Customer', createdAt: 2000 },
+  ];
+  const originalOrder = customers.map((customer) => customer.id);
+  const html = renderLibrary('客户画像', customers, { pending: true });
+  const table = html.match(/<table\b[^>]*>([\s\S]*?)<\/table>/)?.[1];
+  assert.ok(table);
+  assert.ok(table.indexOf('Newest Customer') < table.indexOf('Old Customer 0'));
+  assert.ok(table.indexOf('Old Customer 0') < table.indexOf('Old Customer 1'));
+  assert.doesNotMatch(table, /Old Customer 7|Unknown First|Unknown Second/);
+  assert.deepEqual(
+    customers.map((customer) => customer.id),
+    originalOrder,
+  );
+  const smallTable = renderLibrary('客户画像', [customers[0], customers[10], customers[9]], {
+    pending: true,
+  });
+  assert.ok(smallTable.indexOf('Newest Customer') < smallTable.indexOf('Unknown First'));
+  assert.ok(smallTable.indexOf('Unknown First') < smallTable.indexOf('Unknown Second'));
+  assert.match(html, /最新录入优先/);
 });
 
 test('客户库列表和档案直接提供海关记录入口，不必到评分历史中寻找', () => {

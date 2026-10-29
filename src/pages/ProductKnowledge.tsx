@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Archive, ExternalLink, FileCheck2, Plus, RefreshCw, Search } from 'lucide-react';
+import { Archive, ExternalLink, Plus, RefreshCw, Search } from 'lucide-react';
 import { PageHeading } from '../components/PageHeading';
 import { Badge, Empty, Modal } from '../components/ui';
+import type { OutreachFact } from '../outreachApi';
 import './ProductKnowledge.css';
 
 const categoryLabels = {
@@ -15,6 +16,19 @@ const categoryLabels = {
 };
 const directionLabels = { finished: '成品', materials: '材料配件', samples: '样本展示' };
 const statusLabels = { draft: '待审核', approved: '已审核', archived: '已归档' };
+const factLabels: Record<OutreachFact['kind'], string> = {
+  product: '产品介绍',
+  price: '标准报价',
+  moq: 'MOQ',
+  stock: '库存',
+  leadTime: '交期',
+  freight: '运费',
+  payment: '付款条件',
+};
+const needsExpiry = (kind: OutreachFact['kind']) =>
+  ['price', 'stock', 'leadTime', 'freight'].includes(kind);
+const beijingInput = (value: string | null) =>
+  value ? new Date(Date.parse(value) + 8 * 3600000).toISOString().slice(0, 19) : '';
 
 interface ProductDraft {
   name: string;
@@ -34,6 +48,7 @@ interface ProductDraft {
   effectiveDate: string;
   approvedBy: string;
   notes: string;
+  outreachFacts: OutreachFact[];
 }
 interface ProductKnowledge extends ProductDraft {
   id: string;
@@ -44,7 +59,6 @@ interface ProductKnowledge extends ProductDraft {
 }
 interface ProductList {
   products: ProductKnowledge[];
-  feishu?: { configured: boolean; tableId?: string; status?: string; error?: string };
 }
 interface SaveResult {
   product: ProductKnowledge;
@@ -83,6 +97,7 @@ const blankProduct = (): ProductDraft => ({
   effectiveDate: '',
   approvedBy: '',
   notes: '',
+  outreachFacts: [],
 });
 const splitList = (value: string) => [
   ...new Set(
@@ -142,7 +157,6 @@ export function ProductKnowledgePage() {
   const [productParams, setProductParams] = useSearchParams();
   const focusedProduct = productParams.get('product');
   const [products, setProducts] = useState<ProductKnowledge[]>([]);
-  const [feishu, setFeishu] = useState<ProductList['feishu']>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -174,7 +188,6 @@ export function ProductKnowledgePage() {
       const result = await request<ProductList>('GET', undefined, signal);
       if (!Array.isArray(result.products)) throw new Error('产品资料返回格式异常');
       setProducts(result.products);
-      setFeishu(result.feishu);
     } catch (cause) {
       if (!signal?.aborted) setError(cause instanceof Error ? cause.message : '无法读取产品资料');
     } finally {
@@ -210,6 +223,7 @@ export function ProductKnowledgePage() {
       value: product
         ? {
             ...product,
+            outreachFacts: product.outreachFacts || [],
             status: 'draft',
             approvedBy: '',
           }
@@ -237,6 +251,13 @@ export function ProductKnowledgePage() {
             .filter(Boolean)
         : splitList(value),
     );
+  }
+  function changeFact(id: string, values: Partial<OutreachFact>) {
+    if (editor)
+      change(
+        'outreachFacts',
+        editor.value.outreachFacts.map((fact) => (fact.id === id ? { ...fact, ...values } : fact)),
+      );
   }
   function acceptSaved(result: SaveResult, requestedStatus?: ProductDraft['status']) {
     setProducts((current) => [
@@ -346,24 +367,6 @@ export function ProductKnowledgePage() {
         </button>
       </PageHeading>
 
-      <div className="knowledge-guidance panel">
-        <FileCheck2 size={23} />
-        <div>
-          <strong>先登记资料，再核对审核</strong>
-          <p>
-            获客搜索词仍在获客配置中维护；这里登记实际供货资料。未知参数保持空白，客户提出的规格应先核实。
-          </p>
-          <small>
-            {(feishu?.status === 'pending' || !feishu?.configured) && feishu?.error
-              ? feishu.error
-              : feishu?.status === 'pending'
-                ? '飞书 T5 同步待处理，已保存的资料可在本页继续核对。'
-                : feishu?.configured
-                  ? '通过本页维护，飞书 T5 同步供团队查看。'
-                  : '当前资料保存在后台，飞书 T5 同步尚未配置。'}
-          </small>
-        </div>
-      </div>
       {error && (
         <p className="knowledge-alert error" role="alert">
           {error}
@@ -457,6 +460,23 @@ export function ProductKnowledgePage() {
                       <small>
                         MOQ：{product.moq || '待核实'} · 常规交期：{product.leadTime || '待核实'}
                       </small>
+                      {!!product.outreachFacts?.length && (
+                        <details className="knowledge-fact-summary">
+                          <summary>开发信可引用资料 · {product.outreachFacts.length} 条</summary>
+                          {product.outreachFacts.map((fact) => (
+                            <div key={fact.id}>
+                              <strong>{factLabels[fact.kind]}</strong>
+                              <p>{fact.text}</p>
+                              {fact.conditions && <p>适用条件：{fact.conditions}</p>}
+                              <small>
+                                {fact.validUntil
+                                  ? `有效期至 ${timestamp(fact.validUntil)}${Date.parse(fact.validUntil) <= Date.now() ? ' · 已过期' : ''}`
+                                  : '未设置到期时间'}
+                              </small>
+                            </div>
+                          ))}
+                        </details>
+                      )}
                     </td>
                     <td>
                       <Badge tone={product.status === 'approved' ? 'success' : 'neutral'}>
@@ -713,6 +733,104 @@ export function ProductKnowledgePage() {
               </div>
             </fieldset>
             <fieldset disabled={saving || refreshRequired}>
+              <legend>开发信可引用资料</legend>
+              <p className="knowledge-form-note">
+                填写可直接对外使用的英文事实和适用条件，随本份产品资料一起审核。报价、库存、交期和运费须设置有效期；过期资料不会用于发信。
+              </p>
+              {editor.value.outreachFacts.map((fact, index) => (
+                <div className="knowledge-fact-editor" key={fact.id}>
+                  <div className="knowledge-fields">
+                    <label>
+                      资料 {index + 1} · 类型
+                      <select
+                        value={fact.kind}
+                        onChange={(event) =>
+                          changeFact(fact.id, { kind: event.target.value as OutreachFact['kind'] })
+                        }
+                      >
+                        {Object.entries(factLabels).map(([kind, label]) => (
+                          <option key={kind} value={kind}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      有效期至（北京时间）{needsExpiry(fact.kind) ? ' *' : ''}
+                      <input
+                        type="datetime-local"
+                        step="1"
+                        required={needsExpiry(fact.kind)}
+                        value={beijingInput(fact.validUntil)}
+                        onChange={(event) =>
+                          changeFact(fact.id, {
+                            validUntil: event.target.value
+                              ? new Date(event.target.value + '+08:00').toISOString()
+                              : null,
+                          })
+                        }
+                      />
+                    </label>
+                    <label className="knowledge-full">
+                      可外发英文原句 *
+                      <textarea
+                        required
+                        rows={2}
+                        maxLength={1200}
+                        value={fact.text}
+                        onChange={(event) => changeFact(fact.id, { text: event.target.value })}
+                      />
+                    </label>
+                    <label className="knowledge-full">
+                      适用条件英文原句{fact.kind === 'price' ? ' *' : ''}
+                      <textarea
+                        required={fact.kind === 'price'}
+                        rows={2}
+                        maxLength={800}
+                        placeholder="报价请写全数量档位、规格、币种、计价单位及适用交易条件"
+                        value={fact.conditions}
+                        onChange={(event) =>
+                          changeFact(fact.id, { conditions: event.target.value })
+                        }
+                      />
+                    </label>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn secondary small"
+                    onClick={() =>
+                      change(
+                        'outreachFacts',
+                        editor.value.outreachFacts.filter((item) => item.id !== fact.id),
+                      )
+                    }
+                    aria-label={`删除资料 ${index + 1}`}
+                  >
+                    删除此条
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                className="btn secondary small"
+                disabled={editor.value.outreachFacts.length >= 30}
+                onClick={() =>
+                  change('outreachFacts', [
+                    ...editor.value.outreachFacts,
+                    {
+                      id: crypto.randomUUID(),
+                      kind: 'product',
+                      text: '',
+                      conditions: '',
+                      validUntil: null,
+                    },
+                  ])
+                }
+              >
+                <Plus size={14} /> 添加外发资料
+              </button>
+            </fieldset>
+            <fieldset disabled={saving || refreshRequired}>
               <legend>审核与生效</legend>
               <div className="knowledge-fields">
                 <label>
@@ -749,7 +867,7 @@ export function ProductKnowledgePage() {
                 )}
               </div>
               <p className="knowledge-form-note">
-                审核前请补充可检查的来源或附件。MOQ、交期等资料仍需结合具体订单确认，资料审核不代替对某封商务邮件的批准。
+                审核前请核对以上资料及来源。计划另行授权后，系统可在已确认范围内自动发信；修改资料后需重新审核，未授权范围不会自动扩大。
               </p>
             </fieldset>
             <div className="modal-actions">

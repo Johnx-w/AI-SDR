@@ -397,7 +397,7 @@ function normalize(input, previous) {
     productIds: [...new Set(productIds.map((id) => text(id, 180, true)))],
     priority: integer(value.priority ?? 100, 0, 10000),
     dailyLimit: integer(value.dailyLimit ?? 50, 1, 500),
-    intervalSeconds: integer(value.intervalSeconds ?? 60, 30, 86400),
+    intervalSeconds: integer(value.intervalSeconds ?? 60, 5, 86400),
     paused,
     sendingEnabled: false,
   };

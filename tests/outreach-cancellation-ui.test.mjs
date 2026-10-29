@@ -16,12 +16,16 @@ const textContent = (node) => {
   return typeof node === 'string' || typeof node === 'number' ? String(node) : '';
 };
 
-function setup(status = 'ready', { cancelError, deliveryStatus = 'accepted' } = {}) {
+function setup(
+  status = 'ready',
+  { cancelError, deliveryStatus = 'accepted', generationMode } = {},
+) {
   let campaign = {
     id: 'campaign-one',
     name: 'Australia first outreach',
     mode: 'production',
     status,
+    generationMode,
     revision: 7,
     approvedRevision: 7,
     targetCount: 150,
@@ -164,6 +168,19 @@ function setup(status = 'ready', { cancelError, deliveryStatus = 'accepted' } = 
     writes: () => requests.filter(({ init }) => init.method === 'POST'),
   };
 }
+
+test('自动计划草稿直接提供启动入口，不展示样稿准备或审批步骤', async () => {
+  const h = setup('draft', { generationMode: 'simple' });
+  await h.ready();
+  h.click('执行详情');
+  h.render();
+  await flush();
+  assert.ok(h.button('启动自动发送'));
+  assert.equal(!!h.button('启动自动发送').props.disabled, false);
+  assert.equal(h.button('准备样稿'), undefined);
+  assert.equal(h.button('批准此版本与样稿'), undefined);
+  assert.deepEqual(h.writes(), []);
+});
 
 test('活跃计划里的恢复后草稿保留明确审核入口，查看详情不会直接发送', async () => {
   const h = setup('active', { deliveryStatus: 'draft' });

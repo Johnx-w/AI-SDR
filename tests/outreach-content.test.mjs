@@ -4,6 +4,10 @@ import {
   selectOutreachCandidates,
   normalizeOutreachLead,
   createOutreachGenerator,
+  eligibleOutreachFacts,
+  outreachProductScope,
+  outreachMaterialVersion,
+  agentForCategory,
 } from '../server/outreach-content.mjs';
 
 function fixture() {
@@ -636,13 +640,159 @@ function generationInput() {
   };
 }
 const generated = (input, overrides = {}) => ({
+  contract_version: '1.1',
+  agent_id: agentForCategory(input.product.category),
+  campaign_id: input.campaign.id || 'preview',
+  operation_id:
+    input.candidate.operationId ||
+    `${input.campaign.id || 'preview'}:${input.candidate.customerId}`,
+  customer_id: input.candidate.customerId,
+  based_on_customer_revision: input.candidate.leadSnapshot?.revision || 0,
+  action: 'draft_ready',
   subject: 'PVC shutters for your product range',
-  opening: 'I noticed that your website lists PVC shutters and timber shutters.',
-  sourceIds: [input.candidate.evidence[0].id],
+  body_text: [
+    'Hello,',
+    'I noticed that your website lists PVC shutters and timber shutters.',
+    ...eligibleOutreachFacts(input.product, input.campaign, input.now).map((fact) =>
+      [fact.text, fact.conditions].filter(Boolean).join(' '),
+    ),
+    'Would it be useful if I shared a short product overview for your team?',
+  ].join('\n\n'),
+  personalization_source_ids: [input.candidate.evidence[0].id],
+  product_claim_ids: eligibleOutreachFacts(input.product, input.campaign, input.now).map(
+    (fact) => fact.id,
+  ),
+  reason_codes: [],
+  internal_note: '',
   ...overrides,
 });
 
-test('AI只生成开场，供货介绍逐字追加；凭证和产品商务参数不发给模型', async () => {
+const simpleBody = [
+  'I noticed that your website lists PVC shutters and timber shutters as part of your window furnishings range. That makes shutters a relevant starting point for an introduction to our business.',
+  'We are Example Shutters, and we supply PVC shutters. I am writing to explore potential supply cooperation with your team, starting with this product category. Any further discussion would be based on the requirements your team shares, so we can establish whether there is a suitable fit.',
+  'Would your team be open to considering an additional supplier for PVC shutters?',
+].join('\n\n');
+
+test('简化生成直接使用客户信息和已确认产品范围，无需介绍文案或品类业务员协议', async () => {
+  const input = fixture();
+  input.campaign.generationMode = 'simple';
+  input.campaign.productScopes = input.products.map(outreachProductScope);
+  input.campaign.outreachClaims = [];
+  input.leads[0].email += '\ncontact@buyer.example.org';
+  input.leads[0].contactEvidence.push({
+    ...input.leads[0].contactEvidence[0],
+    value: 'contact@buyer.example.org',
+    quote: 'For business enquiries contact@buyer.example.org',
+  });
+  const [candidate] = selectOutreachCandidates(input).eligible;
+  assert.ok(candidate);
+  assert.equal(candidate.to, 'contact@buyer.example.org');
+  let request;
+  const generator = createOutreachGenerator({
+    env: modelEnv,
+    fetchImpl: async (_url, options) => {
+      const body = JSON.parse(options.body);
+      if (body.messages[0].content.includes('independent reviewer'))
+        return Response.json({
+          choices: [
+            {
+              finish_reason: 'stop',
+              message: {
+                content: JSON.stringify({
+                  decision: 'ready',
+                  summary: '合格',
+                  strengths: [],
+                  issues: [],
+                }),
+              },
+            },
+          ],
+        });
+      request = body;
+      return Response.json({
+        choices: [
+          {
+            finish_reason: 'stop',
+            message: {
+              content: JSON.stringify({
+                subject: 'Window supply cooperation',
+                body_text: 'Hello,\n\n' + simpleBody,
+                source_ids: [candidate.evidence[0].id],
+              }),
+            },
+          },
+        ],
+      });
+    },
+  });
+  const result = await generator.generate({
+    candidate,
+    mailbox: input.mailboxes[0],
+    product: input.products[0],
+    campaign: input.campaign,
+  });
+  assert.equal(result.generationMode, 'simple');
+  assert.equal(result.agentId, undefined);
+  assert.ok(!JSON.stringify(request).includes('contract_version'));
+  assert.match(result.bodyText, /explore potential supply cooperation/);
+  assert.ok(result.bodyText.startsWith(`Hello ${candidate.companyName} Team,\n\n`));
+  assert.equal(result.bodyText.includes('\n\nHello,'), false);
+  assert.match(request.messages[0].content, /Do not add a greeting or salutation/);
+  assert.deepEqual(request.response_format.json_schema.schema.required, [
+    'subject',
+    'body_text',
+    'source_ids',
+  ]);
+});
+
+test('简化开发信的公司称呼由程序固定，保留正文且不从未验证联系人猜姓名', async () => {
+  const input = fixture();
+  input.leads[0].name = 'Example Windows, Inc. & Co.';
+  input.leads[0].contact = 'Unverified Mary';
+  input.campaign.generationMode = 'simple';
+  input.campaign.productScopes = input.products.map(outreachProductScope);
+  input.campaign.outreachClaims = [];
+  const [candidate] = selectOutreachCandidates(input).eligible;
+  const context = {
+    candidate,
+    mailbox: input.mailboxes[0],
+    product: input.products[0],
+    campaign: input.campaign,
+  };
+  const content = simpleBody;
+  for (const prefix of ['', 'Hello,\n\n', 'Hi there, ']) {
+    const generator = createOutreachGenerator({
+      env: modelEnv,
+      fetchImpl: async (_url, options) => {
+        const reviewer = JSON.parse(options.body).messages[0].content.includes(
+          'independent reviewer',
+        );
+        return Response.json({
+          choices: [
+            {
+              finish_reason: 'stop',
+              message: {
+                content: JSON.stringify(
+                  reviewer
+                    ? { decision: 'ready', summary: '合格', strengths: [], issues: [] }
+                    : {
+                        subject: 'Window supply cooperation',
+                        body_text: prefix + content,
+                        source_ids: [candidate.evidence[0].id],
+                      },
+                ),
+              },
+            },
+          ],
+        });
+      },
+    });
+    const result = await generator.generate(context);
+    assert.equal(result.bodyText, `Hello Example Windows, Inc. & Co. Team,\n\n${content}`);
+  }
+});
+
+test('品类业务员生成完整正文，保留批准事实，凭证和未确认商务参数留在本地', async () => {
   const input = generationInput();
   input.mailbox.clientPassword = 'never-send-mailbox-secret';
   input.product.moq = '999 never-send-moq';
@@ -671,6 +821,9 @@ test('AI只生成开场，供货介绍逐字追加；凭证和产品商务参数
   assert.equal(result.bodyText.includes(input.mailbox.signature), false);
   assert.equal(/never-send|secret-delivery|info@buyer/.test(JSON.stringify(request)), false);
   assert.equal(request.max_tokens, 4096);
+  assert.equal(result.agentId, 'shutter');
+  assert.match(request.messages[0].content, /透气窗/);
+  assert.match(request.messages[0].content, /完整适用条件/);
 });
 
 test('未配置模型、变更身份、产品版本或撤回邮箱产品范围在外部调用前拒绝', async () => {
@@ -705,10 +858,14 @@ test('拒绝模型越权修改发件人、伪造引用、添加商务承诺和�
   const input = generationInput();
   for (const overrides of [
     { from: 'other@example.org' },
-    { sourceIds: ['invented-source'] },
-    { opening: 'Our factory can deliver your shutters in 7 days.' },
-    { opening: 'Your order is ready for confirmation.' },
-    { opening: 'I noticed that your website lists 500 stores.' },
+    { personalization_source_ids: ['invented-source'] },
+    { product_claim_ids: ['invented-fact'] },
+    {
+      body_text:
+        generated(input).body_text + '\n\nOur factory can deliver your shutters in 7 days.',
+    },
+    { body_text: generated(input).body_text + '\n\nYour order is ready for confirmation.' },
+    { body_text: generated(input).body_text + '\n\nI noticed that your website lists 500 stores.' },
     { subject: 'Re: Your purchase request' },
   ]) {
     const generator = createOutreachGenerator({
@@ -769,4 +926,217 @@ test('DeepSeek Responses结果复用现有适配器解析', async () => {
   });
   assert.ok((await generator.generate(input)).subject);
   assert.equal(endpoint, 'https://api.deepseek.com/responses');
+});
+
+test('模型请求使用可接受的基础结构Schema，动作分支约束留在本地校验', async () => {
+  const input = generationInput();
+  const generator = createOutreachGenerator({
+    env: modelEnv,
+    fetchImpl: async (_url, options) => {
+      const schema = JSON.parse(options.body).response_format.json_schema.schema;
+      if (schema.allOf || Object.values(schema.properties).some((field) => !field.type))
+        return Response.json(
+          { error: { message: 'Invalid json schema: type required' } },
+          { status: 400 },
+        );
+      return Response.json({
+        choices: [
+          { finish_reason: 'stop', message: { content: JSON.stringify(generated(input)) } },
+        ],
+      });
+    },
+  });
+  assert.equal((await generator.generate(input)).agentId, 'shutter');
+});
+
+function factInput() {
+  const input = generationInput();
+  input.now = new Date('2026-10-27T08:00:00Z');
+  input.product.outreachFacts = [
+    {
+      id: 'supply',
+      kind: 'product',
+      text: 'We supply PVC shutters.',
+      conditions: '',
+      validUntil: null,
+    },
+    {
+      id: 'price',
+      kind: 'price',
+      text: 'The standard price is USD 30 per set.',
+      conditions: 'For orders of at least 500 sets, EXW China.',
+      validUntil: '2026-10-28T08:00:00Z',
+    },
+  ];
+  input.campaign.productScopes = [outreachProductScope(input.product)];
+  input.campaign.outreachClaims = [];
+  input.candidate.materialVersion = outreachMaterialVersion(
+    input.product,
+    input.campaign,
+    input.now,
+  );
+  return input;
+}
+const draftGenerator = (input, alter = (draft) => draft) =>
+  createOutreachGenerator({
+    env: modelEnv,
+    fetchImpl: async () =>
+      Response.json({
+        choices: [
+          { finish_reason: 'stop', message: { content: JSON.stringify(alter(generated(input))) } },
+        ],
+      }),
+  });
+
+test('完整专业首封引用产品和带完整条件的标准报价，准备阶段不要求已启动', async () => {
+  const input = factInput();
+  input.campaign.status = 'preparing';
+  const result = await draftGenerator(input).generate(input);
+  assert.equal(result.agentId, 'shutter');
+  assert.deepEqual(result.factIds, ['supply', 'price']);
+  assert.match(result.bodyText, /USD 30 per set\. For orders of at least 500 sets, EXW China\./);
+  assert.match(result.bodyText, /^Hello,/);
+  assert.equal(result.materialVersion, input.candidate.materialVersion);
+});
+
+test('四个品类分别调用实际专业提示词，其他品类不会猜测专家', async () => {
+  for (const [category, id, title] of [
+    ['ventilation', 'shutter', '透气窗'],
+    ['shutters', 'venetian', '百叶窗'],
+    ['indoor', 'indoor', '室内成品帘'],
+    ['outdoor', 'outdoor', '户外遮阳'],
+  ]) {
+    const input = generationInput();
+    input.product.category = category;
+    delete input.candidate.materialVersion;
+    let prompt;
+    const generator = createOutreachGenerator({
+      env: modelEnv,
+      fetchImpl: async (_url, options) => {
+        prompt = JSON.parse(options.body).messages[0].content;
+        return Response.json({
+          choices: [
+            { finish_reason: 'stop', message: { content: JSON.stringify(generated(input)) } },
+          ],
+        });
+      },
+    });
+    assert.equal((await generator.generate(input)).agentId, id);
+    assert.ok(prompt.includes(title));
+  }
+  const input = generationInput();
+  input.product.category = 'other';
+  await assert.rejects(draftGenerator(input).generate(input), {
+    code: 'outreach_agent_unavailable',
+  });
+});
+
+test('引用事实编号不能掩盖删报价条件、改价、从客户证据推导供货能力或伪造最终报价', async () => {
+  const input = factInput();
+  for (const alter of [
+    (d) => ({
+      ...d,
+      body_text: d.body_text.replace(' For orders of at least 500 sets, EXW China.', ''),
+    }),
+    (d) => ({ ...d, body_text: d.body_text.replace('USD 30', 'USD 20') }),
+    (d) => ({ ...d, body_text: d.body_text + '\n\nOur factory holds ISO certification.' }),
+    (d) => ({ ...d, body_text: d.body_text + '\n\nYour final price is USD 30 per set.' }),
+    (d) => ({ ...d, product_claim_ids: ['supply', 'unapproved'] }),
+  ])
+    await assert.rejects(draftGenerator(input, alter).generate(input));
+});
+
+test('过期价格不提供给模型也不能引用，仍可生成有依据的产品介绍', async () => {
+  const input = factInput();
+  input.product.outreachFacts[1].validUntil = '2026-10-26T08:00:00Z';
+  input.candidate.materialVersion = outreachMaterialVersion(
+    input.product,
+    input.campaign,
+    input.now,
+  );
+  const result = await draftGenerator(input).generate(input);
+  assert.deepEqual(result.factIds, ['supply']);
+  assert.doesNotMatch(result.bodyText, /USD|500 sets/);
+  await assert.rejects(
+    draftGenerator(input, (d) => ({ ...d, product_claim_ids: ['supply', 'price'] })).generate(
+      input,
+    ),
+  );
+});
+
+test('资料版本可在原范围内更新，身份、品牌或市场扩大则不继承授权', () => {
+  const input = factInput();
+  const original = outreachMaterialVersion(input.product, input.campaign, input.now);
+  input.product.version++;
+  input.product.outreachFacts[0].text = 'We supply made-to-measure PVC shutters.';
+  assert.equal(eligibleOutreachFacts(input.product, input.campaign, input.now).length, 2);
+  assert.notEqual(outreachMaterialVersion(input.product, input.campaign, input.now), original);
+  for (const change of [
+    { englishName: 'Aluminium shutters' },
+    { brands: ['Different brand'] },
+    { markets: ['AU', 'US'] },
+  ])
+    assert.equal(
+      outreachMaterialVersion({ ...input.product, ...change }, input.campaign, input.now),
+      null,
+    );
+});
+
+test('没有基础产品事实时不能只凭报价生成，旧计划不能自动引用新版本事实', () => {
+  const input = factInput();
+  input.product.outreachFacts = input.product.outreachFacts.filter((f) => f.kind !== 'product');
+  assert.deepEqual(eligibleOutreachFacts(input.product, input.campaign, input.now), []);
+  const old = generationInput();
+  old.product.version++;
+  old.product.outreachFacts = factInput().product.outreachFacts;
+  assert.deepEqual(eligibleOutreachFacts(old.product, old.campaign, input.now), []);
+  const legacy = generationInput();
+  legacy.campaign.outreachClaims[0].text = 'We supply PVC shutters for USD 30 per set.';
+  assert.deepEqual(eligibleOutreachFacts(legacy.product, legacy.campaign, input.now), []);
+});
+
+test('业务员拒绝或请求核实不产生可发送正文，输出必须回填准确身份和版本', async () => {
+  const input = factInput();
+  for (const overrides of [
+    { action: 'needs_review' },
+    { action: 'suppress' },
+    { agent_id: 'outdoor' },
+    { operation_id: 'another-operation' },
+    { based_on_customer_revision: 99 },
+  ])
+    await assert.rejects(draftGenerator(input, (d) => ({ ...d, ...overrides })).generate(input));
+});
+
+test('普通产品讨论问题可使用our和supply，称呼和客户观察不能夹带新增供货陈述', async () => {
+  const input = factInput();
+  const valid = (d) => ({
+    ...d,
+    subject: 'PVC shutters supply for your range',
+    body_text: d.body_text.replace(
+      'Would it be useful if I shared a short product overview for your team?',
+      'Would it be useful to review whether our PVC shutters could fit your range?',
+    ),
+  });
+  assert.ok((await draftGenerator(input, valid).generate(input)).bodyText);
+  assert.ok(
+    (
+      await draftGenerator(input, (d) => ({
+        ...d,
+        body_text: d.body_text.replace(
+          'Would it be useful if I shared a short product overview for your team?',
+          'Would it be useful to compare your current shutter specifications with what we can supply?',
+        ),
+      })).generate(input)
+    ).bodyText,
+  );
+  for (const text of [
+    'Hello, we supply aluminium blinds.',
+    'Your website lists PVC shutters. We supply aluminium blinds.',
+    'Would you like to hear that we supply aluminium blinds?',
+  ])
+    await assert.rejects(
+      draftGenerator(input, (d) => ({ ...d, body_text: d.body_text + '\n\n' + text })).generate(
+        input,
+      ),
+    );
 });

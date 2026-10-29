@@ -31,6 +31,7 @@ function row(uid = 1, options = {}) {
         `Message-ID: ${options.messageId || `<message-${uid}@customer.example>`}`,
         ...(options.inReplyTo ? [`In-Reply-To: ${options.inReplyTo}`] : []),
         ...(options.references ? [`References: ${options.references}`] : []),
+        ...(options.headers || []),
         '',
         '',
       ].join('\r\n'),
@@ -177,6 +178,38 @@ test('reads inbox and provider sent folder without flag changes or attachment do
     assert.equal(call[4].uid, true);
   }
   assert.equal(JSON.stringify(result).includes(password), false);
+});
+
+test('automatic replies retain reliable headers as a classification without guessing from the subject', async () => {
+  const inbox = [
+    row(1, { headers: ['Auto-Submitted: auto-replied'] }),
+    row(2, { headers: ['Auto-Submitted: auto-generated; owner-email="owner@example.com"'] }),
+    row(3, { headers: ['Auto-Submitted: no'] }),
+    row(4, { headers: ['X-Autoreply: yes'] }),
+    row(5, { headers: ['X-Autorespond: TRUE'] }),
+    row(6, { subject: 'Automatic reply: Thank you for contacting us' }),
+    row(7, { headers: ['X-Autoreply: no', 'X-Autorespond: false'] }),
+    row(8, { headers: ['Auto-Submitted: no', 'Auto-Submitted: auto-replied'] }),
+  ];
+  const { reader, calls } = fixture({ inbox, sentFolder: false });
+  const result = await reader.read({ since });
+  assert.deepEqual(
+    result.folders[0].messages.map((message) => message.classification),
+    [
+      'auto_reply',
+      'auto_reply',
+      'normal',
+      'auto_reply',
+      'auto_reply',
+      'normal',
+      'normal',
+      'auto_reply',
+    ],
+  );
+  for (const call of calls.filter((call) => call[0] === 'fetch' && call[3].headers)) {
+    for (const name of ['auto-submitted', 'x-autoreply', 'x-autorespond'])
+      assert.ok(call[3].headers.includes(name), `IMAP must request ${name}`);
+  }
 });
 
 test('initial sync is recent-only, UID sorted and bounded; pagination leaves a resumable cursor', async () => {

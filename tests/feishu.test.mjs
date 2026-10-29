@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mapFeishuRecord, readFeishu } from '../server/feishu.mjs';
+import { fieldText, mapFeishuRecord, readFeishu } from '../server/feishu.mjs';
 import { createApp } from '../server/app.mjs';
 
 const env = {
@@ -31,6 +31,24 @@ test('真实客户不使用目标国家代替企业所在地，不伪造评分',
   assert.equal(lead.match, '');
   assert.equal(lead.facts[0].quote, 'We supply screens');
 });
+test('空白和未记录开发状态统一待开发，保留已有进度和原始字段', () => {
+  for (const status of [undefined, null, '', '  ', [], '未记录', [{ text: '未记录' }]]) {
+    const lead = mapFeishuRecord({ fields: { 开发状态: status } });
+    assert.equal(lead.status, '待开发');
+    assert.equal(lead.fields['开发状态'], fieldText(status));
+  }
+  for (const status of [
+    '待开发',
+    '已联系',
+    '已回复',
+    '跟进中',
+    '暂缓开发',
+    '停止开发',
+    '人工跟进中',
+  ])
+    assert.equal(mapFeishuRecord({ fields: { 开发状态: status } }).status, status);
+});
+
 test('飞书富文本和异常画像可读取，原始字段被保留', () => {
   const lead = mapFeishuRecord({
     record_id: 'rec-2',
@@ -43,6 +61,28 @@ test('飞书富文本和异常画像可读取，原始字段被保留', () => {
   assert.equal(lead.name, 'Acme');
   assert.equal(lead.email, 'sales@acme.example');
   assert.equal(lead.fields['画像JSON'], '{invalid');
+});
+
+test('客户录入时间优先取首次发现时间，缺失时取记录创建时间，不使用最近研究时间', () => {
+  const createdAt = 1793145600000;
+  const updatedAt = 1793232000000;
+  for (const firstSeen of [createdAt, String(createdAt), [{ text: String(createdAt) }]]) {
+    const lead = mapFeishuRecord({
+      ...record,
+      created_time: updatedAt,
+      fields: { ...record.fields, 首次发现时间: firstSeen, 最近研究时间: updatedAt },
+    });
+    assert.equal(lead.createdAt, createdAt);
+    assert.equal(lead.updatedAt, updatedAt);
+  }
+  for (const missing of [undefined, '', 'invalid', 0, -1, Infinity]) {
+    const fields = { ...record.fields, 首次发现时间: missing, 最近研究时间: updatedAt };
+    assert.equal(
+      mapFeishuRecord({ ...record, created_time: createdAt, fields }).createdAt,
+      createdAt,
+    );
+    assert.equal(mapFeishuRecord({ ...record, fields }).createdAt, null);
+  }
 });
 test('真实读取遍历分页，仅服务端发送认证头，无写入请求', async () => {
   const calls = [];

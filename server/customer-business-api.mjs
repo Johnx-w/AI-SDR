@@ -4,6 +4,7 @@ import { CustomerBusinessFeishu } from './customer-business-feishu.mjs';
 import { ProductKnowledgeFeishu } from './product-knowledge-feishu.mjs';
 import { FeishuClient } from './feishu-direct.mjs';
 import { fieldText } from './feishu.mjs';
+import { decorateLeadDevelopment } from './lead-development.mjs';
 
 export const CUSTOMER_BUSINESS_VERSION = 't1-t3-t4-v1';
 const kinds = new Set(['conversations', 'messages', 'demands', 'tasks']);
@@ -105,7 +106,10 @@ export class CustomerBusinessApi {
     let customers = [];
     let customerError = '';
     try {
-      customers = (await this.loadCustomers()).map((row) => ({
+      customers = decorateLeadDevelopment(
+        { leads: await this.loadCustomers() },
+        store.view(),
+      ).leads.map((row) => ({
         id: row.id,
         name: row.name,
         website: row.website,
@@ -158,6 +162,15 @@ export class CustomerBusinessApi {
           body: {
             ...store.developmentView(id),
             sourceStatus: fieldText(customer.fields?.['开发状态']),
+            status: decorateLeadDevelopment(
+              {
+                lead: {
+                  id,
+                  status: fieldText(customer.fields?.['开发状态']),
+                },
+              },
+              store.view({ customerId: id }),
+            ).lead.status,
           },
         };
       }

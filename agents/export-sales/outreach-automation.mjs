@@ -72,7 +72,7 @@ export function evaluateOutreachReadiness(input) {
     reasons,
     'campaign_inactive',
     draftOnly
-      ? !['draft', 'active'].includes(input?.campaign?.status)
+      ? !['draft', 'preparing', 'ready', 'active'].includes(input?.campaign?.status)
       : input?.campaign?.status !== 'active',
   );
   add(reasons, 'outreach_disabled', input?.policy?.outreach_enabled !== true);

@@ -184,7 +184,7 @@ test('需求优先于高评级开发，拒绝联系和已有沟通客户不作�
   assert.equal(result.priority[0].customerId, 'need');
   assert.equal(
     result.priority.find((row) => row.customerId === 'unknown').reason,
-    'A 级，开发状态待确认',
+    'A 级待开发客户',
   );
   for (const id of ['refused', 'paused'])
     assert.equal(

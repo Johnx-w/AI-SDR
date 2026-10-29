@@ -24,6 +24,7 @@ const factKeys = [
   'attachments',
   'effectiveDate',
   'notes',
+  'outreachFacts',
 ];
 const allowedKeys = new Set([
   ...factKeys,
@@ -53,6 +54,57 @@ function list(value, name, maxItems, maxLength) {
   if (value === undefined) return [];
   if (!Array.isArray(value) || value.length > maxItems) throw fail(400, name + '数量或格式不正确');
   return [...new Set(value.map((item) => text(item, name, maxLength, true)))];
+}
+
+function outreachFacts(value = []) {
+  if (!Array.isArray(value) || value.length > 30)
+    throw fail(400, '开发信事实最多30条，且必须为列表');
+  const ids = new Set();
+  return value.map((fact) => {
+    if (
+      !fact ||
+      typeof fact !== 'object' ||
+      Array.isArray(fact) ||
+      Object.keys(fact).some(
+        (key) => !['id', 'kind', 'text', 'conditions', 'validUntil'].includes(key),
+      )
+    )
+      throw fail(400, '开发信事实包含无效或不支持的字段');
+    const id = text(fact.id, '开发信事实编号', 100, true);
+    if (!/^[A-Za-z0-9_-]+$/u.test(id) || ids.has(id))
+      throw fail(400, '开发信事实编号必须唯一，且只能包含英文字母、数字、下划线和连字符');
+    ids.add(id);
+    if (!['product', 'price', 'moq', 'stock', 'leadTime', 'freight', 'payment'].includes(fact.kind))
+      throw fail(400, '开发信事实类型不正确');
+    const conditions = text(fact.conditions, '开发信事实适用条件', 800, fact.kind === 'price');
+    let validUntil = null;
+    if (fact.validUntil != null) {
+      const date = text(fact.validUntil, '开发信事实有效期', 40, true);
+      if (
+        !/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/u.test(
+          date,
+        ) ||
+        !Number.isFinite(Date.parse(date)) ||
+        new Date(date.slice(0, 10)).toISOString().slice(0, 10) !== date.slice(0, 10)
+      )
+        throw fail(400, '开发信事实有效期必须为有效且包含时区的 ISO 时间');
+      validUntil = new Date(date).toISOString();
+    }
+    if (['price', 'stock', 'leadTime', 'freight'].includes(fact.kind) && !validUntil)
+      throw fail(400, '价格、库存、交期和运费事实必须填写有效期');
+    return {
+      id,
+      kind: fact.kind,
+      text: text(fact.text, '开发信事实正文', 1200, true),
+      conditions,
+      validUntil,
+    };
+  });
+}
+
+function storedProduct(row) {
+  const product = JSON.parse(row.data);
+  return { ...product, outreachFacts: product.outreachFacts ?? [] };
 }
 
 function safeUrl(value, name) {
@@ -132,6 +184,7 @@ function normalize(value) {
     status,
     approvedBy: text(value.approvedBy, '审核人', 100),
     notes: text(value.notes, '备注', 4000),
+    outreachFacts: outreachFacts(value.outreachFacts),
   };
 }
 
@@ -149,7 +202,7 @@ export class ProductKnowledge {
   }
   get(id) {
     const row = this.db.prepare('SELECT data FROM product_knowledge WHERE id=?').get(id);
-    return row ? JSON.parse(row.data) : null;
+    return row ? storedProduct(row) : null;
   }
   list({ status, usableOnly = false } = {}) {
     if (status !== undefined && !statuses.includes(status)) throw fail(400, '产品审核状态不正确');
@@ -159,7 +212,7 @@ export class ProductKnowledge {
     return this.db
       .prepare('SELECT data FROM product_knowledge ORDER BY rowid')
       .all()
-      .map((row) => JSON.parse(row.data))
+      .map(storedProduct)
       .filter(
         (product) =>
           (!status || product.status === status) &&
@@ -175,7 +228,10 @@ export class ProductKnowledge {
       (value.id || typeof idempotencyKey !== 'string' || !/^[\w-]{8,100}$/.test(idempotencyKey))
     )
       throw fail(400, '新增产品资料需要有效的操作编号');
-    const bodyHash = createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
+    const { outreachFacts: facts, ...legacyFacts } = normalized;
+    const bodyHash = createHash('sha256')
+      .update(JSON.stringify(facts.length ? normalized : legacyFacts))
+      .digest('hex');
     this.db.exec('BEGIN IMMEDIATE');
     try {
       if (idempotencyKey) {

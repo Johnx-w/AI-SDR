@@ -358,7 +358,6 @@ export function MailConversations({
       <div className="outreach-section-heading">
         <div>
           <h2>邮件会话</h2>
-          <p>按邮箱查看已保存的来信与往来邮件，查看正文不会发送邮件。</p>
         </div>
         <button
           className="btn primary"
@@ -416,8 +415,7 @@ export function MailConversations({
         </button>
       </div>
       <p className="mail-conversations-scope">
-        首次同步读取最近 30
-        天的收件箱与可识别的已发件箱，之后继续增量读取。点击“同步邮件”才会连接邮箱读取，未读标记仅用于本工作台。
+        首次同步读取最近 30 天的收件箱与可识别的已发件箱，之后继续增量读取。
       </p>
       {notice && (
         <div className="outreach-alert success" role="status">

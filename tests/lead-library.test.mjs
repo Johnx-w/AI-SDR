@@ -43,6 +43,7 @@ const tick = () => new Promise((resolve) => setImmediate(resolve));
 test('summary omits full dossiers while preserving rating, contact and customs indicators', () => {
   const summary = summarizeLead(
     lead({
+      createdAt: 1793145600000,
       companyIdentity: {
         legal_name: 'Acme Ltd',
         website_name: 'Acme',
@@ -74,6 +75,8 @@ test('summary omits full dossiers while preserving rating, contact and customs i
     /FULL_|"facts"|"fields"|"assessment"|"customsEvidence"/,
   );
   assert.equal(summary.updatedAt, null);
+  assert.equal(summary.createdAt, 1793145600000);
+  assert.equal(summarizeLead(lead()).createdAt, null);
   assert.equal(
     summarizeLead(lead({ email: '', phone: '', contactEvidence: [{ kind: 'form' }] }))
       .contactSummary.label,

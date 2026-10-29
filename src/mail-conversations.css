@@ -129,7 +129,10 @@
   overflow: hidden;
 }
 .mail-conversation-list {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
   border-right: 1px solid var(--color-border);
 }
 .mail-conversation-list-heading {
@@ -149,7 +152,7 @@
   font-size: 11px;
 }
 .mail-conversation-items {
-  max-height: 730px;
+  flex: 1 1 0;
   overflow-y: auto;
 }
 .mail-conversation-row {
@@ -808,9 +811,6 @@
     border-right: 0;
     border-bottom: 0;
   }
-  .mail-conversation-items {
-    max-height: 660px;
-  }
   .mail-conversation-back {
     display: inline-flex;
   }
@@ -859,9 +859,6 @@
   .mail-conversation-list {
     border-right: 0;
     border-bottom: 1px solid var(--color-border);
-  }
-  .mail-conversation-items {
-    max-height: 320px;
   }
   .mail-conversation-row-top {
     flex-wrap: nowrap;

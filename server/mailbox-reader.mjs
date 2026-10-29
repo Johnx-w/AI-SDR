@@ -19,6 +19,9 @@ const HEADERS = [
   'message-id',
   'in-reply-to',
   'references',
+  'auto-submitted',
+  'x-autoreply',
+  'x-autorespond',
 ];
 const readMessages = {
   MAILBOX_READ_FAILED: '邮箱邮件同步失败，请检查收件连接后重试',
@@ -119,6 +122,17 @@ function textParts(structure, parts = [], attachments = [], inlineParts = []) {
 }
 function parseOptions() {
   return { skipHtmlToText: false, skipTextToHtml: true, skipImageLinks: true, keepCidLinks: false };
+}
+
+function automaticReply(headers) {
+  return ['auto-submitted', 'x-autoreply', 'x-autorespond'].some((name) => {
+    const value = headers?.get?.(name);
+    return (Array.isArray(value) ? value : [value]).some(
+      (item) =>
+        typeof item === 'string' &&
+        !['', 'no', 'false', '0'].includes(item.split(';')[0].trim().toLowerCase()),
+    );
+  });
 }
 
 function mimePart(part, body, binary = false) {
@@ -268,6 +282,7 @@ export function createMailboxReader({
       uid: uid(metadata.uid),
       folder: folder.path,
       direction: folder.sent || from[0] === normalizedAccount ? 'outbound' : 'inbound',
+      classification: automaticReply(headers.headers) ? 'auto_reply' : 'normal',
       from: from[0],
       fromName: clean(
         headers.from?.value?.[0]?.name || metadata.envelope?.from?.[0]?.name || '',

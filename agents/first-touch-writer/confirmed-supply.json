@@ -1,0 +1,40 @@
+{
+  "confirmedOn": "2026-10-28",
+  "basis": "业务负责人在首次开发信设计访谈中确认自有工厂，三个品牌可在各自范围内使用制造商身份；细分产品沿用已确认邮箱路由。未确认具体规格或商务条件。",
+  "brands": [
+    {
+      "name": "Shutter & Blinds Solutions",
+      "domain": "shutterblindssolutions.com",
+      "products": [
+        { "name": "Venetian Blinds", "direction": "finished", "types": [] },
+        {
+          "name": "Indoor Blinds and Shades",
+          "direction": "finished",
+          "types": [
+            "roller shades",
+            "zebra shades",
+            "cellular shades",
+            "Roman shades",
+            "woven wood shades",
+            "panel track blinds",
+            "vertical blinds"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Shuangsheng Shutter",
+      "domain": "shuangshengshutter.com",
+      "products": [{ "name": "Plantation Shutters", "direction": "finished", "types": [] }]
+    },
+    {
+      "name": "Honey Badger Blinds",
+      "domain": "honeybadgerblinds.com",
+      "products": [
+        { "name": "Fabric Curtains and Drapery", "direction": "finished", "types": [] },
+        { "name": "Curtain Tracks", "direction": "materials", "types": [] },
+        { "name": "Curtain Accessories", "direction": "materials", "types": [] }
+      ]
+    }
+  ]
+}

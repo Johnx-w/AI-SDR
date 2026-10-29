@@ -9,16 +9,19 @@ test('暂缓覆盖列表、详情与导出显示，原始档案和其它客户�
   const contexts = [{ customerId: lead.id, development: { version: 1, paused: true } }];
   const listed = decorateLeadDevelopment(
     { leads: [{ ...lead, version: 'original' }, other] },
-    contexts,
+    { customerContexts: contexts },
   );
-  const detailed = decorateLeadDevelopment({ lead, version: 'original' }, contexts);
+  const detailed = decorateLeadDevelopment(
+    { lead, version: 'original' },
+    { customerContexts: contexts },
+  );
   assert.equal(listed.leads[0].status, '暂缓开发');
   assert.equal(detailed.lead.status, '暂缓开发');
   assert.equal(listed.leads[0].version, detailed.version);
   assert.equal(listed.leads[1], other);
   assert.equal(lead.status, '已回复');
   contexts[0].development = { version: 2, paused: false };
-  const resumed = decorateLeadDevelopment({ leads: [lead] }, contexts);
+  const resumed = decorateLeadDevelopment({ leads: [lead] }, { customerContexts: contexts });
   assert.equal(resumed.leads[0].status, '已回复');
 });
 

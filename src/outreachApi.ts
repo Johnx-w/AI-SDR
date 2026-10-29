@@ -1,5 +1,13 @@
 import type { MailSignatureDesign } from './domain/mail-signature.mjs';
 
+export interface OutreachFact {
+  id: string;
+  kind: 'product' | 'price' | 'moq' | 'stock' | 'leadTime' | 'freight' | 'payment';
+  text: string;
+  conditions: string;
+  validUntil: string | null;
+}
+
 export interface OutreachProduct {
   id: string;
   label?: string;
@@ -9,6 +17,7 @@ export interface OutreachProduct {
   status?: string;
   version?: number;
   englishName?: string;
+  outreachFacts?: OutreachFact[];
 }
 
 export interface OutreachMailbox {
@@ -46,8 +55,17 @@ export interface OutreachCampaign {
   cancelledAt?: string;
   lastError?: string;
   approvedRevision: number | null;
+  generationMode?: 'simple' | 'professional';
   outreachClaims?: { productId: string; productVersion: number; text: string }[];
-  stats: { queued: number; accepted: number; failed: number; unknown: number; blocked: number };
+  productScopes?: { productId: string; name: string; englishName: string }[];
+  stats: {
+    draft?: number;
+    queued: number;
+    accepted: number;
+    failed: number;
+    unknown: number;
+    blocked: number;
+  };
 }
 
 export type OutreachDeliveryStatus =
@@ -80,6 +98,10 @@ export interface OutreachDelivery {
   messageId?: string | null;
   receivedVerifiedAt?: string | null;
   recordError?: string | null;
+  agentId?: 'shutter' | 'venetian' | 'indoor' | 'outdoor';
+  productClaimIds?: string[];
+  materialVersion?: string;
+  productFacts?: OutreachFact[];
 }
 
 export interface OutreachState {

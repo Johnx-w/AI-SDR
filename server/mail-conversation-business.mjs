@@ -115,7 +115,15 @@ export async function recordMailConversation({ store, conversation, messages }) 
         account,
         occurredAt: message.occurredAt,
         deliveryStatus: message.deliveryStatus,
-        classification: 'normal',
+        classification: [
+          'normal',
+          'auto_reply',
+          'unsubscribe',
+          'hard_bounce',
+          'complaint',
+        ].includes(message.classification)
+          ? message.classification
+          : 'normal',
         externalId: message.messageId || '',
         attachments: [],
         attachmentMetadata: message.attachments || [],

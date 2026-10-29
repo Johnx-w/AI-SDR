@@ -54,6 +54,7 @@ export interface Prospect {
   evidence: string;
   facts: { field: string; value: string; quote: string; source_url?: string }[];
   contactEvidence: { kind: string; value: string; quote: string; source_url: string }[];
+  createdAt?: number | null;
   updatedAt: string | number | null;
   fields: Record<string, string>;
 }
@@ -75,6 +76,7 @@ export type LeadSummary = Pick<
   | 'phone'
   | 'website'
   | 'source'
+  | 'createdAt'
   | 'updatedAt'
 > & {
   version: string;

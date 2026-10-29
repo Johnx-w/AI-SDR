@@ -25,6 +25,7 @@ import { exportCsv } from '../services/csv';
 import { formatBeijingText, formatBeijingTime } from '../domain/date-time.mjs';
 import {
   developmentStatuses,
+  leadProductCategoryLabels,
   leadProductCategories,
   marketLabel,
 } from '../domain/lead-library-filters';
@@ -138,17 +139,19 @@ export function LeadLibrary() {
     setSupplement(undefined);
   }, [params.get('lead')]);
   const leads = remote?.leads || [];
-  const filtered = leads.filter(
-    (l) =>
-      (!query ||
-        `${l.name} ${(l.companyIdentity?.aliases || []).join(' ')} ${l.domain} ${l.contact} ${l.email} ${l.source}`
-          .toLowerCase()
-          .includes(query.toLowerCase())) &&
-      (!market || marketLabel(l.market) === market) &&
-      (!grade || l.grade === grade) &&
-      (!product || leadProductCategories(l.product).includes(product)) &&
-      (!status || l.status === status),
-  );
+  const filtered = leads
+    .filter(
+      (l) =>
+        (!query ||
+          `${l.name} ${(l.companyIdentity?.aliases || []).join(' ')} ${l.domain} ${l.contact} ${l.email} ${l.source}`
+            .toLowerCase()
+            .includes(query.toLowerCase())) &&
+        (!market || marketLabel(l.market) === market) &&
+        (!grade || l.grade === grade) &&
+        (!product || leadProductCategories(l.product).includes(product)) &&
+        (!status || l.status === status),
+    )
+    .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
   const pages = Math.max(1, Math.ceil(filtered.length / 8));
   const current = Math.min(page, pages);
   const rows = filtered.slice((current - 1) * 8, current * 8);
@@ -314,7 +317,7 @@ export function LeadLibrary() {
               label: '市场',
               val: market,
               set: setMarket,
-              options: [...new Set(leads.map((l) => marketLabel(l.market)))],
+              options: [...new Set([...leads.map((l) => marketLabel(l.market)), '待核实'])],
             },
             {
               label: '评级',
@@ -326,7 +329,7 @@ export function LeadLibrary() {
               label: '产品',
               val: product,
               set: setProduct,
-              options: [...new Set(leads.flatMap((l) => leadProductCategories(l.product)))],
+              options: Object.values(leadProductCategoryLabels),
             },
             {
               label: '状态',
@@ -347,7 +350,7 @@ export function LeadLibrary() {
               <option value="">全部{f.label}</option>
               {f.options.map((o) => (
                 <option value={o} key={o}>
-                  {f.label === '状态' && o === '未记录' ? '未记录（待确认）' : o}
+                  {o}
                 </option>
               ))}
             </select>
@@ -371,7 +374,7 @@ export function LeadLibrary() {
           >
             清空筛选
           </button>
-          <span>共 {filtered.length} 条线索</span>
+          <span>共 {filtered.length} 条线索 · 最新录入优先</span>
         </div>
         {!remote && !error ? (
           <div className="library-loading">
