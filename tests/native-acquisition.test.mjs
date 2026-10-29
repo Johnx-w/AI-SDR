@@ -771,6 +771,79 @@ test('HTTP 首页失败后从 Tavily 正文发现联系页，仍限制同域与�
   }
 });
 
+test('HTTP 200 空壳经 basic、advanced 补采后以有效正文研究，保留完整 HTML 联系证据', async () => {
+  const f = fixture(),
+    extractions = [];
+  const svc = f.make({
+    readPage: async () => ({
+      html: '<div>Loading</div><a href="mailto:public@acme.example.org"></a>',
+    }),
+    fetchImpl: async (url, options) => {
+      if (url === 'https://api.tavily.com/extract') {
+        const body = JSON.parse(options.body);
+        extractions.push(body.extract_depth);
+        return json({
+          results: [
+            { url: site, raw_content: body.extract_depth === 'basic' ? 'Loading' : sourceText },
+          ],
+          usage: { credits: 1 },
+        });
+      }
+      return f.fetchImpl(url, options);
+    },
+  });
+  try {
+    const out = await svc.research(input, { source_url: site, operation_id: 'shell-upgrade-e2e' });
+    assert.equal(out.新增, 1, out.reason);
+    assert.deepEqual(extractions, ['basic', 'advanced']);
+    const operation = svc.store.get('shell-upgrade-e2e');
+    const sentPages = JSON.parse(
+      f.calls.find((c) => c.url.includes('deepseek')).body.input[1].content,
+    ).pages;
+    assert.deepEqual(sentPages, operation.research_pages);
+    assert.deepEqual(sentPages, [{ source_url: site, text: sourceText }]);
+    assert.deepEqual(operation.web_usage, { web_extract_calls: 2, web_extract_credits: 2 });
+    assert.equal(f.records[0].fields.邮箱, 'public@acme.example.org');
+  } finally {
+    svc.close();
+  }
+});
+
+test('补采超出正文预算的引文不能用于企业准入', async () => {
+  const omittedQuote = 'Acme Screens is a separately registered business entity.';
+  const f = fixture({ modelOverrides: { entity_type: policyFact('business', omittedQuote) } });
+  const svc = f.make({
+    readPage: async () => ({ html: '<p>Loading...</p>' }),
+    fetchImpl: async (url, options) => {
+      if (url === 'https://api.tavily.com/extract')
+        return json({
+          results: [
+            {
+              url: site,
+              raw_content: sourceText + 'x'.repeat(12000) + omittedQuote + 'y'.repeat(12000),
+            },
+          ],
+        });
+      return f.fetchImpl(url, options);
+    },
+  });
+  try {
+    const out = await svc.research(input, {
+      source_url: site,
+      operation_id: 'extract-quote-budget',
+    });
+    const sent = JSON.parse(
+      f.calls.find((c) => c.url.includes('deepseek')).body.input[1].content,
+    ).pages;
+    assert.ok(!sent[0].text.includes(omittedQuote));
+    assert.equal(out.research.eligibility.code, 'entity_unknown');
+    assert.equal(out.新增, 0);
+    assert.equal(f.records.length, 0);
+  } finally {
+    svc.close();
+  }
+});
+
 test('缺少直连凭证时禁止运行，但允许查看历史；不会退回 n8n', async () => {
   let calls = 0;
   const app = createApp({
