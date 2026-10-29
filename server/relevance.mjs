@@ -289,7 +289,12 @@ export function productsRelevant(products, target = {}) {
         !/\b(?:vehicle|caravan|4x4|camping|marine|boat|rv)\b|房车|车载|汽车/i.test(term)
       )
         continue;
-      if (windowMaterialsPattern.test(product) !== needsParts) continue;
+      // Material mentions do not erase independently supported finished products.
+      if (
+        windowMaterialsPattern.test(product) !== needsParts &&
+        (needsParts || !windowProductDirections(product).includes('finished'))
+      )
+        continue;
       if (specificPattern) {
         if (specificPattern.test(product)) return 'matched';
         continue;
