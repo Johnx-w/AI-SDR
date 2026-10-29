@@ -5,6 +5,7 @@ import {
   productsRelevant,
   businessProductRelation,
   countryMatches,
+  windowProductDirections,
 } from '../server/relevance.mjs';
 import { builtinProducts } from '../src/domain/acquisition-products.mjs';
 
@@ -12,6 +13,58 @@ const target = {
   product: 'outdoor zip screens, pergolas, awnings, full cassette folding arm awnings',
   market_countries: ['Australia'],
 };
+
+test('配件用途中的并列帘型不构成销售整帘的证据', () => {
+  for (const product of [
+    'replacement parts and string for blinds and shades',
+    'components for blinds and curtains',
+    'cords for blinds and shades',
+    'hardware for blinds and shades',
+    '用于百叶帘和卷帘的配件',
+    '百叶帘和卷帘用配件',
+    '用于百叶帘和卷帘的维修配件',
+    '百叶帘和卷帘用绳线',
+    '百叶帘配件和卷帘配件',
+    '窗饰替换配件',
+  ])
+    assert.deepEqual(windowProductDirections(product), ['materials'], product);
+});
+
+test('独立经营整帘与配件仍保留两个供货方向，通用配件不证明窗饰业务', () => {
+  for (const product of [
+    'We supply blinds and shades. We also sell replacement parts and string for blinds and shades.',
+    'We supply roller blinds and components for blinds and curtains.',
+    'We supply replacement parts for blinds and also sell complete roller shades.',
+    '我们供应百叶帘和卷帘，并销售窗饰配件。',
+  ])
+    assert.deepEqual(windowProductDirections(product), ['materials', 'finished'], product);
+  for (const product of [
+    'string, cords, mounting hardware and motors',
+    'components for vehicle blinds',
+    'strings for medical curtains',
+  ])
+    assert.deepEqual(windowProductDirections(product), [], product);
+});
+
+test('明确用于卷帘的绳线、五金与附件按材料配件匹配，不冒充整帘', () => {
+  for (const noun of ['cords', 'string', 'hardware', 'accessories', 'materials']) {
+    const product = `${noun} for roller blinds`;
+    assert.deepEqual(windowProductDirections(product), ['materials'], product);
+    assert.equal(productsRelevant([product], { product: 'roller blinds' }), 'not_matched', product);
+    assert.equal(
+      businessProductRelation([product], { product: 'roller blinds' }).status,
+      'not_matched',
+      product,
+    );
+    assert.equal(
+      productsRelevant([product], { product: 'roller blind components' }),
+      'matched',
+      product,
+    );
+  }
+  for (const product of ['E ZIP / Zip Track 户外防风卷帘', 'panel track blinds'])
+    assert.deepEqual(windowProductDirections(product), ['finished'], product);
+});
 
 test('行业强短语与目标产品短语判定页面相关', () => {
   const relevant = pageRelevance(

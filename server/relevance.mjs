@@ -135,8 +135,6 @@ const categories = [
   ['dream', /dream\s+curtain|sheer\s+vertical|梦幻帘/i],
   ['vertical', /vertical\s+blind|垂直帘/i],
 ];
-const partsPattern =
-  /\b(?:components?|parts?|motors?|brackets?|headrails?|springs?)\b|配件|零件|电机|制头|弹簧|安装码/i;
 const unrelatedWindowProducts =
   /\b(?:(?:shower|bath|stage|theat(?:re|er)|welding|air|fire|vehicle|caravan|automotive|car|truck|marine|boat|rv)\s+(?:window\s+)?(?:curtains?|blinds?|shades?|screens?|awnings?|shutters?)|(?:medical|cubicle|surgical)\s+(?:privacy\s+)?curtains?|hospital\s+(?:privacy|cubicle|bedside)\s+curtains?|(?:lamp|eye|sun\s*glass)\s*shades?|(?:led|lcd|computer|phone|projection|printing)\s+screens?|screen\s+printing|camera\s+shutters?|(?:curtains?|blinds?|shades?|awnings?)\s+(?:for|in)\s+(?:cars?|vehicles?|caravans?|boats?|rvs?))\b|浴帘|医用帘|医疗帘|隔帘|舞台幕布|焊接帘|房车|车载|汽车遮阳|灯罩/gi;
 const windowIndustryPattern =
@@ -148,7 +146,7 @@ const sampleProductPattern =
 const sampleProductDescriptions =
   /\b(?:(?:window\s+(?:coverings?|furnishings?|treatments?)|blinds?|shades?|curtains?|awnings?)\s+)?(?:fabrics?\s+)?(?:samples?(?:\s+(?:books?|cards?|kits?))?|swatches?|display\s+(?:kits?|cases?))(?:\s+(?:for|of)\s+(?:window\s+)?(?:coverings?|furnishings?|blinds?|shades?|curtains?|fabrics?))?\b|(?:窗饰|窗帘|面料)?(?:样本册|样本|样册|样卡|展示套件|展示箱)/gi;
 const windowMaterialsPattern =
-  /\b(?:semi[- ]?finished|components?|parts?|motors?|brackets?|headrails?|springs?|slats?|tubes?|tracks?|rails?|profiles?|extrusions?|hardware|accessories|mechanisms?|clutch(?:es)?|chains?|cords?)\b|\b(?:curtain|blind|blinds|shade|shades|awning|awnings)\s+fabrics?\b|\bfabrics?\s+for\s+(?:curtains?|blinds?|shades?|awnings?)\b|半成品|材料|配件|零件|电机|制头|弹簧|安装码|叶片|型材|轨道|面料|卷管/i;
+  /\b(?:semi[- ]?finished|materials?|components?|parts?|motors?|brackets?|headrails?|springs?|slats?|tubes?|(?<!zip[- ]|panel\s)tracks?|rails?|profiles?|extrusions?|hardware|accessories|mechanisms?|clutch(?:es)?|chains?|cords?|strings?)\b|\b(?:curtain|blind|blinds|shade|shades|awning|awnings)\s+fabrics?\b|\bfabrics?\s+for\s+(?:curtains?|blinds?|shades?|awnings?)\b|半成品|材料|配件|零件|电机|制头|弹簧|安装码|叶片|型材|轨道|面料|卷管|绳线|拉绳/i;
 
 function broadWindowProductStatus(text, allowSampleMentions = false) {
   const original = String(text || '').trim();
@@ -175,7 +173,12 @@ export function windowProductDirections(text) {
   if (broadWindowProductStatus(text) !== 'matched') return [];
   const cleaned = String(text)
     .replace(unrelatedWindowProducts, ' ')
-    .replace(sampleProductDescriptions, ' ');
+    .replace(sampleProductDescriptions, ' ')
+    // Keep a shared Chinese accessory suffix attached to all of its uses.
+    .replace(
+      /(?:用于|适用于)?(?:窗饰|窗帘|百叶帘|卷帘|遮阳帘)(?:\s*(?:和|与|以及|及|、)\s*(?:窗饰|窗帘|百叶帘|卷帘|遮阳帘))+(?:的|用)(?:替换|维修|专用)?(配件|零件|材料|电机|面料|绳线|拉绳)/g,
+      '$1',
+    );
   if (!windowMaterialsPattern.test(cleaned)) return ['finished'];
   const found = new Set(['materials']);
   // A catalog sentence may list complete blinds and dedicated components side
@@ -186,10 +189,7 @@ export function windowProductDirections(text) {
     for (const phrase of sentence.split(/\b(?:and|or|plus)\b|[,;&]|、|以及|和|与/)) {
       const material = windowMaterialsPattern.test(phrase);
       if (material) {
-        sharedMaterialContext =
-          /\bsemi[- ]?finished\b|\b(?:components?|parts?|motors?|fabrics?|materials?)\s+for\b|半成品|(?:配件|材料|面料).*用于/i.test(
-            phrase,
-          );
+        sharedMaterialContext = /\bsemi[- ]?finished\b|\bfor\b|半成品|用于/i.test(phrase);
         continue;
       }
       const independentSupply =
@@ -280,7 +280,7 @@ export function productsRelevant(products, target = {}) {
   for (const term of terms) {
     const wanted = productCategories(term);
     const specificPattern = specificProductPatterns.get(term);
-    const needsParts = partsPattern.test(term);
+    const needsParts = windowMaterialsPattern.test(term);
     const outdoorParts = needsParts && /outdoor|室外|户外/i.test(term);
     const indoorParts = needsParts && /indoor|室内/i.test(term);
     for (const product of list) {
@@ -289,7 +289,7 @@ export function productsRelevant(products, target = {}) {
         !/\b(?:vehicle|caravan|4x4|camping|marine|boat|rv)\b|房车|车载|汽车/i.test(term)
       )
         continue;
-      if (partsPattern.test(product) !== needsParts) continue;
+      if (windowMaterialsPattern.test(product) !== needsParts) continue;
       if (specificPattern) {
         if (specificPattern.test(product)) return 'matched';
         continue;
