@@ -3,6 +3,7 @@ import { acquisitionConfig } from './acquisition-config.mjs';
 import { createResearchProviders } from './research-providers.mjs';
 import { researchCacheKey } from './research-reuse.mjs';
 import { boundedResearchPages } from './research-input.mjs';
+import { compactResearchText } from './research-text.mjs';
 import { CustomsDiscovery, customsConfig } from './customs-discovery.mjs';
 import { matchShipmentBuyer } from './shipment-evidence.mjs';
 import { AcquisitionStore } from './acquisition-store.mjs';
@@ -644,7 +645,15 @@ export class NativeAcquisition {
       throw Object.assign(new Error('官网页面均未取得有效正文，采集未完成，未调用模型或写入'), {
         web_usage: webUsage.snapshot(),
       });
-    const bounded = boundedResearchPages([...researchPages.values()]);
+    const originalChars = [...researchPages.values()].reduce((sum, p) => sum + p.text.length, 0);
+    const compacted = [...researchPages.values()].map((p) => ({
+      ...p,
+      text: compactResearchText(p.text, p.source_url),
+    }));
+    const bounded = boundedResearchPages(compacted);
+    bounded.stats.originalChars = originalChars;
+    bounded.stats.compactedChars =
+      originalChars - compacted.reduce((sum, p) => sum + p.text.length, 0);
     return {
       source_url: initial.href,
       research_pages: bounded.pages,
@@ -753,6 +762,8 @@ export class NativeAcquisition {
       op.incomplete_urls = page.incomplete_urls;
       op.research_usage.omitted_pages = page.input_stats?.omittedPages || 0;
       op.research_usage.truncated_pages = page.input_stats?.truncatedPages || 0;
+      op.research_usage.original_chars = page.input_stats?.originalChars || 0;
+      op.research_usage.compacted_chars = page.input_stats?.compactedChars || 0;
       op.stage = 'research';
       op.checked_urls = page.checked_urls;
       op.research_pages = page.research_pages;

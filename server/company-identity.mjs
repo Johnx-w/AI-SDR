@@ -1,7 +1,9 @@
 import { thirdPartyCompanySource } from './website-identity.mjs';
+import { researchEvidencePages } from './research-text.mjs';
 
 // Also embedded with the shared website-source policy in legacy Code nodes.
 export function verifyCompanyIdentity(facts, pages, sourceUrl) {
+  pages = researchEvidencePages(pages);
   const literal = (value) =>
     String(value || '')
       .normalize('NFKC')

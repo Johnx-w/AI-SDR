@@ -5,6 +5,7 @@ import {
   targetProductTerms,
 } from './relevance.mjs';
 import { isAllProductScope, productTerms } from '../src/domain/acquisition-products.mjs';
+import { researchEvidencePages } from './research-text.mjs';
 
 export const assessmentKinds = [
   'core_product',
@@ -164,6 +165,7 @@ export function verifiedAssessmentOpportunities(
   verifiedProductFacts = [],
 ) {
   if (!Array.isArray(raw)) return [];
+  pages = researchEvidencePages(pages);
   const allScope =
     isAllProductScope(target) &&
     Boolean(target.product_scope || target.product || target.products?.length);
@@ -233,7 +235,9 @@ export function verifiedAssessmentOpportunities(
         typeof fact.value !== 'string'
       )
         continue;
-      const page = pages.find((p) => p.source_url === fact.source_url);
+      const page = pages.find(
+        (p) => p.source_url === fact.source_url && compact(p.text).includes(compact(fact.quote)),
+      );
       if (!page || fact.quote.trim().length < 3 || fact.quote.length > 600) continue;
       // Only whitespace is normalized. Partial lines, summaries and joined quotes are rejected.
       const quote = compact(fact.quote);

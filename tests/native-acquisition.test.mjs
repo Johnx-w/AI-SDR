@@ -184,6 +184,45 @@ function fixture({
 
 const policyFact = (value, quote) => ({ value, quote, source_url: site });
 
+test('精简后的中部经营证据贯通研究、初评、模拟写入及读回，统计实际节省字符', async () => {
+  const f = fixture({
+    pageText:
+      '<nav>' +
+      '<p>Home Products About Contact</p>'.repeat(500) +
+      '</nav><p>' +
+      sourceText +
+      '</p><footer>' +
+      '<p>Cookie settings and website policy information.</p>'.repeat(450) +
+      '</footer>',
+    modelOverrides: { actual_country: policyFact('United States', sourceText) },
+    automaticAssessment: true,
+  });
+  const svc = f.make();
+  try {
+    const result = await svc.research(input, {
+      source_url: site,
+      operation_id: 'compacted-insert',
+    });
+    assert.equal(result.新增, 1);
+    assert.equal(result.research.company_name, 'Acme Screens');
+    assert.equal(result.research.product_match, 'matched');
+    assert.equal(result.research.actual_country, 'United States');
+    assert.equal(f.records.length, 1);
+    assert.equal(f.records[0].fields.邮箱, 'sales@acme.example.org');
+    const op = svc.store.get('compacted-insert');
+    const sent = JSON.parse(
+      f.calls.find((call) => call.url.includes('deepseek')).body.input[1].content,
+    ).pages;
+    assert.deepEqual(sent, op.research_pages);
+    assert.ok(result.research_usage.original_chars > 30000);
+    assert.ok(result.research_usage.compacted_chars > 30000);
+    assert.ok(result.research_usage.input_chars < 1500);
+    assert.ok(result.assessment || op.assessment);
+  } finally {
+    svc.close();
+  }
+});
+
 for (const product_scope of ['all', 'specific']) {
   test(`${product_scope} 范围的相关企业国家未知仍入库，核实后归入实际市场`, async () => {
     const modelOverrides = { actual_country: null };
