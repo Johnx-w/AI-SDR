@@ -20,6 +20,34 @@ const genericEnv = {
 const messages = [{ role: 'user', content: 'Research only supplied official website evidence.' }];
 const schema = { type: 'object', properties: {}, additionalProperties: false };
 
+test('现有网页提供方原样传递 basic 与 advanced 提取层级，不隐式重复请求', async () => {
+  for (const env of [legacyEnv, genericEnv]) {
+    const calls = [];
+    const providers = createResearchProviders({
+      env,
+      fetchImpl: async (_url, options) => {
+        calls.push(JSON.parse(options.body));
+        return Response.json({ results: [] });
+      },
+    });
+    for (const extract_depth of ['basic', 'advanced'])
+      await providers.web.extract({
+        urls: ['https://buyer.example.org/'],
+        extract_depth,
+        format: 'markdown',
+      });
+    assert.deepEqual(
+      calls.map((call) => call.extract_depth),
+      ['basic', 'advanced'],
+    );
+    assert.ok(
+      calls.every(
+        (call) => call.urls[0] === 'https://buyer.example.org/' && call.format === 'markdown',
+      ),
+    );
+  }
+});
+
 test('研究推理强度可显式选择且参与响应复用身份，非法设置在请求前拒绝', async () => {
   let request;
   const high = createResearchProviders({

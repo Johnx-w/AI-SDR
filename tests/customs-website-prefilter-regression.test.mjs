@@ -359,7 +359,7 @@ test('extract 无用量或失败后仍有正文时保留实际调用数，费用
     });
     try {
       const page = await service.collect('https://buyer.example.org/');
-      assert.deepEqual(page.web_usage, { web_extract_calls: 1 });
+      assert.deepEqual(page.web_usage, { web_extract_calls: 2 });
     } finally {
       service.close();
     }
