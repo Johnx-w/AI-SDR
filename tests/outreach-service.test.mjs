@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OutreachService } from '../server/outreach-service.mjs';
+import { eligibleOutreachFacts } from '../server/outreach-content.mjs';
 
 function buyer(id = 'buyer-one', product = 'PVC shutters') {
   const domain = `${id}.example.org`;
@@ -167,6 +168,55 @@ async function enableProduction(h) {
   h.service.approveReview(true);
   h.state.clock += 31000;
 }
+
+test('自动开发计划直接启动，LLM生成后带固定签名发送且总量严格停在20封', async (t) => {
+  const h = harness();
+  t.after(() => h.service.close());
+  h.state.leads = Array.from({ length: 25 }, (_, i) => buyer(`automatic-${i}`));
+  h.service.generator.generate = async ({ candidate, product, campaign }) => ({
+    subject: `Supply cooperation with ${candidate.companyName}`,
+    bodyText: `Hello,\n\nWe supply ${product.englishName}. Would you be open to discussing supply cooperation?`,
+    sourceIds: candidate.evidence.map((e) => e.id),
+    factIds: eligibleOutreachFacts(product, campaign).map((f) => f.id),
+  });
+  const c = h.service.saveCampaign(
+    h.campaignInput({ generationMode: 'simple', outreachClaims: [], targetCount: 20 }),
+  );
+  assert.equal(h.service.review().productionApproved, false);
+  h.service.activate(c.id, c.revision);
+  await h.service.preparing.get(c.id);
+  for (let i = 0; i < 25; i++) {
+    h.state.clock += 31000;
+    await h.service.tick();
+  }
+  const detail = h.service.detail(c.id);
+  assert.equal(detail.campaign.status, 'completed');
+  assert.equal(detail.campaign.stats.accepted, 20);
+  assert.equal(detail.campaign.stats.draft, 0);
+  assert.equal(h.deliveries.length, 20);
+  assert.equal(new Set(h.deliveries.map((d) => d.to)).size, 20);
+  assert.ok(
+    h.deliveries.every((d) => d.text.endsWith(h.boxes.find((b) => b.id === d.mailboxId).signature)),
+  );
+});
+
+test('自动计划客户不足时暂停并报告实际数量，不把不足20封显示为完成', async (t) => {
+  const h = harness();
+  t.after(() => h.service.close());
+  h.service.generator.generate = async () => ({
+    subject: 'Supply cooperation',
+    bodyText: 'Hello, would you like to discuss window furnishings?',
+  });
+  const c = h.service.saveCampaign(
+    h.campaignInput({ generationMode: 'simple', outreachClaims: [], targetCount: 20 }),
+  );
+  h.service.activate(c.id, c.revision);
+  await h.service.preparing.get(c.id);
+  await h.service.tick();
+  assert.equal(h.service.campaign(c.id).status, 'paused');
+  assert.match(h.service.campaign(c.id).lastError, /1 \/ 20/);
+  assert.equal(h.deliveries.length, 1);
+});
 
 function deferred() {
   let resolve;
@@ -564,6 +614,27 @@ test('已启动计划自动接入之后入库的待开发客户，并在目标�
   );
 });
 
+test('没有样稿时显示实际拦截原因，已有样稿重新准备不误报无人符合条件', async (t) => {
+  const h = harness();
+  t.after(() => h.service.close());
+  h.state.leads.push(buyer('buyer-two'));
+  const campaign = await prepare(h, { outreachClaims: [] });
+  assert.equal(h.service.detail(campaign.id).campaign.stats.draft, 0);
+  assert.match(h.service.campaign(campaign.id).lastError, /2 家：匹配产品缺少当前版本的开发信介绍/);
+  assert.doesNotMatch(h.service.campaign(campaign.id).lastError, /没有符合条件/);
+  const updated = h.service.saveCampaign(
+    h.campaignInput({ revision: campaign.revision }),
+    campaign.id,
+  );
+  h.service.prepare(updated.id);
+  await h.service.preparing.get(updated.id);
+  assert.equal(h.service.detail(updated.id).campaign.stats.draft, 2);
+  h.service.prepare(updated.id);
+  await h.service.preparing.get(updated.id);
+  assert.equal(h.service.campaign(updated.id).lastError, '');
+  assert.equal(h.deliveries.length, 0);
+});
+
 test('客户证据补齐后重新准备样稿，旧待处理记录不再占用当前待处理计数', async (t) => {
   const h = harness();
   t.after(() => h.service.close());
@@ -911,4 +982,222 @@ test('服务重启保留取消终态和未发送记录，提交中邮件转为�
     await reopened?.close();
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+async function materialHarness(t) {
+  const h = harness();
+  t.after(() => h.service.close());
+  await enableProduction(h);
+  const product = h.products[0];
+  product.category = 'ventilation';
+  product.outreachFacts = [
+    {
+      id: 'supply',
+      kind: 'product',
+      text: 'We supply PVC shutters.',
+      conditions: '',
+      validUntil: null,
+    },
+    {
+      id: 'price',
+      kind: 'price',
+      text: 'The standard price is USD 30 per set.',
+      conditions: 'For orders of at least 500 sets, EXW China.',
+      validUntil: new Date(h.state.clock + 60000).toISOString(),
+    },
+  ];
+  h.service.generator.generate = async ({ product, campaign, candidate, now }) => {
+    const facts = eligibleOutreachFacts(product, campaign, now);
+    return {
+      subject: 'PVC shutters',
+      bodyText: facts.map((f) => [f.text, f.conditions].filter(Boolean).join(' ')).join('\n\n'),
+      agentId: 'shutter',
+      factIds: facts.map((f) => f.id),
+      sourceIds: candidate.evidence.map((f) => f.id),
+    };
+  };
+  const campaign = await prepare(h);
+  h.service.approve(campaign.id, campaign.revision);
+  const original = h.service.deliveries(campaign.id)[0];
+  h.boxes.find((box) => box.id === original.mailboxId).paused = true;
+  h.service.activate(campaign.id, campaign.revision);
+  await h.service.tick();
+  h.boxes.find((box) => box.id === original.mailboxId).paused = false;
+  return { ...h, campaign, product, original };
+}
+
+test('确认新资料后在原计划授权内自动重做未发邮件，保留原邮箱和旧文案', async (t) => {
+  const h = await materialHarness(t);
+  h.product.version++;
+  h.product.outreachFacts[1].text = 'The standard price is USD 32 per set.';
+  // Other eligible accounts have capacity; refreshing must preserve the chosen account.
+  h.boxes.find((box) => box.id === h.original.mailboxId).dailyLimit = 2;
+  await h.service.tick();
+  await h.service.preparing.get(h.campaign.id);
+  const rows = h.service.deliveries(h.campaign.id);
+  assert.equal(rows[0].status, 'cancelled');
+  assert.match(rows[0].bodyText, /USD 30/);
+  const fresh = rows.find((row) => row.status === 'queued');
+  assert.equal(fresh.mailboxId, h.original.mailboxId);
+  assert.equal(fresh.replacesDeliveryId, h.original.id);
+  assert.match(fresh.bodyText, /USD 32/);
+  assert.equal(h.service.campaign(h.campaign.id).approvedRevision, h.campaign.revision);
+  await h.service.tick();
+  assert.equal(h.service.delivery(fresh.id).status, 'accepted');
+  const sentSnapshot = structuredClone(h.service.delivery(fresh.id));
+  h.product.version++;
+  h.product.outreachFacts[1].text = 'The standard price is USD 35 per set.';
+  h.service.refreshProductMaterials();
+  assert.deepEqual(h.service.delivery(fresh.id), sentSnapshot);
+});
+
+test('价格到期自动重做为有效产品介绍，不发送过期数字且不重审计划', async (t) => {
+  const h = await materialHarness(t);
+  h.state.clock += 60001;
+  await h.service.tick();
+  await h.service.preparing.get(h.campaign.id);
+  const fresh = h.service.deliveries(h.campaign.id).find((row) => row.status === 'queued');
+  assert.ok(fresh);
+  assert.doesNotMatch(fresh.bodyText, /USD 30|500 sets/);
+  assert.match(fresh.bodyText, /We supply PVC shutters/);
+  assert.deepEqual(fresh.productClaimIds, ['supply']);
+  assert.equal(h.service.campaign(h.campaign.id).approvedRevision, h.campaign.revision);
+});
+
+test('产品身份或品牌范围改变不能继承自动授权，资料未确认期间也不发送', async (t) => {
+  for (const change of ['draft', 'identity', 'brand']) {
+    const h = await materialHarness(t);
+    h.product.version++;
+    if (change === 'draft') h.product.status = 'draft';
+    if (change === 'identity') h.product.englishName = 'Aluminium shutters';
+    if (change === 'brand') h.product.brands = ['A different brand'];
+    await h.service.tick();
+    await h.service.preparing.get(h.campaign.id);
+    assert.equal(h.service.delivery(h.original.id).status, 'blocked', change);
+    assert.equal(h.service.campaign(h.campaign.id).status, 'active', change);
+    assert.equal(h.deliveries.filter((row) => row.to === h.original.to).length, 0, change);
+  }
+});
+
+test('非持续计划等待资料确认，重新确认后也能自动重做和继续', async (t) => {
+  const h = await materialHarness(t);
+  h.product.version++;
+  h.product.status = 'draft';
+  await h.service.tick();
+  assert.equal(h.service.campaign(h.campaign.id).status, 'active');
+  h.product.version++;
+  h.product.status = 'approved';
+  h.product.outreachFacts[0].text = 'We supply made-to-measure PVC shutters.';
+  await h.service.tick();
+  await h.service.preparing.get(h.campaign.id);
+  const fresh = h.service.deliveries(h.campaign.id).find((row) => row.status === 'queued');
+  assert.ok(fresh);
+  assert.match(fresh.bodyText, /made-to-measure/);
+});
+
+test('生成期间资料变化，迟到的旧正文不进入发送队列', async (t) => {
+  const h = await materialHarness(t);
+  const entered = deferred(),
+    release = deferred();
+  const generate = h.service.generator.generate;
+  h.service.generator.generate = async (input) => {
+    const result = await generate(input);
+    entered.resolve();
+    await release.promise;
+    return result;
+  };
+  h.product.version++;
+  h.product.outreachFacts[0].text = 'We supply PVC plantation shutters.';
+  h.service.refreshProductMaterials();
+  await entered.promise;
+  h.product.version++;
+  h.product.outreachFacts[0].text = 'We supply PVC window shutters.';
+  release.resolve();
+  await h.service.preparing.get(h.campaign.id);
+  const late = h.service
+    .deliveries(h.campaign.id)
+    .find((row) => row.replacesDeliveryId === h.original.id);
+  assert.equal(late.status, 'blocked');
+  assert.equal(late.materialRefresh, true);
+  assert.equal(h.deliveries.filter((row) => row.to === h.original.to).length, 0);
+});
+
+test('SMTP连接准备期间资料变化，最终提交前阻止旧价，结果不会记为已发送', async (t) => {
+  const h = await materialHarness(t);
+  const entered = deferred(),
+    release = deferred();
+  h.service.mailboxes.send = async (id, message, { beforeSend } = {}) => {
+    entered.resolve();
+    await release.promise;
+    beforeSend?.();
+    h.deliveries.push({ mailboxId: id, ...message });
+    return { accepted: [message.to], rejected: [], messageId: message.messageId };
+  };
+  const tick = h.service.tick();
+  await entered.promise;
+  h.product.version++;
+  h.product.outreachFacts[1].text = 'The standard price is USD 32 per set.';
+  release.resolve();
+  await tick;
+  assert.equal(h.service.delivery(h.original.id).status, 'blocked');
+  assert.equal(h.service.delivery(h.original.id).materialRefresh, true);
+  assert.equal(h.deliveries.filter((row) => row.to === h.original.to).length, 0);
+});
+
+test('资料重做失败保留原产品与邮箱，等待后重试不会结束计划或按余量换号', async (t) => {
+  const h = await materialHarness(t);
+  const generate = h.service.generator.generate;
+  h.service.generator.generate = async () => {
+    throw Object.assign(new Error('模型暂不可用'), { status: 503 });
+  };
+  h.product.version++;
+  await h.service.tick();
+  await h.service.preparing.get(h.campaign.id);
+  const failed = h.service.deliveries(h.campaign.id).find((row) => row.status === 'blocked');
+  assert.equal(failed.materialRefresh, true);
+  await h.service.tick();
+  assert.equal(h.service.campaign(h.campaign.id).status, 'active');
+  assert.equal(h.service.preparing.has(h.campaign.id), false);
+  h.state.clock += 60001;
+  h.service.generator.generate = generate;
+  await h.service.tick();
+  await h.service.preparing.get(h.campaign.id);
+  const fresh = h.service.deliveries(h.campaign.id).find((row) => row.status === 'queued');
+  assert.equal(fresh.mailboxId, h.original.mailboxId);
+  assert.equal(fresh.candidate.productId, h.original.candidate.productId);
+});
+
+test('已审核恢复客户在就绪计划重做资料时保留已授予的计划授权', async (t) => {
+  const h = await materialHarness(t);
+  h.state.business = {
+    customerContexts: [
+      { customerId: h.original.customerId, development: { version: 2, paused: false } },
+    ],
+  };
+  h.service.putDelivery({
+    ...h.service.delivery(h.original.id),
+    developmentVersion: 2,
+    developmentReviewedVersion: 2,
+  });
+  h.service.putCampaign({ ...h.service.campaign(h.campaign.id), status: 'ready' });
+  h.product.version++;
+  h.service.refreshProductMaterials();
+  await h.service.preparing.get(h.campaign.id);
+  assert.equal(h.service.campaign(h.campaign.id).approvedRevision, h.campaign.revision);
+  const fresh = h.service.deliveries(h.campaign.id).find((row) => row.status === 'draft');
+  assert.equal(fresh.developmentReviewedVersion, 2);
+});
+
+test('首次生成失败时发生资料变化，仍保留待重做状态与原分配', async (t) => {
+  const h = harness();
+  t.after(() => h.service.close());
+  h.service.generator.generate = async () => {
+    h.products[0].version++;
+    throw Object.assign(new Error('模型暂不可用'), { status: 503 });
+  };
+  const campaign = await prepare(h);
+  const row = h.service.deliveries(campaign.id)[0];
+  assert.equal(row.status, 'blocked');
+  assert.equal(row.materialRefresh, true);
+  assert.equal(row.mailboxId, h.boxes[0].id);
 });

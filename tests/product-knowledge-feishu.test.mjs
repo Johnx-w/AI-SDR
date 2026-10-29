@@ -247,3 +247,31 @@ test('较旧版本同步不会覆盖已经核对的新版本', async () => {
   assert.equal(state.rows[0].fields['备注'], '最新资料');
   assert.equal(state.calls.filter((call) => call.method === 'write').length, 1);
 });
+
+test('开发信事实完整镜像到现有备注字段，清空事实后恢复原始备注', async () => {
+  const { state, mirror } = fixture();
+  const saved = product({
+    outreachFacts: [
+      {
+        id: 'roller-price',
+        kind: 'price',
+        text: 'Our standard price is USD 30 per set.',
+        conditions: 'For orders of at least 500 sets, FOB Shanghai.',
+        validUntil: '2026-12-31T23:59:59.000Z',
+      },
+    ],
+  });
+  assert.equal((await mirror.sync(saved)).status, 'synced');
+  const note = state.rows[0].fields['备注'];
+  const marker = '\n\n开发信事实（JSON）\n';
+  assert.equal(note.slice(0, note.indexOf(marker)), saved.notes);
+  assert.deepEqual(
+    JSON.parse(note.slice(note.indexOf(marker) + marker.length)),
+    saved.outreachFacts,
+  );
+  assert.equal((await mirror.sync(saved)).status, 'synced');
+  assert.equal(state.calls.filter((call) => call.method === 'write').length, 1);
+  assert.equal((await mirror.sync({ ...saved, outreachFacts: [], version: 2 })).status, 'synced');
+  assert.equal(state.rows[0].fields['备注'], saved.notes);
+  assert.equal(saved.notes, '内部备注');
+});

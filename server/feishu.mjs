@@ -3,6 +3,7 @@ import { formatRelatedProducts } from './product-format.mjs';
 import { readAssessmentSummary } from './customer-assessment.mjs';
 import { domainKey } from './website-identity.mjs';
 import { customerSource, customerWebsite, fieldValue } from './customer-fields.mjs';
+import { normalizeDevelopmentStatus } from './lead-development.mjs';
 
 export const fieldText = (value) => {
   if (value == null) return '';
@@ -19,6 +20,10 @@ export function mapFeishuRecord(record) {
     /* 原始字段仍可查看。 */
   }
   const read = (key) => fieldText(fieldValue(f, key));
+  const createdAt =
+    [read('首次发现时间'), record.created_time]
+      .map(Number)
+      .find((value) => Number.isFinite(value) && value > 0) ?? null;
   const grade = read('用户评级') || read('客户等级') || read('用户等级');
   const assessment = readAssessmentSummary(read('评级依据'));
   const contactEvidence = Array.isArray(profile.latest_research?.contact_evidence)
@@ -53,7 +58,7 @@ export function mapFeishuRecord(record) {
     assessment,
     grade: ['A', 'B', 'C', '待核实', '待补全', '暂不开发'].includes(grade) ? grade : '未评级',
     ratingReason: read('评级依据'),
-    status: read('开发状态') || '未记录',
+    status: normalizeDevelopmentStatus(read('开发状态')),
     region: read('州 / 城市'),
     city: '',
     address: read('详细地址'),
@@ -92,6 +97,7 @@ export function mapFeishuRecord(record) {
             return phone ? [{ ...c, ...phone }] : [];
           })(),
     ),
+    createdAt,
     updatedAt: Number(read('最近研究时间')) || profile.latest_research?.at || null,
     fields: Object.fromEntries(Object.entries(f).map(([k, v]) => [k, fieldText(v)])),
   };

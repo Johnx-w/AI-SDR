@@ -2,7 +2,13 @@ import { randomUUID, createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { selectOutreachCandidates, createOutreachGenerator } from './outreach-content.mjs';
+import {
+  selectOutreachCandidates,
+  createOutreachGenerator,
+  outreachProductScope,
+  outreachMaterialVersion,
+  eligibleOutreachFacts,
+} from './outreach-content.mjs';
 import { MailConversations } from './mail-conversations.mjs';
 import { MailReplies } from './mail-replies.mjs';
 import { renderMailboxSignature, signaturePlainTextHtml } from '../src/domain/mail-signature.mjs';
@@ -284,10 +290,12 @@ export class OutreachService {
       intervalSeconds = Number(input.intervalSeconds ?? 180);
     if (!Number.isInteger(targetCount) || targetCount < 1 || targetCount > 1000)
       throw fail(400, '目标数量应为1至1000');
-    if (!Number.isInteger(intervalSeconds) || intervalSeconds < 30 || intervalSeconds > 86400)
-      throw fail(400, '发送间隔至少30秒');
+    if (!Number.isInteger(intervalSeconds) || intervalSeconds < 5 || intervalSeconds > 86400)
+      throw fail(400, '发送间隔至少5秒');
     const name = text(input.name);
     if (!name) throw fail(400, '请填写计划名称');
+    const generationMode = input.generationMode ?? prior?.generationMode ?? 'professional';
+    if (!['simple', 'professional'].includes(generationMode)) throw fail(400, '邮件生成方式无效');
     const claims = Array.isArray(input.outreachClaims)
       ? input.outreachClaims.map((v) => ({
           productId: text(v.productId),
@@ -308,6 +316,7 @@ export class OutreachService {
       id: prior?.id || randomUUID(),
       name,
       mode: 'production',
+      generationMode,
       status: 'draft',
       revision: (prior?.revision || 0) + 1,
       approvedRevision: null,
@@ -331,6 +340,15 @@ export class OutreachService {
       lastError: '',
       sendWindow: input.sendWindow || null,
     };
+    c.productScopes = this.products()
+      .filter(
+        (product) =>
+          (c.filters.products.length
+            ? c.filters.products.includes(product.id)
+            : mailboxIds.some((id) => this.mailboxes.get(id).productIds?.includes(product.id))) &&
+          (!c.filters.categories.length || c.filters.categories.includes(product.category)),
+      )
+      .map(outreachProductScope);
     if (c.sendWindow) {
       const w = c.sendWindow;
       if (!/^\d{2}:\d{2}$/.test(w.start) || !/^\d{2}:\d{2}$/.test(w.end))
@@ -413,6 +431,50 @@ export class OutreachService {
       delivery.developmentReviewedVersion === delivery.developmentVersion
     );
   }
+  materialReason(delivery, campaign = this.campaign(delivery.campaignId)) {
+    if (delivery.mode !== 'production' || !delivery.candidate) return '';
+    const product = this.products().find((row) => row.id === delivery.candidate.productId);
+    const version = outreachMaterialVersion(product, campaign, new Date(this.now()));
+    return !version ||
+      product.version !== delivery.productVersion ||
+      (delivery.materialVersion && version !== delivery.materialVersion)
+      ? '产品资料已更新、过期或不再适用，待重新准备邮件'
+      : '';
+  }
+  refreshProductMaterials() {
+    if (this.closed) return;
+    for (const delivery of this.deliveries().filter(
+      (row) => row.mode === 'production' && ['draft', 'queued'].includes(row.status),
+    )) {
+      const reason = this.materialReason(delivery);
+      if (!reason) continue;
+      this.putDelivery({ ...delivery, status: 'blocked', reason, materialRefresh: true });
+      this.release(delivery.id);
+    }
+    for (const campaign of this.campaigns().filter(
+      (row) => row.mode === 'production' && ['active', 'ready'].includes(row.status),
+    )) {
+      if (this.preparing.has(campaign.id) || campaign.scope !== this.getScope()) continue;
+      const canRefresh = this.deliveries(campaign.id).some(
+        (delivery) =>
+          delivery.status === 'blocked' &&
+          delivery.materialRefresh &&
+          (!delivery.materialRetryAt || Date.parse(delivery.materialRetryAt) <= this.now()) &&
+          outreachMaterialVersion(
+            this.products().find((product) => product.id === delivery.candidate?.productId),
+            campaign,
+            new Date(this.now()),
+          ),
+      );
+      if (canRefresh) {
+        try {
+          this.prepare(campaign.id);
+        } catch (error) {
+          this.putCampaign({ ...campaign, lastError: safeError(error) });
+        }
+      }
+    }
+  }
   async candidates(c, ignoreDelivery) {
     const loaded = await this.loadLeads();
     const leads = Array.isArray(loaded) ? loaded : loaded.leads;
@@ -451,7 +513,16 @@ export class OutreachService {
       // new customers; it must not move a queued email between accounts.
       campaign: existing
         ? { ...c, customerIds: [existing.customerId], mailboxIds: [existing.mailboxId] }
-        : c,
+        : {
+            ...c,
+            senderAssignments: this.deliveries(c.id)
+              .filter((delivery) => delivery.status === 'blocked' && delivery.materialRefresh)
+              .map((delivery) => ({
+                customerId: delivery.customerId,
+                productId: delivery.candidate?.productId,
+                mailboxId: delivery.mailboxId,
+              })),
+          },
       suppressed: identityValues(stopped),
       contacted: identityValues(identities),
       now: new Date(this.now()),
@@ -553,6 +624,12 @@ export class OutreachService {
           return;
         const mailbox = this.mailboxes.get(candidate.mailboxId),
           product = this.products().find((p) => p.id === candidate.productId);
+        const replaced = this.deliveries(id).find(
+          (delivery) =>
+            delivery.customerId === candidate.customerId &&
+            delivery.status === 'blocked' &&
+            delivery.materialRefresh,
+        );
         if (!mailbox?.signature?.trim()) {
           this.putDelivery({
             id: randomUUID(),
@@ -589,9 +666,21 @@ export class OutreachService {
           createdAt: iso(this.now),
           candidate,
           developmentVersion: candidate.developmentVersion,
+          ...(c.generationMode === 'simple'
+            ? { developmentReviewedVersion: candidate.developmentVersion || 0 }
+            : {}),
           revision,
           senderVersion: senderVersion(mailbox),
           productVersion: product.version,
+          materialVersion:
+            candidate.materialVersion || outreachMaterialVersion(product, c, new Date(this.now())),
+          ...(replaced
+            ? {
+                replacesDeliveryId: replaced.id,
+                developmentReviewedVersion: replaced.developmentReviewedVersion,
+                materialRefresh: true,
+              }
+            : {}),
         };
         try {
           this.transaction(() => {
@@ -614,6 +703,7 @@ export class OutreachService {
             mailbox,
             product,
             campaign: c,
+            now: new Date(this.now()),
           });
           const current = this.campaign(id);
           if (this.closed) return;
@@ -629,6 +719,17 @@ export class OutreachService {
             this.release(d.id);
             continue;
           }
+          const materialReason = this.materialReason(d, current);
+          if (materialReason) {
+            this.putDelivery({
+              ...d,
+              status: 'blocked',
+              reason: materialReason,
+              materialRefresh: true,
+            });
+            this.release(d.id);
+            continue;
+          }
           if (!generated.subject || !generated.bodyText || /[\r\n]/.test(generated.subject))
             throw fail(422, '邮件生成结果无效');
           const signature = renderMailboxSignature(mailbox);
@@ -640,13 +741,19 @@ export class OutreachService {
             bodyText,
             bodyHtml,
             status:
-              wasActive && current.approvedRevision === revision && !d.developmentVersion
+              wasActive && current.approvedRevision === revision && this.developmentReviewed(d)
                 ? 'queued'
                 : 'draft',
             reason: '',
             sourceIds: generated.sourceIds || [],
+            agentId: generated.agentId,
+            generationMode: c.generationMode,
+            productClaimIds: generated.factIds || [],
+            productFacts: eligibleOutreachFacts(product, c, new Date(this.now())).filter((fact) =>
+              (generated.factIds || []).includes(fact.id),
+            ),
           });
-          if (d.developmentVersion && !wasActive)
+          if (d.developmentVersion && !wasActive && !this.developmentReviewed(d))
             this.putCampaign({ ...this.campaign(id), approvedRevision: null });
         } catch (error) {
           if (this.closed) return;
@@ -657,7 +764,21 @@ export class OutreachService {
             this.release(d.id);
             continue;
           }
-          this.putDelivery({ ...d, status: 'blocked', reason: safeError(error) });
+          const materialRefresh =
+            d.materialRefresh ||
+            this.delivery(d.id).materialRefresh ||
+            Boolean(this.materialReason(d, current));
+          this.putDelivery({
+            ...d,
+            status: 'blocked',
+            reason: safeError(error),
+            ...(materialRefresh
+              ? {
+                  materialRefresh: true,
+                  materialRetryAt: new Date(this.now() + 60000).toISOString(),
+                }
+              : {}),
+          });
           this.release(d.id);
         }
       }
@@ -665,13 +786,30 @@ export class OutreachService {
     await Promise.all([generate(), generate(), generate()]);
     if (this.closed) return;
     const current = this.campaign(id);
-    if (current.revision === revision && current.status !== 'paused')
+    if (current.revision === revision && current.status !== 'paused') {
+      const deliveries = this.deliveries(id);
+      const pending = deliveries.some((d) => ['draft', 'queued', 'sending'].includes(d.status));
+      const reasons = new Map();
+      for (const delivery of deliveries.filter((d) => d.status === 'blocked')) {
+        const reason = delivery.reason || '条件尚未补齐';
+        reasons.set(reason, (reasons.get(reason) || 0) + 1);
+      }
+      const summary = [...reasons]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([reason, count]) => `${count} 家：${reason}`)
+        .join('；');
       this.putCampaign({
         ...current,
         status: wasActive ? 'active' : 'ready',
         preparedAt: iso(this.now),
-        lastError: selected.length ? '' : '当前没有符合条件的新客户',
+        lastError: pending
+          ? ''
+          : summary
+            ? `暂未生成样稿。${summary}。请打开“样稿与详情”查看。`
+            : '当前没有可加入的未开发客户',
       });
+    }
   }
   approve(id, revision) {
     const c = this.campaign(id);
@@ -714,7 +852,45 @@ export class OutreachService {
     return this.review();
   }
   activate(id, revision) {
-    const c = this.campaign(id);
+    let c = this.campaign(id);
+    if (c.generationMode === 'simple') {
+      if (
+        c.mode !== 'production' ||
+        c.revision !== revision ||
+        !['draft', 'ready', 'paused', 'active'].includes(c.status)
+      )
+        throw fail(409, '计划已更新或正在处理，请刷新后启动');
+      if (!this.generatorClient().configured) throw fail(503, '请先配置邮件生成模型');
+      if (
+        !c.mailboxIds.length ||
+        c.mailboxIds.some((id) => {
+          const m = this.mailboxes.get(id);
+          return (
+            !m?.configured ||
+            m.paused ||
+            m.smtpStatus !== 'connected' ||
+            !m.signature?.trim() ||
+            !m.displayName?.trim()
+          );
+        })
+      )
+        throw fail(409, '请先核对所选邮箱连接和固定签名');
+      this.putCampaign({
+        ...c,
+        status: 'active',
+        approvedRevision: revision,
+        approvedAt: iso(this.now),
+        startedAt: c.startedAt || iso(this.now),
+        lastError: '',
+      });
+      for (const d of this.deliveries(id))
+        if (d.status === 'draft' && d.subject && this.developmentReviewed(d))
+          this.putDelivery({ ...d, status: 'queued' });
+      this.start();
+      this.prepare(id);
+      void this.tick();
+      return this.detail(id);
+    }
     if (c.mode !== 'production' || c.revision !== revision || c.approvedRevision !== revision)
       throw fail(409, '请先审核当前版本的计划和邮件样稿');
     if (!this.review().productionApproved)
@@ -876,8 +1052,8 @@ export class OutreachService {
     if (!m || m.paused || m.smtpStatus !== 'connected' || !m.configured) return false;
     if (c.mode === 'internal_test') return true;
     if (
-      !this.review().productionApproved ||
-      !this.review().testedMailboxIds.includes(m.id) ||
+      (c.generationMode !== 'simple' &&
+        (!this.review().productionApproved || !this.review().testedMailboxIds.includes(m.id))) ||
       c.approvedRevision !== c.revision ||
       !this.inWindow(c)
     )
@@ -911,6 +1087,7 @@ export class OutreachService {
     return this.running;
   }
   async runTick() {
+    this.refreshProductMaterials();
     const campaigns = this.campaigns().filter((c) => c.status === 'active');
     const used = new Set();
     for (const summary of campaigns) {
@@ -961,9 +1138,18 @@ export class OutreachService {
         c.mode === 'production' &&
         !c.continuous &&
         !rows.some((d) => ['draft', 'queued', 'sending'].includes(d.status)) &&
+        !rows.some((d) => d.status === 'blocked' && d.materialRefresh) &&
         !this.preparing.has(c.id)
       )
-        this.putCampaign({ ...current, status: 'completed' });
+        this.putCampaign({
+          ...current,
+          status: c.generationMode === 'simple' ? 'paused' : 'completed',
+          ...(c.generationMode === 'simple'
+            ? {
+                lastError: `本轮已提交 ${consumed} / ${c.targetCount} 封，剩余客户或邮件条件待处理，请查看执行详情。`,
+              }
+            : {}),
+        });
     }
   }
   async dispatch(c, d, m) {
@@ -984,6 +1170,17 @@ export class OutreachService {
       return;
     }
     if (c.mode === 'production') {
+      const materialReason = this.materialReason(d, c);
+      if (materialReason) {
+        this.putDelivery({
+          ...d,
+          status: 'blocked',
+          reason: materialReason,
+          materialRefresh: true,
+        });
+        this.release(d.id);
+        return;
+      }
       const reason =
         this.developmentReason(d) ||
         (!this.developmentReviewed(d) ? '恢复后的邮件尚未重新审核，请先核对样稿' : '');
@@ -1017,10 +1214,12 @@ export class OutreachService {
           v.productVersion === d.productVersion,
       );
       if (!candidate || hash(candidate.leadSnapshot) !== hash(d.candidate.leadSnapshot)) {
+        const materialReason = this.materialReason(d, latest);
         this.putDelivery({
           ...d,
           status: 'blocked',
-          reason: '客户、产品或联系状态已变化，请重新准备邮件',
+          reason: materialReason || '客户、产品或联系状态已变化，请重新准备邮件',
+          ...(materialReason ? { materialRefresh: true } : {}),
         });
         this.release(d.id);
         return;
@@ -1040,7 +1239,7 @@ export class OutreachService {
       senderVersion(latestMailbox) !== d.senderVersion ||
       latestCampaign.revision !== c.revision ||
       (c.mode === 'production' &&
-        (!this.review().productionApproved ||
+        ((c.generationMode !== 'simple' && !this.review().productionApproved) ||
           latestCampaign.approvedRevision !== c.revision ||
           this.isReserved(d.candidate, d.id)))
     ) {
@@ -1073,6 +1272,7 @@ export class OutreachService {
           text: d.bodyText,
           ...(d.bodyHtml ? { html: d.bodyHtml } : {}),
           messageId: pending.messageId,
+          expectedAccount: m.email,
         },
         {
           beforeSend: () => {
@@ -1082,11 +1282,20 @@ export class OutreachService {
                 ? '客户数据来源已改变，邮件尚未提交发送'
                 : '') ||
               (c.mode === 'production' && this.developmentReason(d)) ||
+              (c.mode === 'production' && this.materialReason(d, campaign)) ||
               (c.mode === 'production' && !this.developmentReviewed(d)
                 ? '恢复后的邮件尚未重新审核，请先核对样稿'
                 : '') ||
               (campaign.status !== 'active' || campaign.revision !== c.revision
                 ? '计划已暂停或更新，邮件尚未提交发送'
+                : '') ||
+              (c.mode === 'production' &&
+              (campaign.approvedRevision !== c.revision ||
+                (campaign.generationMode !== 'simple' && !this.review().productionApproved))
+                ? '当前计划或邮箱测试授权已失效，请重新核对'
+                : '') ||
+              (senderVersion(this.mailboxes.get(m.id)) !== d.senderVersion
+                ? '发件身份已变化，邮件尚未提交发送'
                 : '') ||
               (c.mode === 'production' && this.isReserved(d.candidate, d.id)
                 ? '客户联系安排已变化，请重新检查'
@@ -1130,7 +1339,12 @@ export class OutreachService {
       }
     } catch (error) {
       if (error.code === 'OUTREACH_PRE_SEND_BLOCKED') {
-        this.putDelivery({ ...d, status: 'blocked', reason: safeError(error) });
+        this.putDelivery({
+          ...d,
+          status: 'blocked',
+          reason: safeError(error),
+          ...(this.materialReason(d, this.campaign(c.id)) ? { materialRefresh: true } : {}),
+        });
         this.release(d.id);
         return;
       }

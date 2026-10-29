@@ -83,13 +83,17 @@ export function summarizeLead(lead) {
     'phone',
     'website',
     'source',
+    'createdAt',
     'updatedAt',
   ];
   const buyers = Array.isArray(lead.customsEvidence) ? lead.customsEvidence : [];
   return {
     version: contentVersion(lead),
     ...Object.fromEntries(
-      fields.map((key) => [key, lead[key] ?? (['score', 'updatedAt'].includes(key) ? null : '')]),
+      fields.map((key) => [
+        key,
+        lead[key] ?? (['score', 'createdAt', 'updatedAt'].includes(key) ? null : ''),
+      ]),
     ),
     companyIdentity: lead.companyIdentity
       ? {

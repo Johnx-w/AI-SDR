@@ -91,6 +91,20 @@ function harness(t, extra = {}) {
   };
 }
 
+test('mailbox classification reaches business recording and resync preserves previously recorded classifications', async (t) => {
+  const recorded = [];
+  const h = harness(t, { recordCommunication: async (detail) => recorded.push(detail) });
+  h.respond(batch([received('automatic', { classification: 'auto_reply' })]));
+  await h.inbox.sync({ mailboxId: 'one' });
+  const id = h.inbox.list().items[0].id;
+  assert.equal(h.inbox.detail(id).messages[0].classification, 'auto_reply');
+  assert.equal(recorded[0].messages[0].classification, 'auto_reply');
+  h.respond(batch([received('automatic', { classification: 'normal', bodyFormatVersion: 2 })]));
+  await h.inbox.sync({ mailboxId: 'one' });
+  assert.equal(h.inbox.detail(id).messages[0].classification, 'auto_reply');
+  assert.equal(recorded.at(-1).messages[0].classification, 'auto_reply');
+});
+
 test('cached reads never connect; an accepted first touch joins an actual reply with its original mailbox', async (t) => {
   const h = harness(t);
   h.service.putDelivery({

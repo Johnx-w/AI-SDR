@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["decision", "summary", "strengths", "issues"],
+  "properties": {
+    "decision": {
+      "type": "string",
+      "enum": ["ready", "revise", "block", "insufficient_evidence"]
+    },
+    "summary": { "type": "string" },
+    "strengths": { "type": "array", "items": { "type": "string" } },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "quote", "reason", "recommendation"],
+        "properties": {
+          "severity": { "type": "string", "enum": ["blocking", "improve"] },
+          "quote": { "type": "string" },
+          "reason": { "type": "string" },
+          "recommendation": { "type": "string" }
+        }
+      }
+    }
+  }
+}

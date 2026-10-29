@@ -26,7 +26,7 @@
       "required": ["id", "status", "sending_mode", "revision", "approved_automatic_revision"],
       "properties": {
         "id": { "type": "string", "minLength": 1 },
-        "status": { "enum": ["draft", "active", "paused", "closed"] },
+        "status": { "enum": ["draft", "preparing", "ready", "active", "paused", "closed"] },
         "sending_mode": { "enum": ["draft_only", "review_required", "automatic"] },
         "revision": { "type": "integer", "minimum": 0 },
         "approved_automatic_revision": { "type": ["integer", "null"], "minimum": 0 }

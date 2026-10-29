@@ -921,6 +921,7 @@
 .outreach-preview-layout {
   display: grid;
   grid-template-columns: minmax(180px, 0.8fr) minmax(0, 2fr);
+  height: 550px;
   border: 1px solid var(--color-border);
   border-radius: 10px;
   overflow: hidden;
@@ -928,7 +929,9 @@
 .outreach-preview-list {
   border-right: 1px solid var(--color-border);
   background: var(--color-surface-muted);
-  max-height: 550px;
+  overflow: auto;
+}
+.outreach-preview-layout > .outreach-message {
   overflow: auto;
 }
 .outreach-preview-list button {
@@ -1173,6 +1176,7 @@
   }
   .outreach-preview-layout {
     grid-template-columns: 1fr;
+    height: auto;
   }
   .outreach-preview-list {
     max-height: 180px;
@@ -1192,5 +1196,8 @@
   }
   .outreach-message {
     padding: 16px;
+  }
+  .outreach-preview-layout > .outreach-message {
+    max-height: 550px;
   }
 }

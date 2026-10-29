@@ -257,10 +257,7 @@ export class OverviewService {
         .sort((a, b) => a.grade.localeCompare(b.grade) || a.name.localeCompare(b.name));
       for (const customer of ranked)
         addPriority(customer.id, {
-          reason:
-            !customer.status || customer.status === '未记录'
-              ? `${customer.grade} 级，开发状态待确认`
-              : `${customer.grade} 级待开发客户`,
+          reason: `${customer.grade} 级待开发客户`,
           action: '查看档案与开发依据',
           to: link('/leads', { lead: customer.id }),
         });

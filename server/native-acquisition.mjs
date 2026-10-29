@@ -876,13 +876,11 @@ export class NativeAcquisition {
               (b.id === item.customs_evidence.id &&
                 b.product_family === item.customs_evidence.product_family)),
         );
-        if (!matchingBuyer || research.country_match === 'unknown') {
+        if (!matchingBuyer) {
           const output = this.output(op, {
             research,
             outcome: 'review',
-            reason: matchingBuyer
-              ? '海关候选官网经营国尚未核实，不能用卸货港或披露市场代替'
-              : '海关买方与官网经营主体不一致，待人工消歧',
+            reason: '海关买方与官网经营主体不一致，待人工消歧',
           });
           this.store.complete(op, output);
           return output;
@@ -912,7 +910,6 @@ export class NativeAcquisition {
         Boolean(research.company_name) &&
         Boolean(identityVerified) &&
         research.product_match === 'matched' &&
-        research.country_match === 'matched' &&
         research.required_match !== 'not_matched' &&
         !hardMismatch;
       if (!broadAdmissionReady && !item.target_record_id) {
@@ -923,7 +920,7 @@ export class NativeAcquisition {
             research.reason ||
             (hardMismatch
               ? '官网主体与目标市场或产品范围不匹配'
-              : '官网主体、经营国家或窗饰产品关联尚未核实'),
+              : '官网主体或窗饰产品关联尚未核实'),
         });
         this.store.complete(op, output);
         return output;

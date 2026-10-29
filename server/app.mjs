@@ -183,7 +183,8 @@ export function createApp({
       : new OutreachService({
           path: env.OUTREACH_DB_PATH || ':memory:',
           mailboxes: new OutreachMailboxes({ env }),
-          loadLeads: async () => (await loadLeads()).leads,
+          loadLeads: async () =>
+            decorateLeadDevelopment(await loadLeads(), business.state().store.view()).leads,
           products: () => knowledge().list(),
           getEnv: () => connections.environment(),
           getScope: acquisitionScope,
@@ -225,8 +226,10 @@ export function createApp({
       scope: acquisitionScope,
     }));
   const overview = new OverviewService({
-    customers: () => library().list(),
-    customerSnapshot: () => library().snapshot(),
+    customers: async () =>
+      decorateLeadDevelopment(await library().list(), business.state().store.view()),
+    customerSnapshot: () =>
+      decorateLeadDevelopment(library().snapshot(), business.state().store.view()),
     business: () => business.state().store.view(),
     acquisition: () => ({ ...jobs().overview(), schedules: plans().list() }),
     products: () => knowledge().list(),
@@ -272,7 +275,7 @@ export function createApp({
     // Keep measurements scoped to the connection that started this request.
     const metrics = leadPerformance;
     try {
-      const body = decorateLeadDevelopment(await read(), business.state().store.contexts());
+      const body = decorateLeadDevelopment(await read(), business.state().store.view());
       const serialized = JSON.stringify(body);
       const durationMs = performance.now() - started;
       metrics.record(operation, { durationMs, bytes: Buffer.byteLength(serialized) });
@@ -408,6 +411,7 @@ export function createApp({
             )
               throw new ApiError(400, '新增产品资料需要有效的 Idempotency-Key');
             const product = knowledge().save(value, { expectedVersion, idempotencyKey: key });
+            outbound?.refreshProductMaterials?.();
             const feishu = await productMirror().sync(product);
             return json(response, request.method === 'POST' ? 201 : 200, { product, feishu });
           }

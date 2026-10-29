@@ -28,6 +28,7 @@ export interface CustomerDevelopmentSnapshot {
   doNotContact: boolean;
   fixedEmail: string;
   sourceStatus: string;
+  status?: string;
   reviewToken: string;
 }
 

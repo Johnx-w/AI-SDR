@@ -8,6 +8,7 @@ import { AcquisitionStore } from '../server/acquisition-store.mjs';
 import { FeishuClient } from '../server/feishu-direct.mjs';
 import { BatchJobs } from '../server/batch-jobs.mjs';
 import { createApp } from '../server/app.mjs';
+import { mapFeishuRecord } from '../server/feishu.mjs';
 
 const site = 'https://acme.example.org/';
 const env = {
@@ -183,6 +184,44 @@ function fixture({
 
 const policyFact = (value, quote) => ({ value, quote, source_url: site });
 
+for (const product_scope of ['all', 'specific']) {
+  test(`${product_scope} 范围的相关企业国家未知仍入库，核实后归入实际市场`, async () => {
+    const modelOverrides = { actual_country: null };
+    const f = fixture({ modelOverrides, automaticAssessment: true });
+    const svc = f.make();
+    const target = { ...input, product_scope, query_mode: 'auto' };
+    try {
+      const output = await svc.research(target, {
+        source_url: site,
+        operation_id: `unknown-country-${product_scope}`,
+      });
+      assert.equal(output.新增, 1);
+      assert.equal(output.outcome, 'completed');
+      assert.equal(output.research.actual_country, null);
+      assert.equal(output.research.country_match, 'unknown');
+      assert.equal(f.records[0].fields.国家, undefined);
+      assert.equal(mapFeishuRecord(f.records[0]).market, '待核实');
+
+      modelOverrides.actual_country = policyFact('United States', sourceText);
+      svc.readPage = async (url) => {
+        const page = await f.readPage(url);
+        return { ...page, html: page.html + '<p>Our operating country is United States.</p>' };
+      };
+      const refreshed = await svc.research(target, {
+        source_url: site,
+        target_record_id: 'rec-native',
+        operation_id: `confirmed-country-${product_scope}`,
+      });
+      assert.equal(refreshed.更新, 1);
+      assert.equal(refreshed.新增, 0);
+      assert.equal(f.records.length, 1);
+      assert.equal(mapFeishuRecord(f.records[0]).market, 'United States');
+    } finally {
+      svc.close();
+    }
+  });
+}
+
 test('客户已入库但最新评估保存失败时可恢复，恢复不重复研究或写客户', async () => {
   const f = fixture({ automaticAssessment: true });
   const svc = f.make();
@@ -327,7 +366,7 @@ test('海关候选复用官网取证、入库读回；新产品票据关联既�
   }
 });
 
-test('只有名称的海关候选保持待关联，错误主体或未核实经营国不会冒充核实买家', async () => {
+test('海关候选国家未知可入库但保持待关联，错误主体不入库', async () => {
   for (const [name, country, expected] of [
     ['Acme Screens', 'United States', 'name_only'],
     ['Different Entity', 'United States', 'conflict'],
@@ -360,8 +399,9 @@ test('只有名称的海关候选保持待关联，错误主体或未核实经�
         },
       );
       assert.equal(svc.store.customsEvidence(site)[0].match.status, expected);
-      assert.equal(out.新增, expected === 'conflict' || !country ? 0 : 1);
-      if (expected === 'conflict' || !country) assert.equal(out.outcome, 'review');
+      assert.equal(out.新增, expected === 'conflict' ? 0 : 1);
+      if (expected === 'conflict') assert.equal(out.outcome, 'review');
+      else if (!country) assert.equal(mapFeishuRecord(f.records[0]).market, '待核实');
     } finally {
       svc.close();
     }

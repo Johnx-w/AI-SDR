@@ -257,6 +257,11 @@ export class MailConversations {
       attachments: attachmentMetadata(input.attachments),
       occurredAt,
       deliveryStatus: input.deliveryStatus,
+      classification: ['normal', 'auto_reply', 'unsubscribe', 'hard_bounce', 'complaint'].includes(
+        input.classification,
+      )
+        ? input.classification
+        : 'normal',
       messageId: externalId || undefined,
       source: input.source,
       unread: input.direction === 'inbound' && input.unread !== false,

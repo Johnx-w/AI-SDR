@@ -161,6 +161,11 @@ test('暂缓状态展示原因、人工历史和独立联系限制，回复仍�
   assert.doesNotMatch(html, /操作人姓名|登录账号/);
 });
 
+test('邮件开发管理展示根据真实沟通计算的当前状态', (t) => {
+  const data = { ...fixture(false), sourceStatus: '待开发', status: '已联系' };
+  assert.match(control(t, data).html(), /当前开发状态：已联系/);
+});
+
 test('只有已明确关联客户的邮件会话提供开发控制，未关联会话引导客户库核对', () => {
   const render = (customerId) =>
     renderToStaticMarkup(

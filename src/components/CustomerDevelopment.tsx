@@ -196,8 +196,10 @@ export function CustomerDevelopmentControl({ customerId }: { customerId: string 
         </p>
       )}
       {notice && <p role="status">{notice}</p>}
-      {snapshot?.sourceStatus && (
-        <p className="customer-development-muted">档案原始开发状态：{snapshot.sourceStatus}</p>
+      {(snapshot?.status || snapshot?.sourceStatus) && (
+        <p className="customer-development-muted">
+          当前开发状态：{snapshot.status || snapshot.sourceStatus}
+        </p>
       )}
       {restricted && (
         <p className="customer-development-warning">

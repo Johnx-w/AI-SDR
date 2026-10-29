@@ -105,7 +105,11 @@ function encoded(product) {
     审核人: product.approvedBy || null,
     审核时间: date(product.approvedAt),
     最近更新时间: date(product.updatedAt),
-    备注: product.notes || null,
+    备注: product.outreachFacts?.length
+      ? [product.notes, '开发信事实（JSON）\n' + JSON.stringify(product.outreachFacts)]
+          .filter(Boolean)
+          .join('\n\n')
+      : product.notes || null,
   };
 }
 

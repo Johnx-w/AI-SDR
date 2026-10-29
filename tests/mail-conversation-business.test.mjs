@@ -51,6 +51,33 @@ test('only matched real messages enter customer business; no demands or tasks ar
   assert.equal(h.store.context('customer').fixedEmail, h.conversation.account);
 });
 
+test('mailbox classifications are preserved as original business facts, including automatic replies', async (t) => {
+  const h = setup(t);
+  for (const classification of [
+    'normal',
+    'auto_reply',
+    'unsubscribe',
+    'hard_bounce',
+    'complaint',
+  ]) {
+    const incoming = {
+      ...h.incoming,
+      id: classification,
+      messageId: `<${classification}@buyer.example>`,
+      classification,
+    };
+    await h.record([incoming]);
+    const record = h.store
+      .all('messages')
+      .find((message) => message.externalId === incoming.messageId);
+    assert.equal(record.classification, classification);
+    await h.record([
+      { ...incoming, classification: classification === 'normal' ? 'auto_reply' : 'normal' },
+    ]);
+    assert.equal(h.store.get('messages', record.id).classification, classification);
+  }
+});
+
 test('manual SMTP acceptance remains distinct from sent-folder confirmation and preserves human ownership', async (t) => {
   const h = setup(t);
   const existing = await h.store.saveConversation({
