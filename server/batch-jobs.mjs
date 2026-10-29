@@ -611,6 +611,8 @@ export class BatchJobs {
             startedAt: new Date(this.now()).toISOString(),
             status: 'running',
             discovered: 0,
+            filtered: 0,
+            filterReasons: {},
             duplicates: 0,
             queued: 0,
             researched: 0,
@@ -678,7 +680,11 @@ export class BatchJobs {
           metric.discovered =
             (found.candidates || []).length +
             (found.skipped_existing || []).length +
-            (found.review_candidates || []).length;
+            (found.review_candidates || []).length +
+            (found.filtered_sources || []).length;
+          metric.filtered = (found.filtered_sources || []).length;
+          for (const item of found.filtered_sources || [])
+            metric.filterReasons[item.reason] = (metric.filterReasons[item.reason] || 0) + 1;
           const fresh = this.get(id);
           j.status = fresh.status;
           for (const c of found.skipped_existing || []) {

@@ -64,39 +64,63 @@ const blockedMedia = [
   '9news.com.au',
   '7news.com.au',
   'ctvnews.ca',
+  'fginsight.com',
 ];
 // Apply the same source qualification to discovery and queued/direct research.
 // A third-party company profile is not the company's independently verified site.
-function companyWebsiteSourceUrl(value, evidence = {}) {
+function companyWebsiteSource(value, evidence = {}) {
   const url = websiteUrl(value);
-  if (!url) return null;
+  if (!url) return { url: null, reason: '网址无效或不安全' };
   const domain = domainKey(url.href);
   if (
     blockedHosts.test(url.hostname) ||
     thirdPartyCompanySource({ ...evidence, url: url.href }) ||
-    /gazette|herald|tribune|chronicle|newspaper|news\.co/i.test(url.hostname) ||
-    blockedMedia.some((host) => domain === host || domain.endsWith('.' + host)) ||
-    /directory|findglocal|word-of-mouth|superpages/i.test(url.hostname) ||
-    /\.(?:pdf|docx?|xlsx?|pptx?|zip|rar)$/i.test(url.pathname) ||
-    /\/(jobs?|careers?|vacanc[^/]*|employment|news|wiki|directory|listings?)(\/|$)/i.test(
-      url.pathname,
-    )
+    /directory|findglocal|word-of-mouth|superpages/i.test(url.hostname)
   )
-    return null;
-  return url;
+    return { url: null, reason: '第三方平台或目录' };
+  if (
+    /gazette|herald|tribune|chronicle|newspaper|news\.co/i.test(url.hostname) ||
+    blockedMedia.some((host) => domain === host || domain.endsWith('.' + host))
+  )
+    return { url: null, reason: '新闻媒体' };
+  if (/\.(?:pdf|docx?|xlsx?|pptx?|zip|rar)$/i.test(url.pathname))
+    return { url: null, reason: '非网页文件' };
+  if (
+    /\/(jobs?|careers?|vacanc[^/]*|employment|wiki|directory|listings?)(\/|$)/i.test(url.pathname)
+  )
+    return { url: null, reason: '招聘或目录页面' };
+  const description = `${url.pathname} ${evidence.title || ''}`;
+  if (
+    /(?:^|\.)gov(?:\.[a-z]{2})?$/.test(url.hostname) &&
+    /safety|regulat(?:ion|ory)|statistics?|census|classification|naics|guidance/i.test(
+      description,
+    ) &&
+    !/procurement|tender|\brfp\b|solicitation|supplier registration/i.test(description)
+  )
+    return { url: null, reason: '监管或统计资料' };
+  return { url };
+}
+
+function companyWebsiteSourceUrl(value, evidence = {}) {
+  return companyWebsiteSource(value, evidence).url;
 }
 
 export function selectWebsiteCandidates(results, knownDomains = [], limit = 20) {
   const known = new Set(knownDomains),
     seen = new Set(),
     candidates = [],
-    skipped = [];
+    skipped = [],
+    filtered = [];
   for (const result of results) {
-    const url = companyWebsiteSourceUrl(result?.url, {
+    const source = companyWebsiteSource(result?.url, {
       title: result?.title,
       text: [result?.content, result?.raw_content].filter(Boolean).join(' '),
     });
-    if (!url) continue;
+    if (!source.url) {
+      filtered.push({ url: result?.url || '', reason: source.reason });
+      continue;
+    }
+    const url = source.url;
     const domain = domainKey(url.href);
     if (known.has(domain)) {
       skipped.push({ domain, url: url.href });
@@ -112,7 +136,12 @@ export function selectWebsiteCandidates(results, knownDomains = [], limit = 20) 
     });
     if (candidates.length >= limit) break;
   }
-  return { candidates, skipped_existing: skipped, skipped_existing_count: skipped.length };
+  return {
+    candidates,
+    skipped_existing: skipped,
+    skipped_existing_count: skipped.length,
+    filtered_sources: filtered,
+  };
 }
 
 // Name evidence is necessary to queue a customs website, not proof of identity.
@@ -733,7 +762,7 @@ export class NativeAcquisition {
         this.store.complete(op, output);
         return output;
       }
-      if (!companyWebsiteSourceUrl(item.source_url)) {
+      if (!companyWebsiteSourceUrl(item.source_url, { title: item.source_title })) {
         const reason =
           '现有来源为第三方贸易/平台档案或其他非官网页面，不是企业官网；尚未核实企业独立官网，本轮不据此判定高等级';
         if (item.target_record_id)

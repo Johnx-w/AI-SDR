@@ -33,6 +33,8 @@ export interface SearchMetric {
   status: string;
   error?: string;
   discovered: number;
+  filtered?: number;
+  filterReasons?: Record<string, number>;
   duplicates: number;
   queued: number;
   researched: number;

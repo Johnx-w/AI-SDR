@@ -296,7 +296,17 @@ export function BatchProgress({
                         </small>
                       )}
                     </td>
-                    <td>{metric.discovered}</td>
+                    <td>
+                      {metric.discovered}
+                      {!!metric.filtered && (
+                        <small>
+                          来源过滤 {metric.filtered} ·{' '}
+                          {Object.entries(metric.filterReasons || {})
+                            .map(([reason, count]) => `${reason} ${count}`)
+                            .join(' · ')}
+                        </small>
+                      )}
+                    </td>
                     <td>{metric.duplicates}</td>
                     <td>
                       {metric.researched} / {metric.queued}

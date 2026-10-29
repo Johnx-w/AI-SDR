@@ -29,6 +29,72 @@ test('未列黑名单的贸易买方档案也不能由搜索标题摘要冒充�
   );
 });
 
+test('监管与统计资料在研究前过滤，企业新闻和政府采购候选仍保留', () => {
+  const result = selectWebsiteCandidates([
+    {
+      url: 'https://www.cpsc.gov/Safety-Education/Safety-Education-Centers/Window-Covering',
+      title: 'Window Covering Cords | Consumer Product Safety Commission',
+    },
+    {
+      url: 'https://www.census.gov/naics/',
+      title: 'North American Industry Classification System',
+    },
+    {
+      url: 'https://supplier.example.com/news/new-roller-blinds',
+      title: 'New Roller Blinds | Example Window Supplier',
+    },
+    { url: 'https://procurement.example.gov/', title: 'Government procurement office' },
+    { url: 'https://parts.example.org/catalog', title: 'Window blind components supplier' },
+  ]);
+  assert.deepEqual(
+    result.candidates.map((row) => row.domain),
+    ['supplier.example.com', 'procurement.example.gov', 'parts.example.org'],
+  );
+  assert.deepEqual(
+    result.filtered_sources.map((row) => row.reason),
+    ['监管或统计资料', '监管或统计资料'],
+  );
+});
+
+test('直接研究已知监管资料时不抓网页、不调用模型或写客户', async () => {
+  const service = new NativeAcquisition({
+    env,
+    readPage: async () => assert.fail('Regulatory source must not be collected'),
+    feishu: {
+      records: async () => [],
+      write: async () => assert.fail('No remote write permitted'),
+    },
+    providers: {
+      web: { extract: async () => assert.fail('No extraction permitted') },
+      model: { research: async () => assert.fail('No model request permitted') },
+    },
+    fetchImpl: async () => assert.fail('No network request permitted'),
+  });
+  try {
+    for (const item of [
+      {
+        source_url:
+          'https://www.cpsc.gov/Safety-Education/Safety-Education-Centers/Window-Covering',
+        operation_id: 'regulatory-source-filter',
+      },
+      {
+        source_url: 'https://www.census.gov/',
+        source_title: 'North American Industry Classification System',
+        operation_id: 'statistical-source-filter',
+      },
+    ]) {
+      const result = await service.research(
+        { country: 'United States', product: 'window coverings', audience: 'BC' },
+        item,
+      );
+      assert.equal(result.outcome, 'review');
+      assert.match(result.reason, /非官网页面/);
+    }
+  } finally {
+    service.close();
+  }
+});
+
 test('企业介绍自身进口和货运业务、或引用第三方评价时不被平台特征误杀', () => {
   const result = selectWebsiteCandidates([
     {
