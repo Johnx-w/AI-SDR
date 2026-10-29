@@ -157,7 +157,9 @@ test('mail conversation entry shows the requested account, local-cache scope and
     onMailboxChange() {},
   });
   assert.match(html, /<option value="mailbox-2" selected="">support@our\.example<\/option>/);
-  assert.match(html, /点击“同步邮件”才会连接邮箱读取/);
+  assert.match(html, /首次同步读取最近 30 天的收件箱与可识别的已发件箱，之后继续增量读取/);
+  assert.match(html, /aria-label="刷新本地邮件缓存"/);
+  assert.match(html, /<button[^>]*>[\s\S]*?同步邮件<\/button>/);
   assert.match(html, /仅看未读/);
   assert.match(html, /正在读取邮件会话/);
   assert.match(html, /选择一段邮件会话/);

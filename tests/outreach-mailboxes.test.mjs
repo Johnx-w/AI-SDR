@@ -243,7 +243,8 @@ test('batch import is atomic, enforces case-insensitive uniqueness, and validate
   assert.equal(existsSync(path), false);
   for (const patch of [
     { dailyLimit: 501 },
-    { intervalSeconds: 29 },
+    { intervalSeconds: 4 },
+    { intervalSeconds: 86401 },
     { smtp: { ...smtp, host: 'attacker.example' } },
     { smtp: { ...smtp, secure: false } },
     { email: 'sales@example.com\r\nBcc: bad@example.org' },
@@ -256,6 +257,10 @@ test('batch import is atomic, enforces case-insensitive uniqueness, and validate
   await assert.rejects(registry.import(Array.from({ length: 21 }, () => settings)), {
     code: 'MAILBOX_INVALID',
   });
+  for (const intervalSeconds of [5, 29, 86400]) {
+    const saved = await registry.save({ ...settings, intervalSeconds, clientPassword: secret });
+    assert.equal(saved.intervalSeconds, intervalSeconds);
+  }
 });
 
 test('editing credentials or account resets verification, while metadata edits retain it', async (t) => {
