@@ -164,6 +164,15 @@ export interface AcquisitionJob {
       quote?: string;
       source_url?: string;
     }[];
+    review_resolution?: {
+      key: string;
+      source_url: string;
+      operation_id: string;
+      status: 'pending' | 'uncertain' | 'inserted' | 'updated' | 'duplicate' | 'review' | 'failed';
+      record_id?: string | null;
+      reason?: string;
+      updated_at: string;
+    };
   }[];
 }
 export interface ResearchUsage {

@@ -87,6 +87,8 @@ export class BatchJobs {
           }
         this.save(job);
       }
+    if (this.schedule && this.provider === 'native')
+      setImmediate(() => this.resumeInterrupted().catch(() => {}));
   }
   save(job) {
     job.updatedAt = new Date(this.now()).toISOString();
@@ -364,6 +366,42 @@ export class BatchJobs {
     } finally {
       this.resuming = false;
     }
+  }
+  async resumeInterrupted() {
+    const job = this.active();
+    if (
+      this.provider !== 'native' ||
+      job?.status !== 'paused' ||
+      job.reason !== 'interrupted' ||
+      (job.provider || 'n8n') !== this.provider
+    )
+      return;
+    if (job.current) {
+      const result = await this.remoteStatus(job.current.operation_id);
+      const latest = this.get(job.id);
+      if (
+        latest.status !== 'paused' ||
+        latest.reason !== 'interrupted' ||
+        latest.current?.operation_id !== job.current.operation_id ||
+        !result?.settled ||
+        !result.output
+      )
+        return;
+      if (
+        result.output.retryable_before_write === true &&
+        result.output.outcome === 'failed' &&
+        ['extract', 'research'].includes(result.output.stage) &&
+        (latest.current.interruptionRetries || 0) < 1 &&
+        latest.researched < latest.limits.research
+      ) {
+        latest.queue.unshift({
+          ...latest.current,
+          interruptionRetries: (latest.current.interruptionRetries || 0) + 1,
+        });
+        this.save(latest);
+      }
+    }
+    await this.resume(job.id);
   }
   stop(id) {
     const j = this.get(id);

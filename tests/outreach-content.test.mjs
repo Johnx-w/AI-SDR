@@ -717,9 +717,9 @@ const generated = (input, overrides = {}) => ({
 });
 
 const simpleBody = [
-  'I noticed that your website lists PVC shutters and timber shutters as part of your window furnishings range. That makes shutters a relevant starting point for an introduction to our business.',
-  'We are Example Shutters, and we supply PVC shutters. I am writing to explore potential supply cooperation with your team, starting with this product category. Any further discussion would be based on the requirements your team shares, so we can establish whether there is a suitable fit.',
-  'Would your team be open to considering an additional supplier for PVC shutters?',
+  'I noticed your website lists PVC shutters among the window furnishings you offer to customers.',
+  'At Example Shutters, we supply PVC shutters for window furnishing businesses. I am reaching out to introduce another supply option for this part of your range.',
+  'Would a short product introduction be useful to your team?',
 ].join('\n\n');
 
 test('简化生成直接使用客户信息和已确认产品范围，无需介绍文案或品类业务员协议', async () => {
@@ -766,10 +766,13 @@ test('简化生成直接使用客户信息和已确认产品范围，无需介�
   assert.equal(result.generationMode, 'simple');
   assert.equal(result.agentId, undefined);
   assert.ok(!JSON.stringify(request).includes('contract_version'));
-  assert.match(result.bodyText, /explore potential supply cooperation/);
-  assert.ok(result.bodyText.startsWith(`Hello ${candidate.companyName} Team,\n\n`));
+  assert.equal(JSON.parse(request.messages[1].content).customer.general_inbox, true);
+  assert.ok(!JSON.stringify(request).includes('contact@buyer.example.org'));
+  assert.match(result.bodyText, /At Example Shutters, we supply PVC shutters/);
+  assert.ok(result.bodyText.startsWith(`Hi ${candidate.companyName} team,\n\n`));
   assert.equal(result.bodyText.includes('\n\nHello,'), false);
   assert.match(request.messages[0].content, /Do not add a greeting or salutation/);
+  assert.match(request.messages[0].content, /Paragraph 1 is one concise, sourced observation/);
   assert.deepEqual(request.response_format.json_schema.schema.required, [
     'subject',
     'body_text',
@@ -813,8 +816,52 @@ test('简化开发信的公司称呼由程序固定，保留正文且不从未�
       },
     });
     const result = await generator.generate(context);
-    assert.equal(result.bodyText, `Hello Example Windows, Inc. & Co. Team,\n\n${content}`);
+    assert.equal(result.bodyText, `Hi Example Windows, Inc. & Co. team,\n\n${content}`);
   }
+});
+
+test('简化开发信按客户观察、品牌供货介绍、容易回复的问题排列', async () => {
+  const input = fixture();
+  input.campaign.generationMode = 'simple';
+  input.campaign.productScopes = input.products.map(outreachProductScope);
+  input.campaign.outreachClaims = [];
+  const [candidate] = selectOutreachCandidates(input).eligible;
+  let calls = 0;
+  const generator = createOutreachGenerator({
+    env: modelEnv,
+    fetchImpl: async () => {
+      calls++;
+      return Response.json({
+        choices: [
+          {
+            finish_reason: 'stop',
+            message: {
+              content: JSON.stringify({
+                subject: 'PVC Shutter Supply Cooperation',
+                body_text:
+                  calls === 1
+                    ? [
+                        'I noticed your website lists PVC shutters among your window furnishings. I am writing from Example Shutters to introduce our PVC shutter supply for your range.',
+                        'If this is relevant, we could discuss the shutter requirements your team works with before exploring a supply arrangement.',
+                        'Would your team be open to considering us as a supplier for PVC shutters?',
+                      ].join('\n\n')
+                    : simpleBody,
+                source_ids: [candidate.evidence[0].id],
+              }),
+            },
+          },
+        ],
+      });
+    },
+  });
+  const result = await generator.generate({
+    candidate,
+    mailbox: input.mailboxes[0],
+    product: input.products[0],
+    campaign: input.campaign,
+  });
+  assert.equal(calls, 2);
+  assert.match(result.bodyText.split('\n\n')[2], /Example Shutters.*supply/);
 });
 
 test('品类业务员生成完整正文，保留批准事实，凭证和未确认商务参数留在本地', async () => {

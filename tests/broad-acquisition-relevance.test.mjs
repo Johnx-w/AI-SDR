@@ -18,6 +18,47 @@ const source = 'https://example-window.example/about';
 const evidence = (value, quote) => ({ value, quote, source_url: source });
 const fact = (kind, quote, value = quote) => ({ kind, ...evidence(value, quote) });
 
+test('官网首页名称引文的链接斜杠误写可用原文校正，其他站点名称仍不接受', () => {
+  const homepage = 'https://www.selectblinds.com/';
+  const heading = '# [Select Blinds SelectBlinds](/)';
+  const body = [heading, 'Custom blinds, shades, curtains and shutters, made easy.'].join('\n');
+  const raw = {
+    company_name: {
+      value: 'SelectBlinds',
+      quote: '# [Select Blinds SelectBlinds](//)',
+      source_url: homepage,
+    },
+    entity_type: {
+      value: 'business',
+      quote: 'Custom blinds, shades, curtains and shutters, made easy.',
+      source_url: homepage,
+    },
+    products: [
+      {
+        value: 'curtains',
+        quote: 'Custom blinds, shades, curtains and shutters, made easy.',
+        source_url: homepage,
+      },
+    ],
+  };
+  const parse = (text) =>
+    parseCompanyResearch(
+      { choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(raw) } }] },
+      { source_url: homepage, research_pages: [{ source_url: homepage, text }] },
+      broad,
+    );
+  const accepted = parse(body);
+  assert.equal(accepted.company_name, 'SelectBlinds');
+  assert.equal(accepted.company_identity.status, 'website_name_only');
+  assert.equal(accepted.product_match, 'matched');
+  assert.equal(accepted.facts.find((item) => item.field === 'company_name').quote, heading);
+  assert.equal(
+    parse(body.replace(heading, '# [Select Blinds SelectBlinds](https://other.example/)'))
+      .company_name,
+    null,
+  );
+});
+
 test('全窗饰范围接受泛称、跨环境成品以及专用材料半成品', () => {
   for (const product of [
     'window coverings',

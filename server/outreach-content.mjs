@@ -354,7 +354,7 @@ export function outreachMaterialVersion(product, campaign, now = new Date()) {
             product.version,
             outreachProductScope(product),
             facts,
-            ...(campaign?.generationMode === 'simple' ? [writerPrompt] : []),
+            ...(campaign?.generationMode === 'simple' ? [writerPrompt, confirmedSupply] : []),
           ]),
         )
         .digest('hex')
@@ -875,7 +875,7 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
             body_text: {
               type: 'string',
               description:
-                '80–120 English words in exactly three paragraphs separated by two newline characters; the third paragraph is one cooperation question. No greeting or signature.',
+                '55–85 English words in exactly three paragraphs separated by two newline characters: customer observation, sender brand and product supply introduction, then one easy question about a brief overview or introduction. No greeting or signature.',
             },
             source_ids: { type: 'array', items: { type: 'string' } },
           },
@@ -885,6 +885,10 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
             name: candidate.companyName,
             country: candidate.leadSnapshot?.market,
             business: candidate.leadSnapshot?.type,
+            general_inbox:
+              /^(?:info|contact|reception|help|hello|office|enquiries|inquiries|admin|support|sales)(?:[._+-].*)?$/iu.test(
+                text(candidate.to).split('@')[0],
+              ),
             evidence,
           },
           sender: {
@@ -892,6 +896,7 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
             product: product.englishName,
             focus_product: matchedTypes.length === 1 ? matchedTypes[0] : product.englishName,
             manufacturing_confirmed: manufacturingConfirmed,
+            origin_country: manufacturingConfirmed ? confirmedSupply.originCountry : null,
             confirmed_product_types: manufacturingConfirmed ? confirmed.types : [],
             facts: writerFacts,
           },
@@ -931,7 +936,9 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
               subject + '\n' + bodyText,
             ) ||
             (!manufacturingConfirmed &&
-              /\b(?:manufactur\w*|factor(?:y|ies))\b/iu.test(subject + '\n' + bodyText)) ||
+              /\b(?:manufactur\w*|factor(?:y|ies))\b|\bfrom China\b/iu.test(
+                subject + '\n' + bodyText,
+              )) ||
             confirmedSupply.brands.some(
               (brand) =>
                 brand.name !== mailbox.brandName &&
@@ -946,10 +953,14 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
           )
             throw fail(502, '开发信包含未确认的商务信息，请重试', 'outreach_unsupported_claim');
           const wordCount = bodyText.split(/\s+/u).length;
+          const paragraphs = bodyText.split(/\n\s*\n/u);
           if (
-            wordCount < 75 ||
-            wordCount > 125 ||
-            bodyText.split(/\n\s*\n/u).length !== 3 ||
+            wordCount < 50 ||
+            wordCount > 90 ||
+            paragraphs.length !== 3 ||
+            paragraphs[0].toLowerCase().includes(mailbox.brandName.toLowerCase()) ||
+            !paragraphs[1].toLowerCase().includes(mailbox.brandName.toLowerCase()) ||
+            !/\b(?:suppl(?:y|ier|iers)|manufactur\w*)\b/iu.test(paragraphs[1]) ||
             (bodyText.match(/\?/gu) || []).length !== 1 ||
             !bodyText.endsWith('?') ||
             /^(?:hello|hi|dear)\b|\bI hope this email finds you well\b|(?:^|\n)\s*(?:(?:best|kind|warm)\s+)?(?:regards|sincerely|yours (?:truly|sincerely)|thank you)(?:\s*[,!]|$)|\bconfirmed (?:range|types?|product types?)\b/iu.test(
@@ -961,20 +972,20 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
                 { role: 'assistant', content: JSON.stringify(draft) },
                 {
                   role: 'user',
-                  content: `Revise the draft's writing format only, using the same supplied facts and focus_product. It currently has ${wordCount} words and ${bodyText.split(/\n\s*\n/u).length} paragraphs. Return 90–100 English words in exactly three paragraphs separated by two newlines; count the words before returning. Paragraph 1 only observes the customer's listed focus product; paragraph 2 introduces the brand, approved supply facts, cooperation purpose and one conditional next step explaining that product requirements can be discussed before supply arrangements; paragraph 3 is one cooperation question. Add no filler, invented customer facts or counts inferred from a bare number in a source excerpt. No greeting, signature, generic well-wishes or internal phrases such as confirmed range/types. Keep customer source IDs valid and supplier claims grounded. Return the same JSON fields.`,
+                  content: `Revise the draft's writing format only, using the same supplied facts and focus_product. It currently has ${wordCount} words and ${paragraphs.length} paragraphs. Return 60–75 English words in exactly three paragraphs separated by two newlines: paragraph 1 is one sourced observation about the customer's matching product; paragraph 2 names the sender brand, states its approved product supply and explains the contact purpose; paragraph 3 is one easy question about a brief overview or introduction, optionally for the sourcing colleague if this is a general inbox. Add no filler, invented customer facts or counts inferred from a bare number in a source excerpt. No greeting, signature, generic well-wishes or internal phrases such as confirmed range/types. Keep customer source IDs valid and supplier claims grounded. Return the same JSON fields.`,
                 },
               );
               continue;
             }
             throw fail(
               502,
-              '开发信应约 80–120 词，分三段直接切入业务并以一个合作问题结尾，请重试',
+              '开发信应约 55–85 词，依次写客户观察、品牌供货介绍和一个容易回复的问题，请重试',
               'outreach_generation_invalid',
             );
           }
           return {
             subject,
-            bodyText: `Hello ${candidate.companyName} Team,\n\n${bodyText}`,
+            bodyText: `Hi ${candidate.companyName} team,\n\n${bodyText}`,
             sourceIds: draft.source_ids,
             factIds: writerFacts.map((f) => f.id),
             materialVersion,

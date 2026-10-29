@@ -1072,6 +1072,37 @@ test('已返回记录编号后读回短暂中断，由受控重试完成且不�
   }
 });
 
+test('重启核对仅把未写入的抓取中断标为可重试', async () => {
+  const f = fixture(),
+    svc = f.make();
+  try {
+    const { operation: beforeWrite } = svc.store.begin('interrupted-before-write', {
+      input,
+      item: { source_url: site, operation_id: 'interrupted-before-write' },
+    });
+    beforeWrite.stage = 'extract';
+    beforeWrite.source_url = site;
+    svc.store.save(beforeWrite);
+    const recovered = await svc.status(beforeWrite.id);
+    assert.equal(recovered.settled, true);
+    assert.equal(recovered.output.outcome, 'failed');
+    assert.equal(recovered.output.retryable_before_write, true);
+    assert.equal((await svc.status(beforeWrite.id)).output.retryable_before_write, true);
+    const { operation: writeIntent } = svc.store.begin('interrupted-write-intent', {
+      input,
+      item: { source_url: site, operation_id: 'interrupted-write-intent' },
+    });
+    writeIntent.stage = 'persist';
+    writeIntent.action = 'update';
+    writeIntent.source_url = site;
+    svc.store.save(writeIntent);
+    const pending = await svc.status(writeIntent.id);
+    assert.equal(pending.settled, false);
+  } finally {
+    svc.close();
+  }
+});
+
 test('读回字段不一致不宣称成功；跨域跳转与缺少正文不调用模型', async () => {
   const f = fixture({ corruptReadback: true }),
     svc = f.make();

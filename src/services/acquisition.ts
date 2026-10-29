@@ -58,6 +58,27 @@ export const acquisitionApi = {
     }),
   jobs: () => request<{ jobs: AcquisitionJob[] }>('/jobs'),
   job: (id: string) => request<AcquisitionJob>(`/jobs/${encodeURIComponent(id)}`),
+  reviewEvidence: (jobId: string, index: number) =>
+    request<{
+      resolution: AcquisitionJob['rows'][number]['review_resolution'] | null;
+      evidence: {
+        company_name: string | null;
+        identity_status: string;
+        product_match: string;
+        products: string[];
+        checked_urls: string[];
+        facts: { field: string; value: string; quote: string; source_url: string }[];
+      } | null;
+    }>(`/jobs/${encodeURIComponent(jobId)}/reviews/${index}`),
+  reviewCandidate: (jobId: string, index: number, sourceUrl: string, key: string) =>
+    request<{ resolution: NonNullable<AcquisitionJob['rows'][number]['review_resolution']> }>(
+      `/jobs/${encodeURIComponent(jobId)}/reviews/${index}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+        body: JSON.stringify({ source_url: sourceUrl }),
+      },
+    ),
   createJob: (input: WorkflowInput, target_count: number, requestId: string) =>
     request<AcquisitionJob>('/jobs', {
       method: 'POST',

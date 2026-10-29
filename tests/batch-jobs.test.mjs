@@ -439,3 +439,200 @@ test('SQLite保存队列与当前操作，重启暂停核对而非自动重放',
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('读阶段服务中断经核对后自动重试一次并继续下一候选', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'shade-batch-recovery-'));
+  const path = join(dir, 'jobs.sqlite');
+  let manager;
+  try {
+    manager = harness({ path, provider: 'native' }).manager;
+    const job = manager.create({ ...input, target_count: 1 }, 'recover-read-stage');
+    const original = {
+      source_url: 'https://interrupted.example.com/',
+      domain: 'interrupted.example.com',
+      operation_id: `${job.id}-1`,
+    };
+    job.current = original;
+    job.researched = 1;
+    job.queue = [{ source_url: 'https://next.example.com/', domain: 'next.example.com' }];
+    manager.save(job);
+    manager.close();
+    const leads = [];
+    const attempts = [];
+    manager = harness({
+      path,
+      provider: 'native',
+      status: async () => ({
+        settled: true,
+        output: {
+          stage: 'extract',
+          outcome: 'failed',
+          reason: '服务在写入前中断；本次企业未入库',
+          retryable_before_write: true,
+        },
+      }),
+      research: async (_target, item) => {
+        attempts.push(item);
+        leads.push({ id: 'recovered', name: 'Recovered', website: item.source_url });
+        return {
+          新增: 1,
+          明细: [{ source_url: item.source_url, result: 'inserted', record_id: 'recovered' }],
+        };
+      },
+      readLeads: async () => leads,
+    }).manager;
+    assert.equal(manager.get(job.id).status, 'paused');
+    await manager.resumeInterrupted();
+    await manager.work(job.id);
+    const recovered = manager.get(job.id);
+    assert.equal(recovered.status, 'completed');
+    assert.equal(recovered.failed, 1);
+    assert.equal(recovered.inserted, 1);
+    assert.equal(attempts.length, 1);
+    assert.equal(attempts[0].source_url, original.source_url);
+    assert.notEqual(attempts[0].operation_id, original.operation_id);
+    assert.equal(attempts[0].interruptionRetries, 1);
+    assert.equal(recovered.queue.length, 1);
+  } finally {
+    manager?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('原生任务重启时自动恢复写入前中断，无需人工点继续', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'shade-batch-auto-resume-'));
+  const path = join(dir, 'jobs.sqlite');
+  let manager;
+  try {
+    manager = harness({ path, provider: 'native' }).manager;
+    const job = manager.create({ ...input, target_count: 1 }, 'auto-resume-read-stage');
+    job.current = {
+      source_url: 'https://interrupted.example.com/',
+      domain: 'interrupted.example.com',
+      operation_id: `${job.id}-1`,
+    };
+    job.researched = 1;
+    manager.save(job);
+    manager.close();
+    const leads = [];
+    manager = harness({
+      path,
+      provider: 'native',
+      schedule: true,
+      status: async () => ({
+        settled: true,
+        output: { stage: 'extract', outcome: 'failed', retryable_before_write: true },
+      }),
+      research: async (_target, item) => {
+        leads.push({ id: 'resumed', name: 'Resumed', website: item.source_url });
+        return {
+          新增: 1,
+          明细: [{ source_url: item.source_url, result: 'inserted', record_id: 'resumed' }],
+        };
+      },
+      readLeads: async () => leads,
+    }).manager;
+    for (let i = 0; i < 50 && manager.get(job.id).status !== 'completed'; i++)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    const resumed = manager.get(job.id);
+    assert.equal(resumed.status, 'completed');
+    assert.equal(resumed.inserted, 1);
+    assert.equal(resumed.rows.length, 2);
+  } finally {
+    manager?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('已结算的 select 阶段操作自动对账并继续队列', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'shade-batch-select-resume-'));
+  const path = join(dir, 'jobs.sqlite');
+  let manager;
+  try {
+    manager = harness({ path, provider: 'native' }).manager;
+    const job = manager.create({ ...input, target_count: 1 }, 'resume-settled-select');
+    job.current = {
+      source_url: 'https://select.example.com/',
+      domain: 'select.example.com',
+      operation_id: `${job.id}-1`,
+    };
+    job.researched = 1;
+    job.queue = [{ source_url: 'https://next.example.com/', domain: 'next.example.com' }];
+    manager.save(job);
+    manager.close();
+    const leads = [];
+    manager = harness({
+      path,
+      provider: 'native',
+      schedule: true,
+      status: async () => ({
+        settled: true,
+        output: { stage: 'select', outcome: 'failed', reason: '候选未取得有效信息' },
+      }),
+      research: async (_target, item) => {
+        leads.push({ id: 'next', name: 'Next', website: item.source_url });
+        return {
+          新增: 1,
+          明细: [{ source_url: item.source_url, result: 'inserted', record_id: 'next' }],
+        };
+      },
+      readLeads: async () => leads,
+    }).manager;
+    for (let i = 0; i < 50 && manager.get(job.id).status !== 'completed'; i++)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    const resumed = manager.get(job.id);
+    assert.equal(resumed.status, 'completed');
+    assert.deepEqual(
+      resumed.rows.map((row) => row.result),
+      ['failed', 'inserted'],
+    );
+    assert.equal(resumed.researched, 2);
+  } finally {
+    manager?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('不确定写入和重复读阶段中断均不无限重试', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'shade-batch-safety-'));
+  const path = join(dir, 'jobs.sqlite');
+  let manager;
+  try {
+    manager = harness({ path, provider: 'native' }).manager;
+    const job = manager.create({ ...input, target_count: 1 }, 'recover-safety');
+    job.current = {
+      source_url: 'https://interrupted.example.com/',
+      domain: 'interrupted.example.com',
+      operation_id: `${job.id}-1`,
+      interruptionRetries: 1,
+    };
+    job.researched = 1;
+    manager.save(job);
+    manager.close();
+    manager = harness({
+      path,
+      provider: 'native',
+      status: async () => ({
+        settled: false,
+        reason: '写入结果待核对',
+      }),
+    }).manager;
+    await manager.resumeInterrupted();
+    assert.equal(manager.get(job.id).status, 'paused');
+    manager.remoteStatus = async () => ({
+      settled: true,
+      output: {
+        stage: 'extract',
+        outcome: 'failed',
+        retryable_before_write: true,
+      },
+    });
+    await manager.resumeInterrupted();
+    const resumed = manager.get(job.id);
+    assert.equal(resumed.status, 'running');
+    assert.equal(resumed.queue.length, 0);
+  } finally {
+    manager?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

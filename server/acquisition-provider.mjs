@@ -49,6 +49,28 @@ export function createAcquisitionProvider({ env, fetchImpl = fetch, nativeImpl }
       assessmentHistory: (...args) => service().assessmentHistory(...args),
       discover: (...args) => service().discover(...args),
       research: (...args) => service().research(...args),
+      reviewEvidence: (id) => {
+        const operation = id ? service().store?.get(id) : null;
+        const research = operation?.research || {};
+        return operation
+          ? {
+              company_name: research.company_name || null,
+              identity_status: research.company_identity?.status || 'unverified',
+              product_match: research.product_match || 'unknown',
+              products: (research.products || []).slice(0, 20),
+              checked_urls: (operation.checked_urls || []).slice(0, 5),
+              facts: (research.facts || [])
+                .filter((fact) => ['company_name', 'products', 'entity_type'].includes(fact.field))
+                .slice(0, 15)
+                .map(({ field, value, quote, source_url }) => ({
+                  field,
+                  value,
+                  quote,
+                  source_url,
+                })),
+            }
+          : null;
+      },
       status: (id) => service().status(id),
       recoverRun: (id) => service().status(id),
       run: (...args) => service().run(...args),

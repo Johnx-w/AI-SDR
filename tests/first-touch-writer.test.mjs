@@ -60,9 +60,9 @@ function fixture(brand = policy.brands[0], scope = brand.products[1] || brand.pr
   const draft = {
     subject: `${scope.name} Supply Cooperation`,
     body_text: [
-      `I noticed that your website includes ${scope.name} in your product range. This provides a relevant starting point for introducing our business and exploring a possible supply relationship with your team.`,
-      `We are ${brand.name}, and we manufacture and supply ${scope.name}. I am writing to introduce our business as a potential supplier for this category. Any further discussion would be based on your requirements, so both teams can assess whether there is a suitable fit before considering next steps.`,
-      `Would your team be open to considering an additional supplier for ${scope.name}?`,
+      `I noticed your website lists ${scope.name} among the window furnishings you offer to customers.`,
+      `At ${brand.name}, we manufacture and supply ${scope.name} from China for window furnishing businesses. I am reaching out to introduce another supply option for this part of your range.`,
+      `Would a short product introduction be useful to your team?`,
     ].join('\n\n'),
     source_ids: ['source'],
   };
@@ -100,8 +100,9 @@ test('三个品牌在已确认的产品范围内使用制造商事实，记录�
       sender = JSON.parse(request.messages[1].content).sender;
     });
     assert.equal(sender.manufacturing_confirmed, true);
+    assert.equal(sender.origin_country, 'China');
     assert.match(result.bodyText, /we manufacture and supply/);
-    assert.equal(result.bodyText.startsWith('Hello Example Dealer Team,\n\n'), true);
+    assert.equal(result.bodyText.startsWith('Hi Example Dealer team,\n\n'), true);
     assert.equal(result.bodyText.includes('Sender Name'), false);
     assert.equal(result.bodyText.includes('Best regards,'), false);
     assert.equal(result.factIds.length, 2);
@@ -180,7 +181,7 @@ test('合格首封仅调用一次撰写模型，通过程序检查后直接返�
   const result = await generate(input, draft, () => calls++);
   assert.equal(calls, 1);
   assert.equal(result.subject, draft.subject);
-  assert.equal(result.bodyText, `Hello Example Dealer Team,\n\n${draft.body_text}`);
+  assert.equal(result.bodyText, `Hi Example Dealer team,\n\n${draft.body_text}`);
   assert.deepEqual(result.sourceIds, draft.source_ids);
 });
 
@@ -215,6 +216,7 @@ test('未知品牌、错误域名、未确认产品与采购形态不能继承�
       generate(input, draft, (request) => {
         const sender = JSON.parse(request.messages[1].content).sender;
         assert.equal(sender.manufacturing_confirmed, false);
+        assert.equal(sender.origin_country, null);
         assert.deepEqual(sender.confirmed_product_types, []);
         assert.equal(sender.facts.length, 1);
       }),
@@ -222,7 +224,9 @@ test('未知品牌、错误域名、未确认产品与采购形态不能继承�
     );
     const supplierDraft = {
       ...draft,
-      body_text: draft.body_text.replace('manufacture and supply', 'supply'),
+      body_text: draft.body_text
+        .replace('manufacture and supply', 'supply')
+        .replace(' from China', ''),
     };
     // Keep the fallback test about identity, rather than introducing another known brand.
     supplierDraft.body_text = supplierDraft.body_text.replace(
@@ -231,6 +235,13 @@ test('未知品牌、错误域名、未确认产品与采购形态不能继承�
     );
     assert.ok((await generate(input, supplierDraft)).bodyText.includes('we supply'));
   }
+});
+
+test('身份不匹配时不能仅把制造商改成供应商就保留从中国供货表述', async () => {
+  const { input, draft } = fixture();
+  input.mailbox.email = 'sales@another.example';
+  draft.body_text = draft.body_text.replace('manufacture and supply', 'supply');
+  await assert.rejects(generate(input, draft), { code: 'outreach_unsupported_claim' });
 });
 
 test('来源缺失在调用前阻止生成，伪造或重复来源及不符合字数和提问规则的结果不进入发送', async () => {

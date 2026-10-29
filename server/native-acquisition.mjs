@@ -1350,6 +1350,8 @@ export class NativeAcquisition {
       return { settled: false, reason: '写入尚未确认，未自动重试' };
     }
     const output = this.output(op, { reason: '服务在写入前中断；本次企业未入库' });
+    if (['extract', 'research'].includes(op.stage) && !op.action && !op.fields)
+      output.retryable_before_write = true;
     this.store.complete(op, output);
     return { settled: true, output };
   }

@@ -156,6 +156,19 @@ export function parseCompanyResearch(response, page, target = {}) {
         return p.text.match(new RegExp(pattern, 'u'))?.[0];
       };
       if (!quote) quote = locate(f.quote);
+      if (!quote && f.field === 'company_name') {
+        const homeLink = /^#{1,6}\s+\[([^\]]+)\]\(\/+\)$/.exec(f.quote.trim());
+        if (homeLink?.[1].includes(f.value))
+          quote =
+            p.text
+              .split('\n')
+              .find(
+                (line) =>
+                  /^#{1,6}\s+\[[^\]]+\]\(\/\)$/.test(line.trim()) &&
+                  line.includes(`[${homeLink[1]}]`),
+              )
+              ?.trim() || null;
+      }
       if (
         !quote &&
         ![
