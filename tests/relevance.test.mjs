@@ -66,6 +66,16 @@ test('明确用于卷帘的绳线、五金与附件按材料配件匹配，不�
     assert.deepEqual(windowProductDirections(product), ['finished'], product);
 });
 
+test('成品介绍同时提到用料或独立配件目录时仍可匹配成品', () => {
+  for (const product of [
+    'Our custom Roller Shades are made to measure and handcrafted with premium materials and high-quality components for a tailored fit and finish.',
+    'We supply roller shades and components for blinds and curtains.',
+  ]) {
+    assert.equal(productsRelevant([product], { product: 'roller shades' }), 'matched', product);
+    assert.equal(businessProductRelation([product], { product: 'roller shades' }).kind, 'catalog_related');
+  }
+});
+
 test('行业强短语与目标产品短语判定页面相关', () => {
   const relevant = pageRelevance(
     'Helioscreen manufactures retractable outdoor blinds, folding arm awnings and pergola systems for patios across Australia. Custom zip screens installed by our own team.',

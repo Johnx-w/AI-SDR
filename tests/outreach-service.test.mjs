@@ -169,10 +169,12 @@ async function enableProduction(h) {
   h.state.clock += 31000;
 }
 
-test('自动开发计划直接启动，LLM生成后带固定签名发送且总量严格停在20封', async (t) => {
+test('自动开发直接使用客户库无来源邮箱，带固定签名发送且总量严格停在20封', async (t) => {
   const h = harness();
   t.after(() => h.service.close());
   h.state.leads = Array.from({ length: 25 }, (_, i) => buyer(`automatic-${i}`));
+  for (const lead of h.state.leads) lead.contactEvidence = [];
+  h.state.leads[0].email = 'buyer@gmail.com';
   h.service.generator.generate = async ({ candidate, product, campaign }) => ({
     subject: `Supply cooperation with ${candidate.companyName}`,
     bodyText: `Hello,\n\nWe supply ${product.englishName}. Would you be open to discussing supply cooperation?`,
@@ -195,6 +197,7 @@ test('自动开发计划直接启动，LLM生成后带固定签名发送且总�
   assert.equal(detail.campaign.stats.draft, 0);
   assert.equal(h.deliveries.length, 20);
   assert.equal(new Set(h.deliveries.map((d) => d.to)).size, 20);
+  assert.equal(h.deliveries[0].to, 'buyer@gmail.com');
   assert.ok(
     h.deliveries.every((d) => d.text.endsWith(h.boxes.find((b) => b.id === d.mailboxId).signature)),
   );
@@ -635,14 +638,15 @@ test('没有样稿时显示实际拦截原因，已有样稿重新准备不误�
   assert.equal(h.deliveries.length, 0);
 });
 
-test('客户证据补齐后重新准备样稿，旧待处理记录不再占用当前待处理计数', async (t) => {
+test('客户库补充邮箱后重新准备样稿，旧待处理记录不再占用当前待处理计数', async (t) => {
   const h = harness();
   t.after(() => h.service.close());
-  const contact = h.state.leads[0].contactEvidence;
+  const email = h.state.leads[0].email;
+  h.state.leads[0].email = '';
   h.state.leads[0].contactEvidence = [];
   const campaign = await prepare(h);
   assert.equal(h.service.detail(campaign.id).campaign.stats.blocked, 1);
-  h.state.leads[0].contactEvidence = contact;
+  h.state.leads[0].email = email;
   h.service.prepare(campaign.id);
   await h.service.preparing.get(campaign.id);
   const detail = h.service.detail(campaign.id);
@@ -872,7 +876,7 @@ test('生成样稿期间取消，模型返回或报错均不能复活草稿及�
 test('候选读取完成与写入之间取消，不再写入待处理客户记录', async (t) => {
   const h = harness();
   t.after(() => h.service.close());
-  h.state.leads[0].contactEvidence = [];
+  h.state.leads[0].email = '';
   const campaign = h.service.saveCampaign(h.campaignInput());
   const candidates = h.service.candidates.bind(h.service);
   h.service.candidates = async (...args) => {

@@ -107,16 +107,56 @@ test('没有事实出处时，搜索标签和主营产品摘要不能单独触�
   assert.equal(result.blocked[0].reasonCode, 'product_match_unconfirmed');
 });
 
-test('邮箱必须同时存在于当前客户记录及官网来源，不从模型或旧证据恢复已移除地址', () => {
+test('成品卷帘的用料描述不应被误判为只经营材料配件', () => {
+  const input = fixture();
+  Object.assign(input.products[0], {
+    name: '室内遮阳帘',
+    englishName: 'Indoor Blinds and Shades',
+    category: 'indoor',
+    aliases: ['roller shades'],
+  });
+  const fact = input.leads[0].facts[1];
+  fact.value = 'Roller Shades';
+  fact.quote =
+    'Our custom Roller Shades are made to measure and handcrafted with premium materials and high-quality components for a tailored fit and finish.';
+  const result = selectOutreachCandidates(input);
+  assert.equal(result.eligible.length, 1, JSON.stringify(result.blocked.map((b) => b.reason)));
+});
+
+test('直接使用客户库当前邮箱，不要求官网来源且不恢复旧证据中的已移除地址', () => {
   const input = fixture();
   input.leads[0].email = 'new-address@buyer.example.org';
   let result = selectOutreachCandidates(input);
-  assert.equal(result.eligible.length, 0);
-  assert.equal(result.blocked[0].reasonCode, 'contact_unverified');
+  assert.equal(result.eligible[0].to, 'new-address@buyer.example.org');
+  assert.deepEqual(result.eligible[0].contactEvidence, {
+    email: 'new-address@buyer.example.org',
+    sourceUrl: '',
+    quote: '',
+  });
   input.leads[0].email = 'info@buyer.example.org';
   input.leads[0].contactEvidence[0].source_url = 'https://directory.example.org/buyer';
   result = selectOutreachCandidates(input);
-  assert.equal(result.eligible.length, 0);
+  assert.equal(result.eligible[0].to, 'info@buyer.example.org');
+  input.leads[0].email = '';
+  assert.equal(selectOutreachCandidates(input).blocked[0].reasonCode, 'contact_unverified');
+});
+
+test('客户库邮箱无需附带证据，仍排除格式错误、已明确无效及专用地址', () => {
+  const input = fixture();
+  input.leads[0].contactEvidence = [];
+  input.leads[0].email = 'invalid; HR@buyer.example.org，INFO@buyer.example.org';
+  assert.equal(selectOutreachCandidates(input).eligible[0].to, 'info@buyer.example.org');
+  input.leads[0].email = 'invalid';
+  assert.equal(selectOutreachCandidates(input).blocked[0].reasonCode, 'contact_unverified');
+  input.leads[0].email = 'info@buyer.example.org';
+  input.leads[0].contactEvidence = [
+    {
+      kind: 'email',
+      value: input.leads[0].email,
+      verification_status: 'invalid',
+    },
+  ];
+  assert.equal(selectOutreachCandidates(input).blocked[0].reasonCode, 'contact_unverified');
 });
 
 test('已联系、历史未知、暂停、抑制和个人消费者都不会自动首发', () => {
@@ -140,13 +180,13 @@ test('已联系、历史未知、暂停、抑制和个人消费者都不会自�
   assert.equal(selectOutreachCandidates(input).blocked[0].reasonCode, 'business_unverified');
 });
 
-test('官网明确的 mailto 链接可使用可见标签作出处，不要求标签重复邮箱', () => {
+test('客户库已有邮箱时，不因出处标签未重复邮箱或采集方式而拦截', () => {
   const input = fixture();
   input.leads[0].contactEvidence[0].method = 'mailto_link';
   input.leads[0].contactEvidence[0].quote = 'Email our customer support team';
   assert.equal(selectOutreachCandidates(input).eligible.length, 1);
   input.leads[0].contactEvidence[0].method = 'guessed';
-  assert.equal(selectOutreachCandidates(input).eligible.length, 0);
+  assert.equal(selectOutreachCandidates(input).eligible.length, 1);
 });
 
 test('明确的隐私、退订、无人回复、投诉及招聘专用邮箱不能成为开发信收件人', () => {
@@ -343,6 +383,15 @@ test('变更产品版本、撤回审核、未来生效或没有当前公司产�
   input.products[0].status = 'approved';
   input.products[0].effectiveDate = '2099-01-01';
   assert.equal(selectOutreachCandidates(input).eligible.length, 0);
+});
+
+test('简化计划未覆盖匹配产品时明确提示授权范围', () => {
+  const input = fixture();
+  input.campaign.generationMode = 'simple';
+  input.campaign.productScopes = [];
+  const blocked = selectOutreachCandidates(input).blocked[0];
+  assert.equal(blocked.reasonCode, 'outreach_claim_missing');
+  assert.match(blocked.reason, /计划.*产品范围/);
 });
 
 test('成品经营证据不会变成材料配件采购形态', () => {
@@ -691,24 +740,7 @@ test('简化生成直接使用客户信息和已确认产品范围，无需介�
   const generator = createOutreachGenerator({
     env: modelEnv,
     fetchImpl: async (_url, options) => {
-      const body = JSON.parse(options.body);
-      if (body.messages[0].content.includes('independent reviewer'))
-        return Response.json({
-          choices: [
-            {
-              finish_reason: 'stop',
-              message: {
-                content: JSON.stringify({
-                  decision: 'ready',
-                  summary: '合格',
-                  strengths: [],
-                  issues: [],
-                }),
-              },
-            },
-          ],
-        });
-      request = body;
+      request = JSON.parse(options.body);
       return Response.json({
         choices: [
           {
@@ -763,24 +795,17 @@ test('简化开发信的公司称呼由程序固定，保留正文且不从未�
   for (const prefix of ['', 'Hello,\n\n', 'Hi there, ']) {
     const generator = createOutreachGenerator({
       env: modelEnv,
-      fetchImpl: async (_url, options) => {
-        const reviewer = JSON.parse(options.body).messages[0].content.includes(
-          'independent reviewer',
-        );
+      fetchImpl: async () => {
         return Response.json({
           choices: [
             {
               finish_reason: 'stop',
               message: {
-                content: JSON.stringify(
-                  reviewer
-                    ? { decision: 'ready', summary: '合格', strengths: [], issues: [] }
-                    : {
-                        subject: 'Window supply cooperation',
-                        body_text: prefix + content,
-                        source_ids: [candidate.evidence[0].id],
-                      },
-                ),
+                content: JSON.stringify({
+                  subject: 'Window supply cooperation',
+                  body_text: prefix + content,
+                  source_ids: [candidate.evidence[0].id],
+                }),
               },
             },
           ],
