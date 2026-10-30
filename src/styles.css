@@ -662,26 +662,6 @@ main {
   min-width: 0;
   box-shadow: 0 2px 2px var(--color-shadow);
 }
-.section-title {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 14px;
-  padding: 20px 22px 0;
-}
-.section-title h3 {
-  margin: 0;
-  font-size: 13px;
-  letter-spacing: 0.1px;
-}
-.section-title p {
-  font-size: 10px;
-  color: var(--color-text-muted);
-  margin: 5px 0 0;
-}
-.section-title > div:first-child {
-  min-width: 0;
-}
 .overview-strip {
   display: flex;
   align-items: center;
@@ -802,9 +782,6 @@ main {
   box-shadow: 0 1px 4px var(--color-shadow);
   color: var(--color-primary-text);
 }
-.funnel-panel .section-title {
-  padding-bottom: 6px;
-}
 .funnel-panel .tiny-label {
   font-size: 8px;
   letter-spacing: 0.5px;
@@ -879,9 +856,6 @@ main {
   grid-template-columns: 1.9fr 1fr;
   gap: 20px;
   margin-bottom: 20px;
-}
-.priority-panel .section-title {
-  padding-bottom: 16px;
 }
 .lead-table {
   border-collapse: collapse;
@@ -1009,9 +983,6 @@ main {
   align-items: center;
   gap: 5px;
   color: var(--color-text-muted);
-}
-.today-panel .section-title {
-  padding-bottom: 9px;
 }
 .task-list {
   padding: 0 20px;
@@ -1547,9 +1518,6 @@ main {
   min-height: 520px;
   padding-bottom: 25px;
 }
-.settings-panel .section-title {
-  padding: 25px 28px;
-}
 .settings-form {
   max-width: 500px;
   padding: 4px 28px;
@@ -1981,9 +1949,6 @@ main {
   font-size: 10px;
   min-height: 34px;
 }
-.integration-summary .section-title {
-  padding: 20px 19px;
-}
 .integration-summary-row {
   display: flex;
   align-items: center;
@@ -2113,10 +2078,6 @@ main {
   margin-top: 17px;
   overflow-wrap: anywhere;
   font-size: 10px;
-}
-.history-pane > .section-title,
-.setup-pane > .section-title {
-  padding: 0 0 20px;
 }
 .history-pane > .btn {
   margin-top: 20px;
@@ -2379,12 +2340,6 @@ main {
   .dashboard-bottom .lead-table td:nth-child(4) {
     display: none;
   }
-  .section-title {
-    padding: 17px 18px 0;
-  }
-  .section-title p {
-    font-size: 9px;
-  }
   .automation-layout {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -2626,17 +2581,6 @@ main {
     gap: 16px;
     margin-bottom: 16px;
   }
-  .section-title {
-    padding: 18px 17px 0;
-    gap: 8px;
-  }
-  .section-title h3 {
-    font-size: 12px;
-  }
-  .section-title p {
-    font-size: 9px;
-    line-height: 1.7;
-  }
   .segmented button {
     padding: 4px 8px;
     font-size: 8px;
@@ -2805,12 +2749,6 @@ main {
   .settings-nav svg {
     display: none;
   }
-  .settings-panel .section-title {
-    padding: 22px;
-  }
-  .settings-panel .section-title p {
-    line-height: 1.9;
-  }
   .settings-form {
     padding: 2px 22px;
     gap: 19px;
@@ -2871,16 +2809,6 @@ main {
   }
   .workflow-panel {
     margin-bottom: 17px;
-  }
-  .workflow-panel .section-title {
-    align-items: flex-start;
-  }
-  .workflow-panel .section-title p {
-    max-width: 240px;
-    font-size: 8px;
-  }
-  .workflow-panel .section-title > .badge {
-    font-size: 7px;
   }
   .workflow-stages {
     padding: 22px 13px;
@@ -3074,7 +3002,6 @@ main {
   }
 }
 .page-heading p,
-.section-title p,
 .muted,
 .company-cell small,
 .cell-secondary,
@@ -3122,8 +3049,7 @@ main {
   font-size: 12px;
 }
 .task-item small,
-.company-cell small,
-.section-title p {
+.company-cell small {
   font-size: 10px;
 }
 .lead-table.compact .company-cell strong {

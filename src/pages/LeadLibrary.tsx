@@ -603,17 +603,6 @@ export function LeadLibrary() {
                     </p>
                   </div>
                 </div>
-                {detailError && (
-                  <p className="library-sync-warning" role="status">
-                    档案更新未完成，保留当前内容：{detailError}{' '}
-                    <button
-                      className="text-link"
-                      onClick={() => setDetailAttempt((value) => value + 1)}
-                    >
-                      重新读取
-                    </button>
-                  </p>
-                )}
                 {supplement ? (
                   <SupplementPanel<Prospect>
                     key={

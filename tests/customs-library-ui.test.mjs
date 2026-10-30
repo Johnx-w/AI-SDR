@@ -74,14 +74,19 @@ function renderLibrary(tab = '客户画像', customers = [lead], options = {}) {
         return {
           ...React,
           useEffect: () => {},
-          useState: (initial) => [
-            stateIndex++ === 8 && options.market !== undefined
-              ? options.market
-              : initial === '客户画像'
-                ? tab
-                : initial,
-            () => {},
-          ],
+          useState: (initial) => {
+            const index = stateIndex++;
+            return [
+              index === 3 && options.detailError !== undefined
+                ? options.detailError
+                : index === 8 && options.market !== undefined
+                  ? options.market
+                  : initial === '客户画像'
+                    ? tab
+                    : initial,
+              () => {},
+            ];
+          },
         };
       if (specifier === 'react-router-dom')
         return {
@@ -242,6 +247,14 @@ test('同步失败时保留客户列表，并展示最近同步时间与错误',
   assert.match(html, /<table\b[^>]*>[\s\S]*Acme Screens[\s\S]*?<\/table>/);
   assert.match(html, /最近同步/);
   assert.match(html, /保留已有客户：飞书暂时不可用/);
+});
+
+test('档案更新失败时保留已加载资料，并只显示一次重试提醒', () => {
+  const html = renderLibrary('客户画像', [lead], { detailError: '网络中断' });
+  assert.match(html, /Acme Screens/);
+  assert.equal((html.match(/档案更新未完成/g) || []).length, 1);
+  assert.equal((html.match(/重新读取档案/g) || []).length, 1);
+  assert.match(html, /档案更新未完成，正在显示已加载资料：网络中断/);
 });
 
 test('同步耗时与变更计数集中在默认折叠的同步详情中', () => {

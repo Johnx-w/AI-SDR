@@ -260,20 +260,6 @@ main {
   box-shadow: none;
   border-radius: 8px;
 }
-.section-title {
-  padding: 16px 18px 12px;
-  min-height: 53px;
-}
-.section-title h3 {
-  font-size: 16px;
-  font-weight: 650;
-  color: var(--color-text);
-}
-.section-title p {
-  font-size: 11px;
-  color: var(--color-text-muted);
-  margin: 0;
-}
 .page-footer {
   font-size: 10px;
   padding: 8px 25px 19px;
@@ -418,11 +404,6 @@ main {
 .decision-panel {
   padding: 0 17px;
 }
-.decision-panel .section-title {
-  padding-left: 0;
-  padding-right: 0;
-  border-bottom: 1px solid var(--color-border);
-}
 .decision-row {
   display: flex;
   align-items: center;
@@ -471,14 +452,6 @@ main {
 .funnel-panel {
   padding-bottom: 13px;
 }
-.funnel-panel .section-title {
-  justify-content: flex-start;
-}
-.funnel-panel .section-title > div {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
 .work-funnel {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -519,10 +492,6 @@ main {
 .priority-panel {
   padding: 0 14px 10px;
 }
-.priority-panel .section-title {
-  padding-left: 3px;
-  padding-right: 3px;
-}
 .priority-panel table {
   min-width: 490px;
   width: 100%;
@@ -545,11 +514,6 @@ main {
 }
 .running-panel {
   padding: 0 16px;
-}
-.running-panel .section-title {
-  padding-left: 0;
-  padding-right: 0;
-  border-bottom: 1px solid var(--color-border);
 }
 .running-row {
   display: flex;
@@ -642,10 +606,6 @@ main {
 }
 .reply-chart {
   padding: 0 15px 10px;
-}
-.reply-chart .section-title {
-  padding-left: 0;
-  padding-right: 0;
 }
 .reply-chart svg {
   width: 100%;

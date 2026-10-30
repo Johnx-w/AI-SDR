@@ -1,28 +1,9 @@
 import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
-import { ArrowUpRight, X } from 'lucide-react';
+import { X } from 'lucide-react';
 
 export function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: string }) {
   return <span className={`badge ${tone}`}>{children}</span>;
-}
-export function SectionTitle({
-  title,
-  subtitle,
-  action,
-}: {
-  title: string;
-  subtitle?: string;
-  action?: ReactNode;
-}) {
-  return (
-    <div className="section-title">
-      <div>
-        <h3>{title}</h3>
-        {subtitle && <p>{subtitle}</p>}
-      </div>
-      {action}
-    </div>
-  );
 }
 export function Empty({ title, detail }: { title: string; detail: string }) {
   return (
@@ -31,22 +12,6 @@ export function Empty({ title, detail }: { title: string; detail: string }) {
       <h3>{title}</h3>
       <p>{detail}</p>
     </div>
-  );
-}
-export function ExternalLink({
-  href,
-  children,
-  className = 'btn secondary',
-}: {
-  href: string;
-  children: ReactNode;
-  className?: string;
-}) {
-  return (
-    <a className={className} href={href} target="_blank" rel="noopener noreferrer">
-      {children}
-      <ArrowUpRight size={15} />
-    </a>
   );
 }
 export function Modal({
