@@ -11,7 +11,6 @@ import type {
   DiscoveryQuery,
 } from '../domain/types';
 
-export const WORKFLOW_URL = 'https://vynox.app.n8n.cloud/workflow/EycE9OmaPkRFUDSq';
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/v1/acquisition${path}`, {
     ...init,
