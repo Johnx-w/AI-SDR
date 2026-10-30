@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
@@ -260,8 +260,11 @@ export function CustomerBusiness() {
     row?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     row?.focus({ preventScroll: true });
   }, [loading, focusedId, tab, data]);
-  const customerName = (id: string) =>
-    data.customers.find((customer) => customer.id === id)?.name || id;
+  const customerNames = useMemo(
+    () => new Map(data.customers.map((customer) => [customer.id, customer.name] as const)),
+    [data.customers],
+  );
+  const customerName = (id: string) => customerNames.get(id) || id;
   const conversationName = (id?: string) =>
     data.conversations.find((conversation) => conversation.id === id)?.title || '未关联会话';
   const productName = (id: string) =>
