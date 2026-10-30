@@ -58,9 +58,9 @@ function fixture({ pageText, modelData, existingRecords = [] } = {}) {
 
 test('AI 研究前预筛：与目标产品无关的官网直接排除，不调用模型不写飞书', async () => {
   const f = fixture({
-    pageText:
-      "BCF is Australia's greatest boating, camping and fishing store. Shop tents, kayaks and 4x4 gear with club membership discounts.",
-  }),
+      pageText:
+        "BCF is Australia's greatest boating, camping and fishing store. Shop tents, kayaks and 4x4 gear with club membership discounts.",
+    }),
     svc = f.make();
   try {
     const output = await svc.research(input, {
@@ -69,9 +69,14 @@ test('AI 研究前预筛：与目标产品无关的官网直接排除，不调�
     });
     assert.equal(output.新增, 0);
     assert.ok(JSON.stringify(output).includes('不相关'));
-    assert.equal(f.calls.some((c) => c.url.includes('deepseek')), false);
     assert.equal(
-      f.calls.some((c) => (c.method === 'POST' && c.url.includes('client_token=')) || c.method === 'PUT'),
+      f.calls.some((c) => c.url.includes('deepseek')),
+      false,
+    );
+    assert.equal(
+      f.calls.some(
+        (c) => (c.method === 'POST' && c.url.includes('client_token=')) || c.method === 'PUT',
+      ),
       false,
     );
   } finally {
@@ -82,22 +87,22 @@ test('AI 研究前预筛：与目标产品无关的官网直接排除，不调�
 test('AI 研究后审计：国家与目标市场不符时拒绝入库', async () => {
   const evidence = (value, quote) => ({ value, quote, source_url: site });
   const f = fixture({
-    pageText:
-      'Ziptrak dealer centre for outdoor zip screens and folding arm awnings in Auckland, New Zealand.',
-    modelData: {
-      company_name: evidence('Auckland Screens', 'Ziptrak dealer centre'),
-      actual_country: evidence('New Zealand', 'Auckland, New Zealand'),
-      customer_type: evidence('distributor', 'Ziptrak dealer centre'),
-      audience: evidence('B', 'dealer centre'),
-      main_product_preference: evidence('户外拉链帘经销', 'outdoor zip screens'),
-      industry_profile: evidence('窗饰经销企业', 'Ziptrak dealer centre'),
-      products: [evidence('outdoor zip screens', 'outdoor zip screens')],
-      demand_products: [],
-      profile_tags: [evidence('dealer', 'dealer centre')],
-      address: null,
-      service_areas: [],
-    },
-  }),
+      pageText:
+        'Ziptrak dealer centre for outdoor zip screens and folding arm awnings in Auckland, New Zealand.',
+      modelData: {
+        company_name: evidence('Auckland Screens', 'Ziptrak dealer centre'),
+        actual_country: evidence('New Zealand', 'Auckland, New Zealand'),
+        customer_type: evidence('distributor', 'Ziptrak dealer centre'),
+        audience: evidence('B', 'dealer centre'),
+        main_product_preference: evidence('户外拉链帘经销', 'outdoor zip screens'),
+        industry_profile: evidence('窗饰经销企业', 'Ziptrak dealer centre'),
+        products: [evidence('outdoor zip screens', 'outdoor zip screens')],
+        demand_products: [],
+        profile_tags: [evidence('dealer', 'dealer centre')],
+        address: null,
+        service_areas: [],
+      },
+    }),
     svc = f.make();
   try {
     const output = await svc.research(input, {
@@ -106,7 +111,10 @@ test('AI 研究后审计：国家与目标市场不符时拒绝入库', async ()
     });
     assert.equal(output.新增, 0);
     assert.ok(JSON.stringify(output).includes('国家与目标市场不符'));
-    assert.equal(f.calls.some((c) => c.method === 'POST' && c.url.includes('client_token=')), false);
+    assert.equal(
+      f.calls.some((c) => c.method === 'POST' && c.url.includes('client_token=')),
+      false,
+    );
   } finally {
     svc.close();
   }

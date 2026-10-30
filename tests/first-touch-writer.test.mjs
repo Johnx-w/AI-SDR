@@ -21,8 +21,6 @@ const env = {
   RESEARCH_MODEL_API_KEY: 'test-key',
   RESEARCH_MODEL_MODEL: 'test-model',
 };
-const readyReview = { decision: 'ready', summary: '合格', strengths: [], issues: [] };
-const isReview = (request) => request.messages[0].content.includes('independent reviewer');
 
 function fixture(brand = policy.brands[0], scope = brand.products[1] || brand.products[0]) {
   const product = {
@@ -62,9 +60,9 @@ function fixture(brand = policy.brands[0], scope = brand.products[1] || brand.pr
   const draft = {
     subject: `${scope.name} Supply Cooperation`,
     body_text: [
-      `I noticed that your website includes ${scope.name} in your product range. This provides a relevant starting point for introducing our business and exploring a possible supply relationship with your team.`,
-      `We are ${brand.name}, and we manufacture and supply ${scope.name}. I am writing to introduce our business as a potential supplier for this category. Any further discussion would be based on your requirements, so both teams can assess whether there is a suitable fit before considering next steps.`,
-      `Would your team be open to considering an additional supplier for ${scope.name}?`,
+      `I noticed your website lists ${scope.name} among the window furnishings you offer to customers.`,
+      `At ${brand.name}, we manufacture and supply ${scope.name} from China for window furnishing businesses. I am reaching out to introduce another supply option for this part of your range.`,
+      `Would a short product introduction be useful to your team?`,
     ].join('\n\n'),
     source_ids: ['source'],
   };
@@ -76,12 +74,12 @@ async function generate(input, draft, inspect = () => {}) {
     env,
     fetchImpl: async (_url, options) => {
       const request = JSON.parse(options.body);
-      if (!isReview(request)) inspect(request);
+      inspect(request);
       return Response.json({
         choices: [
           {
             finish_reason: 'stop',
-            message: { content: JSON.stringify(isReview(request) ? readyReview : draft) },
+            message: { content: JSON.stringify(draft) },
           },
         ],
       });
@@ -102,8 +100,9 @@ test('三个品牌在已确认的产品范围内使用制造商事实，记录�
       sender = JSON.parse(request.messages[1].content).sender;
     });
     assert.equal(sender.manufacturing_confirmed, true);
+    assert.equal(sender.origin_country, 'China');
     assert.match(result.bodyText, /we manufacture and supply/);
-    assert.equal(result.bodyText.startsWith('Hello Example Dealer Team,\n\n'), true);
+    assert.equal(result.bodyText.startsWith('Hi Example Dealer team,\n\n'), true);
     assert.equal(result.bodyText.includes('Sender Name'), false);
     assert.equal(result.bodyText.includes('Best regards,'), false);
     assert.equal(result.factIds.length, 2);
@@ -114,6 +113,35 @@ test('三个品牌在已确认的产品范围内使用制造商事实，记录�
       sender.facts.every((f) => !policy.brands.some((b) => b !== brand && f.text.includes(b.name))),
     );
   }
+});
+
+test('首封不把条款页出处写成机械的客户观察', async () => {
+  const { input, draft } = fixture(policy.brands[1]);
+  input.candidate.evidence[0].quote = 'PLANTATION SHUTTERS';
+  input.candidate.evidence[0].sourceUrl = 'https://buyer.example/terms-and-conditions/';
+  let calls = 0;
+  const generator = createOutreachGenerator({
+    env,
+    fetchImpl: async () => {
+      calls++;
+      const body_text =
+        calls === 1
+          ? [
+              'Your terms and conditions page lists plantation shutters among the products Example Dealer offers.',
+              'Shuangsheng Shutter manufactures and supplies plantation shutters from China, and we are reaching out to introduce our range as a possible supply option for your business.',
+              'Would a brief overview of our plantation shutter range be useful to you or the person handling sourcing?',
+            ].join('\n\n')
+          : draft.body_text;
+      return Response.json({
+        choices: [
+          { finish_reason: 'stop', message: { content: JSON.stringify({ ...draft, body_text }) } },
+        ],
+      });
+    },
+  });
+  const result = await generator.generate(input);
+  assert.equal(calls, 2);
+  assert.doesNotMatch(result.bodyText, /terms and conditions page/i);
 });
 
 test('室内大类只提供业务已确认的细分产品，计划产品范围撤回后不调用模型', async () => {
@@ -151,10 +179,6 @@ test('写作格式只修订一次，修订结果继续通过同样的事实检�
       env,
       fetchImpl: async (_url, options) => {
         const request = JSON.parse(options.body);
-        if (isReview(request))
-          return Response.json({
-            choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(readyReview) } }],
-          });
         calls++;
         if (calls === 2) {
           assert.equal(request.messages.at(-2).role, 'assistant');
@@ -176,140 +200,18 @@ test('写作格式只修订一次，修订结果继续通过同样的事实检�
       await assert.rejects(generator.generate(input), {
         code: mode === 'unsupported' ? 'outreach_unsupported_claim' : 'outreach_generation_invalid',
       });
-    assert.equal(calls, mode === 'still-invalid' ? 3 : 2);
+    assert.equal(calls, 2);
   }
 });
 
-test('批量生成先评审，只有评审通过的草稿才能返回排队', async () => {
+test('合格首封仅调用一次撰写模型，通过程序检查后直接返回', async () => {
   const { input, draft } = fixture();
-  input.mailbox.clientPassword = 'never-send-secret';
-  let writerCalls = 0,
-    reviewCalls = 0;
-  const revised = {
-    ...draft,
-    body_text: draft.body_text.replace(
-      'This provides a relevant starting point for introducing our business',
-      'This is the product that prompted our introduction',
-    ),
-  };
-  const generator = createOutreachGenerator({
-    env,
-    fetchImpl: async (_url, options) => {
-      const request = JSON.parse(options.body);
-      const reviewer = isReview(request);
-      let content;
-      if (reviewer) {
-        reviewCalls++;
-        const context = JSON.parse(request.messages[1].content);
-        assert.equal(context.customer.name, 'Example Dealer');
-        assert.equal(context.draft.greeting, 'Hello Example Dealer Team,');
-        assert.ok(!JSON.stringify(context).includes('never-send-secret'));
-        assert.ok(!JSON.stringify(context).includes('Sender Name'));
-        assert.deepEqual(
-          context.customer.evidence.map((entry) => entry.id),
-          ['source'],
-        );
-        assert.equal(context.sender.approved_facts.length, 2);
-        content =
-          reviewCalls === 1
-            ? {
-                decision: 'revise',
-                summary: '删去重复',
-                strengths: [],
-                issues: [
-                  {
-                    severity: 'improve',
-                    quote: 'This provides a relevant starting point',
-                    reason: '表述空泛',
-                    recommendation: '改成直接说明切入点',
-                  },
-                ],
-              }
-            : readyReview;
-      } else {
-        writerCalls++;
-        if (writerCalls === 2) {
-          assert.equal(request.messages.at(-2).role, 'assistant');
-          assert.match(request.messages.at(-1).content, /表述空泛/);
-        }
-        content = writerCalls === 1 ? draft : revised;
-      }
-      return Response.json({
-        choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(content) } }],
-      });
-    },
-  });
-  const result = await generator.generate(input);
-  assert.equal(writerCalls, 2);
-  assert.equal(reviewCalls, 2);
-  assert.ok(result.bodyText.includes('This is the product that prompted our introduction'));
-  assert.equal(result.bodyText.includes('Sender Name'), false);
-});
-
-test('评审阻断、资料不足或结果无效时不返回可发送正文', async () => {
-  for (const mode of ['block', 'insufficient_evidence', 'invalid', 'empty_revision']) {
-    const { input, draft } = fixture();
-    let writerCalls = 0,
-      reviewCalls = 0;
-    const generator = createOutreachGenerator({
-      env,
-      fetchImpl: async (_url, options) => {
-        const reviewer = isReview(JSON.parse(options.body));
-        let content = draft;
-        if (reviewer) {
-          reviewCalls++;
-          content =
-            mode === 'block'
-              ? {
-                  decision: 'block',
-                  summary: '事实不足',
-                  strengths: [],
-                  issues: [
-                    {
-                      severity: 'blocking',
-                      quote: `We are ${input.mailbox.brandName}`,
-                      reason: '身份未确认',
-                      recommendation: '删除',
-                    },
-                  ],
-                }
-              : mode === 'insufficient_evidence'
-                ? {
-                    decision: 'insufficient_evidence',
-                    summary: '来源不足',
-                    strengths: [],
-                    issues: [],
-                  }
-                : mode === 'empty_revision'
-                  ? { decision: 'revise', summary: '需要修改', strengths: [], issues: [] }
-                  : {
-                    decision: 'ready',
-                    summary: '通过',
-                    strengths: [],
-                    issues: [
-                      {
-                        severity: 'improve',
-                        quote: 'invented quote',
-                        reason: '无依据',
-                        recommendation: '删除',
-                      },
-                    ],
-                  };
-        } else writerCalls++;
-        return Response.json({
-          choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(content) } }],
-        });
-      },
-    });
-    await assert.rejects(generator.generate(input), {
-      code:
-        mode === 'invalid' || mode === 'empty_revision'
-          ? 'outreach_review_invalid'
-          : 'outreach_review_not_ready',
-    });
-    assert.equal(writerCalls, mode === 'block' ? 3 : 1);
-    assert.equal(reviewCalls, mode === 'block' ? 3 : 1);
-  }
+  let calls = 0;
+  const result = await generate(input, draft, () => calls++);
+  assert.equal(calls, 1);
+  assert.equal(result.subject, draft.subject);
+  assert.equal(result.bodyText, `Hi Example Dealer team,\n\n${draft.body_text}`);
+  assert.deepEqual(result.sourceIds, draft.source_ids);
 });
 
 test('未知品牌、错误域名、未确认产品与采购形态不能继承制造商身份', async () => {
@@ -343,6 +245,7 @@ test('未知品牌、错误域名、未确认产品与采购形态不能继承�
       generate(input, draft, (request) => {
         const sender = JSON.parse(request.messages[1].content).sender;
         assert.equal(sender.manufacturing_confirmed, false);
+        assert.equal(sender.origin_country, null);
         assert.deepEqual(sender.confirmed_product_types, []);
         assert.equal(sender.facts.length, 1);
       }),
@@ -350,7 +253,9 @@ test('未知品牌、错误域名、未确认产品与采购形态不能继承�
     );
     const supplierDraft = {
       ...draft,
-      body_text: draft.body_text.replace('manufacture and supply', 'supply'),
+      body_text: draft.body_text
+        .replace('manufacture and supply', 'supply')
+        .replace(' from China', ''),
     };
     // Keep the fallback test about identity, rather than introducing another known brand.
     supplierDraft.body_text = supplierDraft.body_text.replace(
@@ -359,6 +264,13 @@ test('未知品牌、错误域名、未确认产品与采购形态不能继承�
     );
     assert.ok((await generate(input, supplierDraft)).bodyText.includes('we supply'));
   }
+});
+
+test('身份不匹配时不能仅把制造商改成供应商就保留从中国供货表述', async () => {
+  const { input, draft } = fixture();
+  input.mailbox.email = 'sales@another.example';
+  draft.body_text = draft.body_text.replace('manufacture and supply', 'supply');
+  await assert.rejects(generate(input, draft), { code: 'outreach_unsupported_claim' });
 });
 
 test('来源缺失在调用前阻止生成，伪造或重复来源及不符合字数和提问规则的结果不进入发送', async () => {

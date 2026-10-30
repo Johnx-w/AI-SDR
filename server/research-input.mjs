@@ -1,4 +1,5 @@
 import { websiteTextExcerpt } from './website-metadata.mjs';
+import { RESEARCH_GAP } from './research-text.mjs';
 
 const CEILINGS = { maxPages: 5, maxPageChars: 16000, maxTotalChars: 80000 };
 const highSurrogate = (value) => value >= 0xd800 && value <= 0xdbff;
@@ -15,12 +16,12 @@ function safeTail(text, length) {
 }
 function excerpt(text, limit) {
   if (text.length <= limit) return text;
-  if (limit < 4) return safeHead(text, limit);
+  if (limit <= RESEARCH_GAP.length + 1) return safeHead(text, limit);
   // Match websiteTextExcerpt's head/tail policy, with safe UTF-16 cut points.
   const tailLength = Math.min(4000, Math.floor(limit / 3));
-  const head = safeHead(text, limit - tailLength - 2);
+  const head = safeHead(text, limit - tailLength - RESEARCH_GAP.length);
   const tail = safeTail(text, tailLength);
-  return head && tail ? head + '\n\n' + tail : head || tail || safeHead(text, limit);
+  return head && tail ? head + RESEARCH_GAP + tail : head || tail || safeHead(text, limit);
 }
 function urlKey(source) {
   try {

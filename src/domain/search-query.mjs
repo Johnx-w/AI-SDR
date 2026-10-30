@@ -100,7 +100,7 @@ export function automaticSearchPlan(input, countries = [input.country]) {
   const selected = acquisition.customerTypes.filter((type) => roles.includes(type.value));
   const roleVariants = selected.length
     ? selected.map((type) => type.terms)
-    : ['', 'supplier', 'dealer', 'manufacturer'];
+    : ['supplier', 'dealer', 'manufacturer', ''];
   const preferences = String(input.preferred_requirements || '');
   const hints = [
     [/电动|自动化|motori[sz]ed/i, 'motorized'],

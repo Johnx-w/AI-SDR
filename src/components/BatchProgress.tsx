@@ -1,5 +1,7 @@
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import type { AcquisitionJob, CustomsBuyerEvidence } from '../domain/types';
+import { acquisitionApi } from '../services/acquisition';
 
 const states = {
   running: '正在收录',
@@ -70,7 +72,139 @@ function CargoDetails({ buyer }: { buyer: CustomsBuyerEvidence }) {
     </details>
   );
 }
-function DetailRows({ rows }: { rows: AcquisitionJob['rows'] }) {
+type ReviewRow = AcquisitionJob['rows'][number];
+function ReviewAction({ jobId, index, row }: { jobId: string; index: number; row: ReviewRow }) {
+  const [sourceUrl, setSourceUrl] = useState(
+    row.review_resolution?.source_url || row.source_url || '',
+  );
+  const [resolution, setResolution] = useState(row.review_resolution);
+  const [evidence, setEvidence] =
+    useState<Awaited<ReturnType<typeof acquisitionApi.reviewEvidence>>['evidence']>(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const key = useRef(row.review_resolution?.key || '');
+  useEffect(() => {
+    if (!row.review_resolution) return;
+    setResolution(row.review_resolution);
+    key.current = row.review_resolution.key;
+    setSourceUrl(row.review_resolution.source_url);
+  }, [
+    row.review_resolution?.key,
+    row.review_resolution?.status,
+    row.review_resolution?.updated_at,
+  ]);
+  const uncertain = resolution?.status === 'pending' || resolution?.status === 'uncertain';
+  const recorded = ['inserted', 'updated', 'duplicate'].includes(resolution?.status || '');
+  async function loadEvidence() {
+    if (evidence || busy) return;
+    try {
+      const result = await acquisitionApi.reviewEvidence(jobId, index);
+      setEvidence(result.evidence);
+      if (result.resolution) {
+        setResolution(result.resolution);
+        key.current = result.resolution.key;
+        setSourceUrl(result.resolution.source_url);
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '核实依据读取失败');
+    }
+  }
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (busy || recorded) return;
+    setBusy(true);
+    setError('');
+    if (!uncertain) key.current = crypto.randomUUID();
+    try {
+      const result = await acquisitionApi.reviewCandidate(
+        jobId,
+        index,
+        uncertain ? resolution!.source_url : sourceUrl,
+        key.current,
+      );
+      setResolution(result.resolution);
+      const latest = await acquisitionApi.reviewEvidence(jobId, index).catch(() => null);
+      if (latest) setEvidence(latest.evidence);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '核实失败');
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <details onToggle={(event) => event.currentTarget.open && void loadEvidence()}>
+      <summary>{recorded ? '核实结果' : '核实并尝试入库'}</summary>
+      {evidence ? (
+        <div>
+          <small>
+            官网名称：{evidence.company_name || '未核实'} · 身份：{evidence.identity_status}
+          </small>
+          <small>
+            窗饰产品：{evidence.product_match} · {evidence.products.join('、') || '未核实'}
+          </small>
+          {evidence.facts.map((fact, i) => (
+            <small key={`${fact.field}-${i}`}>
+              {fact.field === 'company_name' ? '名称' : fact.field === 'products' ? '产品' : '主体'}
+              依据：
+              {fact.quote}（
+              {safeUrl(fact.source_url) ? (
+                <a href={safeUrl(fact.source_url)} target="_blank" rel="noopener noreferrer">
+                  来源
+                </a>
+              ) : (
+                '来源不可打开'
+              )}
+              ）
+            </small>
+          ))}
+        </div>
+      ) : (
+        <small>打开官网核对主体与经营产品；无已保存证据时重新采集。</small>
+      )}
+      {resolution?.reason && <small>{resolution.reason}</small>}
+      {recorded ? (
+        <small>
+          {resolution?.record_id ? (
+            <Link to={`/leads?lead=${encodeURIComponent(resolution.record_id)}`}>查看客户档案</Link>
+          ) : (
+            '该企业已在客户库，可按官网查找档案'
+          )}
+        </small>
+      ) : (
+        <form onSubmit={(event) => void submit(event)}>
+          <label>
+            已核对的企业官网
+            <input
+              type="url"
+              required
+              value={uncertain ? resolution!.source_url : sourceUrl}
+              disabled={busy || uncertain}
+              placeholder="https://企业官网/"
+              onChange={(event) => setSourceUrl(event.target.value)}
+            />
+          </label>
+          <button type="submit" className="btn secondary" disabled={busy}>
+            {busy ? '核实中…' : uncertain ? '核对上次结果' : '重新核实并尝试入库'}
+          </button>
+        </form>
+      )}
+      {error && (
+        <small role="alert" className="error-message">
+          {error}
+        </small>
+      )}
+    </details>
+  );
+}
+function DetailRows({
+  rows,
+  allRows,
+  jobId,
+}: {
+  rows: AcquisitionJob['rows'];
+  allRows: AcquisitionJob['rows'];
+  jobId: string;
+}) {
   return (
     <table className="lead-table">
       <thead>
@@ -140,9 +274,17 @@ function DetailRows({ rows }: { rows: AcquisitionJob['rows'] }) {
                     .join('；')}
                 </small>
               )}
+              {row.result === 'review' && (
+                <ReviewAction jobId={jobId} index={allRows.indexOf(row)} row={row} />
+              )}
             </td>
             <td>
-              {resultNames[row.result] || row.result}
+              {row.review_resolution?.status === 'inserted' ||
+              row.review_resolution?.status === 'updated'
+                ? '核实后已入库'
+                : row.review_resolution?.status === 'duplicate'
+                  ? '已在客户库'
+                  : resultNames[row.result] || row.result}
               {row.assessment && (
                 <small>
                   {row.assessment.grade || row.assessment.status || '未定级'} · 已支持
@@ -296,7 +438,17 @@ export function BatchProgress({
                         </small>
                       )}
                     </td>
-                    <td>{metric.discovered}</td>
+                    <td>
+                      {metric.discovered}
+                      {!!metric.filtered && (
+                        <small>
+                          来源过滤 {metric.filtered} ·{' '}
+                          {Object.entries(metric.filterReasons || {})
+                            .map(([reason, count]) => `${reason} ${count}`)
+                            .join(' · ')}
+                        </small>
+                      )}
+                    </td>
                     <td>{metric.duplicates}</td>
                     <td>
                       {metric.researched} / {metric.queued}
@@ -338,7 +490,7 @@ export function BatchProgress({
                   aria-label="本轮新增结果列表"
                   tabIndex={0}
                 >
-                  <DetailRows rows={insertedRows} />
+                  <DetailRows rows={insertedRows} allRows={job.rows} jobId={job.id} />
                 </div>
               </details>
             )}
@@ -351,7 +503,7 @@ export function BatchProgress({
                   aria-label="其他处理结果列表"
                   tabIndex={0}
                 >
-                  <DetailRows rows={otherRows} />
+                  <DetailRows rows={otherRows} allRows={job.rows} jobId={job.id} />
                 </div>
               </details>
             )}

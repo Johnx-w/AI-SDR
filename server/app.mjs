@@ -7,6 +7,7 @@ import { BrandingCache } from './branding-cache.mjs';
 import { summarizeRunOutput } from './run-outcome.mjs';
 import { validateTarget, locationOptions } from './search-target.mjs';
 import { BatchJobs, validateCount, validateResearchBudget } from './batch-jobs.mjs';
+import { AcquisitionReviews } from './acquisition-reviews.mjs';
 import { createAcquisitionProvider } from './acquisition-provider.mjs';
 import { ApiConnections } from './api-connections.mjs';
 import { discoverResearchModels } from './model-discovery.mjs';
@@ -25,6 +26,7 @@ import { validateContactEdit } from './lead-contacts.mjs';
 import { LeadLibrary } from './lead-library.mjs';
 import { LeadPerformance } from './lead-performance.mjs';
 import { OverviewService } from './overview.mjs';
+import { websiteScope } from './website-metadata.mjs';
 
 class ApiError extends Error {
   constructor(status, message) {
@@ -159,6 +161,24 @@ export function createApp({
       status: (id) => provider.status(id),
       readLeads: verifiedLeads,
     }));
+  let acquisitionReviews;
+  const reviews = () =>
+    (acquisitionReviews ??= new AcquisitionReviews(jobs().db, acquisitionScope()));
+  const reviewJob = (job) => {
+    const snapshot = jobs().view(job);
+    const resolutions = reviews().forJob(job.id);
+    return {
+      ...snapshot,
+      rows: snapshot.rows.map((row, index) => ({
+        ...row,
+        ...(resolutions.has(index) ? { review_resolution: resolutions.get(index) } : {}),
+      })),
+    };
+  };
+  const reviewPlan = (plan) => {
+    const snapshot = plans().view(plan);
+    return snapshot.lastJob ? { ...snapshot, lastJob: reviewJob(snapshot.lastJob) } : snapshot;
+  };
   let schedules;
   let products;
   const catalog = () =>
@@ -451,7 +471,7 @@ export function createApp({
           const manager = plans();
           if (!suffix.length && request.method === 'GET')
             return json(response, 200, {
-              schedules: manager.list().map((plan) => manager.view(plan)),
+              schedules: manager.list().map(reviewPlan),
             });
           if (!suffix.length && request.method === 'POST') {
             const body = await readJson(request);
@@ -469,10 +489,10 @@ export function createApp({
               },
               request.headers['idempotency-key'],
             );
-            return json(response, 201, manager.view(plan));
+            return json(response, 201, reviewPlan(plan));
           }
           if (suffix.length === 2 && request.method === 'POST')
-            return json(response, 200, manager.view(manager.control(suffix[0], suffix[1])));
+            return json(response, 200, reviewPlan(manager.control(suffix[0], suffix[1])));
           throw new ApiError(404, '定时计划接口不存在');
         }
         if (url.pathname === `${prefix}/locations` && request.method === 'GET')
@@ -636,7 +656,7 @@ export function createApp({
           const suffix = url.pathname.slice(`${prefix}/jobs`.length).split('/').filter(Boolean);
           const manager = jobs();
           if (!suffix.length && request.method === 'GET')
-            return json(response, 200, { jobs: manager.list().map((j) => manager.view(j)) });
+            return json(response, 200, { jobs: manager.list().map(reviewJob) });
           if (!suffix.length && request.method === 'POST') {
             if (!provider.info.configured)
               throw new ApiError(503, '获客执行引擎尚未配置，请检查接入状态');
@@ -647,16 +667,81 @@ export function createApp({
               target_count: validateCount(body.target_count),
             };
             const job = manager.create(input, request.headers['idempotency-key']);
-            return json(response, 202, manager.view(job));
+            return json(response, 202, reviewJob(job));
           }
           if (suffix.length === 1 && request.method === 'GET')
-            return json(response, 200, manager.view(manager.get(suffix[0])));
+            return json(response, 200, reviewJob(manager.get(suffix[0])));
+          if (suffix.length === 3 && suffix[1] === 'reviews') {
+            const job = manager.get(suffix[0]);
+            if (job.scope !== manager.scope) throw new ApiError(409, '执行记录所属客户库已变化');
+            const index = Number(suffix[2]);
+            if (!Number.isSafeInteger(index) || index < 0 || String(index) !== suffix[2])
+              throw new ApiError(400, '待核实行号无效');
+            const row = job.rows[index];
+            if (!row || row.result !== 'review') throw new ApiError(404, '待核实企业不存在');
+            if (request.method === 'GET') {
+              const resolution = reviews().get(job.id, index);
+              return json(response, 200, {
+                resolution,
+                evidence:
+                  provider.reviewEvidence?.(resolution?.operation_id || row.operation_id) || null,
+              });
+            }
+            if (request.method !== 'POST') throw new ApiError(405, '不支持的核实操作');
+            if (provider.info.provider !== 'native' || !provider.info.configured)
+              throw new ApiError(503, '待核实企业需要已配置的直连获客引擎');
+            if (running || manager.active())
+              throw new ApiError(409, '当前获客任务正在处理，请完成后再核实该企业');
+            const body = await readJson(request);
+            const source = websiteScope(body?.source_url);
+            if (!source) throw new ApiError(400, '请填写公网 HTTPS 企业官网');
+            const key = request.headers['idempotency-key'];
+            if (typeof key !== 'string' || !/^[\w-]{8,80}$/.test(key))
+              throw new ApiError(400, '核实操作需要有效 Idempotency-Key');
+            const prior = reviews().get(job.id, index);
+            const attempt = reviews().begin(job.id, index, key, source.url);
+            if (prior?.key === key) {
+              if (!['pending', 'uncertain'].includes(attempt.status))
+                return json(response, 200, { resolution: attempt });
+              const result = await provider.status(attempt.operation_id);
+              if (result?.settled) {
+                const resolution = reviews().settle(job.id, index, result.output);
+                if (['inserted', 'updated'].includes(resolution.status)) library().invalidate();
+                return json(response, 200, { resolution });
+              }
+              if (result?.reason?.includes('操作记录不存在'))
+                return json(response, 200, {
+                  resolution: reviews().settle(job.id, index, {
+                    outcome: 'failed',
+                    reason: '上次核实操作未建立，请重新提交',
+                  }),
+                });
+              throw new ApiError(409, '核实结果尚待确认，未重复执行');
+            }
+            running++;
+            try {
+              const output = await provider.research(job.input, {
+                ...row,
+                source_url: source.url,
+                source_title: '',
+                operation_id: attempt.operation_id,
+              });
+              const resolution = reviews().settle(job.id, index, output);
+              if (['inserted', 'updated'].includes(resolution.status)) library().invalidate();
+              return json(response, 200, { resolution });
+            } catch {
+              reviews().uncertain(job.id, index);
+              throw new ApiError(409, '核实结果待确认，请使用同一操作编号重试，避免重复入库');
+            } finally {
+              running--;
+            }
+          }
           if (suffix.length === 2 && request.method === 'POST') {
             if (suffix[1] === 'stop')
-              return json(response, 200, manager.view(manager.stop(suffix[0])));
+              return json(response, 200, reviewJob(manager.stop(suffix[0])));
             if (suffix[1] === 'resume') {
               if (!provider.info.configured) throw new ApiError(503, '获客执行引擎尚未配置');
-              return json(response, 200, manager.view(await manager.resume(suffix[0])));
+              return json(response, 200, reviewJob(await manager.resume(suffix[0])));
             }
           }
           throw new ApiError(404, '任务接口不存在');

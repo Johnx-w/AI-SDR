@@ -22,6 +22,7 @@ export const researchPolicyCode =
   (
     await Promise.all(
       [
+        'research-text',
         'relevance',
         'customer-eligibility',
         'assessment-evidence',

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CalendarDays, Pause, Play, X } from 'lucide-react';
 import { Badge, Empty } from '../components/ui';
@@ -34,28 +34,45 @@ export function ScheduledAcquisition() {
   const [error, setError] = useState('');
   const [filter, setFilter] = useState('active');
   const [expanded, setExpanded] = useState('');
+  const readVersion = useRef(0);
+  const reading = useRef(false);
   async function load(background = false) {
+    if (reading.current) return;
+    const version = ++readVersion.current;
+    reading.current = true;
     if (!background) setLoading(true);
     try {
       const response = await acquisitionApi.schedules();
-      setPlans(response.schedules);
-      setError('');
+      if (version === readVersion.current) {
+        setPlans(response.schedules);
+        setError('');
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : '读取定时计划失败');
+      if (version === readVersion.current)
+        setError(e instanceof Error ? e.message : '读取定时计划失败');
     } finally {
-      if (!background) setLoading(false);
+      if (version === readVersion.current) {
+        reading.current = false;
+        if (!background) setLoading(false);
+      }
     }
   }
   useEffect(() => {
     void load();
     const timer = setInterval(() => void load(true), 10000);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      readVersion.current++;
+      reading.current = false;
+    };
   }, []);
   async function control(plan: AcquisitionSchedule, action: 'pause' | 'resume' | 'close') {
     setBusy(plan.id);
     setError('');
     try {
       const updated = await acquisitionApi.controlSchedule(plan.id, action);
+      readVersion.current++;
+      reading.current = false;
       setPlans((current) => current.map((p) => (p.id === plan.id ? updated : p)));
     } catch (e) {
       setError(e instanceof Error ? e.message : '操作失败');
@@ -68,6 +85,8 @@ export function ScheduledAcquisition() {
     setError('');
     try {
       await acquisitionApi.controlJob(id, action);
+      readVersion.current++;
+      reading.current = false;
       await load(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : '操作失败');

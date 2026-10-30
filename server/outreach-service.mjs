@@ -31,6 +31,18 @@ const senderVersion = (m) =>
   ]);
 const day = (date) =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date(date));
+function sendWindowError(w) {
+  const validTime = /^([01]\d|2[0-3]):[0-5]\d$/;
+  if (!w || !validTime.test(w.start) || !validTime.test(w.end) || w.start === w.end)
+    return '发送时段须为有效且不同的起止时间';
+  if (typeof w.timezone !== 'string' || !w.timezone.trim()) return '发送时区无效';
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: w.timezone }).format();
+  } catch {
+    return '发送时区无效';
+  }
+  return '';
+}
 const safeError = (error) =>
   error?.status ? text(error.message, 350) : '处理失败，请核对连接后重试';
 
@@ -338,7 +350,7 @@ export class OutreachService {
       scope: this.getScope(),
       baselineCustomerIds: prior?.baselineCustomerIds ?? null,
       lastError: '',
-      sendWindow: input.sendWindow || null,
+      sendWindow: input.sendWindow === undefined ? (prior?.sendWindow ?? null) : input.sendWindow,
     };
     c.productScopes = this.products()
       .filter(
@@ -349,15 +361,9 @@ export class OutreachService {
           (!c.filters.categories.length || c.filters.categories.includes(product.category)),
       )
       .map(outreachProductScope);
-    if (c.sendWindow) {
-      const w = c.sendWindow;
-      if (!/^\d{2}:\d{2}$/.test(w.start) || !/^\d{2}:\d{2}$/.test(w.end))
-        throw fail(400, '发送时段格式应为HH:mm');
-      try {
-        new Intl.DateTimeFormat('en', { timeZone: w.timezone }).format();
-      } catch {
-        throw fail(400, '发送时区无效');
-      }
+    if (c.sendWindow !== null) {
+      const error = sendWindowError(c.sendWindow);
+      if (error) throw fail(400, error);
     }
     return this.transaction(() => {
       if (prior)
@@ -1036,8 +1042,9 @@ export class OutreachService {
     return this.detail(id);
   }
   inWindow(c) {
-    if (!c.sendWindow) return true;
+    if (c.sendWindow == null) return true;
     const w = c.sendWindow;
+    if (sendWindowError(w)) return false;
     const current = new Intl.DateTimeFormat('en-GB', {
       timeZone: w.timezone,
       hour: '2-digit',

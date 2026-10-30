@@ -32,6 +32,7 @@ test('全范围搜索在短轮次内交替覆盖室内、室外、半成品及�
     .join('\n');
   assert.match(initial, /"window coverings"/);
   for (const pattern of [indoor, outdoor, semifinished, components]) assert.match(initial, pattern);
+  assert.ok(queries.slice(0, 5).every(({ query }) => /\bsupplier\b/.test(query)));
   assert.doesNotMatch(queries.map(({ query }) => query).join('\n'), /sample books|display kits/);
   assert.equal(new Set(queries.map(({ query }) => query)).size, queries.length);
 });

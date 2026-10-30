@@ -3,6 +3,7 @@ import { acquisitionConfig } from './acquisition-config.mjs';
 import { createResearchProviders } from './research-providers.mjs';
 import { researchCacheKey } from './research-reuse.mjs';
 import { boundedResearchPages } from './research-input.mjs';
+import { compactResearchText } from './research-text.mjs';
 import { CustomsDiscovery, customsConfig } from './customs-discovery.mjs';
 import { matchShipmentBuyer } from './shipment-evidence.mjs';
 import { AcquisitionStore } from './acquisition-store.mjs';
@@ -21,7 +22,7 @@ import { calculateHandoffReadiness } from './handoff-readiness.mjs';
 import { searchPlan } from './search-plan.mjs';
 import { readPublicHtml, websiteUrl } from './branding.mjs';
 import { planWebsitePages, combineWebsiteEvidence, websiteScope } from './website-metadata.mjs';
-import { researchPageText } from './research-pages.mjs';
+import { researchPageText, hasUsableResearchText } from './research-pages.mjs';
 import {
   companyResearchRequest,
   companyResearchSchema,
@@ -63,39 +64,63 @@ const blockedMedia = [
   '9news.com.au',
   '7news.com.au',
   'ctvnews.ca',
+  'fginsight.com',
 ];
 // Apply the same source qualification to discovery and queued/direct research.
 // A third-party company profile is not the company's independently verified site.
-function companyWebsiteSourceUrl(value, evidence = {}) {
+function companyWebsiteSource(value, evidence = {}) {
   const url = websiteUrl(value);
-  if (!url) return null;
+  if (!url) return { url: null, reason: '网址无效或不安全' };
   const domain = domainKey(url.href);
   if (
     blockedHosts.test(url.hostname) ||
     thirdPartyCompanySource({ ...evidence, url: url.href }) ||
-    /gazette|herald|tribune|chronicle|newspaper|news\.co/i.test(url.hostname) ||
-    blockedMedia.some((host) => domain === host || domain.endsWith('.' + host)) ||
-    /directory|findglocal|word-of-mouth|superpages/i.test(url.hostname) ||
-    /\.(?:pdf|docx?|xlsx?|pptx?|zip|rar)$/i.test(url.pathname) ||
-    /\/(jobs?|careers?|vacanc[^/]*|employment|news|wiki|directory|listings?)(\/|$)/i.test(
-      url.pathname,
-    )
+    /directory|findglocal|word-of-mouth|superpages/i.test(url.hostname)
   )
-    return null;
-  return url;
+    return { url: null, reason: '第三方平台或目录' };
+  if (
+    /gazette|herald|tribune|chronicle|newspaper|news\.co/i.test(url.hostname) ||
+    blockedMedia.some((host) => domain === host || domain.endsWith('.' + host))
+  )
+    return { url: null, reason: '新闻媒体' };
+  if (/\.(?:pdf|docx?|xlsx?|pptx?|zip|rar)$/i.test(url.pathname))
+    return { url: null, reason: '非网页文件' };
+  if (
+    /\/(jobs?|careers?|vacanc[^/]*|employment|wiki|directory|listings?)(\/|$)/i.test(url.pathname)
+  )
+    return { url: null, reason: '招聘或目录页面' };
+  const description = `${url.pathname} ${evidence.title || ''}`;
+  if (
+    /(?:^|\.)gov(?:\.[a-z]{2})?$/.test(url.hostname) &&
+    /safety|regulat(?:ion|ory)|statistics?|census|classification|naics|guidance/i.test(
+      description,
+    ) &&
+    !/procurement|tender|\brfp\b|solicitation|supplier registration/i.test(description)
+  )
+    return { url: null, reason: '监管或统计资料' };
+  return { url };
+}
+
+function companyWebsiteSourceUrl(value, evidence = {}) {
+  return companyWebsiteSource(value, evidence).url;
 }
 
 export function selectWebsiteCandidates(results, knownDomains = [], limit = 20) {
   const known = new Set(knownDomains),
     seen = new Set(),
     candidates = [],
-    skipped = [];
+    skipped = [],
+    filtered = [];
   for (const result of results) {
-    const url = companyWebsiteSourceUrl(result?.url, {
+    const source = companyWebsiteSource(result?.url, {
       title: result?.title,
       text: [result?.content, result?.raw_content].filter(Boolean).join(' '),
     });
-    if (!url) continue;
+    if (!source.url) {
+      filtered.push({ url: result?.url || '', reason: source.reason });
+      continue;
+    }
+    const url = source.url;
     const domain = domainKey(url.href);
     if (known.has(domain)) {
       skipped.push({ domain, url: url.href });
@@ -111,7 +136,12 @@ export function selectWebsiteCandidates(results, knownDomains = [], limit = 20) 
     });
     if (candidates.length >= limit) break;
   }
-  return { candidates, skipped_existing: skipped, skipped_existing_count: skipped.length };
+  return {
+    candidates,
+    skipped_existing: skipped,
+    skipped_existing_count: skipped.length,
+    filtered_sources: filtered,
+  };
 }
 
 // Name evidence is necessary to queue a customs website, not proof of identity.
@@ -549,7 +579,8 @@ export class NativeAcquisition {
     if (!initial) throw new Error('官网地址无效，仅接受公网 HTTPS 企业网站');
     const domain = domainKey(initial.href),
       pages = [],
-      failures = [];
+      failures = new Set(),
+      researchPages = new Map();
     const queue = [initial.href],
       planned = new Set(queue),
       visited = new Set();
@@ -562,6 +593,15 @@ export class NativeAcquisition {
           queue.push(next);
         }
       }
+    };
+    const addPage = (url, content) => {
+      // Keep complete HTML for independent contact/metadata extraction, even on shells.
+      pages.push({ url, content });
+      enqueue(url, content);
+      const text = researchPageText(content, content.length);
+      if (!hasUsableResearchText(text, content)) return false;
+      researchPages.set(url, { source_url: url, text });
+      return true;
     };
     // Discover contact/about/service links from complete HTML before limiting AI input.
     const readPlanned = async () => {
@@ -583,56 +623,73 @@ export class NativeAcquisition {
               break;
             }
           }
-          if (!content || !researchPageText(content)) throw new Error('官网未返回有效正文');
-          pages.push({ url: url.href, content });
-          enqueue(url.href, content);
+          if (!addPage(url.href, content)) failures.add(original);
         } catch {
-          failures.push(original);
+          failures.add(original);
         }
       }
     };
     await readPlanned();
     // Supplement failed or dynamically rendered pages, bounded to the same five URLs.
-    const extractedUrls = new Set();
-    for (let batch = 0; batch < 2; batch++) {
-      const urls = failures.filter((url) => !extractedUrls.has(url));
-      if (!urls.length && pages.length) break;
-      const selected = urls.length ? urls : [initial.href];
-      for (const url of selected) extractedUrls.add(url);
+    const attempted = { basic: new Set(), advanced: new Set() };
+    for (;;) {
+      const depth = ['basic', 'advanced'].find((level) =>
+        [...failures].some((url) => !attempted[level].has(url)),
+      );
+      if (!depth) break;
+      const selected = [...failures].filter((url) => !attempted[depth].has(url));
+      for (const url of selected) attempted[depth].add(url);
       let extracted;
       try {
         webUsage.start();
         extracted = await this.providers.web.extract({
-          urls: [...new Set(selected)].slice(0, 5),
-          extract_depth: 'basic',
+          urls: selected,
+          extract_depth: depth,
           format: 'markdown',
         });
         webUsage.observe(extracted);
-      } catch (error) {
-        if (!pages.length) throw error;
+      } catch {
         extracted = { results: [] };
       }
-      for (const p of extracted.results) {
-        if (domainKey(p.url) !== domain || !planned.has(p.url) || !p.raw_content) continue;
-        pages.push({ url: p.url, content: p.raw_content });
-        enqueue(p.url, p.raw_content);
+      for (const p of extracted?.results || []) {
+        const url = websiteUrl(p?.url);
+        if (
+          !url ||
+          domainKey(url.href) !== domain ||
+          !selected.includes(url.href) ||
+          !planned.has(url.href)
+        )
+          continue;
+        for (const content of [p.raw_content, p.content]) {
+          if (typeof content !== 'string') continue;
+          if (addPage(url.href, content)) {
+            failures.delete(url.href);
+            break;
+          }
+        }
       }
       await readPlanned();
     }
-    const researchPages = new Map();
-    for (const page of pages) {
-      const text = researchPageText(page.content, page.content.length);
-      if (text && !researchPages.has(page.url))
-        researchPages.set(page.url, { source_url: page.url, text });
-    }
-    if (!researchPages.size) throw new Error('官网页面均未取得正文，未调用模型或写入');
-    const bounded = boundedResearchPages([...researchPages.values()]);
+    if (!researchPages.size)
+      throw Object.assign(new Error('官网页面均未取得有效正文，采集未完成，未调用模型或写入'), {
+        web_usage: webUsage.snapshot(),
+      });
+    const originalChars = [...researchPages.values()].reduce((sum, p) => sum + p.text.length, 0);
+    const compacted = [...researchPages.values()].map((p) => ({
+      ...p,
+      text: compactResearchText(p.text, p.source_url),
+    }));
+    const bounded = boundedResearchPages(compacted);
+    bounded.stats.originalChars = originalChars;
+    bounded.stats.compactedChars =
+      originalChars - compacted.reduce((sum, p) => sum + p.text.length, 0);
     return {
       source_url: initial.href,
       research_pages: bounded.pages,
       page_text: bounded.pages.map((p) => p.text).join('\n'),
       input_stats: bounded.stats,
       web_usage: webUsage.snapshot(),
+      incomplete_urls: [...failures],
       website_metadata: combineWebsiteEvidence(pages),
       checked_urls: [...researchPages.keys()],
     };
@@ -705,7 +762,7 @@ export class NativeAcquisition {
         this.store.complete(op, output);
         return output;
       }
-      if (!companyWebsiteSourceUrl(item.source_url)) {
+      if (!companyWebsiteSourceUrl(item.source_url, { title: item.source_title })) {
         const reason =
           '现有来源为第三方贸易/平台档案或其他非官网页面，不是企业官网；尚未核实企业独立官网，本轮不据此判定高等级';
         if (item.target_record_id)
@@ -731,8 +788,11 @@ export class NativeAcquisition {
       this.store.save(op);
       const page = await this.collect(item.source_url);
       op.web_usage = page.web_usage;
+      op.incomplete_urls = page.incomplete_urls;
       op.research_usage.omitted_pages = page.input_stats?.omittedPages || 0;
       op.research_usage.truncated_pages = page.input_stats?.truncatedPages || 0;
+      op.research_usage.original_chars = page.input_stats?.originalChars || 0;
+      op.research_usage.compacted_chars = page.input_stats?.compactedChars || 0;
       op.stage = 'research';
       op.checked_urls = page.checked_urls;
       op.research_pages = page.research_pages;
@@ -765,6 +825,7 @@ export class NativeAcquisition {
       // actually mention the target products or the window-shading industry.
       const relevance = pageRelevance(page.page_text, input);
       if (!relevance.relevant) {
+        const incomplete = page.incomplete_urls.length > 0;
         if (item.target_record_id)
           return await this.persistIncompleteAssessment(
             op,
@@ -776,15 +837,16 @@ export class NativeAcquisition {
         const research = {
           ok: false,
           stage: 'done',
-          reason:
-            input.query_mode === 'auto'
+          reason: incomplete
+            ? '官网部分页面未取得有效正文，采集未完成，待补充核实'
+            : input.query_mode === 'auto'
               ? '本轮官网正文未取得目标品类依据，待补充核实'
               : '官网内容与目标产品不相关，已预筛排除',
           source_url: item.source_url,
-          product_match: 'not_matched',
+          product_match: incomplete ? 'unknown' : 'not_matched',
           relevance,
           checked_urls: page.checked_urls,
-          review_required: input.query_mode === 'auto',
+          review_required: incomplete || input.query_mode === 'auto',
         };
         op.research = research;
         this.store.save(op);
@@ -856,6 +918,23 @@ export class NativeAcquisition {
         ...parsed,
         checked_urls: page.checked_urls,
       };
+      if (
+        page.incomplete_urls.length &&
+        research.product_match === 'not_matched' &&
+        ![
+          research.country_match,
+          research.audience_match,
+          research.customer_type_match,
+          research.profile_match,
+          research.required_match,
+        ].includes('not_matched') &&
+        research.eligibility?.status !== 'rejected'
+      ) {
+        research.product_match = 'unknown';
+        research.product_relation = { ...research.product_relation, status: 'unknown' };
+        research.review_required = true;
+        research.reason = '官网部分页面未取得有效正文，采集未完成，待补充核实';
+      }
       op.research = research;
       if (item.source_kind === 'customs') {
         const associations = this.store
@@ -1046,6 +1125,7 @@ export class NativeAcquisition {
       op.source_url = item.source_url;
       return await this.writePreparedAssessment(op);
     } catch (error) {
+      if (op.stage === 'extract' && error.web_usage) op.web_usage = error.web_usage;
       if (['persist', 'assessment'].includes(op.stage)) {
         op.state = 'uncertain';
         this.store.save(op);
@@ -1077,7 +1157,13 @@ export class NativeAcquisition {
         );
       const output = this.output(op, {
         research: op.research || {},
-        reason: modelFailure || (error.status ? error.message : '官网采集或研究失败，未写入飞书'),
+        reason:
+          modelFailure ||
+          (error.status
+            ? error.message
+            : op.stage === 'extract'
+              ? '官网采集未完成，未取得有效正文，未写入飞书'
+              : '官网采集或研究失败，未写入飞书'),
       });
       this.store.complete(op, output);
       return output;
@@ -1264,6 +1350,8 @@ export class NativeAcquisition {
       return { settled: false, reason: '写入尚未确认，未自动重试' };
     }
     const output = this.output(op, { reason: '服务在写入前中断；本次企业未入库' });
+    if (['extract', 'research'].includes(op.stage) && !op.action && !op.fields)
+      output.retryable_before_write = true;
     this.store.complete(op, output);
     return { settled: true, output };
   }

@@ -15,11 +15,6 @@ const writerPrompt = readFileSync(new URL('system.md', writerRoot), 'utf8');
 const confirmedSupply = JSON.parse(
   readFileSync(new URL('confirmed-supply.json', writerRoot), 'utf8'),
 );
-const reviewerRoot = new URL('../agents/first-touch-reviewer/', import.meta.url);
-const reviewerPrompt = readFileSync(new URL('system.md', reviewerRoot), 'utf8');
-const reviewerSchema = JSON.parse(
-  readFileSync(new URL('output.schema.json', reviewerRoot), 'utf8'),
-);
 
 function confirmedWriterProduct(product) {
   if (array(product.brands).length !== 1) return null;
@@ -113,6 +108,7 @@ function dedicatedContactPurpose(address, sourceUrl, quote) {
     return true;
   // A policy page alone does not make its contact unsuitable: some businesses
   // publish their general commercial address there. Require an explicit purpose.
+  if (!sourceUrl) return false;
   const source = new URL(sourceUrl);
   if (!/(?:privacy|legal|data[-_]?protection|gdpr|ccpa)/iu.test(source.pathname + source.search))
     return false;
@@ -144,22 +140,27 @@ export function normalizeOutreachLead(lead = {}) {
         .map((value) => value.toLowerCase()),
     ),
   ];
-  const contacts = array(lead.contactEvidence).flatMap((entry) => {
-    const address = text(entry?.value).toLowerCase();
-    const sourceUrl = publicUrl(entry?.source_url || entry?.sourceUrl);
-    const quote = compact(entry?.quote);
-    if (
-      entry?.kind !== 'email' ||
-      !emailPattern.test(address) ||
-      !emails.includes(address) ||
-      !ownSource(sourceUrl, companyDomain) ||
-      (!quote.toLowerCase().includes(address) &&
-        !(entry?.method === 'mailto_link' && quote.length >= 3)) ||
-      entry?.verification_status === 'invalid'
-    )
-      return [];
-    if (dedicatedContactPurpose(address, sourceUrl, quote)) return [];
-    return [{ email: address, sourceUrl, quote }];
+  const contacts = emails.flatMap((address) => {
+    const entries = array(lead.contactEvidence).filter(
+      (entry) => entry?.kind === 'email' && text(entry.value).toLowerCase() === address,
+    );
+    const entry = entries.find(
+      (item) =>
+        item.verification_status !== 'invalid' &&
+        !dedicatedContactPurpose(
+          address,
+          publicUrl(item.source_url || item.sourceUrl),
+          compact(item.quote),
+        ),
+    );
+    if ((!entry && entries.length) || dedicatedContactPurpose(address, '', '')) return [];
+    return [
+      {
+        email: address,
+        sourceUrl: publicUrl(entry?.source_url || entry?.sourceUrl),
+        quote: compact(entry?.quote),
+      },
+    ];
   });
   const entities = evidence.filter((fact) => fact.field === 'entity_type');
   const business = entities.length
@@ -214,7 +215,7 @@ function recipient(contacts, selectOne = false) {
   };
   unique.sort((a, b) => priority(a.email) - priority(b.email) || a.email.localeCompare(b.email));
   if (!unique.length)
-    return { error: 'contact_unverified', reason: '缺少与客户官网来源对应的公开商务邮箱' };
+    return { error: 'contact_unverified', reason: '客户库中没有格式有效且适合商务联系的邮箱' };
   if (!selectOne && unique.length > 1 && priority(unique[0].email) === priority(unique[1].email))
     return {
       error: 'contact_ambiguous',
@@ -353,9 +354,7 @@ export function outreachMaterialVersion(product, campaign, now = new Date()) {
             product.version,
             outreachProductScope(product),
             facts,
-            ...(campaign?.generationMode === 'simple'
-              ? [writerPrompt, reviewerPrompt, reviewerSchema]
-              : []),
+            ...(campaign?.generationMode === 'simple' ? [writerPrompt, confirmedSupply] : []),
           ]),
         )
         .digest('hex')
@@ -549,7 +548,9 @@ export function selectOutreachCandidates({
       reject(
         missingClaim ? 'outreach_claim_missing' : 'product_match_unconfirmed',
         missingClaim
-          ? '匹配产品缺少当前版本的开发信介绍'
+          ? campaign.generationMode === 'simple'
+            ? '匹配产品不在当前计划的已确认产品范围内，请核对计划与发件邮箱'
+            : '匹配产品缺少当前版本的开发信介绍'
           : '尚无已审核且有客户经营证据支持的产品匹配',
       );
       continue;
@@ -874,7 +875,7 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
             body_text: {
               type: 'string',
               description:
-                '80–120 English words in exactly three paragraphs separated by two newline characters; the third paragraph is one cooperation question. No greeting or signature.',
+                '55–85 English words in exactly three paragraphs separated by two newline characters: customer observation, sender brand and product supply introduction, then one easy question about a brief overview or introduction. No greeting or signature.',
             },
             source_ids: { type: 'array', items: { type: 'string' } },
           },
@@ -884,6 +885,10 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
             name: candidate.companyName,
             country: candidate.leadSnapshot?.market,
             business: candidate.leadSnapshot?.type,
+            general_inbox:
+              /^(?:info|contact|reception|help|hello|office|enquiries|inquiries|admin|support|sales)(?:[._+-].*)?$/iu.test(
+                text(candidate.to).split('@')[0],
+              ),
             evidence,
           },
           sender: {
@@ -891,6 +896,7 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
             product: product.englishName,
             focus_product: matchedTypes.length === 1 ? matchedTypes[0] : product.englishName,
             manufacturing_confirmed: manufacturingConfirmed,
+            origin_country: manufacturingConfirmed ? confirmedSupply.originCountry : null,
             confirmed_product_types: manufacturingConfirmed ? confirmed.types : [],
             facts: writerFacts,
           },
@@ -902,7 +908,7 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
           },
           { role: 'user', content: JSON.stringify(input) },
         ];
-        for (let attempt = 0; attempt < 3; attempt++) {
+        for (let attempt = 0; attempt < 2; attempt++) {
           const response = await provider.research({ schema, messages });
           const draft = parseGenerated(response, schema);
           const subject = text(draft.subject),
@@ -930,7 +936,9 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
               subject + '\n' + bodyText,
             ) ||
             (!manufacturingConfirmed &&
-              /\b(?:manufactur\w*|factor(?:y|ies))\b/iu.test(subject + '\n' + bodyText)) ||
+              /\b(?:manufactur\w*|factor(?:y|ies))\b|\bfrom China\b/iu.test(
+                subject + '\n' + bodyText,
+              )) ||
             confirmedSupply.brands.some(
               (brand) =>
                 brand.name !== mailbox.brandName &&
@@ -945,98 +953,42 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
           )
             throw fail(502, '开发信包含未确认的商务信息，请重试', 'outreach_unsupported_claim');
           const wordCount = bodyText.split(/\s+/u).length;
+          const paragraphs = bodyText.split(/\n\s*\n/u);
           if (
-            wordCount < 75 ||
-            wordCount > 125 ||
-            bodyText.split(/\n\s*\n/u).length !== 3 ||
+            wordCount < 50 ||
+            wordCount > 90 ||
+            paragraphs.length !== 3 ||
+            /\b(?:terms(?: and conditions)?|privacy|cookie|legal)\s+(?:page|policy|notice)\b|\bterms and conditions\b/iu.test(
+              paragraphs[0],
+            ) ||
+            paragraphs[0].toLowerCase().includes(mailbox.brandName.toLowerCase()) ||
+            !paragraphs[1].toLowerCase().includes(mailbox.brandName.toLowerCase()) ||
+            !/\b(?:suppl(?:y|ier|iers)|manufactur\w*)\b/iu.test(paragraphs[1]) ||
             (bodyText.match(/\?/gu) || []).length !== 1 ||
             !bodyText.endsWith('?') ||
             /^(?:hello|hi|dear)\b|\bI hope this email finds you well\b|(?:^|\n)\s*(?:(?:best|kind|warm)\s+)?(?:regards|sincerely|yours (?:truly|sincerely)|thank you)(?:\s*[,!]|$)|\bconfirmed (?:range|types?|product types?)\b/iu.test(
               bodyText,
             )
           ) {
-            if (attempt < 2) {
+            if (attempt === 0) {
               messages.push(
                 { role: 'assistant', content: JSON.stringify(draft) },
                 {
                   role: 'user',
-                   content: `Revise the draft's writing format only, using the same supplied facts and focus_product. It currently has ${wordCount} words and ${bodyText.split(/\n\s*\n/u).length} paragraphs. Return 90–100 English words in exactly three paragraphs separated by two newlines; count the words before returning. Paragraph 1 only observes the customer's listed focus product; paragraph 2 introduces the brand, approved supply facts, cooperation purpose and one conditional next step explaining that product requirements can be discussed before supply arrangements; paragraph 3 is one cooperation question. Add no filler, invented customer facts or counts inferred from a bare number in a source excerpt. No greeting, signature, generic well-wishes or internal phrases such as confirmed range/types. Keep customer source IDs valid and supplier claims grounded. Return the same JSON fields.`,
+                  content: `Revise the draft's writing format only, using the same supplied facts and focus_product. It currently has ${wordCount} words and ${paragraphs.length} paragraphs. Return 60–75 English words in exactly three paragraphs separated by two newlines: paragraph 1 describes the customer's matching product as an offer or activity, without naming a terms, privacy or legal page; paragraph 2 names the sender brand, states its approved product supply and explains the contact purpose plainly; paragraph 3 is one easy question about a brief overview or introduction, optionally for the sourcing colleague if this is a general inbox. Add no filler, invented customer facts or counts inferred from a bare number in a source excerpt. No greeting, signature, generic well-wishes or internal phrases such as confirmed range/types. Keep customer source IDs valid and supplier claims grounded. Return the same JSON fields.`,
                 },
               );
               continue;
             }
             throw fail(
               502,
-              '开发信应约 80–120 词，分三段直接切入业务并以一个合作问题结尾，请重试',
+              '开发信应约 55–85 词，依次写客户观察、品牌供货介绍和一个容易回复的问题，请重试',
               'outreach_generation_invalid',
             );
           }
-          const reviewResponse = await provider.research({
-            schema: reviewerSchema,
-            messages: [
-              { role: 'system', content: reviewerPrompt },
-              {
-                role: 'user',
-                content: JSON.stringify({
-                  writer_policy: writerPrompt,
-                  customer: {
-                    name: candidate.companyName,
-                    evidence: evidence.filter((entry) => draft.source_ids.includes(entry.id)),
-                  },
-                  sender: {
-                    brand: mailbox.brandName,
-                    product: product.englishName,
-                    focus_product: input.sender.focus_product,
-                    approved_facts: writerFacts,
-                  },
-                  draft: {
-                    subject,
-                    greeting: `Hello ${candidate.companyName} Team,`,
-                    body: bodyText,
-                    signature_is_added_by_application: true,
-                  },
-                }),
-              },
-            ],
-          });
-          const review = parseGenerated(reviewResponse, reviewerSchema);
-          if (
-            !reviewerSchema.properties.decision.enum.includes(review.decision) ||
-            typeof review.summary !== 'string' ||
-            !Array.isArray(review.strengths) ||
-            review.strengths.some((item) => typeof item !== 'string') ||
-            !Array.isArray(review.issues) ||
-            review.issues.length > 3 ||
-            review.issues.some(
-              (issue) =>
-                !issue ||
-                !['blocking', 'improve'].includes(issue.severity) ||
-                ['quote', 'reason', 'recommendation'].some(
-                  (key) => typeof issue[key] !== 'string' || !issue[key].trim(),
-                ) ||
-                (issue.quote && !(subject + '\n' + bodyText).includes(issue.quote)),
-            ) ||
-            (review.decision === 'ready' && review.issues.length) ||
-            (['revise', 'block'].includes(review.decision) && !review.issues.length) ||
-            (review.decision === 'block' &&
-              !review.issues.some((issue) => issue.severity === 'blocking'))
-          )
-            throw fail(502, '开发信评审结果无效，未加入发送队列', 'outreach_review_invalid');
-          if (review.decision !== 'ready') {
-            if (review.decision === 'insufficient_evidence' || attempt === 2)
-              throw fail(502, '开发信评审未通过，未加入发送队列', 'outreach_review_not_ready');
-            messages.push(
-              { role: 'assistant', content: JSON.stringify(draft) },
-              {
-                role: 'user',
-                content: `Revise the draft using these review findings: ${JSON.stringify(review.issues)}. Keep the same supplied customer evidence, sender identity, product scope and confirmed supplier facts. Do not invent new facts. Return the original JSON fields.`,
-              },
-            );
-            continue;
-          }
           return {
             subject,
-            bodyText: `Hello ${candidate.companyName} Team,\n\n${bodyText}`,
+            bodyText: `Hi ${candidate.companyName} team,\n\n${bodyText}`,
             sourceIds: draft.source_ids,
             factIds: writerFacts.map((f) => f.id),
             materialVersion,

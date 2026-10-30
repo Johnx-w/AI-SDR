@@ -184,6 +184,45 @@ function fixture({
 
 const policyFact = (value, quote) => ({ value, quote, source_url: site });
 
+test('精简后的中部经营证据贯通研究、初评、模拟写入及读回，统计实际节省字符', async () => {
+  const f = fixture({
+    pageText:
+      '<nav>' +
+      '<p>Home Products About Contact</p>'.repeat(500) +
+      '</nav><p>' +
+      sourceText +
+      '</p><footer>' +
+      '<p>Cookie settings and website policy information.</p>'.repeat(450) +
+      '</footer>',
+    modelOverrides: { actual_country: policyFact('United States', sourceText) },
+    automaticAssessment: true,
+  });
+  const svc = f.make();
+  try {
+    const result = await svc.research(input, {
+      source_url: site,
+      operation_id: 'compacted-insert',
+    });
+    assert.equal(result.新增, 1);
+    assert.equal(result.research.company_name, 'Acme Screens');
+    assert.equal(result.research.product_match, 'matched');
+    assert.equal(result.research.actual_country, 'United States');
+    assert.equal(f.records.length, 1);
+    assert.equal(f.records[0].fields.邮箱, 'sales@acme.example.org');
+    const op = svc.store.get('compacted-insert');
+    const sent = JSON.parse(
+      f.calls.find((call) => call.url.includes('deepseek')).body.input[1].content,
+    ).pages;
+    assert.deepEqual(sent, op.research_pages);
+    assert.ok(result.research_usage.original_chars > 30000);
+    assert.ok(result.research_usage.compacted_chars > 30000);
+    assert.ok(result.research_usage.input_chars < 1500);
+    assert.ok(result.assessment || op.assessment);
+  } finally {
+    svc.close();
+  }
+});
+
 for (const product_scope of ['all', 'specific']) {
   test(`${product_scope} 范围的相关企业国家未知仍入库，核实后归入实际市场`, async () => {
     const modelOverrides = { actual_country: null };
@@ -771,6 +810,79 @@ test('HTTP 首页失败后从 Tavily 正文发现联系页，仍限制同域与�
   }
 });
 
+test('HTTP 200 空壳经 basic、advanced 补采后以有效正文研究，保留完整 HTML 联系证据', async () => {
+  const f = fixture(),
+    extractions = [];
+  const svc = f.make({
+    readPage: async () => ({
+      html: '<div>Loading</div><a href="mailto:public@acme.example.org"></a>',
+    }),
+    fetchImpl: async (url, options) => {
+      if (url === 'https://api.tavily.com/extract') {
+        const body = JSON.parse(options.body);
+        extractions.push(body.extract_depth);
+        return json({
+          results: [
+            { url: site, raw_content: body.extract_depth === 'basic' ? 'Loading' : sourceText },
+          ],
+          usage: { credits: 1 },
+        });
+      }
+      return f.fetchImpl(url, options);
+    },
+  });
+  try {
+    const out = await svc.research(input, { source_url: site, operation_id: 'shell-upgrade-e2e' });
+    assert.equal(out.新增, 1, out.reason);
+    assert.deepEqual(extractions, ['basic', 'advanced']);
+    const operation = svc.store.get('shell-upgrade-e2e');
+    const sentPages = JSON.parse(
+      f.calls.find((c) => c.url.includes('deepseek')).body.input[1].content,
+    ).pages;
+    assert.deepEqual(sentPages, operation.research_pages);
+    assert.deepEqual(sentPages, [{ source_url: site, text: sourceText }]);
+    assert.deepEqual(operation.web_usage, { web_extract_calls: 2, web_extract_credits: 2 });
+    assert.equal(f.records[0].fields.邮箱, 'public@acme.example.org');
+  } finally {
+    svc.close();
+  }
+});
+
+test('补采超出正文预算的引文不能用于企业准入', async () => {
+  const omittedQuote = 'Acme Screens is a separately registered business entity.';
+  const f = fixture({ modelOverrides: { entity_type: policyFact('business', omittedQuote) } });
+  const svc = f.make({
+    readPage: async () => ({ html: '<p>Loading...</p>' }),
+    fetchImpl: async (url, options) => {
+      if (url === 'https://api.tavily.com/extract')
+        return json({
+          results: [
+            {
+              url: site,
+              raw_content: sourceText + 'x'.repeat(12000) + omittedQuote + 'y'.repeat(12000),
+            },
+          ],
+        });
+      return f.fetchImpl(url, options);
+    },
+  });
+  try {
+    const out = await svc.research(input, {
+      source_url: site,
+      operation_id: 'extract-quote-budget',
+    });
+    const sent = JSON.parse(
+      f.calls.find((c) => c.url.includes('deepseek')).body.input[1].content,
+    ).pages;
+    assert.ok(!sent[0].text.includes(omittedQuote));
+    assert.equal(out.research.eligibility.code, 'entity_unknown');
+    assert.equal(out.新增, 0);
+    assert.equal(f.records.length, 0);
+  } finally {
+    svc.close();
+  }
+});
+
 test('缺少直连凭证时禁止运行，但允许查看历史；不会退回 n8n', async () => {
   let calls = 0;
   const app = createApp({
@@ -957,6 +1069,37 @@ test('已返回记录编号后读回短暂中断，由受控重试完成且不�
   } finally {
     svc.close();
     rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test('重启核对仅把未写入的抓取中断标为可重试', async () => {
+  const f = fixture(),
+    svc = f.make();
+  try {
+    const { operation: beforeWrite } = svc.store.begin('interrupted-before-write', {
+      input,
+      item: { source_url: site, operation_id: 'interrupted-before-write' },
+    });
+    beforeWrite.stage = 'extract';
+    beforeWrite.source_url = site;
+    svc.store.save(beforeWrite);
+    const recovered = await svc.status(beforeWrite.id);
+    assert.equal(recovered.settled, true);
+    assert.equal(recovered.output.outcome, 'failed');
+    assert.equal(recovered.output.retryable_before_write, true);
+    assert.equal((await svc.status(beforeWrite.id)).output.retryable_before_write, true);
+    const { operation: writeIntent } = svc.store.begin('interrupted-write-intent', {
+      input,
+      item: { source_url: site, operation_id: 'interrupted-write-intent' },
+    });
+    writeIntent.stage = 'persist';
+    writeIntent.action = 'update';
+    writeIntent.source_url = site;
+    svc.store.save(writeIntent);
+    const pending = await svc.status(writeIntent.id);
+    assert.equal(pending.settled, false);
+  } finally {
+    svc.close();
   }
 });
 
