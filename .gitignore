@@ -7,6 +7,7 @@ dist/
 artifacts/
 *.log
 .data/
+.codex-tmp/
 # 本地业务校准、贸易样本和登录图片，不随项目代码发布。
 auth-qrcode.png
 docs/acquisition-calibration-20261021.md

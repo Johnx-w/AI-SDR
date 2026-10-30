@@ -72,7 +72,10 @@ test('成品介绍同时提到用料或独立配件目录时仍可匹配成品',
     'We supply roller shades and components for blinds and curtains.',
   ]) {
     assert.equal(productsRelevant([product], { product: 'roller shades' }), 'matched', product);
-    assert.equal(businessProductRelation([product], { product: 'roller shades' }).kind, 'catalog_related');
+    assert.equal(
+      businessProductRelation([product], { product: 'roller shades' }).kind,
+      'catalog_related',
+    );
   }
 });
 

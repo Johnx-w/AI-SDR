@@ -3,3 +3,5 @@ dist
 artifacts
 .env
 package-lock.json
+docs/archive/
+tests/fixtures/
