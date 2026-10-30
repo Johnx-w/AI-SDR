@@ -958,6 +958,9 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
             wordCount < 50 ||
             wordCount > 90 ||
             paragraphs.length !== 3 ||
+            /\b(?:terms(?: and conditions)?|privacy|cookie|legal)\s+(?:page|policy|notice)\b|\bterms and conditions\b/iu.test(
+              paragraphs[0],
+            ) ||
             paragraphs[0].toLowerCase().includes(mailbox.brandName.toLowerCase()) ||
             !paragraphs[1].toLowerCase().includes(mailbox.brandName.toLowerCase()) ||
             !/\b(?:suppl(?:y|ier|iers)|manufactur\w*)\b/iu.test(paragraphs[1]) ||
@@ -972,7 +975,7 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
                 { role: 'assistant', content: JSON.stringify(draft) },
                 {
                   role: 'user',
-                  content: `Revise the draft's writing format only, using the same supplied facts and focus_product. It currently has ${wordCount} words and ${paragraphs.length} paragraphs. Return 60–75 English words in exactly three paragraphs separated by two newlines: paragraph 1 is one sourced observation about the customer's matching product; paragraph 2 names the sender brand, states its approved product supply and explains the contact purpose; paragraph 3 is one easy question about a brief overview or introduction, optionally for the sourcing colleague if this is a general inbox. Add no filler, invented customer facts or counts inferred from a bare number in a source excerpt. No greeting, signature, generic well-wishes or internal phrases such as confirmed range/types. Keep customer source IDs valid and supplier claims grounded. Return the same JSON fields.`,
+                  content: `Revise the draft's writing format only, using the same supplied facts and focus_product. It currently has ${wordCount} words and ${paragraphs.length} paragraphs. Return 60–75 English words in exactly three paragraphs separated by two newlines: paragraph 1 describes the customer's matching product as an offer or activity, without naming a terms, privacy or legal page; paragraph 2 names the sender brand, states its approved product supply and explains the contact purpose plainly; paragraph 3 is one easy question about a brief overview or introduction, optionally for the sourcing colleague if this is a general inbox. Add no filler, invented customer facts or counts inferred from a bare number in a source excerpt. No greeting, signature, generic well-wishes or internal phrases such as confirmed range/types. Keep customer source IDs valid and supplier claims grounded. Return the same JSON fields.`,
                 },
               );
               continue;

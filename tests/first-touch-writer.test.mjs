@@ -115,6 +115,35 @@ test('三个品牌在已确认的产品范围内使用制造商事实，记录�
   }
 });
 
+test('首封不把条款页出处写成机械的客户观察', async () => {
+  const { input, draft } = fixture(policy.brands[1]);
+  input.candidate.evidence[0].quote = 'PLANTATION SHUTTERS';
+  input.candidate.evidence[0].sourceUrl = 'https://buyer.example/terms-and-conditions/';
+  let calls = 0;
+  const generator = createOutreachGenerator({
+    env,
+    fetchImpl: async () => {
+      calls++;
+      const body_text =
+        calls === 1
+          ? [
+              'Your terms and conditions page lists plantation shutters among the products Example Dealer offers.',
+              'Shuangsheng Shutter manufactures and supplies plantation shutters from China, and we are reaching out to introduce our range as a possible supply option for your business.',
+              'Would a brief overview of our plantation shutter range be useful to you or the person handling sourcing?',
+            ].join('\n\n')
+          : draft.body_text;
+      return Response.json({
+        choices: [
+          { finish_reason: 'stop', message: { content: JSON.stringify({ ...draft, body_text }) } },
+        ],
+      });
+    },
+  });
+  const result = await generator.generate(input);
+  assert.equal(calls, 2);
+  assert.doesNotMatch(result.bodyText, /terms and conditions page/i);
+});
+
 test('室内大类只提供业务已确认的细分产品，计划产品范围撤回后不调用模型', async () => {
   const { input, draft } = fixture();
   input.candidate.evidence[0].value = 'Cellular Shades';
