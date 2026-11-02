@@ -110,20 +110,49 @@ test('旧 A/B/C 筛选遇到新优先级显式阻断，新筛选可继续生成�
   assert.equal(selectOutreachCandidates(input).eligible.length, 1);
 });
 
+test('已入库但匹配待核实的客户不进入自动首封', () => {
+  const input = fixture();
+  input.leads[0].grade = '待核实';
+  input.leads[0].assessment = { matchLevel: '待核实' };
+  const result = selectOutreachCandidates(input);
+  assert.equal(result.eligible.length, 0);
+  assert.equal(result.blocked[0].reasonCode, 'match_unverified');
+});
+
 test('邮箱容量分配先给高优先客户，常规开发保持入库顺序', () => {
   const input = fixture();
   const base = input.leads[0];
   input.leads = [
-    { ...base, id: 'regular', website: 'https://regular.example.org', grade: '常规开发', email: 'info@regular.example.org' },
-    { ...base, id: 'high', website: 'https://high.example.org', grade: '高优先', email: 'info@high.example.org' },
+    {
+      ...base,
+      id: 'regular',
+      website: 'https://regular.example.org',
+      grade: '常规开发',
+      email: 'info@regular.example.org',
+    },
+    {
+      ...base,
+      id: 'high',
+      website: 'https://high.example.org',
+      grade: '高优先',
+      email: 'info@high.example.org',
+    },
   ].map((lead) => ({
     ...lead,
     facts: lead.facts.map((fact) => ({ ...fact, source_url: lead.website + '/shutters' })),
-    contactEvidence: lead.contactEvidence.map((fact) => ({ ...fact, value: lead.email, source_url: lead.website + '/contact', quote: `Contact ${lead.email} for business enquiries.` })),
+    contactEvidence: lead.contactEvidence.map((fact) => ({
+      ...fact,
+      value: lead.email,
+      source_url: lead.website + '/contact',
+      quote: `Contact ${lead.email} for business enquiries.`,
+    })),
   }));
   input.mailboxes[0].dailyLimit = 1;
   const result = selectOutreachCandidates(input);
-  assert.deepEqual(result.eligible.map((lead) => lead.customerId), ['high']);
+  assert.deepEqual(
+    result.eligible.map((lead) => lead.customerId),
+    ['high'],
+  );
 });
 
 test('没有事实出处时，搜索标签和主营产品摘要不能单独触发发信', () => {
