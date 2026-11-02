@@ -314,6 +314,8 @@ test('invalid batches roll back all messages and cursor; one failing account doe
   assert.equal(h.inbox.list({ mailboxId: 'one' }).items.length, 0);
   assert.equal(result.mailboxes[0].lastSyncAt, null);
   assert.ok(result.mailboxes[0].error);
+  assert.equal(result.mailboxes[0].lastError.code, 'MAILBOX_SYNC_INVALID');
+  assert.equal(result.mailboxes[0].lastError.stage, 'validate');
   assert.equal(h.inbox.list({ mailboxId: 'two' }).items.length, 1);
 });
 
@@ -423,4 +425,35 @@ test('search includes earlier message bodies and full text beyond the list previ
   );
   await h.inbox.sync({ mailboxId: 'one' });
   assert.equal(h.inbox.list({ q: 'requested-specification' }).items.length, 1);
+});
+
+test('sync persists safe failure diagnostics, distinguishes local storage, and retains the last failure after recovery', async (t) => {
+  const h = harness(t);
+  h.respond(() => {
+    throw Object.assign(new Error('secret authorization token'), {
+      code: 'MAILBOX_CREDENTIAL_FAILED',
+    });
+  });
+  let result = await h.inbox.sync({ mailboxId: 'one' });
+  const failure = result.mailboxes[0].lastError;
+  assert.equal(failure.code, 'MAILBOX_CREDENTIAL_FAILED');
+  assert.equal(failure.occurredAt, at);
+  assert.match(result.mailboxes[0].error, /无法解密/);
+  assert.doesNotMatch(JSON.stringify(result), /secret authorization token/);
+  const stored = JSON.parse(h.service.db.prepare('SELECT data FROM mailbox_sync_state').get().data);
+  assert.deepEqual(stored.lastError, failure);
+  h.respond(batch([received('recovered')]));
+  result = await h.inbox.sync({ mailboxId: 'one' });
+  assert.equal(result.mailboxes[0].error, null);
+  assert.deepEqual(result.mailboxes[0].lastError, failure);
+  const putMessage = h.inbox.putMessage;
+  h.inbox.putMessage = () => {
+    throw Object.assign(new Error('private database path'), { code: 'ERR_SQLITE_ERROR' });
+  };
+  result = await h.inbox.sync({ mailboxId: 'one' });
+  assert.match(result.mailboxes[0].error, /本地保存/);
+  assert.equal(result.mailboxes[0].lastError.stage, 'save');
+  assert.equal(result.mailboxes[0].lastError.providerCode, 'ERR_SQLITE_ERROR');
+  assert.doesNotMatch(JSON.stringify(result), /private database path|授权码/);
+  h.inbox.putMessage = putMessage;
 });

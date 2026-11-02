@@ -718,3 +718,46 @@ test('CID image limits use decoded bytes and cap total inline data at two megaby
     false,
   );
 });
+
+test('reader retains safe failure codes and phases without provider text or credentials', async () => {
+  for (const [details, expected] of [
+    [
+      {
+        authenticationFailed: true,
+        serverResponseCode: 'AUTHENTICATIONFAILED',
+        responseStatus: 'NO',
+      },
+      'MAILBOX_READ_AUTH_FAILED',
+    ],
+    [{ code: 'ENOTFOUND' }, 'MAILBOX_READ_CONNECTION_FAILED'],
+    [{ code: 'ETIMEDOUT' }, 'MAILBOX_READ_TIMEOUT'],
+    [{ code: 'CERT_HAS_EXPIRED' }, 'MAILBOX_READ_TLS_FAILED'],
+    [
+      { code: password, responseStatus: password, serverResponseCode: password },
+      'MAILBOX_READ_FAILED',
+    ],
+  ]) {
+    const h = fixture({
+      connectError: Object.assign(new Error(`AUTH ${account} ${password}`), details),
+    });
+    await assert.rejects(h.reader.read({ since }), (error) => {
+      assert.equal(error.code, expected);
+      assert.equal(error.diagnostic.stage, 'connect');
+      assert.doesNotMatch(JSON.stringify(error), /synthetic-reader-secret|Sales@example.com/);
+      if (details.code === 'ENOTFOUND') assert.equal(error.diagnostic.providerCode, 'ENOTFOUND');
+      return true;
+    });
+  }
+  const h = fixture({
+    fetchError: Object.assign(new Error(password), {
+      responseStatus: 'NO',
+      serverResponseCode: 'UNAVAILABLE',
+    }),
+  });
+  await assert.rejects(h.reader.read({ since }), (error) => {
+    assert.equal(error.diagnostic.stage, 'read');
+    assert.equal(error.diagnostic.providerCode, 'UNAVAILABLE');
+    assert.equal(error.diagnostic.responseStatus, 'NO');
+    return true;
+  });
+});

@@ -125,6 +125,13 @@ test('mail sync failures remain visible per account and describe incomplete fold
         email: 'one@our.example',
         lastSyncAt: null,
         error: 'IMAP 暂时无法连接',
+        lastError: {
+          occurredAt: '2026-10-27T02:00:00Z',
+          stage: 'connect',
+          code: 'MAILBOX_READ_CONNECTION_FAILED',
+          providerCode: 'ENOTFOUND',
+          message: '无法连接 IMAP 服务',
+        },
         hasMore: false,
       },
       {
@@ -144,6 +151,27 @@ test('mail sync failures remain visible per account and describe incomplete fold
   assert.match(html, /已同步文件夹：INBOX、Sent/);
   assert.match(html, /还有邮件待同步/);
   assert.match(html, /最近成功同步 10\/27 09:00/);
+  assert.match(html, /最近失败诊断/);
+  assert.match(html, /连接与认证/);
+  assert.match(html, /MAILBOX_READ_CONNECTION_FAILED · ENOTFOUND/);
+  const recovered = render(MailSyncSummary, {
+    statuses: [
+      {
+        mailboxId: 'one',
+        email: 'one@our.example',
+        lastSyncAt: '2026-10-27T03:00:00Z',
+        error: null,
+        lastError: {
+          occurredAt: '2026-10-27T02:00:00Z',
+          stage: 'read',
+          code: 'MAILBOX_READ_TIMEOUT',
+          message: '邮件同步超时',
+        },
+      },
+    ],
+  });
+  assert.match(recovered, /最近失败诊断（已恢复）/);
+  assert.doesNotMatch(recovered, /role="alert"|个邮箱同步异常/);
 });
 
 test('mail conversation entry shows the requested account, local-cache scope and read-only empty loading layout', () => {
