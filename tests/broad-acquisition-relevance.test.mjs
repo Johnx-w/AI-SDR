@@ -340,7 +340,7 @@ test('官网经营目录可形成宽范围潜在机会，不能变成公开采�
     at: Date.parse('2026-10-22T00:00:00Z'),
     id: 'broad-test',
   });
-  assert.equal(assessment.grade, 'A');
+  assert.equal(assessment.grade, '高优先');
   assert.equal(assessment.direction, 'finished');
   assert.equal(assessment.product, 'window coverings');
   const instructions = companyResearchRequest(page, broad).messages[0].content;

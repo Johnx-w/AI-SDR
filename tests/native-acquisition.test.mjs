@@ -301,6 +301,11 @@ test('仅有T2也能完成自动评分和入库，评估只存后台最新值且
     assert.equal(current.assessments.length, 1);
     assert.equal(current.assessment.id, result.assessment.id);
     assert.equal(current.assessment.sync, undefined);
+    assert.equal(result.assessment.matchLevel, current.assessment.matchLevel);
+    assert.deepEqual(result.assessment.prioritySignals, current.assessment.prioritySignals);
+    const dossier = svc.decorateLeads({ leads: [mapFeishuRecord(f.records[0])] }).leads[0];
+    assert.equal(dossier.assessment.matchLevel, current.assessment.matchLevel);
+    assert.deepEqual(dossier.assessment.prioritySignals, current.assessment.prioritySignals);
     assert.equal(svc.assessmentInfo().assessmentStorage, 'latest_only');
     assert(
       f.calls

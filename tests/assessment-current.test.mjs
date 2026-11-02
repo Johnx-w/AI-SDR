@@ -65,6 +65,28 @@ test('主体不符、旧规则或复用评估编号篡改内容均被拒绝，�
   }
 });
 
+test('旧规则快照可只读显示，新评估替换时仍校验当前版本', () => {
+  const service = new AssessmentService({ env });
+  const legacy = {
+    ...snapshot('legacy', '2026-10-24T01:00:00Z'),
+    ruleVersion: 'acquisition-v2.1',
+    grade: 'B',
+    score: 65,
+  };
+  try {
+    service.store.saveCurrent(legacy, customer.record_id);
+    assert.equal(service.latest(customer.record_id).legacy, true);
+    assert.equal(service.summary('legacy').grade, 'B');
+    assert.throws(() => service.save(legacy, customer), /当前规则/);
+    const current = snapshot('current', '2026-10-25T01:00:00Z');
+    assert.equal(service.save(current, customer).legacy, false);
+    assert.equal(service.latest(customer.record_id).id, 'current');
+    assert.equal(service.summary('legacy'), null);
+  } finally {
+    service.close();
+  }
+});
+
 test('不同飞书表范围下同名客户相互隔离，不能占用其他范围的评估编号', () => {
   const directory = mkdtempSync(join(tmpdir(), 'current-assessment-scope-'));
   const path = join(directory, 'assessment.sqlite');

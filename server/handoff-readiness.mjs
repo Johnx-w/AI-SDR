@@ -2,7 +2,7 @@ import { domainKey } from './website-identity.mjs';
 import { extractContacts } from './contact-extractor.mjs';
 
 // This is a deterministic business gate over already verified research and
-// source contacts, not a second model score. Unknown V does not block handoff.
+// source contacts, not a second model score. Unknown D/V does not block handoff.
 export function calculateHandoffReadiness({
   research = {},
   assessment,
@@ -35,14 +35,20 @@ export function calculateHandoffReadiness({
     permitted &&
     opportunities.some((opportunity) => {
       const dimensions = opportunity.dimensions || {};
-      return (
+      const currentPriority =
+        ['高优先', '常规开发'].includes(opportunity.grade) &&
+        ['高优先', '常规开发'].includes(opportunity.status) &&
+        ['finished', 'materials', 'samples'].includes(opportunity.direction) &&
+        Boolean(opportunity.product);
+      const legacyPriority =
         ['A', 'B'].includes(opportunity.grade) &&
         ['优先开发', '可开发'].includes(opportunity.status) &&
         Number.isFinite(dimensions.P?.score) &&
         dimensions.P.score >= 30 &&
         Number.isFinite(dimensions.R?.score) &&
-        dimensions.R.score >= 25 &&
-        Number.isFinite(dimensions.D?.score) &&
+        dimensions.R.score >= 25;
+      return (
+        (currentPriority || legacyPriority) &&
         ![dimensions.P, dimensions.R, dimensions.D].some((dimension) => dimension?.conflict) &&
         !(opportunity.requirements || opportunity.facts || []).some((fact) =>
           ['identity_conflict', 'mandatory_requirement'].includes(fact.kind),
@@ -115,7 +121,7 @@ export function calculateHandoffReadiness({
   const contactVerified = verifiedContacts.length > 0;
   const reasons = [];
   if (!identityVerified) reasons.push('企业与官网主体尚未核实');
-  if (!qualified) reasons.push('尚无满足产品、采购角色、持续经营及必需条件的A/B供货机会');
+  if (!qualified) reasons.push('尚无符合匹配条件且无冲突的可开发供货机会');
   if (!contactVerified) reasons.push('尚无同官网来源的公司级联系入口');
   return {
     policy: 'sales-handoff-v1',

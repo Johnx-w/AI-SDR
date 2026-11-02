@@ -104,11 +104,28 @@ test('T2机会摘要分别保留供货方向，材料潜在关联不写成公开
   assert.match(summary.主要供货机会, /材料配件 · aluminum profiles（适配待核实/);
   assert.match(summary.主要供货机会, /roller blind fabrics.*采购需求未确认/);
   assert.doesNotMatch(summary.主要供货机会, /sample books/);
+  assert.equal(summary.待确认事项, '');
+  assert.deepEqual(Object.keys(summary), ['主要供货机会', '待确认事项']);
+});
+
+test('T2 待确认仅记录真实经营证据冲突，普通缺项和采购沟通不生成人工补档提示', () => {
+  const summary = assessmentSummaryFields({
+    opportunities: [
+      {
+        direction: 'finished',
+        product: 'roller blinds',
+        status: '待核实',
+        dimensions: { P: { conflict: true, missing: '同一产品的经营事实相互冲突，需核实' } },
+        requirements: [{ kind: 'identity_conflict' }, { kind: 'mandatory_requirement' }],
+      },
+    ],
+    missing: ['持续经营或当前供货流程资料不足'],
+    incompleteReason: '官网部分页面未取得',
+  });
   assert.equal(
     summary.待确认事项,
-    '经营年限待核实；研究限制：官网部分页面未取得；材料采购方式待沟通',
+    '同一产品的经营事实相互冲突，需核实；经营主体依据相互冲突；强制供货条件需核实',
   );
-  assert.deepEqual(Object.keys(summary), ['主要供货机会', '待确认事项']);
 });
 
 test('T2未知内容不补造机会，已完成研究可清除旧缺项摘要', () => {

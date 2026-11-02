@@ -244,20 +244,27 @@ export class OverviewService {
           (record) => record.customerId,
         ),
       );
+      const priorityGrades = ['高优先', 'A', 'B', '常规开发'];
       const ranked = customers
         .filter(
           (customer) =>
-            ['A', 'B'].includes(customer.grade) &&
+            priorityGrades.includes(customer.grade) &&
             ['待开发', '未开发', '未联系', '待联系', '新线索', '未记录', ''].includes(
               customer.status || '',
             ) &&
             !suppressed.has(customer.id) &&
             !contacted.has(customer.id),
         )
-        .sort((a, b) => a.grade.localeCompare(b.grade) || a.name.localeCompare(b.name));
+        .sort(
+          (a, b) =>
+            priorityGrades.indexOf(a.grade) - priorityGrades.indexOf(b.grade) ||
+            a.name.localeCompare(b.name),
+        );
       for (const customer of ranked)
         addPriority(customer.id, {
-          reason: `${customer.grade} 级待开发客户`,
+          reason: ['高优先', '常规开发'].includes(customer.grade)
+            ? `${customer.grade}待开发客户`
+            : `${customer.grade} 级待开发客户`,
           action: '查看档案与开发依据',
           to: link('/leads', { lead: customer.id }),
         });

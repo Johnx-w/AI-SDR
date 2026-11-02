@@ -29,6 +29,12 @@ test('真实客户不使用目标国家代替企业所在地，不伪造评分',
   assert.equal(lead.match, '');
   assert.equal(lead.facts[0].quote, 'We supply screens');
 });
+
+test('新旧开发优先级均从飞书单选字段原样读取', () => {
+  for (const grade of ['高优先', '常规开发', 'A', 'B', 'C']) {
+    assert.equal(mapFeishuRecord({ fields: { 用户评级: grade } }).grade, grade);
+  }
+});
 test('空白和未记录开发状态统一待开发，保留已有进度和原始字段', () => {
   for (const status of [undefined, null, '', '  ', [], '未记录', [{ text: '未记录' }]]) {
     const lead = mapFeishuRecord({ fields: { 开发状态: status } });

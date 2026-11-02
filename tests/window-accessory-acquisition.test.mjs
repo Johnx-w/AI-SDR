@@ -18,7 +18,7 @@ const target = {
   query_mode: 'auto',
 };
 
-test('历史配件目录恢复用途后正常入库、读回并保留待核实国家和初始 C 级', async () => {
+test('历史配件目录恢复用途后正常入库、读回并保留待核实国家和常规开发', async () => {
   const records = [];
   const calls = { model: 0, write: 0, readback: 0 };
   const store = new AcquisitionStore(':memory:', 'accessory-regression');
@@ -116,13 +116,13 @@ test('历史配件目录恢复用途后正常入库、读回并保留待核实�
     assert.equal(records[0].fields.需求产品, undefined);
     assert.ok(records[0].fields.相关产品.includes(product));
     assert.equal(mapFeishuRecord(records[0]).market, '待核实');
-    assert.equal(records[0].fields.用户评级, 'C');
+    assert.equal(records[0].fields.用户评级, '常规开发');
 
     const assessment = service.assessmentHistory('rec-accessory').assessment;
-    assert.equal(assessment.grade, 'C');
+    assert.equal(assessment.grade, '常规开发');
     assert.equal(assessment.direction, 'materials');
     assert.equal(assessment.product, product);
-    assert.equal(assessment.score, 55);
+    assert.equal(assessment.dimensions.R.score, null, '目录不能冒充经营角色');
     assert.equal(assessment.complete, false);
     assert.equal(assessment.opportunities.length, 1);
     assert.equal(assessment.dimensions.D.score, null);

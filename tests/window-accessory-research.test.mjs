@@ -51,7 +51,7 @@ test('历史目录响应从已核验公司引文恢复窗饰配件用途并贯�
   assert.deepEqual(research.demand_products, []);
   const assessment = assessCompany({ research, target: broad, id: 'accessory-regression' });
   assert.equal(assessment.direction, 'materials');
-  assert.equal(assessment.grade, 'C');
+  assert.equal(assessment.grade, '常规开发');
   assert.equal(assessment.opportunities.length, 1);
   assert.equal(researchFields(research, {})['需求产品'], undefined);
   assert.match(researchFields(research, {})['相关产品'], /parts and string for blinds and shades/);

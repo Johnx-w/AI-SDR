@@ -517,7 +517,10 @@ export class BatchJobs {
         if (key && !(key === 'inserted' && acceptedRow.inserted_new === false)) metric[key]++;
         if (acceptedRow.result === 'inserted') {
           const grade = acceptedRow.assessment?.grade;
-          metric.ratings[['A', 'B', 'C'].includes(grade) ? grade : 'unrated']++;
+          const bucket = ['高优先', '常规开发', 'A', 'B', 'C'].includes(grade)
+            ? grade
+            : 'unrated';
+          metric.ratings[bucket] = (metric.ratings[bucket] || 0) + 1;
         }
       }
       const latest = this.get(job.id);
