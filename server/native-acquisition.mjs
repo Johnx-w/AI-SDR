@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { acquisitionConfig } from './acquisition-config.mjs';
 import { createResearchProviders } from './research-providers.mjs';
 import { researchCacheKey } from './research-reuse.mjs';
+import { exclusionConditionsKey } from './exclusion-conditions.mjs';
 import { boundedResearchPages } from './research-input.mjs';
 import { compactResearchText } from './research-text.mjs';
 import { AcquisitionStore } from './acquisition-store.mjs';
@@ -121,7 +122,7 @@ export function selectWebsiteCandidates(results, knownDomains = [], limit = 20) 
     }
     const url = source.url;
     const domain = domainKey(url.href);
-    if (known.has(domain)) {
+    if (known.has(domain) && !result.target_record_id) {
       skipped.push({ domain, url: url.href });
       continue;
     }
@@ -132,6 +133,7 @@ export function selectWebsiteCandidates(results, knownDomains = [], limit = 20) 
       source_title: result.title || '',
       source_kind: 'website',
       domain,
+      ...(result.target_record_id ? { target_record_id: result.target_record_id } : {}),
     });
     if (candidates.length >= limit) break;
   }
@@ -433,6 +435,8 @@ export class NativeAcquisition {
   }
   async discover(input, search, seen = []) {
     input = { ...input, ...validateTarget(input) };
+    const conditionsKey = exclusionConditionsKey(input);
+    this.store.backfillExclusions();
     if (search?.country && !input.market_countries.includes(search.country))
       throw Object.assign(new Error('搜索国家不在当前支持的市场范围内'), { status: 400 });
     this.ensureConfigured();
@@ -448,8 +452,29 @@ export class NativeAcquisition {
       auto_parameters: false,
       exclude_domains: excluded.slice(-150),
     });
+    const target = records.find((record) => record.record_id === search?.target_record_id);
+    const targetDomain = domainKey(customerWebsite(target));
+    const selected = selectWebsiteCandidates(
+      data.results.map((result) => ({
+        ...result,
+        target_record_id:
+          targetDomain && domainKey(result.url) === targetDomain ? target.record_id : undefined,
+      })),
+      excluded,
+    );
+    selected.candidates = selected.candidates.filter((candidate) => {
+      if (candidate.target_record_id) return true;
+      const prior = this.store.exclusion(conditionsKey, candidate.source_url);
+      if (!prior) return true;
+      selected.filtered_sources.push({
+        url: candidate.source_url,
+        reason: `历史排除：${prior.reason}`,
+        operation_id: prior.operation_id,
+      });
+      return false;
+    });
     return {
-      ...selectWebsiteCandidates(data.results, excluded),
+      ...selected,
       stage: 'select',
       source: this.providers.web.provider,
       usage: data.usage,
@@ -615,23 +640,56 @@ export class NativeAcquisition {
     };
   }
   rejectNewCandidate(operation, reason) {
+    const research = operation.research || {};
     const minimal = {
       id: operation.id,
       scope: operation.scope,
       stage: operation.stage,
       createdAt: operation.createdAt,
+      input: {
+        input: validateTarget(operation.input.input),
+        item: { source_url: operation.input.item.source_url },
+      },
+      checked_urls: operation.checked_urls,
+      incomplete_urls: operation.incomplete_urls,
+      collection_complete: operation.collection_complete,
+      research_complete: operation.research_complete,
+      research: Object.fromEntries(
+        [
+          'stage',
+          'source_url',
+          'entity_type',
+          'product_match',
+          'country_match',
+          'audience_match',
+          'customer_type_match',
+          'profile_match',
+          'required_match',
+          'review_required',
+          'incomplete_reason',
+        ]
+          .filter((key) => research[key] !== undefined)
+          .map((key) => [key, research[key]]),
+      ),
       research_usage: operation.research_usage,
       web_usage: operation.web_usage,
     };
+    if (research.relevance) minimal.research.relevance = { relevant: research.relevance.relevant };
+    if (research.eligibility)
+      minimal.research.eligibility = { status: research.eligibility.status };
     const output = this.output(minimal, {
-      research: { ok: false, reason },
+      research: { ...minimal.research, ok: false, reason },
       outcome: 'rejected',
       reason,
     });
-    this.store.complete(minimal, output);
-    return output;
+    return this.store.completeResearch(
+      minimal,
+      output,
+      exclusionConditionsKey(operation.input.input),
+      operation.input.item.source_url,
+    );
   }
-  async research(input, item) {
+  async research(input, item, { bypassExclusion = false } = {}) {
     // Also validate restored tasks and callers that bypass HTTP validation.
     input = { ...input, ...validateTarget(input) };
     this.ensureConfigured();
@@ -684,6 +742,29 @@ export class NativeAcquisition {
         this.store.complete(op, output);
         return output;
       }
+      if (!item.target_record_id && !bypassExclusion) {
+        const prior = this.store.exclusion(exclusionConditionsKey(input), item.source_url);
+        if (prior) {
+          const reason = `命中历史排除记录（原操作 ${prior.operation_id}）：${prior.reason}`;
+          const output = this.output(op, {
+            outcome: 'rejected',
+            reason,
+            research: {
+              ok: false,
+              stage: 'done',
+              source_url: item.source_url,
+              review_required: false,
+              historical_exclusion: {
+                operation_id: prior.operation_id,
+                excluded_at: prior.excluded_at,
+                summary: JSON.parse(prior.summary),
+              },
+            },
+          });
+          this.store.complete(op, output);
+          return output;
+        }
+      }
       op.stage = 'extract';
       this.store.save(op);
       const page = await this.collect(item.source_url);
@@ -696,6 +777,7 @@ export class NativeAcquisition {
       op.stage = 'research';
       op.checked_urls = page.checked_urls;
       op.research_pages = page.research_pages;
+      op.collection_complete = page.research_pages.length > 0;
       op.evidence = page.website_metadata;
       this.store.save(op);
       if (
@@ -753,8 +835,12 @@ export class NativeAcquisition {
         if (!research.review_required && research.product_match === 'not_matched')
           return this.rejectNewCandidate(op, research.reason);
         const output = this.output(op, { research, reason: research.reason, outcome: 'review' });
-        this.store.complete(op, output);
-        return output;
+        return this.store.completeResearch(
+          op,
+          output,
+          exclusionConditionsKey(input),
+          item.source_url,
+        );
       }
       op.research_usage.input_chars =
         page.input_stats?.inputChars ??
@@ -825,6 +911,7 @@ export class NativeAcquisition {
         research.reason = '官网部分页面未取得有效正文，采集未完成，待补充核实';
       }
       op.research = research;
+      op.research_complete = true;
       op.evidence = page.website_metadata;
       op.research_pages = page.research_pages;
       op.usage = op.research_usage.cache_hits ? undefined : response.usage;
@@ -897,8 +984,12 @@ export class NativeAcquisition {
           outcome: 'review',
           reason: research.reason || '官网主体或窗饰产品关联尚未核实',
         });
-        this.store.complete(op, output);
-        return output;
+        return this.store.completeResearch(
+          op,
+          output,
+          exclusionConditionsKey(input),
+          item.source_url,
+        );
       }
       if (
         item.target_record_id &&
@@ -927,8 +1018,12 @@ export class NativeAcquisition {
           reason: '写入前身份核对失败',
           row: { result: 'manual_review', source_url: item.source_url },
         });
-        this.store.complete(op, output);
-        return output;
+        return this.store.completeResearch(
+          op,
+          output,
+          exclusionConditionsKey(input),
+          item.source_url,
+        );
       }
       if (matching.length && !item.target_record_id) {
         const output = this.output(op, {
@@ -937,8 +1032,12 @@ export class NativeAcquisition {
           skipped: [{ domain, url: item.source_url }],
           reason: '研究期间已被其他任务收录',
         });
-        this.store.complete(op, output);
-        return output;
+        return this.store.completeResearch(
+          op,
+          output,
+          exclusionConditionsKey(input),
+          item.source_url,
+        );
       }
       const old = matching[0];
       let raw = {
@@ -1210,8 +1309,12 @@ export class NativeAcquisition {
             ? '飞书新增并读回核验成功'
             : '飞书更新并读回核验成功',
     });
-    this.store.complete(op, output);
-    return output;
+    return this.store.completeResearch(
+      op,
+      output,
+      exclusionConditionsKey(op.input.input),
+      op.input.item.source_url,
+    );
   }
   async status(id) {
     const op = this.store.get(id);

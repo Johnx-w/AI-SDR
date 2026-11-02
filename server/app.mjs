@@ -728,12 +728,16 @@ export function createApp({
             }
             running++;
             try {
-              const output = await provider.research(job.input, {
-                ...row,
-                source_url: source.url,
-                source_title: '',
-                operation_id: attempt.operation_id,
-              });
+              const output = await provider.research(
+                job.input,
+                {
+                  ...row,
+                  source_url: source.url,
+                  source_title: '',
+                  operation_id: attempt.operation_id,
+                },
+                { bypassExclusion: true },
+              );
               const resolution = reviews().settle(job.id, index, output);
               if (['inserted', 'updated'].includes(resolution.status)) library().invalidate();
               return json(response, 200, { resolution });

@@ -83,8 +83,9 @@ test('待核实企业改正官网后走研究写入、刷新后保留结果且�
   ]);
   const nativeImpl = {
     store: { get: (id) => evidence.get(id) },
-    async research(_target, item) {
+    async research(_target, item, options) {
       researchCalls++;
+      assert.deepEqual(options, { bypassExclusion: true });
       assert.equal(item.operation_id.startsWith('review-'), true);
       assert.equal(item.source_title, '');
       evidence.set(item.operation_id, {
