@@ -152,7 +152,9 @@ function parseLegacyFacts(assessment, text) {
       current.source_url = field[2];
       part = 'source_url';
     } else if (
-      /^(?:待补充|本轮|研究限制|规则版本|评估时间|评级口径|用户评级|已支持分数|其他方向)/.test(line)
+      /^(?:待补充|本轮|研究限制|规则版本|评估时间|评级口径|用户评级|已支持分数|匹配等级|开发优先级|优先线索|需要核实的冲突|其他方向)/.test(
+        line,
+      )
     ) {
       flush();
     } else if (current && part === 'quote') {
@@ -170,10 +172,10 @@ function parseLegacyFacts(assessment, text) {
   return normalizeFacts(facts);
 }
 
-function conclusion(key, dimension, facts) {
+function conclusion(key, dimension, facts, current) {
   const name = definitions[key].name;
   if (dimension.conflict) return '该维度事实存在冲突，需核实';
-  if (dimension.score === null || dimension.score === undefined) return name + '依据待补充';
+  if (dimension.score === null || dimension.score === undefined) return name + '尚无公开依据';
   const has = (...kinds) => facts.some((fact) => kinds.includes(fact.kind));
   if (key === 'P') {
     if (has('unrelated_product')) return '现有证据显示产品不匹配';
@@ -206,11 +208,12 @@ function conclusion(key, dimension, facts) {
     if (motor) return '存在电动或自动化系统特征';
     if (commercial) return '存在工程配套特征';
   }
-  return '已记录' + name + '评分';
+  return '已记录' + name + (current ? '依据' : '评分');
 }
 
 export function buildAssessmentDimensions(assessment, ratingReason = '') {
   if (!assessment?.dimensions || typeof assessment.dimensions !== 'object') return [];
+  const current = ['acquisition-v4.0', 'acquisition-v5.0'].includes(assessment.ruleVersion);
   const legacy = parseLegacyFacts(assessment, assessment.evidenceReason || ratingReason);
   return Object.entries(definitions).flatMap(([key, definition]) => {
     const dimension = assessment.dimensions[key];
@@ -218,7 +221,10 @@ export function buildAssessmentDimensions(assessment, ratingReason = '') {
     const facts = Object.hasOwn(dimension, 'facts')
       ? normalizeFacts(dimension.facts)
       : legacy.filter((fact) => definition.kinds.includes(fact.kind));
-    const missing = typeof dimension.missing === 'string' ? dimension.missing : '';
+    const missing =
+      (current && !dimension.conflict) || typeof dimension.missing !== 'string'
+        ? ''
+        : dimension.missing;
     const basis = [
       ...new Set(
         facts
@@ -226,14 +232,14 @@ export function buildAssessmentDimensions(assessment, ratingReason = '') {
           .map((fact) => `${labels[fact.kind] || '业务事实'}：${fact.value}`),
       ),
     ];
-    if (missing) basis.push('待补充：' + missing);
+    if (missing && dimension.conflict) basis.push('需核实：' + missing);
     return [
       {
         key,
         name: definition.name,
         score: dimension.score ?? null,
         maximum: dimension.maximum,
-        conclusion: conclusion(key, dimension, facts),
+        conclusion: conclusion(key, dimension, facts, current),
         basis,
         facts,
         missing,

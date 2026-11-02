@@ -57,9 +57,11 @@ function renderLibrary(tab = '客户画像', customers = [lead], options = {}) {
                 ? options.detailError
                 : index === 8 && options.market !== undefined
                   ? options.market
-                  : initial === '客户画像'
-                    ? tab
-                    : initial,
+                  : index === 9 && options.grade !== undefined
+                    ? options.grade
+                    : initial === '客户画像'
+                      ? tab
+                      : initial,
               () => {},
             ];
           },
@@ -84,7 +86,7 @@ function renderLibrary(tab = '客户画像', customers = [lead], options = {}) {
   return renderToStaticMarkup(React.createElement(load(entry).LeadLibrary));
 }
 
-test('客户库筛选展示中文市场、固定评级顺序和完整开发状态，保留历史值', () => {
+test('客户库筛选展示中文市场和 A/B/C 评级，保留完整开发状态', () => {
   const html = renderLibrary('客户画像', [
     { ...lead, market: 'Canada', grade: 'C', status: '待开发' },
     { ...lead, id: 'other', grade: 'A', status: '人工跟进中' },
@@ -95,8 +97,9 @@ test('客户库筛选展示中文市场、固定评级顺序和完整开发状�
   assert.equal((marketOptions.match(/<option value="待核实">待核实<\/option>/g) || []).length, 1);
   assert.match(
     html,
-    /<option value="A">A<\/option><option value="B">B<\/option><option value="C">C<\/option><option value="待核实">待核实<\/option>/,
+    /<option value="A">A<\/option><option value="B">B<\/option><option value="C">C<\/option>/,
   );
+  assert.doesNotMatch(html, /C（旧版）|独立待核实评级/);
   for (const status of [
     '待开发',
     '已联系',
@@ -162,7 +165,7 @@ test('客户列表为空时全部市场下仍提供待核实选项', () => {
   );
 });
 
-test('客户库在分页前按首次录入时间倒序，研究更新不置顶，时间相同及未知时保持原顺序', () => {
+test('同优先级客户在分页前按首次录入时间倒序，研究更新不置顶', () => {
   const customers = [
     { ...lead, id: 'unknown-1', name: 'Unknown First', createdAt: null, updatedAt: 9999999999999 },
     ...Array.from({ length: 8 }, (_, index) => ({
@@ -190,7 +193,29 @@ test('客户库在分页前按首次录入时间倒序，研究更新不置顶�
   });
   assert.ok(smallTable.indexOf('Newest Customer') < smallTable.indexOf('Unknown First'));
   assert.ok(smallTable.indexOf('Unknown First') < smallTable.indexOf('Unknown Second'));
-  assert.match(html, /最新录入优先/);
+  assert.match(html, /A 级先显示/);
+});
+
+test('A/B/C 在分页前按等级排序，历史分数不冒充当前评级', () => {
+  const customers = [
+    { ...lead, id: 'low', name: 'Low Lead', grade: 'C', score: 70, createdAt: 3000 },
+    { ...lead, id: 'regular', name: 'Regular Lead', grade: 'B', score: 70, createdAt: 2000 },
+    { ...lead, id: 'high', name: 'High Lead', grade: 'A', score: 70, createdAt: 1000 },
+  ];
+  const original = customers.map((item) => item.id);
+  const html = renderLibrary('客户画像', customers, { pending: true });
+  const table = html.match(/<table\b[^>]*>([\s\S]*?)<\/table>/)?.[1];
+  assert.ok(table);
+  assert.ok(table.indexOf('High Lead') < table.indexOf('Regular Lead'));
+  assert.ok(table.indexOf('Regular Lead') < table.indexOf('Low Lead'));
+  assert.doesNotMatch(table, /旧版|旧规则70分/);
+  assert.deepEqual(
+    customers.map((item) => item.id),
+    original,
+  );
+  const highOnly = renderLibrary('客户画像', customers, { pending: true, grade: 'A' });
+  assert.match(highOnly, /High Lead/);
+  assert.doesNotMatch(highOnly, /Regular Lead|Low Lead/);
 });
 
 test('后台同步保留精简列表，档案尚未加载时显示独立加载状态', () => {

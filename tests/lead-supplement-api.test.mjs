@@ -35,7 +35,7 @@ function fixture({ gradeOnly = false, potentialInput = false } = {}) {
       企业官网: { link: website, text: website },
       来源链接: website,
       企业经营产品: 'roller blinds',
-      初评结果: 'C',
+      初评结果: 'B',
       开发状态: '待开发',
       邮箱: 'buyer@buyer.example.org',
     },
@@ -209,7 +209,7 @@ function fixture({ gradeOnly = false, potentialInput = false } = {}) {
   return f;
 }
 
-test('补齐R和V按规则55→85→95，缺项逐项清除，人工证据与官网证据分开且重启保留', async () => {
+test('人工核实角色可提升优先级，V 未知不形成补档任务，证据重启后保留', async () => {
   const f = fixture();
   try {
     assert.equal(f.lead().score, 55);
@@ -218,7 +218,7 @@ test('补齐R和V按规则55→85→95，缺项逐项清除，人工证据与官
     assert.equal(r.lead.grade, 'A');
     assert.equal(r.lead.assessment.dimensions.R.score, 30);
     assert.equal(r.lead.assessment.dimensions.V.score, null);
-    assert.deepEqual(r.lead.assessment.missing, ['定制/电动或工程配套特征尚未取得依据']);
+    assert.deepEqual(r.lead.assessment.missing, []);
     assert.ok(!r.lead.pendingQuestions.includes('该品类经营角色尚未取得充分依据'));
     assert.equal(r.lead.confirmations[0].content, '已确认专业制造和供应卷帘');
     assert.equal(r.lead.confirmations[0].product, 'roller blinds');
@@ -253,7 +253,7 @@ test('补齐R和V按规则55→85→95，缺项逐项清除，人工证据与官
     assert.deepEqual(refreshed.confirmations, beforeRestart.confirmations);
     assert.deepEqual(refreshed.assessment.dimensions, beforeRestart.assessment.dimensions);
     assert.equal(refreshed.status, beforeRestart.status);
-    assert.equal(f.writes(), 2);
+    assert.equal(f.writes(), 1, 'V 事实留在本地快照，优先级未变无需再写飞书');
   } finally {
     f.dispose();
   }
@@ -351,7 +351,7 @@ test('远端提交后响应丢失通过读回确认；未提交时不激活事�
         await assert.rejects(() => f.save(input), { status: 502 });
         assert.equal(f.lead().score, 55);
         assert.deepEqual(f.lead().confirmations, []);
-        assert.equal(f.record().fields.初评结果, 'C');
+        assert.equal(f.record().fields.初评结果, 'B');
         f.restart();
         assert.equal(f.lead().score, 55);
         f.mode('normal');
@@ -403,7 +403,7 @@ test('待核对保存遇到远端字段变化或新评估时停止覆盖，保�
       const pending = f.engine.supplements.pending(customerId);
       assert.equal(pending.state, 'prepared');
       assert.equal(pending.confirmation.confirmedBy, '张工');
-      if (conflict === 'remote-fields') f.changeFields({ 初评结果: 'B' });
+      if (conflict === 'remote-fields') f.changeFields({ 初评结果: 'C' });
       else
         f.engine.assessments.save(
           {
@@ -500,11 +500,11 @@ test('法人和实际采购确认更新档案，采购依据必须来自同客�
   }
 });
 
-test('人工采购确认只清除对应材料产品的采购缺项，普通备注不能代替评分或主体/需求确认', async () => {
+test('人工采购确认仅更新对应材料机会，普通备注不能代替主体或需求确认', async () => {
   const f = fixture({ potentialInput: true });
   try {
     const note = f.engine.assessments.latest(customerId).supplyOpportunity.note;
-    const scoringMissing = f.lead().assessment.missing.filter((item) => item !== note);
+    const scoringMissing = f.lead().assessment.missing;
     const { dimension, facts, ...profile } = f.input();
     for (const [index, pendingItem] of [
       ...scoringMissing,
@@ -530,8 +530,8 @@ test('人工采购确认只清除对应材料产品的采购缺项，普通备�
       content: '已确认卷帘采购',
     };
     const wrongScope = await f.save(purchase, 'finished-purchase-key');
-    assert.ok(wrongScope.lead.assessment.missing.includes(note));
-    assert.ok(wrongScope.lead.pendingQuestions.includes(note));
+    assert.equal(wrongScope.lead.assessment.supplyOpportunity.procurementStatus, 'unconfirmed');
+    assert.ok(!wrongScope.lead.pendingQuestions.includes(note));
     const rightScope = await f.save(
       {
         ...purchase,

@@ -55,6 +55,13 @@ const safeUrl = (s: string) => {
     return undefined;
   }
 };
+const priorityOrder = (
+  a: { grade: string; createdAt?: number | null },
+  b: { grade: string; createdAt?: number | null },
+) => {
+  const rank = (grade: string) => ({ A: 0, B: 1, C: 2 })[grade] ?? 3;
+  return rank(a.grade) - rank(b.grade) || (b.createdAt ?? 0) - (a.createdAt ?? 0);
+};
 export function LeadLibrary() {
   const { notify } = useWorkspace();
   const [params, setParams] = useSearchParams();
@@ -151,7 +158,7 @@ export function LeadLibrary() {
         (!product || leadProductCategories(l.product).includes(product)) &&
         (!status || l.status === status),
     )
-    .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+    .sort(priorityOrder);
   const pages = Math.max(1, Math.ceil(filtered.length / 8));
   const current = Math.min(page, pages);
   const rows = filtered.slice((current - 1) * 8, current * 8);
@@ -172,7 +179,7 @@ export function LeadLibrary() {
     const selectedIds = new Set(filtered.map((lead) => lead.id));
     try {
       const full = await leadLibrary.exportDetails();
-      const exported = full.filter((lead) => selectedIds.has(lead.id));
+      const exported = full.filter((lead) => selectedIds.has(lead.id)).sort(priorityOrder);
       if (exported.length !== selectedIds.size)
         throw new Error('客户列表已发生变化，请刷新后重新导出');
       exportCsv(
@@ -183,8 +190,7 @@ export function LeadLibrary() {
           市场: marketLabel(l.market),
           类型: typeNames[l.type] || l.type,
           产品: l.product,
-          评分: l.score ?? '未评分',
-          初评结果: l.grade,
+          客户评级: l.grade,
           评级依据: l.ratingReason || '',
           开发状态: l.status,
           广告代码: l.advertisingCodes || '',
@@ -282,15 +288,10 @@ export function LeadLibrary() {
       <div className="library-stats">
         {[
           { name: '全部客户', value: leads.length },
-          {
-            name: 'A 级客户',
-            value: leads.filter((l) => l.grade === 'A').length,
-          },
-          {
-            name: '待补资料',
-            value: leads.filter((l) => ['未评级', '待核实', '待补全'].includes(l.grade)).length,
-          },
-          { name: '已记录邮箱', value: leads.filter((l) => l.email).length },
+          ...['A', 'B', 'C'].map((grade) => ({
+            name: `${grade} 级`,
+            value: leads.filter((lead) => lead.grade === grade).length,
+          })),
         ].map((x) => (
           <div key={x.name}>
             <span>{x.name}</span>
@@ -330,7 +331,7 @@ export function LeadLibrary() {
               label: '评级',
               val: grade,
               set: setGrade,
-              options: [...new Set(['A', 'B', 'C', '待核实', ...leads.map((l) => l.grade)])],
+              options: [...new Set(['A', 'B', 'C', ...leads.map((l) => l.grade)])].filter(Boolean),
             },
             {
               label: '产品',
@@ -381,7 +382,7 @@ export function LeadLibrary() {
           >
             清空筛选
           </button>
-          <span>共 {filtered.length} 条线索 · 最新录入优先</span>
+          <span>共 {filtered.length} 条线索 · A 级先显示</span>
         </div>
         {!remote && !error ? (
           <div className="library-loading">
@@ -404,7 +405,7 @@ export function LeadLibrary() {
                 <tr>
                   <th>公司名称／来源</th>
                   <th>市场与客户类型</th>
-                  <th>初评结果</th>
+                  <th>客户评级</th>
                   <th>联系准备</th>
                   <th>开发状态</th>
                   <th />
@@ -451,22 +452,13 @@ export function LeadLibrary() {
                     <td>
                       <div className="reference-score">
                         <span className={'grade-box grade-' + l.grade}>
-                          {l.score === null || !['A', 'B', 'C'].includes(l.grade) ? '—' : l.grade}
+                          {['A', 'B', 'C'].includes(l.grade) ? l.grade : '—'}
                         </span>
                         <div>
-                          <strong>
-                            {l.grade}
-                            <small>{l.score === null ? '' : ' · 已支持' + l.score + '分'}</small>
-                          </strong>
-                          {l.score !== null ? (
-                            <div className="tiny-track">
-                              <i style={{ width: l.score + '%' }} />
-                            </div>
-                          ) : (
-                            <span className="subtext">
-                              {l.grade === '未评级' ? '尚未自动评级' : '手工记录'}
-                            </span>
-                          )}
+                          <strong>{l.grade}</strong>
+                          <span className="subtext">
+                            {l.matchLevel ? '匹配等级：' + l.matchLevel : '查看评级依据'}
+                          </span>
                           <button
                             className="rating-reason-short text-link"
                             aria-label={`查看 ${l.name} 的评级依据`}

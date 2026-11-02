@@ -321,14 +321,14 @@ test('HTTP 读取已执行计划及最近任务，保留核实结果并可关闭
       const { schedules: listed } = await response.json();
       assert.equal(listed.length, 3);
       const recent = listed.find((item) => item.id === plan.id).lastJob;
-      assert.equal(recent.queued, 1);
+      assert.equal(recent.queued, 0);
       assert.equal(recent.rows[0].review_resolution.status, 'inserted');
       assert.equal('queue' in recent, false);
       assert.equal(listed.find((item) => item.id === fresh.id).lastJob, null);
       assert.equal(listed.find((item) => item.id === archived.id).lastJob, null);
       const closed = await fetch(base + `${path}/${plan.id}/close`, { method: 'POST' });
       assert.equal(closed.status, 200);
-      assert.equal((await closed.json()).lastJob.queued, 1);
+      assert.equal((await closed.json()).lastJob.queued, 0);
     });
   } finally {
     rmSync(folder, { recursive: true, force: true });

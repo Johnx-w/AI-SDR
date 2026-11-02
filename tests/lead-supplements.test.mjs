@@ -59,6 +59,7 @@ const confirmation = (overrides = {}) => ({
 
 test('人工确认经营角色按现有规则重算，补齐R但保留未知V和原研究限制', () => {
   const before = initial();
+  assert.equal(before.grade, 'B');
   assert.equal(before.dimensions.R.score, null);
   assert.equal(before.score, 55);
   const entry = confirmation();
@@ -67,7 +68,7 @@ test('人工确认经营角色按现有规则重算，补齐R但保留未知V和
   assert.equal(result.grade, 'A');
   assert.equal(result.dimensions.R.score, 30);
   assert.equal(result.dimensions.V.score, null);
-  assert.deepEqual(result.missing, ['定制/电动或工程配套特征尚未取得依据']);
+  assert.deepEqual(result.missing, []);
   assert.equal(result.incompleteReason, research.incomplete_reason);
   assert.deepEqual(result.checkedUrls, [source]);
   assert.deepEqual(result.target, before.target);

@@ -56,6 +56,49 @@ test('有效业务联系表单可满足公司级入口而不强求公开邮箱�
   );
 });
 
+test('高优先或常规客户可凭已核实产品与公司联系入口交接，经营年限未知不阻断', () => {
+  const contacts = [
+    {
+      kind: 'email',
+      value: 'sales@buyer.example.org',
+      quote: 'sales@buyer.example.org',
+      source_url: site,
+    },
+  ];
+  for (const grade of ['高优先', '常规开发']) {
+    const handoff = calculateHandoffReadiness({
+      research,
+      assessment: {
+        grade,
+        status: grade,
+        direction: 'finished',
+        product: 'roller blinds',
+        dimensions: {
+          P: { score: 40 },
+          R: { score: null },
+          D: { score: null },
+          V: { score: null },
+        },
+      },
+      contacts,
+    });
+    assert.equal(handoff.ready, true, grade);
+  }
+  assert.equal(
+    calculateHandoffReadiness({
+      research,
+      assessment: {
+        grade: '高优先',
+        status: '高优先',
+        dimensions: { P: { score: 40, conflict: true } },
+        requirements: [{ kind: 'identity_conflict' }],
+      },
+      contacts,
+    }).ready,
+    false,
+  );
+});
+
 test('同企业不同操作重放旧新增结果不会重复计入新增', async () => {
   const ready = {
     policy: 'sales-handoff-v1',

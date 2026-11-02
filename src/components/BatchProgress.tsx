@@ -195,7 +195,7 @@ function DetailRows({
                   <small>
                     {row.handoff.contact_verified
                       ? '已找到有来源的公司级联系入口'
-                      : '本轮未找到官网公司级联系入口，可后续补充'}
+                      : '本轮未找到官网公司级联系入口，暂不能邮件联系'}
                   </small>
                 )
               )}
@@ -246,8 +246,8 @@ function DetailRows({
                   : resultNames[row.result] || row.result}
               {row.assessment && (
                 <small>
-                  {row.assessment.grade || row.assessment.status || '未定级'} · 已支持
-                  {row.assessment.score}分
+                  {['高优先', '常规开发'].includes(row.assessment.grade || '') && '旧版 '}
+                  {row.assessment.grade || row.assessment.status || '未定级'}
                 </small>
               )}
             </td>
@@ -352,7 +352,7 @@ export function BatchProgress({
                   <th>重复</th>
                   <th>已研究</th>
                   <th>新增收录数</th>
-                  <th>评级</th>
+                  <th>开发优先级</th>
                 </tr>
               </thead>
               <tbody>
@@ -387,6 +387,12 @@ export function BatchProgress({
                     <td>
                       A {metric.ratings.A || 0} · B {metric.ratings.B || 0} · C{' '}
                       {metric.ratings.C || 0}
+                      {!!(metric.ratings['高优先'] || metric.ratings['常规开发']) && (
+                        <small>
+                          旧记录 高优先 {metric.ratings['高优先'] || 0} · 常规开发{' '}
+                          {metric.ratings['常规开发'] || 0}
+                        </small>
+                      )}
                       <small>未定级 {metric.ratings.unrated || 0}</small>
                     </td>
                   </tr>
@@ -398,8 +404,8 @@ export function BatchProgress({
             企业归入第一次发现它的搜索词；后续再次发现计入重复。尚未研究完的候选不参与评级效果判断。
           </p>
           <p className="muted">
-            新增目标只统计去重后实际写入并由飞书读回确认的企业。A/B/C
-            是初始开发优先级，不表示企业已采购、会回复或资料完整。
+            新增目标只统计去重后实际写入并由飞书读回确认的企业。A/B/C 表示初始开发顺序，
+            不表示企业已采购、会回复或资料完整。
           </p>
         </details>
       )}

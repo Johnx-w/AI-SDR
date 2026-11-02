@@ -223,6 +223,12 @@ export class BatchJobs {
     job.reason = reason;
     job.status = reason === 'target_reached' ? 'completed' : 'partial';
     job.completedAt = new Date(this.now()).toISOString();
+    job.queue = [];
+    job.seen = [];
+    job.skippedDomains = [];
+    job.searchSignatures = [];
+    job.pendingSearch = null;
+    job.current = null;
     return this.save(job);
   }
   async reconcile(job) {
@@ -471,7 +477,10 @@ export class BatchJobs {
           inserted_new: false,
           qualification_reason: 'already_in_lead_library',
         });
-      } else if (output?.outcome === 'review' || output?.research?.review_required) {
+      } else if (
+        output?.outcome === 'review' ||
+        (output?.outcome !== 'rejected' && output?.research?.review_required)
+      ) {
         job.review = (job.review || 0) + 1;
         job.rows.push({
           ...item,
@@ -480,23 +489,29 @@ export class BatchJobs {
           requirementChecks: output.research?.requirement_checks || [],
         });
       } else if (
-        output?.research &&
-        (['rejected', 'insufficient_evidence'].includes(output.research.eligibility?.status) ||
-          [
-            'product_match',
-            'country_match',
-            'audience_match',
-            'customer_type_match',
-            'profile_match',
-            'required_match',
-          ].some(
-            (key) =>
-              ['not_matched', 'unknown'].includes(output.research[key]) &&
-              (key !== 'audience_match' || output.research[key] === 'not_matched'),
-          ))
+        output?.outcome === 'rejected' ||
+        (output?.research &&
+          (['rejected', 'insufficient_evidence'].includes(output.research.eligibility?.status) ||
+            [
+              'product_match',
+              'country_match',
+              'audience_match',
+              'customer_type_match',
+              'profile_match',
+              'required_match',
+            ].some(
+              (key) =>
+                ['not_matched', 'unknown'].includes(output.research[key]) &&
+                (key !== 'audience_match' || output.research[key] === 'not_matched'),
+            )))
       ) {
         job.rejected++;
-        job.rows.push({ ...item, result: 'rejected', reason: output.reason });
+        job.rows.push({
+          search_id: item.search_id,
+          operation_id: item.operation_id,
+          result: 'rejected',
+          reason: output.outcome === 'rejected' ? output.reason : '不符合本次筛选条件',
+        });
       } else if (output?.outcome === 'failed' && output.stage !== 'persist') {
         job.failed++;
         job.rows.push({ ...item, result: 'failed', reason: output.reason });
@@ -517,7 +532,8 @@ export class BatchJobs {
         if (key && !(key === 'inserted' && acceptedRow.inserted_new === false)) metric[key]++;
         if (acceptedRow.result === 'inserted') {
           const grade = acceptedRow.assessment?.grade;
-          metric.ratings[['A', 'B', 'C'].includes(grade) ? grade : 'unrated']++;
+          const bucket = ['高优先', '常规开发', 'A', 'B', 'C'].includes(grade) ? grade : 'unrated';
+          metric.ratings[bucket] = (metric.ratings[bucket] || 0) + 1;
         }
       }
       const latest = this.get(job.id);

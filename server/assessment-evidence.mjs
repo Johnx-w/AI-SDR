@@ -83,6 +83,8 @@ const identifiedKinds = new Set([
   'completed_commercial_project',
 ]);
 const productKinds = new Set(['unrelated_product']);
+const positiveProductKinds = new Set(['core_product', 'secondary_product', 'adjacent_product']);
+const positiveRoleKinds = new Set(['specialist_supply', 'general_supply']);
 const directionFactKinds = new Set([
   'core_product',
   'secondary_product',
@@ -142,6 +144,52 @@ const supportsProductEvidence = (evidence, product, direction) => {
     (genericWindowProduct.test(product) ||
       compact(evidence).toLowerCase().includes(compact(product).toLowerCase()) ||
       productsRelevant([evidence], { product_scope: 'specific', product }) === 'matched')
+  );
+};
+const normalizedProductName = (value) =>
+  compact(value)
+    .toLowerCase()
+    .replace(/\s*&\s*/g, ' and ');
+const genericSupplyRole = (quote) =>
+  /\b(?:sell|sells|selling|sold|retail(?:er|ing)?|distribut\w*|suppl\w*|manufactur\w*|produc(?:e|es|ed|ing)|offer(?:s|ing)?)\b|供应|供货|销售|零售|批发|经销|制造|生产/i.test(
+    quote,
+  ) &&
+  /\bwindow\s+(?:coverings?|furnishings?|treatments?)\b|\b(?:blinds?\s*(?:,|and|&)\s*shades?|shades?\s*(?:,|and|&)\s*blinds?)\b|窗饰|窗帘产品/i.test(
+    quote,
+  );
+const supportsScopedFact = (
+  fact,
+  quote,
+  product,
+  direction,
+  related,
+  page,
+  verifiedProductFacts,
+) => {
+  if (supportsProductEvidence(quote, product, direction)) return true;
+  if (!related || !productDirections(quote).includes(direction)) return false;
+  if (positiveProductKinds.has(fact.kind)) {
+    const mainProduct = product.replace(/\s*\([^)]*\)\s*$/, '').trim();
+    if (normalizedProductName(quote).includes(normalizedProductName(mainProduct))) return true;
+    return verifiedProductFacts.some(
+      (entry) =>
+        typeof entry.value === 'string' &&
+        normalizedProductName(entry.value).split(' ').length >= 2 &&
+        normalizedProductName(product).includes(normalizedProductName(entry.value)) &&
+        entry.source_url === page.source_url &&
+        compact(page.text).includes(compact(entry.quote)) &&
+        supportsProductEvidence(entry.quote, entry.value, direction) &&
+        normalizedProductName(quote).includes(normalizedProductName(entry.value)),
+    );
+  }
+  if (!positiveRoleKinds.has(fact.kind) || !genericSupplyRole(quote)) return false;
+  return verifiedProductFacts.some(
+    (entry) =>
+      typeof entry.value === 'string' &&
+      entry.source_url === page.source_url &&
+      compact(page.text).includes(compact(entry.quote)) &&
+      supportsProductEvidence(entry.value, product, direction) &&
+      supportsProductEvidence(entry.quote, product, direction),
   );
 };
 const supportsManufacturingMaterial = (fact, product) => {
@@ -244,7 +292,15 @@ export function verifiedAssessmentOpportunities(
       if (!compact(page.text).includes(quote)) continue;
       if (
         directionFactKinds.has(fact.kind) &&
-        !supportsProductEvidence(quote, product, opportunity.direction)
+        !supportsScopedFact(
+          fact,
+          quote,
+          product,
+          opportunity.direction,
+          related,
+          page,
+          verifiedProductFacts,
+        )
       )
         continue;
       if (productKinds.has(fact.kind) && productsRelevant([quote], { product }) !== 'matched')

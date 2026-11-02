@@ -7,6 +7,7 @@ import {
   formatAssessmentReason,
   formatAssessmentEvidence,
   readAssessmentSummary,
+  projectCustomerGrade,
 } from '../server/customer-assessment.mjs';
 import { mapFeishuRecord } from '../server/feishu.mjs';
 
@@ -15,6 +16,17 @@ const target = { product: 'roller blinds', country: 'Australia' };
 const fact = (kind, value = kind) => ({ kind, value, quote: value, source_url: source });
 const baseline = ['core_product', 'specialist_supply', 'current_supply_process'];
 const opportunity = (facts) => ({ direction: 'finished', product: 'roller blinds', facts });
+test('v4 待核实记录以原始评级核对后展示 C，保留原始字段', () => {
+  const lead = {
+    grade: '待核实',
+    fields: { 初评结果: '待核实' },
+    assessment: { ruleVersion: 'acquisition-v4.0', grade: null, status: '待核实' },
+  };
+  const projected = projectCustomerGrade(lead);
+  assert.equal(projected.grade, 'C');
+  assert.equal(projected.assessment.grade, 'C');
+  assert.equal(projected.fields['初评结果'], '待核实');
+});
 function evaluate(facts, overrides = {}) {
   return assessCompany({
     research: {
@@ -30,16 +42,18 @@ function evaluate(facts, overrides = {}) {
   });
 }
 
-test('初评四项可独立达到100分，不依赖海关，摘要可经飞书读回', () => {
+test('新版优先级只依赖同方向产品和角色，飞书摘要可读回', () => {
   const result = evaluate([
     ...baseline.map((k) => fact(k)),
     fact('custom_made'),
     fact('motorized_system'),
     ...Array.from({ length: 5 }, (_, i) => fact('operating_outlet', `Showroom ${i}`)),
   ]);
-  assert.equal(result.ruleVersion, 'acquisition-v3.2');
+  assert.equal(result.ruleVersion, 'acquisition-v5.0');
   assert.equal(result.score, 100);
   assert.equal(result.grade, 'A');
+  assert.equal(result.matchLevel, '明确匹配');
+  assert.ok(result.prioritySignals.some((signal) => signal.kind === 'core_product'));
   assert.equal(result.complete, true);
   assert.deepEqual(Object.keys(result.dimensions), ['P', 'R', 'D', 'V']);
   assert.deepEqual(
@@ -47,15 +61,15 @@ test('初评四项可独立达到100分，不依赖海关，摘要可经飞书�
     [40, 30, 20, 10],
   );
   assert.deepEqual(result.missing, []);
-  assert.doesNotMatch(result.reason, /海关/);
+  assert.doesNotMatch(result.reason, /海关|\/100|待补充/);
   assert.doesNotMatch(formatAssessmentEvidence(result), /海关/);
   const lead = mapFeishuRecord({
     record_id: 'rec-test',
     fields: { 用户评级: result.grade, 评级依据: result.reason, 来源链接: source },
   });
-  assert.equal(lead.score, 100);
-  assert.equal(lead.assessment.complete, true);
-  assert.equal(lead.assessment.ruleVersion, 'acquisition-v3.2');
+  assert.equal(lead.score, null);
+  assert.equal(lead.assessment.priority, 'A');
+  assert.equal(lead.assessment.ruleVersion, 'acquisition-v5.0');
 });
 
 test('持续经营中档按15分计算；95分来自真实业务证据而非海关假设', () => {
@@ -88,22 +102,20 @@ test('同一网点重复出现不触发20分档', () => {
   assert.equal(result.score, 75);
 });
 
-test('新档位门槛保留A75与B60，未知V不按比例放大', () => {
-  const a = evaluate(baseline.map((k) => fact(k)));
-  assert.equal(a.score, 75);
-  assert.equal(a.grade, 'A');
-  assert.equal(a.complete, false);
-  const b = evaluate(
-    ['secondary_product', 'general_supply', 'current_supply_process'].map((k) => fact(k)),
-  );
-  assert.equal(b.score, 60);
-  assert.equal(b.grade, 'B');
-  assert.equal(b.dimensions.V.score, null);
-  assert.equal(b.missing.length, 1);
-  assert.doesNotMatch(b.missing.join(' '), /海关/);
+test('主营和供货角色可在 D/V 全未知时高优先，副线仍为常规', () => {
+  for (const role of ['specialist_supply', 'general_supply']) {
+    const high = evaluate(['core_product', role].map((kind) => fact(kind)));
+    assert.equal(high.grade, 'A');
+    assert.equal(high.dimensions.D.score, null);
+    assert.equal(high.dimensions.V.score, null);
+    assert.deepEqual(high.missing, []);
+  }
+  const regular = evaluate(['secondary_product', 'specialist_supply'].map((kind) => fact(kind)));
+  assert.equal(regular.grade, 'B');
+  assert.equal(regular.matchLevel, '明确匹配');
 });
 
-test('缺持续经营依据仍保留已支持的初始A评级，海关不参与初评分', () => {
+test('缺持续经营依据仍高优先，海关不参与初评', () => {
   const facts = ['core_product', 'specialist_supply', 'custom_made', 'motorized_system'].map((k) =>
     fact(k),
   );
@@ -111,11 +123,11 @@ test('缺持续经营依据仍保留已支持的初始A评级，海关不参与�
   assert.equal(result.score, 80);
   assert.equal(result.grade, 'A');
   assert.equal(result.status, '优先开发');
-  assert.ok(result.missing.includes('持续经营或当前供货流程资料不足'));
+  assert.deepEqual(result.missing, []);
   assert.deepEqual(result, evaluate(facts));
 });
 
-test('已核实卷帘业务但经营角色未知时保留C初评，最佳成品证据保留面料潜在机会', () => {
+test('已核实卷帘业务但经营角色未知时常规开发，最佳成品证据保留面料潜在机会', () => {
   const result = assessCompany({
     research: {
       source_url: source,
@@ -139,8 +151,8 @@ test('已核实卷帘业务但经营角色未知时保留C初评，最佳成品�
     target: { country: 'Canada', product: 'roller blind fabric' },
     id: 'fixture-partial-role',
   });
-  assert.equal(result.grade, 'C');
-  assert.equal(result.status, '常规开发');
+  assert.equal(result.grade, 'B');
+  assert.equal(result.status, '可开发');
   assert.equal(result.score, 40);
   assert.equal(result.dimensions.R.score, null, '未知角色不补分');
   assert.equal(result.supplyOpportunity.procurementStatus, 'unconfirmed');
@@ -149,8 +161,8 @@ test('已核实卷帘业务但经营角色未知时保留C初评，最佳成品�
 
 test('邻近产品、仅安装、身份冲突与明确无关仍限制初评', () => {
   for (const [product, role, extra, status] of [
-    ['adjacent_product', 'specialist_supply', [], '常规开发'],
-    ['core_product', 'installation_only', [], '常规开发'],
+    ['adjacent_product', 'specialist_supply', [], '低投入开发'],
+    ['core_product', 'installation_only', [], '低投入开发'],
     ['core_product', 'specialist_supply', [fact('identity_conflict')], '待核实'],
     ['unrelated_product', 'specialist_supply', [], '暂不开发'],
   ]) {
@@ -168,10 +180,22 @@ test('邻近产品、仅安装、身份冲突与明确无关仍限制初评', ()
   }
 });
 
+test('明确市场不匹配不能因主营和供货角色被评为高优先', () => {
+  const result = evaluate(
+    ['core_product', 'specialist_supply'].map((kind) => fact(kind)),
+    {
+      country_match: 'not_matched',
+    },
+  );
+  assert.equal(result.grade, null);
+  assert.equal(result.matchLevel, '不匹配');
+  assert.equal(result.status, '暂不开发');
+});
+
 test('无可用机会时只有四项未知，不生成海关缺项', () => {
   const result = evaluate([], { assessment_opportunities: [] });
   assert.equal(result.score, 0);
-  assert.equal(result.grade, null);
+  assert.equal(result.grade, 'C');
   assert.equal(result.complete, false);
   assert.deepEqual(Object.keys(result.dimensions), ['P', 'R', 'D', 'V']);
   assert.doesNotMatch(result.reason, /海关/);

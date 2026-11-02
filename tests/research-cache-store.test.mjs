@@ -57,6 +57,21 @@ test('模型缓存按飞书 scope 隔离，相同 key 可以有独立内容', ()
   }
 });
 
+test('拒绝结果只清理所属客户表的模型响应缓存', () => {
+  const a = new AcquisitionStore(':memory:', 'scope-a');
+  try {
+    a.saveModelResponse(key(), response('rejected'));
+    a.db
+      .prepare('INSERT INTO research_model_responses VALUES(?,?,?,?)')
+      .run('scope-b', key(), Date.now(), JSON.stringify(response('other scope')));
+    a.discardModelResponse(key());
+    assert.equal(a.modelResponse(key()), null);
+    assert.equal(a.db.prepare('SELECT COUNT(*) AS n FROM research_model_responses').get().n, 1);
+  } finally {
+    a.close();
+  }
+});
+
 test('TTL 为保存起 7 天，读取不延长寿命，到期返回 null 并清理', () => {
   const store = new AcquisitionStore();
   try {

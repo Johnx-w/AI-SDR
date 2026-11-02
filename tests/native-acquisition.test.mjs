@@ -301,6 +301,11 @@ test('仅有T2也能完成自动评分和入库，评估只存后台最新值且
     assert.equal(current.assessments.length, 1);
     assert.equal(current.assessment.id, result.assessment.id);
     assert.equal(current.assessment.sync, undefined);
+    assert.equal(result.assessment.matchLevel, current.assessment.matchLevel);
+    assert.deepEqual(result.assessment.prioritySignals, current.assessment.prioritySignals);
+    const dossier = svc.decorateLeads({ leads: [mapFeishuRecord(f.records[0])] }).leads[0];
+    assert.equal(dossier.assessment.matchLevel, current.assessment.matchLevel);
+    assert.deepEqual(dossier.assessment.prioritySignals, current.assessment.prioritySignals);
     assert.equal(svc.assessmentInfo().assessmentStorage, 'latest_only');
     assert(
       f.calls
@@ -389,8 +394,19 @@ for (const [scenarioIndex, scenario] of [
       assert.equal(output.新增, 0);
       assert.equal(output.更新, 0);
       assert.equal(output.research.ok, false);
-      if (scenario.productMismatch) assert.equal(output.research.product_match, 'not_matched');
-      else assert.equal(output.research.eligibility.code, scenario.code);
+      if (scenario.code === 'entity_unknown') {
+        assert.equal(output.outcome, 'review');
+        assert.equal(output.research.eligibility.code, scenario.code);
+      } else {
+        assert.equal(output.outcome, 'rejected');
+        assert.equal(output.research.product_match, undefined);
+        assert.equal(output.research.eligibility, undefined);
+        const stored = svc.store.get('policy-blocked-' + scenarioIndex);
+        assert.equal(stored.input, undefined);
+        assert.equal(stored.research_pages, undefined);
+        assert.equal(stored.research_response, undefined);
+        assert.ok(!JSON.stringify(stored).includes(site));
+      }
       assert.equal(
         f.calls.some((c) => c.url.includes('/records') && ['POST', 'PUT'].includes(c.method)),
         false,

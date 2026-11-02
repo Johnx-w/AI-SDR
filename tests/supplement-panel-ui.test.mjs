@@ -188,7 +188,7 @@ test('changing dimension or category drops the original pending item instead of 
   });
   await harness.ready();
   fill(harness);
-  harness.change('评分维度', 'V');
+  harness.change('事实类别', 'V');
   harness.change('具体信息', '可按尺寸定制');
   await harness.submit();
   assert.equal(harness.calls[0][1].pendingItem, undefined);
@@ -378,7 +378,7 @@ test('restored assessment keeps its original scope when the current product is c
     await harness.ready();
     const html = renderToStaticMarkup(harness.render());
     assert.match(html, /selected="">材料配件 · Original Roller fabric/);
-    assert.equal(harness.field('评分维度').props.value, 'R');
+    assert.equal(harness.field('事实类别').props.value, 'R');
     await harness.submit();
     assert.equal(harness.calls.length, 1);
     assert.deepEqual(harness.calls[0][1], input);

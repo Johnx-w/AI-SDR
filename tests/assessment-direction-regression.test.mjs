@@ -48,7 +48,7 @@ test('真实零售卷帘机会贴materials标签不能用成品定制和消费�
     products,
   );
   assert.deepEqual(opportunities, []);
-  assert.equal(evaluate(opportunities).grade, null);
+  assert.equal(evaluate(opportunities).grade, 'C');
 });
 
 test('specific也核对每个计分引文方向，不把成品供货定制电动和结账挪给真实面料副线', () => {
@@ -79,7 +79,7 @@ test('specific也核对每个计分引文方向，不把成品供货定制电动
     opportunities[0].facts.map((entry) => entry.kind),
     ['core_product'],
   );
-  assert.equal(evaluate(opportunities).grade, 'C');
+  assert.equal(evaluate(opportunities).grade, 'B');
   assert.equal(evaluate(opportunities).dimensions.R.score, null);
 });
 
@@ -102,13 +102,13 @@ test('面料目标保留真实成品经营初评，材料采购标为待沟通�
   assert.equal(opportunities[0].direction, 'finished');
   assert.equal(opportunities[0].relationship, 'potential_input');
   const result = evaluate(opportunities);
-  assert.equal(result.grade, 'B');
+  assert.equal(result.grade, 'A');
   assert.equal(result.dimensions.D.score, null);
   assert.equal(result.supplyOpportunity.procurementStatus, 'unconfirmed');
   assert.match(result.reason, /材料或配件采购方式、规格、数量与负责人待沟通/);
 });
 
-test('只有已核实卷帘产品线时仍给企业C初评级，错误材料标签不成为材料采购事实', () => {
+test('只有已核实卷帘产品线时仍可常规开发，错误材料标签不成为材料采购事实', () => {
   const quote = 'We sell finished roller blinds to homeowners.';
   const result = assessCompany({
     research: {
@@ -122,12 +122,12 @@ test('只有已核实卷帘产品线时仍给企业C初评级，错误材料标�
     target: { product: 'roller blind fabric' },
     id: 'fixture-catalog-assessment',
   });
-  assert.equal(result.grade, 'C');
-  assert.equal(result.status, '常规开发');
+  assert.equal(result.grade, 'B');
+  assert.equal(result.status, '可开发');
   assert.equal(result.direction, 'finished');
   assert.equal(result.product, 'roller blinds');
   assert.equal(result.supplyOpportunity.procurementStatus, 'unconfirmed');
-  assert.equal(result.score, 55);
+  assert.equal(result.dimensions.R.score, null, '产品目录不自动证明供货角色');
 });
 
 test('真正的面料分销可计材料机会，不要求公开采购需求', () => {
@@ -194,4 +194,187 @@ test('合作工厂制造成品不能据此推断零售商自身进行材料生�
     [catalog('roller blinds', quote)],
   );
   assert.deepEqual(opportunities, []);
+});
+
+test('复合产品标题的主营事实可用完整主标题原文核实，泛化渠道话术仍不算角色', () => {
+  const product =
+    'Custom Blinds & Shades (Faux Wood, Cellular, Roller, Solar, Roman, Vertical, Woven Wood)';
+  const core =
+    'Custom blinds and shades experts since 1993, Factory Direct Blinds is an online window treatment retailer for residential customers and trade professionals.';
+  const role = 'we transitioned from traditional roots to an online direct-to-consumer model';
+  const opportunities = verifiedAssessmentOpportunities(
+    [
+      {
+        direction: 'finished',
+        product,
+        facts: [fact('core_product', core), fact('specialist_supply', role)],
+      },
+    ],
+    [{ source_url: source, text: `${core} Roller Shades ${role}` }],
+    { product_scope: 'all' },
+    ['Roller Shades'],
+    [catalog('Roller Shades', 'Roller Shades')],
+  );
+  assert.deepEqual(
+    opportunities[0]?.facts.map((entry) => entry.kind),
+    ['core_product'],
+  );
+});
+
+test('并列产品标题可用已独立核实的同方向具体产品，仍核对来源与方向', () => {
+  const quote = 'Welcome to Shadetex Australia - Wholesale Manufacturer of Outdoor Blinds';
+  const product = 'Outdoor Blinds & Awnings';
+  const raw = [{ direction: 'finished', product, facts: [fact('core_product', quote)] }];
+  const products = [catalog('Awnings', 'Awnings'), catalog('Outdoor Blinds', 'Outdoor Blinds')];
+  const pages = [{ source_url: source, text: `${quote} Outdoor Blinds Awnings` }];
+  const args = [
+    raw,
+    pages,
+    { product_scope: 'all' },
+    products.map((entry) => entry.value),
+    products,
+  ];
+  assert.deepEqual(
+    verifiedAssessmentOpportunities(...args)[0]?.facts.map((entry) => entry.kind),
+    ['core_product'],
+  );
+  assert.deepEqual(
+    verifiedAssessmentOpportunities(
+      [
+        {
+          direction: 'materials',
+          product: 'Outdoor Blind Fabrics',
+          facts: [fact('core_product', quote)],
+        },
+      ],
+      pages,
+      { product_scope: 'all' },
+      ['Outdoor Blind Fabrics'],
+      [catalog('Outdoor Blind Fabrics', 'Outdoor Blind Fabrics')],
+    )[0]?.facts,
+    [],
+  );
+  assert.deepEqual(
+    verifiedAssessmentOpportunities(
+      [
+        {
+          direction: 'finished',
+          product,
+          facts: [fact('core_product', quote, 'https://wrong.example/')],
+        },
+      ],
+      pages,
+      { product_scope: 'all' },
+      products.map((entry) => entry.value),
+      products,
+    )[0]?.facts,
+    [],
+  );
+  assert.deepEqual(
+    verifiedAssessmentOpportunities(
+      [
+        {
+          direction: 'finished',
+          product,
+          facts: [fact('core_product', 'We manufacture Indoor Blinds')],
+        },
+      ],
+      [{ source_url: source, text: 'Awnings Outdoor Blinds We manufacture Indoor Blinds' }],
+      { product_scope: 'all' },
+      ['Awnings', 'Outdoor Blinds', 'Indoor Blinds'],
+      [...products, catalog('Indoor Blinds', 'Indoor Blinds')],
+    )[0]?.facts,
+    [],
+  );
+});
+
+test('泛称窗口业务引文不凭单个 Blinds 目录词变成复合主营证据', () => {
+  const quote = 'We offer a variety of custom window treatments, including:';
+  const product = 'Custom blinds, shades, shutters, drapes and curtains';
+  const result = verifiedAssessmentOpportunities(
+    [{ direction: 'finished', product, facts: [fact('core_product', quote)] }],
+    [{ source_url: source, text: `${quote} Blinds Shades Shutters` }],
+    { product_scope: 'all' },
+    ['Blinds', 'Shades', 'Shutters'],
+    [catalog('Blinds', 'Blinds'), catalog('Shades', 'Shades'), catalog('Shutters', 'Shutters')],
+  );
+  assert.deepEqual(
+    result.flatMap((entry) => entry.facts),
+    [],
+  );
+});
+
+test('泛窗饰供货角色须有同页具体产品，其他产品或服务话术不能借用', () => {
+  const product = 'Roller Shades';
+  const catalogQuote = 'Explore our Roller Shades.';
+  const retailer = 'Largest online retailer of custom window treatments';
+  const unrelated = 'We sell Roman Shades';
+  const service = 'We do it all for you: design, measure, & install.';
+  const productNoun = 'Comprehensive line of window covering products.';
+  const wholesaleSlogan = 'Kickstart Your Shades & Blinds Wholesale Journey Today';
+  const pages = [
+    {
+      source_url: source,
+      text: `${catalogQuote} ${retailer} ${unrelated} ${service} ${productNoun} ${wholesaleSlogan}`,
+    },
+  ];
+  const raw = [
+    {
+      direction: 'finished',
+      product,
+      facts: [retailer, unrelated, service, productNoun, wholesaleSlogan].map((quote) =>
+        fact('specialist_supply', quote),
+      ),
+    },
+  ];
+  const verified = [catalog(product, catalogQuote)];
+  const result = verifiedAssessmentOpportunities(
+    raw,
+    pages,
+    { product_scope: 'all' },
+    [product],
+    verified,
+  );
+  assert.deepEqual(
+    result[0]?.facts.map((entry) => entry.quote),
+    [retailer],
+  );
+  assert.deepEqual(
+    verifiedAssessmentOpportunities(
+      raw,
+      pages,
+      { product_scope: 'all' },
+      [product],
+      [catalog(product, catalogQuote, 'https://other.example/')],
+    )[0]?.facts,
+    [],
+  );
+});
+
+test('材料方向的泛窗饰供应角色只可用同页材料目录证明', () => {
+  const role = 'We are a supplier of fabrics and components for the window treatment industry.';
+  const material = 'Roller Shade Fabrics';
+  const finished = 'Roller Shades';
+  const opportunities = verifiedAssessmentOpportunities(
+    [
+      {
+        direction: 'materials',
+        product: material,
+        facts: [fact('specialist_supply', role)],
+      },
+      {
+        direction: 'finished',
+        product: finished,
+        facts: [fact('specialist_supply', role)],
+      },
+    ],
+    [{ source_url: source, text: `${material} ${finished} ${role}` }],
+    { product_scope: 'all' },
+    [material, finished],
+    [catalog(material, material), catalog(finished, finished)],
+  );
+  assert.deepEqual(
+    opportunities.map((entry) => entry.facts.map((item) => item.kind)),
+    [['specialist_supply'], []],
+  );
 });

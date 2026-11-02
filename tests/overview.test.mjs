@@ -197,6 +197,28 @@ test('需求优先于高评级开发，拒绝联系和已有沟通客户不作�
   );
 });
 
+test('开发提醒按 A/B/C 评级排序', async () => {
+  const { service } = fixture({
+    customers: async () => ({
+      leads: [customer('regular', 'B'), customer('high', 'A')],
+      syncedAt: asOf,
+    }),
+    business: () => ({
+      conversations: [],
+      messages: [],
+      demands: [],
+      tasks: [],
+      customerContexts: [],
+    }),
+  });
+  const result = await service.read();
+  assert.deepEqual(
+    result.priority.slice(0, 2).map((row) => row.customerId),
+    ['high', 'regular'],
+  );
+  assert.equal(result.priority[0].reason, 'A 级待开发客户');
+});
+
 test('联系限制保留到期内部行动并提示沟通核对，只抑制新开发候选', async () => {
   const customers = ['review', 'other', 'sample', 'communication', 'candidate'].map((id) =>
     customer(id),

@@ -70,7 +70,7 @@ export function CustomerProfile({
   const overview = [lead.mainProductPreference, lead.evidence, lead.industryProfile].find(
     (value) => value && meaningful(value),
   );
-  const fullDescription = businessLines(overview)[0] || '企业概况待补充';
+  const fullDescription = businessLines(overview)[0] || '尚无已核实企业概况';
   const description =
     fullDescription.length > 140 ? fullDescription.slice(0, 140) + '…' : fullDescription;
   const products = lines(lead.product);
@@ -78,33 +78,38 @@ export function CustomerProfile({
     line.replace(/（潜在供货机会）|\(潜在供货机会\)/g, '').replace(/[，,]潜在供货机会/g, ''),
   );
   const demand = businessLines(lead.demandProducts).filter((line) => meaningful(line));
+  const automaticMissing = new Set([
+    ...(lead.assessment?.missing || []),
+    ...Object.values(lead.assessment?.dimensions || {}).flatMap((dimension) =>
+      dimension.missing ? [dimension.missing] : [],
+    ),
+  ]);
+  const needsReview = (item: string) => /冲突|强制|不一致|必需/.test(item);
   const pending = [
     ...new Set(
       [
-        ...(lead.assessment?.missing || []),
+        ...(lead.assessment?.missing || []).filter(needsReview),
         ...Object.values(lead.assessment?.dimensions || {}).flatMap((dimension) =>
-          dimension.missing ? [dimension.missing] : [],
+          dimension.conflict && dimension.missing ? [dimension.missing] : [],
         ),
         ...businessLines(
           (lead.pendingQuestions || '').replace(/(?:本轮)?研究限制[:：][\s\S]*$/, ''),
-        ).flatMap((line) => line.split(/[；;]/)),
-        ...(!lead.companyIdentity?.legal_name ||
-        lead.companyIdentity?.status === 'legal_name_self_reported'
-          ? ['经营法人名称待核实']
-          : []),
-        ...(!demand.length && !lead.manualPurchaseNeed ? ['具体采购需求待确认'] : []),
+        )
+          .flatMap((line) => line.split(/[；;]/))
+          .filter((item) => needsReview(item) || !automaticMissing.has(item)),
       ]
         .map((item) => item.trim())
-        .filter((item) => item && !/^(暂无已记录的待确认事项|暂无|无)$/.test(item)),
+        .filter(
+          (item) =>
+            item &&
+            !/^(暂无已记录的待确认事项|暂无|无|经营法人名称待核实|具体采购需求待确认)$/.test(
+              item,
+            ) &&
+            !/^材料或配件采购方式、规格、数量与负责人待沟通/.test(item),
+        ),
     ),
   ].filter((item) => {
-    // Confirming a free-form note cannot resolve an unfilled score dimension.
-    if (
-      Object.values(lead.assessment?.dimensions || {}).some(
-        (dimension) => dimension.missing === item,
-      )
-    )
-      return true;
+    if (needsReview(item)) return true;
     if (
       /经营法人名称待核实/.test(item) &&
       lead.companyIdentity?.status === 'legal_name_manual_confirmed'
@@ -117,7 +122,7 @@ export function CustomerProfile({
   });
   const supplementContext = (item: string): SupplementContext => {
     const dimension = Object.entries(lead.assessment?.dimensions || {}).find(
-      ([, value]) => value.missing === item,
+      ([, value]) => value.conflict && value.missing === item,
     )?.[0];
     if (dimension && ['P', 'R', 'D', 'V'].includes(dimension))
       return {
@@ -177,16 +182,22 @@ export function CustomerProfile({
       <div className="profile-overview">
         <div className="profile-overview-heading">
           <div className="profile-priority">
-            <Badge tone={lead.grade === 'A' ? 'blue' : 'neutral'}>
+            <Badge tone={['高优先', 'A'].includes(lead.grade) ? 'blue' : 'neutral'}>
               {lead.grade}
               {priority[lead.grade] ? ' · ' + priority[lead.grade] : ''}
             </Badge>
-            {lead.score !== null && <span>已支持 {lead.score}/100</span>}
+            {lead.assessment?.ruleVersion &&
+              !['acquisition-v4.0', 'acquisition-v5.0'].includes(lead.assessment.ruleVersion) && (
+                <Badge>旧版评估</Badge>
+              )}
+            {lead.assessment &&
+              ['acquisition-v4.0', 'acquisition-v5.0'].includes(lead.assessment.ruleVersion) &&
+              lead.assessment.matchLevel && <span>匹配等级：{lead.assessment.matchLevel}</span>}
           </div>
           <div className="profile-actions">
             {onSupplement && (
               <button className="text-link" onClick={() => onSupplement({ category: 'profile' })}>
-                补充资料
+                记录已核实信息
               </button>
             )}
             <button className="text-link" onClick={onAssessment}>
@@ -200,6 +211,14 @@ export function CustomerProfile({
             <dt>客户类型</dt>
             <dd>{typeLabel}</dd>
           </div>
+          {lead.assessment &&
+            ['acquisition-v4.0', 'acquisition-v5.0'].includes(lead.assessment.ruleVersion) &&
+            !!lead.assessment.prioritySignals?.length && (
+              <div>
+                <dt>优先线索</dt>
+                <dd>{lead.assessment.prioritySignals.map((signal) => signal.label).join('、')}</dd>
+              </div>
+            )}
           {lead.serviceAreas && (
             <div>
               <dt>服务地区</dt>
@@ -240,7 +259,7 @@ export function CustomerProfile({
             )}
           </>
         ) : (
-          <p className="profile-empty">主营产品待补充</p>
+          <p className="profile-empty">尚无已核实产品</p>
         )}
       </section>
       <div className="profile-business-grid">
@@ -270,9 +289,9 @@ export function CustomerProfile({
             </div>
           )}
         </section>
-        <section className="profile-business-card profile-pending" aria-label="待确认">
-          <h3>待确认</h3>
-          {pending.length ? (
+        {!!pending.length && (
+          <section className="profile-business-card profile-pending" aria-label="需核实事项">
+            <h3>需核实事项</h3>
             <ul>
               {pending.map((item) => (
                 <li key={item}>
@@ -281,18 +300,16 @@ export function CustomerProfile({
                     <button
                       className="text-link profile-supplement-link"
                       onClick={() => onSupplement(supplementContext(item))}
-                      aria-label={'补充资料：' + item}
+                      aria-label={'核实事项：' + item}
                     >
-                      补充资料
+                      核实依据
                     </button>
                   )}
                 </li>
               ))}
             </ul>
-          ) : (
-            <p className="profile-empty">暂无已记录的待确认事项</p>
-          )}
-        </section>
+          </section>
+        )}
       </div>
       <div className="profile-updated" aria-label="资料与评估时间">
         <span>官网取证：{formatBeijingTime(lead.updatedAt, '时间未记录')}</span>

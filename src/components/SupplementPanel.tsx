@@ -29,7 +29,7 @@ const categories: Record<SupplementCategory, string> = {
   profile: '企业资料',
   legal_name: '经营法人名称',
   purchase_need: '采购需求',
-  assessment: '评分依据',
+  assessment: '经营事实',
 };
 const factOptions: Record<SupplementDimension, [string, string][]> = {
   P: [
@@ -351,7 +351,7 @@ export function SupplementPanel<TLead>({
             </label>
             {category === 'assessment' && (
               <label>
-                评分维度
+                事实类别
                 <select
                   value={dimension}
                   onChange={(event) => changeDimension(event.target.value as SupplementDimension)}
@@ -431,9 +431,9 @@ export function SupplementPanel<TLead>({
             />
           </label>
           {category === 'assessment' && (
-            <section className="supplement-facts" aria-label="已确认的评分事实">
+            <section className="supplement-facts" aria-label="已确认的经营事实">
               <div className="supplement-facts-heading">
-                <h4>已确认的评分事实</h4>
+                <h4>已确认的经营事实</h4>
                 <button
                   className="text-link"
                   type="button"
@@ -496,7 +496,7 @@ export function SupplementPanel<TLead>({
               ))}
               {dimension === 'D' && (
                 <p className="supplement-hint">
-                  经营年限、网点等资料需结合当前供货流程计分；每个网点或项目单独添加一项。
+                  经营年限、网点等资料可作为经营背景；A/B 评级不要求补齐这些信息。
                 </p>
               )}
             </section>

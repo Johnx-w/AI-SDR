@@ -213,6 +213,11 @@ export class AcquisitionStore {
     }
     return JSON.parse(row.response);
   }
+  discardModelResponse(key) {
+    this.db
+      .prepare('DELETE FROM research_model_responses WHERE scope=? AND cache_key=?')
+      .run(this.scope, modelCacheKey(key));
+  }
   // Cache only a validated provider response. Requests, credentials, environment
   // settings, customer writes and operation results do not belong in this table.
   saveModelResponse(key, response, { now = Date.now() } = {}) {

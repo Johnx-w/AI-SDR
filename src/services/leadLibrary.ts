@@ -79,6 +79,7 @@ export type LeadSummary = Pick<
 > & {
   version: string;
   companyIdentity?: Omit<NonNullable<Prospect['companyIdentity']>, 'evidence' | 'notes'> | null;
+  matchLevel?: string;
   ratingSummary: string;
   contactSummary: { label: string; detail: string };
 };

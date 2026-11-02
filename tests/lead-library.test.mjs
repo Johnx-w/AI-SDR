@@ -74,7 +74,27 @@ test('summary omits full dossiers while preserving rating and contact indicators
   );
   assert.equal(
     summarizeLead(lead({ grade: '未评级', ratingReason: '', assessment: null })).ratingSummary,
-    '关键依据待补充',
+    '关键依据尚未核实',
+  );
+  assert.equal(
+    summarizeLead(lead({ email: '', phone: '', contactEvidence: [] })).contactSummary.label,
+    '暂无公开联系入口',
+  );
+  assert.equal(
+    summarizeLead(
+      lead({
+        grade: 'A',
+        assessment: {
+          matchLevel: '明确匹配',
+          prioritySignals: [{ label: '主营产品' }, { label: '专业供货角色' }],
+        },
+      }),
+    ).ratingSummary,
+    '主营产品、专业供货角色已核实',
+  );
+  assert.equal(
+    summarizeLead(lead({ grade: 'A', assessment: { matchLevel: '明确匹配' } })).matchLevel,
+    '明确匹配',
   );
 });
 
@@ -416,6 +436,66 @@ test('remote edits and removals preserve local dossiers, and ordering never chan
     assert.equal(reordered.sync.metrics.last.updated, 0);
     assert.equal(reordered.sync.metrics.last.reordered, 2);
     assert.equal(reordered.sync.metrics.last.rowsWritten, 2);
+  } finally {
+    library.close();
+  }
+});
+
+test('refresh repairs old C projections from retained v4 evidence without replacing local dossiers', async () => {
+  const cases = [
+    ['高优先', 40, 30, 'A'],
+    ['常规开发', 40, null, 'B'],
+    ['常规开发', null, null, 'C'],
+  ];
+  const leads = cases.map(([oldGrade, product, role], index) =>
+    lead({
+      id: `rec-${index}`,
+      grade: oldGrade,
+      fields: { 初评结果: oldGrade },
+      assessment: {
+        ruleVersion: 'acquisition-v4.0',
+        grade: oldGrade,
+        status: oldGrade,
+        manualOverride: false,
+        dimensions: { P: { score: product }, R: { score: role } },
+      },
+    }),
+  );
+  const library = new LeadLibrary({ readLeads: async () => response(leads) });
+  try {
+    await library.list();
+    for (const item of leads) library.upsert({ id: item.id, grade: 'C' });
+    assert.deepEqual(
+      (await library.list()).leads.map((item) => item.grade),
+      ['C', 'C', 'C'],
+    );
+    const result = await library.refresh();
+    assert.deepEqual(
+      result.leads.map((item) => item.grade),
+      ['A', 'B', 'C'],
+    );
+    assert.equal((await library.detail('rec-0')).lead.facts[0].quote, 'FULL_DOSSIER');
+  } finally {
+    library.close();
+  }
+});
+
+test('refresh rebuilds an outdated list summary even when dossier content is unchanged', async () => {
+  const library = new LeadLibrary({
+    readLeads: async () => response([lead({ grade: 'C', assessment: { matchLevel: '待核实' } })]),
+  });
+  try {
+    await library.list();
+    const row = library.db
+      .prepare('SELECT scope,record_id,summary FROM lead_library_customers')
+      .get();
+    const old = JSON.parse(row.summary);
+    delete old.matchLevel;
+    library.db
+      .prepare('UPDATE lead_library_customers SET summary=? WHERE scope=? AND record_id=?')
+      .run(JSON.stringify(old), row.scope, row.record_id);
+    assert.equal((await library.list()).leads[0].matchLevel, undefined);
+    assert.equal((await library.refresh()).leads[0].matchLevel, '待核实');
   } finally {
     library.close();
   }

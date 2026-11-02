@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { isIP } from 'node:net';
 import { domainKey } from './website-identity.mjs';
+import { assessmentSummaryFields } from './customer-fields.mjs';
 import { businessProductRelation, countryMatches, windowProductDirections } from './relevance.mjs';
 import { researchProviderConfig } from './acquisition-config.mjs';
 import { createResearchProviders } from './research-providers.mjs';
@@ -176,6 +177,7 @@ export function normalizeOutreachLead(lead = {}) {
     website,
     market: text(lead.market),
     grade: text(lead.grade),
+    matchLevel: text(lead.assessment?.matchLevel),
     status: text(lead.status),
     type: text(lead.type),
     business,
@@ -459,7 +461,7 @@ export function selectOutreachCandidates({
       ? existing + (allocated.get(mailbox.id) || 0)
       : Number.POSITIVE_INFINITY;
   };
-  for (const raw of leads) {
+  for (const raw of [...leads].sort((a, b) => Number(b.grade === 'A') - Number(a.grade === 'A'))) {
     const lead = normalizeOutreachLead(raw);
     const assignment = array(campaign.senderAssignments).find(
       (row) => row.customerId === lead.customerId,
@@ -471,8 +473,6 @@ export function selectOutreachCandidates({
         'matched'
     )
       continue;
-    if (array(campaign.filters?.grades).length && !campaign.filters.grades.includes(lead.grade))
-      continue;
     const base = {
       customerId: lead.customerId,
       companyName: lead.companyName,
@@ -482,6 +482,26 @@ export function selectOutreachCandidates({
     };
     const reject = (reasonCode, reason) =>
       blocked.push({ ...base, reasonCode, reason, leadSnapshot: lead });
+    const grades = array(campaign.filters?.grades);
+    if (grades.length && !grades.includes(lead.grade)) {
+      if (
+        ['A', 'B', 'C'].includes(lead.grade) &&
+        grades.some((grade) => ['高优先', '常规开发'].includes(grade))
+      )
+        reject(
+          'legacy_grade_filter',
+          '计划仍使用旧高优先／常规开发筛选，请更新为 A/B/C 后重新核对',
+        );
+      continue;
+    }
+    if (lead.matchLevel === '不匹配' || ['待核实', '待补全', '暂不开发'].includes(lead.grade)) {
+      reject('match_unverified', '客户匹配依据待核实或已明确不匹配，暂缓自动首封');
+      continue;
+    }
+    if (assessmentSummaryFields(raw.assessment)['待确认事项']) {
+      reject('assessment_conflict', '客户经营事实或必需条件仍有冲突，暂缓自动首封');
+      continue;
+    }
     const identities = [lead.customerId, lead.companyDomain, ...lead.emails]
       .filter(Boolean)
       .map((v) => v.toLowerCase());

@@ -18,7 +18,7 @@ const textContent = (node) => {
 
 function setup(
   status = 'ready',
-  { cancelError, deliveryStatus = 'accepted', generationMode } = {},
+  { cancelError, deliveryStatus = 'accepted', generationMode, grades = [] } = {},
 ) {
   let campaign = {
     id: 'campaign-one',
@@ -35,7 +35,7 @@ function setup(
     intervalSeconds: 30,
     createdAt: '2026-10-26T07:38:00Z',
     cancelledAt: status === 'cancelled' ? '2026-10-27T03:00:00Z' : undefined,
-    filters: { markets: ['Australia'], grades: [], products: [] },
+    filters: { markets: ['Australia'], grades, products: [] },
     stats: { queued: 0, accepted: 1, failed: 0, unknown: 0, blocked: 0 },
   };
   const deliveries = [
@@ -180,6 +180,18 @@ test('自动计划草稿直接提供启动入口，不展示样稿准备或审�
   assert.equal(h.button('准备样稿'), undefined);
   assert.equal(h.button('批准此版本与样稿'), undefined);
   assert.deepEqual(h.writes(), []);
+});
+
+test('旧等级计划在列表和详情都提示需更新筛选，保留原筛选值可核对', async () => {
+  const h = setup('ready', { generationMode: 'simple', grades: ['高优先'] });
+  await h.ready();
+  assert.match(h.html(), /旧等级筛选需更新：高优先/);
+  h.click('执行详情');
+  h.render();
+  await flush();
+  assert.match(h.html(), /此计划使用旧版等级筛选（高优先）/);
+  assert.match(h.html(), /新评级客户会被阻断/);
+  assert.match(h.html(), /<dt>客户评级<\/dt>/);
 });
 
 test('活跃计划里的恢复后草稿保留明确审核入口，查看详情不会直接发送', async () => {

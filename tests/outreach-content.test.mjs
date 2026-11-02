@@ -98,6 +98,83 @@ test('首封按有来源的经营产品及当前审核版本匹配，不把评�
   assert.equal(chosen.leadSnapshot.status, '待开发');
 });
 
+test('旧高优先筛选遇到 A/B/C 显式阻断，新筛选可继续生成首封候选', () => {
+  const input = fixture();
+  input.leads[0].grade = 'A';
+  input.campaign.filters.grades = ['高优先'];
+  const legacy = selectOutreachCandidates(input);
+  assert.equal(legacy.eligible.length, 0);
+  assert.equal(legacy.blocked[0].reasonCode, 'legacy_grade_filter');
+  assert.match(legacy.blocked[0].reason, /更新为 A\/B\/C/);
+  input.campaign.filters.grades = ['A'];
+  assert.equal(selectOutreachCandidates(input).eligible.length, 1);
+});
+
+test('C 级资料缺项可进入首封候选，事实冲突仍单独阻断', () => {
+  const input = fixture();
+  input.leads[0].grade = 'C';
+  input.leads[0].assessment = { matchLevel: '待核实' };
+  const result = selectOutreachCandidates(input);
+  assert.equal(result.eligible.length, 1);
+  assert.equal(result.blocked.length, 0);
+});
+
+test('高优先客户的其他产品仍有事实冲突时暂停自动首封', () => {
+  const input = fixture();
+  input.leads[0].grade = 'A';
+  input.leads[0].assessment = {
+    matchLevel: '明确匹配',
+    opportunities: [
+      { direction: 'finished', product: 'PVC shutters', status: '高优先' },
+      {
+        direction: 'finished',
+        product: 'Other shades',
+        status: '待核实',
+        dimensions: { P: { conflict: true, missing: '同一产品的经营事实相互冲突，需核实' } },
+      },
+    ],
+  };
+  const result = selectOutreachCandidates(input);
+  assert.equal(result.eligible.length, 0);
+  assert.equal(result.blocked[0].reasonCode, 'assessment_conflict');
+});
+
+test('邮箱容量分配先给 A 级客户，B 级保持入库顺序', () => {
+  const input = fixture();
+  const base = input.leads[0];
+  input.leads = [
+    {
+      ...base,
+      id: 'regular',
+      website: 'https://regular.example.org',
+      grade: 'B',
+      email: 'info@regular.example.org',
+    },
+    {
+      ...base,
+      id: 'high',
+      website: 'https://high.example.org',
+      grade: 'A',
+      email: 'info@high.example.org',
+    },
+  ].map((lead) => ({
+    ...lead,
+    facts: lead.facts.map((fact) => ({ ...fact, source_url: lead.website + '/shutters' })),
+    contactEvidence: lead.contactEvidence.map((fact) => ({
+      ...fact,
+      value: lead.email,
+      source_url: lead.website + '/contact',
+      quote: `Contact ${lead.email} for business enquiries.`,
+    })),
+  }));
+  input.mailboxes[0].dailyLimit = 1;
+  const result = selectOutreachCandidates(input);
+  assert.deepEqual(
+    result.eligible.map((lead) => lead.customerId),
+    ['high'],
+  );
+});
+
 test('没有事实出处时，搜索标签和主营产品摘要不能单独触发发信', () => {
   const input = fixture();
   input.leads[0].facts = input.leads[0].facts.filter((fact) => fact.field !== 'products');
