@@ -83,6 +83,111 @@ function fixture() {
   return { leads: [lead], products: [product], mailboxes: [mailbox], campaign };
 }
 
+function recipients(input, rows) {
+  input.leads[0].email = rows.map(([local]) => `${local}@buyer.example.org`).join('\n');
+  input.leads[0].contactEvidence = rows.map(([local, description]) => ({
+    kind: 'email',
+    value: `${local}@buyer.example.org`,
+    quote: `${description}: ${local}@buyer.example.org`,
+    source_url: 'https://buyer.example.org/team',
+  }));
+}
+
+test('首封按职责选择采购、经营负责人、通用、销售，未知人名不抢占', () => {
+  const input = fixture();
+  const rows = [
+    ['alice', 'Unspecified'],
+    ['sales', 'Sales enquiries'],
+    ['info', 'Business enquiries'],
+    ['owner', 'Managing director'],
+    ['zoe', 'Purchasing manager'],
+  ];
+  for (const expected of ['zoe', 'owner', 'info', 'sales', 'alice']) {
+    recipients(input, rows);
+    assert.equal(selectOutreachCandidates(input).eligible[0].to, `${expected}@buyer.example.org`);
+    rows.splice(
+      rows.findIndex(([local]) => local === expected),
+      1,
+    );
+  }
+});
+
+test('采购并列时先核对品类市场，再选新供应商入口、采购联系人及稳定兜底', () => {
+  const input = fixture();
+  for (const [rows, expected] of [
+    [
+      [
+        ['a', 'Purchasing for roller blinds'],
+        ['z', 'Purchasing for PVC shutters'],
+      ],
+      'z',
+    ],
+    [
+      [
+        ['a', 'Purchasing. Region: Canada'],
+        ['z', 'Purchasing. Region: Australia'],
+      ],
+      'z',
+    ],
+    [
+      [
+        ['a', 'Purchasing manager'],
+        ['z', 'Contact for new suppliers'],
+      ],
+      'z',
+    ],
+    [
+      [
+        ['a', 'Procurement department'],
+        ['z', 'Purchasing manager'],
+      ],
+      'z',
+    ],
+    [
+      [
+        ['z', 'Procurement department'],
+        ['a', 'Procurement department'],
+      ],
+      'a',
+    ],
+  ]) {
+    recipients(input, rows);
+    const result = selectOutreachCandidates(input);
+    assert.equal(
+      result.eligible[0]?.to,
+      `${expected}@buyer.example.org`,
+      JSON.stringify(result.blocked),
+    );
+    input.leads[0].contactEvidence.reverse();
+    input.leads[0].email = input.leads[0].email.split('\n').reverse().join('\n');
+    assert.equal(selectOutreachCandidates(input).eligible[0]?.to, `${expected}@buyer.example.org`);
+  }
+});
+
+test('仅有受限邮箱时保留客户评级但不发首封，已排除或身份冲突也不放行', () => {
+  const input = fixture();
+  recipients(input, [
+    ['support', 'Customer support'],
+    ['accounts', 'Finance department'],
+  ]);
+  assert.equal(selectOutreachCandidates(input).blocked[0].reasonCode, 'contact_unverified');
+  assert.equal(input.leads[0].grade, 'B');
+  for (const state of [{ excluded: true }, { companyIdentity: { status: 'identity_conflict' } }]) {
+    const sample = fixture();
+    Object.assign(sample.leads[0], state);
+    assert.equal(selectOutreachCandidates(sample).eligible.length, 0);
+  }
+});
+
+test('旧待核实筛选兼容C，不把评级提升当作发信许可', () => {
+  const input = fixture();
+  input.campaign.filters.grades = ['待核实'];
+  input.leads[0].grade = 'C';
+  assert.equal(selectOutreachCandidates(input).eligible.length, 1);
+  input.leads[0].status = '已联系';
+  assert.equal(selectOutreachCandidates(input).eligible.length, 0);
+});
+
 test('首封按有来源的经营产品及当前审核版本匹配，不把评级当作采购意向', () => {
   const input = fixture();
   input.leads[0].grade = 'C';
@@ -180,11 +285,11 @@ test('已联系、历史未知、暂停、抑制和个人消费者都不会自�
   assert.equal(selectOutreachCandidates(input).blocked[0].reasonCode, 'business_unverified');
 });
 
-test('客户库已有邮箱时，不因出处标签未重复邮箱或采集方式而拦截', () => {
+test('官网明确售后用途即排除，猜测的职责不作为事实', () => {
   const input = fixture();
   input.leads[0].contactEvidence[0].method = 'mailto_link';
   input.leads[0].contactEvidence[0].quote = 'Email our customer support team';
-  assert.equal(selectOutreachCandidates(input).eligible.length, 1);
+  assert.equal(selectOutreachCandidates(input).eligible.length, 0);
   input.leads[0].contactEvidence[0].method = 'guessed';
   assert.equal(selectOutreachCandidates(input).eligible.length, 1);
 });
@@ -278,7 +383,7 @@ test('依据隐私页的原文用途排除退订及数据权利地址，保留�
   }
 });
 
-test('隐私或法律页面仍可证明普通商务邮箱，适合的同优先级地址继续要求确认', () => {
+test('隐私或法律页面仍可证明普通商务邮箱，适合的同优先级地址稳定选择一个', () => {
   for (const path of ['/privacy-policy', '/legal']) {
     const input = fixture();
     const lead = input.leads[0];
@@ -293,7 +398,7 @@ test('隐私或法律页面仍可证明普通商务邮箱，适合的同优先�
       quote: 'For product enquiries contact contact@buyer.example.org',
       source_url: `https://buyer.example.org${path}`,
     });
-    assert.equal(selectOutreachCandidates(input).blocked[0].reasonCode, 'contact_ambiguous');
+    assert.equal(selectOutreachCandidates(input).eligible.length, 1);
   }
 });
 
@@ -350,7 +455,7 @@ test('同一产品有多个获准邮箱时，暂停其中一个仍可由其他�
   assert.equal(result.blocked.length, 0);
 });
 
-test('没有明确产品范围的邮箱不能发送，有范围后多个同优先级收件人仍需确认', () => {
+test('没有明确产品范围的邮箱不能发送，有范围后多个同优先级收件人稳定选择一个', () => {
   const input = fixture();
   input.mailboxes.push({ ...input.mailboxes[0], id: 'brand-b' });
   input.campaign.mailboxIds.push('brand-b');
@@ -370,7 +475,7 @@ test('没有明确产品范围的邮箱不能发送，有范围后多个同优�
     quote: 'contact@buyer.example.org',
     source_url: 'https://buyer.example.org/contact',
   });
-  assert.equal(selectOutreachCandidates(input).blocked[0].reasonCode, 'contact_ambiguous');
+  assert.equal(selectOutreachCandidates(input).eligible.length, 1);
 });
 
 test('变更产品版本、撤回审核、未来生效或没有当前公司产品文案时不生成', () => {

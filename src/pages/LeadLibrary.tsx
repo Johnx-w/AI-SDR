@@ -287,8 +287,8 @@ export function LeadLibrary() {
             value: leads.filter((l) => l.grade === 'A').length,
           },
           {
-            name: '待补资料',
-            value: leads.filter((l) => ['未评级', '待核实', '待补全'].includes(l.grade)).length,
+            name: 'C 级客户',
+            value: leads.filter((l) => l.grade === 'C').length,
           },
           { name: '已记录邮箱', value: leads.filter((l) => l.email).length },
         ].map((x) => (
@@ -330,7 +330,7 @@ export function LeadLibrary() {
               label: '评级',
               val: grade,
               set: setGrade,
-              options: [...new Set(['A', 'B', 'C', '待核实', ...leads.map((l) => l.grade)])],
+              options: ['A', 'B', 'C'],
             },
             {
               label: '产品',
@@ -468,11 +468,11 @@ export function LeadLibrary() {
                     <td>
                       <div className="reference-score">
                         <span className={'grade-box grade-' + l.grade}>
-                          {l.score === null || !['A', 'B', 'C'].includes(l.grade) ? '—' : l.grade}
+                          {['A', 'B', 'C'].includes(l.grade) ? l.grade : '—'}
                         </span>
                         <div>
                           <strong>
-                            {l.grade}
+                            {l.grade || '已排除'}
                             <small>{l.score === null ? '' : ' · 已支持' + l.score + '分'}</small>
                           </strong>
                           {l.score !== null ? (
@@ -480,9 +480,7 @@ export function LeadLibrary() {
                               <i style={{ width: l.score + '%' }} />
                             </div>
                           ) : (
-                            <span className="subtext">
-                              {l.grade === '未评级' ? '尚未自动评级' : '手工记录'}
-                            </span>
+                            <span className="subtext">尚无自动评级依据</span>
                           )}
                           <button
                             className="rating-reason-short text-link"

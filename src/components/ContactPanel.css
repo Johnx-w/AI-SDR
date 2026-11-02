@@ -75,12 +75,20 @@
   gap: 9px;
   overflow-wrap: anywhere;
 }
-.contact-primary-values > a {
+.contact-address > a {
   color: var(--color-primary-text);
   text-decoration: underline;
   text-underline-offset: 3px;
   font-size: 14px;
   font-weight: 500;
+}
+.contact-address {
+  display: grid;
+  gap: 4px;
+}
+.contact-address small {
+  font-size: 12px;
+  color: var(--color-text-muted);
 }
 .contact-not-recorded {
   font-size: 12px;

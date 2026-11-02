@@ -2,15 +2,13 @@ import { createHash } from 'node:crypto';
 import { domainKey } from './website-identity.mjs';
 import { customerWebsite } from './customer-fields.mjs';
 import { businessProductRelation, windowProductDirections } from './relevance.mjs';
+import { customerGrade } from '../src/domain/customer-grade.mjs';
 
-export const ASSESSMENT_RULE_VERSION = 'acquisition-v3.2';
+export const ASSESSMENT_RULE_VERSION = 'acquisition-v3.3';
 export const directionNames = { finished: '成品', materials: '材料配件', samples: '样本展示' };
 export const ASSESSMENT_HISTORY_FORMAT = 'evidence-v1';
 export function assessmentRating(snapshot) {
-  return (
-    snapshot.grade ||
-    (['待核实', '待补全', '暂不开发'].includes(snapshot.status) ? snapshot.status : '待核实')
-  );
+  return customerGrade(snapshot.grade, snapshot.status) || null;
 }
 const labels = {
   P: '产品契合',
@@ -143,30 +141,28 @@ function gradeOpportunity(opportunity, dimensions, research) {
   const { P, R } = dimensions;
   const supported = Object.values(dimensions).reduce((sum, d) => sum + (d.score ?? 0), 0);
   const has = (...kinds) => (opportunity.facts || []).some((f) => kinds.includes(f.kind));
-  let grade = null,
+  let grade = 'C',
     status;
-  if (P.conflict || R.conflict || has('identity_conflict', 'mandatory_requirement'))
-    status = '待核实';
-  else if (research.entity_type === 'individual' || P.score === 0 || R.score === 0)
+  if (research.entity_type === 'individual' || P.score === 0 || R.score === 0) {
+    grade = null;
     status = '暂不开发';
+  } else if (P.conflict || R.conflict || has('identity_conflict', 'mandatory_requirement'))
+    status = '待核实';
   else if (research.entity_type !== 'business') status = '待核实';
   else if (P.score === null || R.score === null) {
     // Business/product evidence has already passed source verification. Unknown
     // score dimensions lower the initial priority without erasing that prospect.
     grade = 'C';
-    status = '常规开发';
+    status = '低投入开发';
   } else if (P.score < 30 || R.score < 25) {
     grade = 'C';
-    status = '常规开发';
+    status = '低投入开发';
   } else if (supported >= 75) {
     grade = 'A';
     status = '优先开发';
-  } else if (supported >= 60) {
+  } else {
     grade = 'B';
     status = '可开发';
-  } else {
-    grade = 'C';
-    status = '常规开发';
   }
   return { grade, status, score: supported };
 }
@@ -192,10 +188,7 @@ export function assessCompany({ research, target, at = Date.now(), id }) {
           direction: windowProductDirections(productFact.value)[0],
           product: productFact.value,
           relationship: relation.kind,
-          facts: [
-            { ...productFact, kind: 'secondary_product' },
-            { ...productFact, kind: 'general_supply', value: '官网经营相关产品线，采购方式待沟通' },
-          ],
+          facts: [{ ...productFact, kind: 'secondary_product' }],
         },
       ];
     }
@@ -267,7 +260,7 @@ export function assessCompany({ research, target, at = Date.now(), id }) {
         ? { environment_preference: target.environment_preference }
         : {}),
     },
-    grade: best?.grade || null,
+    grade: best ? best.grade : research.entity_type === 'individual' ? null : 'C',
     status: best?.status || (research.entity_type === 'individual' ? '暂不开发' : '待核实'),
     score: best?.score ?? 0,
     complete: best?.complete || false,
@@ -316,7 +309,7 @@ export function formatAssessmentReason(snapshot) {
             snapshot.supplyOpportunity.note,
         ]
       : []),
-    '用户评级：' + assessmentRating(snapshot) + '；' + snapshot.status,
+    '用户评级：' + (assessmentRating(snapshot) || '已排除') + '；' + snapshot.status,
     '已支持分数：' +
       snapshot.score +
       '/100；' +
@@ -449,6 +442,7 @@ export function readAssessmentSummary(value) {
     score,
     ruleVersion,
     evaluatedAt,
+    status: reason.match(/(?:^|\n)用户评级：[^；\n]*；([^\n]*)/)?.[1] || '',
     complete: reason.includes('；资料完整') || reason.includes('；评分维度依据齐全'),
     assumed: false,
   };

@@ -1,4 +1,5 @@
 import { Fragment } from 'react';
+import { customerGrade } from '../domain/customer-grade.mjs';
 import { ArrowUpRight } from 'lucide-react';
 import { Badge } from './ui';
 import type { CustomsBuyerEvidence } from '../domain/types';
@@ -343,7 +344,8 @@ export function AssessmentPanel({
       {assessment ? (
         <div className="assessment-current">
           <strong>
-            {assessment.grade || assessment.status || '未评级'} · 已支持 {assessment.score}/100
+            {customerGrade(assessment.grade, assessment.status) || '已排除'} · 已支持{' '}
+            {assessment.score}/100
           </strong>
           <Badge>{assessment.complete ? '评分维度完整' : '含未知维度'}</Badge>
           {assessment.manualOverride && <Badge>主表评级已人工修改</Badge>}

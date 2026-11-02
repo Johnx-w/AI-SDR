@@ -122,7 +122,7 @@ test('历史配件目录恢复用途后正常入库、读回并保留待核实�
     assert.equal(assessment.grade, 'C');
     assert.equal(assessment.direction, 'materials');
     assert.equal(assessment.product, product);
-    assert.equal(assessment.score, 55);
+    assert.equal(assessment.score, 30);
     assert.equal(assessment.complete, false);
     assert.equal(assessment.opportunities.length, 1);
     assert.equal(assessment.dimensions.D.score, null);

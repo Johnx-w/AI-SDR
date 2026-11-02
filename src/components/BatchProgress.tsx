@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import type { AcquisitionJob, CustomsBuyerEvidence } from '../domain/types';
 import { acquisitionApi } from '../services/acquisition';
+import { customerGrade } from '../domain/customer-grade.mjs';
 
 const states = {
   running: '正在收录',
@@ -287,7 +288,7 @@ function DetailRows({
                   : resultNames[row.result] || row.result}
               {row.assessment && (
                 <small>
-                  {row.assessment.grade || row.assessment.status || '未定级'} · 已支持
+                  {customerGrade(row.assessment.grade, row.assessment.status) || '已排除'} · 已支持
                   {row.assessment.score}分
                 </small>
               )}

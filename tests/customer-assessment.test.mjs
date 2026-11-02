@@ -7,6 +7,7 @@ import {
   formatAssessmentReason,
   formatAssessmentEvidence,
   readAssessmentSummary,
+  assessmentRating,
 } from '../server/customer-assessment.mjs';
 import { mapFeishuRecord } from '../server/feishu.mjs';
 
@@ -30,6 +31,31 @@ function evaluate(facts, overrides = {}) {
   });
 }
 
+test('产品与经营角色已确认时至少为B，不因缺少辅助资料降为C', () => {
+  const result = evaluate(['secondary_product', 'general_supply'].map((kind) => fact(kind)));
+  assert.equal(result.score, 55);
+  assert.equal(result.grade, 'B');
+  assert.equal(result.complete, false);
+});
+
+test('待核实业务归C，明确不匹配单独排除，旧待核实等级统一读取', () => {
+  const pending = evaluate([
+    fact('core_product'),
+    fact('specialist_supply'),
+    fact('identity_conflict'),
+  ]);
+  assert.equal(pending.grade, 'C');
+  assert.equal(pending.status, '待核实');
+  for (const status of ['待核实', '待补全', '未评级'])
+    assert.equal(assessmentRating({ status }), 'C');
+  const excluded = evaluate([fact('unrelated_product'), fact('specialist_supply')]);
+  assert.equal(excluded.status, '暂不开发');
+  assert.equal(assessmentRating(excluded), null);
+  const lead = mapFeishuRecord({ fields: { 用户评级: null, 评级依据: excluded.reason } });
+  assert.equal(lead.excluded, true);
+  assert.equal(lead.grade, '');
+});
+
 test('初评四项可独立达到100分，不依赖海关，摘要可经飞书读回', () => {
   const result = evaluate([
     ...baseline.map((k) => fact(k)),
@@ -37,7 +63,7 @@ test('初评四项可独立达到100分，不依赖海关，摘要可经飞书�
     fact('motorized_system'),
     ...Array.from({ length: 5 }, (_, i) => fact('operating_outlet', `Showroom ${i}`)),
   ]);
-  assert.equal(result.ruleVersion, 'acquisition-v3.2');
+  assert.equal(result.ruleVersion, 'acquisition-v3.3');
   assert.equal(result.score, 100);
   assert.equal(result.grade, 'A');
   assert.equal(result.complete, true);
@@ -55,7 +81,7 @@ test('初评四项可独立达到100分，不依赖海关，摘要可经飞书�
   });
   assert.equal(lead.score, 100);
   assert.equal(lead.assessment.complete, true);
-  assert.equal(lead.assessment.ruleVersion, 'acquisition-v3.2');
+  assert.equal(lead.assessment.ruleVersion, 'acquisition-v3.3');
 });
 
 test('持续经营中档按15分计算；95分来自真实业务证据而非海关假设', () => {
@@ -88,7 +114,7 @@ test('同一网点重复出现不触发20分档', () => {
   assert.equal(result.score, 75);
 });
 
-test('新档位门槛保留A75与B60，未知V不按比例放大', () => {
+test('A需优先投入依据，B确认匹配即可，未知V不按比例放大', () => {
   const a = evaluate(baseline.map((k) => fact(k)));
   assert.equal(a.score, 75);
   assert.equal(a.grade, 'A');
@@ -140,7 +166,7 @@ test('已核实卷帘业务但经营角色未知时保留C初评，最佳成品�
     id: 'fixture-partial-role',
   });
   assert.equal(result.grade, 'C');
-  assert.equal(result.status, '常规开发');
+  assert.equal(result.status, '低投入开发');
   assert.equal(result.score, 40);
   assert.equal(result.dimensions.R.score, null, '未知角色不补分');
   assert.equal(result.supplyOpportunity.procurementStatus, 'unconfirmed');
@@ -149,8 +175,8 @@ test('已核实卷帘业务但经营角色未知时保留C初评，最佳成品�
 
 test('邻近产品、仅安装、身份冲突与明确无关仍限制初评', () => {
   for (const [product, role, extra, status] of [
-    ['adjacent_product', 'specialist_supply', [], '常规开发'],
-    ['core_product', 'installation_only', [], '常规开发'],
+    ['adjacent_product', 'specialist_supply', [], '低投入开发'],
+    ['core_product', 'installation_only', [], '低投入开发'],
     ['core_product', 'specialist_supply', [fact('identity_conflict')], '待核实'],
     ['unrelated_product', 'specialist_supply', [], '暂不开发'],
   ]) {
@@ -171,7 +197,7 @@ test('邻近产品、仅安装、身份冲突与明确无关仍限制初评', ()
 test('无可用机会时只有四项未知，不生成海关缺项', () => {
   const result = evaluate([], { assessment_opportunities: [] });
   assert.equal(result.score, 0);
-  assert.equal(result.grade, null);
+  assert.equal(result.grade, 'C');
   assert.equal(result.complete, false);
   assert.deepEqual(Object.keys(result.dimensions), ['P', 'R', 'D', 'V']);
   assert.doesNotMatch(result.reason, /海关/);

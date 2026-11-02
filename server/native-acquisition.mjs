@@ -341,7 +341,7 @@ export class NativeAcquisition {
               ruleVersion: stored.ruleVersion,
               evaluatedAt: stored.evaluatedAt,
               score: stored.score,
-              grade: manualOverride ? (lead.grade === '未评级' ? null : lead.grade) : stored.grade,
+              grade: manualOverride ? lead.grade : assessmentRating(stored),
               status: manualOverride ? '主表评级已修改；后台保留最新自动评估供核对' : stored.status,
               complete: stored.complete,
               manualOverride,
@@ -975,7 +975,15 @@ export class NativeAcquisition {
           research.company_identity.status,
         ) &&
         research.company_identity.status !== 'identity_conflict';
+      const initialAssessment = !item.target_record_id
+        ? assessCompany({
+            research,
+            target: input,
+            id: assessmentId(this.assessments.scope, op.id),
+          })
+        : null;
       const hardMismatch =
+        initialAssessment?.status === '暂不开发' ||
         research.entity_type === 'individual' ||
         research.product_match === 'not_matched' ||
         research.country_match === 'not_matched' ||
@@ -1082,16 +1090,18 @@ export class NativeAcquisition {
           (f) => f.field_name === resolveCustomerField(definitions, '用户评级') && f.type === 3,
         )
       ) {
-        op.assessment = assessCompany({
-          research: old
-            ? applySupplementsToResearch(
-                research,
-                this.supplements.confirmations(old.record_id, item.source_url),
-              )
-            : research,
-          target: input,
-          id: assessmentId(this.assessments.scope, op.id),
-        });
+        op.assessment =
+          initialAssessment ||
+          assessCompany({
+            research: old
+              ? applySupplementsToResearch(
+                  research,
+                  this.supplements.confirmations(old.record_id, item.source_url),
+                )
+              : research,
+            target: input,
+            id: assessmentId(this.assessments.scope, op.id),
+          });
         if (old)
           resolveConfirmedPending(
             op.assessment,
@@ -1313,7 +1323,7 @@ export class NativeAcquisition {
       },
       reason: op.assessment
         ? op.assessment.incompleteReason
-          ? '研究资料不足，已保存待核实评级与最新依据并核对'
+          ? '研究资料不足，已保存当前评级与待核实事项并核对'
           : '企业资料与当前评级已读回，最新评估依据已保存'
         : this.feishu.localFirst
           ? '客户档案已保存至本地数据库，飞书同步在后台核对'

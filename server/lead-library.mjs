@@ -4,10 +4,16 @@ import { dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { customerWebsite } from './customer-fields.mjs';
 import { domainKey } from './website-identity.mjs';
+import { customerGrade } from '../src/domain/customer-grade.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const plainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const text = (value) => (typeof value === 'string' ? value : '');
+const readCurrentLead = (value) => {
+  const lead = JSON.parse(value);
+  const grade = customerGrade(lead.grade, lead.excluded ? '暂不开发' : lead.assessment?.status);
+  return { ...lead, grade, ...(!grade ? { excluded: true } : {}) };
+};
 const contentVersion = (value) =>
   createHash('sha256')
     .update(
@@ -43,9 +49,9 @@ function ratingSummary(lead) {
     .filter(Boolean);
   const pending = lines.find((line) => /^(待补充依据|待补充)[:：]/.test(line));
   const reason =
-    (['待核实', '待补全', '未评级'].includes(lead.grade) ? pending : '') ||
+    (customerGrade(lead.grade) === 'C' ? pending : '') ||
     lines.find((line) => /^(主营产品|明确经营品类|专业供货角色|综合供货角色)[:：]/.test(line)) ||
-    (['待核实', '待补全', '未评级'].includes(lead.grade) ? '关键依据待补充' : '查看评级依据');
+    (customerGrade(lead.grade) === 'C' ? '低投入开发，依据待核实' : '查看评级依据');
   return reason.length > 46 ? reason.slice(0, 45) + '…' : reason;
 }
 
@@ -105,6 +111,7 @@ export function summarizeLead(lead) {
           status: lead.companyIdentity.status || '',
         }
       : null,
+    ...(lead.excluded ? { excluded: true } : {}),
     ratingSummary: ratingSummary(lead),
     contactSummary: contactSummary(lead),
     customsSummary: {
@@ -294,7 +301,7 @@ export class LeadLibrary {
           `SELECT ${column} AS data FROM lead_library_customers WHERE scope=? ORDER BY position,record_id`,
         )
         .all(this.scope)
-        .map((row) => JSON.parse(row.data)),
+        .map((row) => readCurrentLead(row.data)),
       ...this.metadata(),
     };
   }
@@ -331,7 +338,7 @@ export class LeadLibrary {
       .prepare('SELECT detail,version FROM lead_library_customers WHERE scope=? AND record_id=?')
       .get(this.scope, id);
     if (!row) throw fail(404, '客户不存在，请刷新客户库');
-    return { lead: JSON.parse(row.detail), version: row.version, ...this.metadata() };
+    return { lead: readCurrentLead(row.detail), version: row.version, ...this.metadata() };
   }
 
   refresh({ afterCurrent = false } = {}) {

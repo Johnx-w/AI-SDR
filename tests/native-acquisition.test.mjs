@@ -183,6 +183,41 @@ function fixture({
 
 const policyFact = (value, quote) => ({ value, quote, source_url: site });
 
+test('确认没有供货角色的新企业不入库，缺评级字段也不能绕过准入', async () => {
+  const quote = 'We do not supply zip screens.';
+  for (const automaticAssessment of [false, true]) {
+    const f = fixture({
+      automaticAssessment,
+      pageText: sourceText + ' ' + quote,
+      modelOverrides: {
+        assessment_opportunities: [
+          {
+            direction: 'finished',
+            product: 'zip screens',
+            facts: [
+              { kind: 'core_product', value: 'zip screens', quote: sourceText, source_url: site },
+              { kind: 'no_supply_role', value: 'no supply', quote, source_url: site },
+            ],
+          },
+        ],
+      },
+    });
+    const svc = f.make();
+    try {
+      const result = await svc.research(input, {
+        source_url: site,
+        operation_id: `excluded-${automaticAssessment}`,
+      });
+      assert.equal(result.research.product_match, 'matched');
+      assert.equal(result.research.entity_type, 'business');
+      assert.equal(result.新增, 0);
+      assert.equal(f.records.length, 0);
+    } finally {
+      svc.close();
+    }
+  }
+});
+
 test('精简后的中部经营证据贯通研究、初评、模拟写入及读回，统计实际节省字符', async () => {
   const f = fixture({
     pageText:

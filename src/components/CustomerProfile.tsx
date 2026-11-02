@@ -164,7 +164,11 @@ export function CustomerProfile({
     ...(lead.source ? [['发现来源', lead.source]] : []),
     ...(lead.advertisingCodes ? [['广告代码', lead.advertisingCodes]] : []),
   ];
-  const priority: Record<string, string> = { A: '优先开发', B: '可开发', C: '较低优先级' };
+  const priority: Record<string, string> = {
+    A: '优先开发',
+    B: '常规开发',
+    C: '低投入开发 / 待核实',
+  };
   const audience =
     (
       { B: '企业客户', C: '个人客户', BC: '企业与个人客户', 'B+C': '企业与个人客户' } as Record<
@@ -178,7 +182,7 @@ export function CustomerProfile({
         <div className="profile-overview-heading">
           <div className="profile-priority">
             <Badge tone={lead.grade === 'A' ? 'blue' : 'neutral'}>
-              {lead.grade}
+              {lead.grade || '已排除'}
               {priority[lead.grade] ? ' · ' + priority[lead.grade] : ''}
             </Badge>
             {lead.score !== null && <span>已支持 {lead.score}/100</span>}

@@ -40,6 +40,31 @@ const deferred = () => {
 };
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
+test('旧缓存中的待核实等级立即展示为C，明确排除不转为可开发客户', async () => {
+  const library = new LeadLibrary({
+    readLeads: async () =>
+      response([lead({ grade: '待核实' }), lead({ id: 'excluded', grade: '暂不开发' })]),
+  });
+  try {
+    await library.refresh();
+    assert.equal(library.snapshot().leads[0].grade, 'C');
+    assert.equal((await library.detail('rec-1')).lead.grade, 'C');
+    assert.equal(library.snapshot().leads[1].excluded, true);
+    assert.equal((await library.detail('excluded')).lead.grade, '');
+    assert.equal(
+      library.db
+        .prepare('SELECT detail FROM lead_library_customers WHERE record_id=?')
+        .get('rec-1')
+        .detail.includes('待核实'),
+      true,
+    );
+    await library.refresh();
+    assert.equal((await library.detail('excluded')).lead.grade, '');
+  } finally {
+    library.close();
+  }
+});
+
 test('summary omits full dossiers while preserving rating, contact and customs indicators', () => {
   const summary = summarizeLead(
     lead({
@@ -84,7 +109,7 @@ test('summary omits full dossiers while preserving rating, contact and customs i
   );
   assert.equal(
     summarizeLead(lead({ grade: '未评级', ratingReason: '', assessment: null })).ratingSummary,
-    '关键依据待补充',
+    '低投入开发，依据待核实',
   );
 });
 

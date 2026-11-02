@@ -16,10 +16,13 @@ test('当前邮箱按大小写和常用分隔符去重，电话仅规范可确�
     phone:
       '+1 (972) 696-0181\n001 972 696 0181\n+1-972-696-0181 ext. 22\n+19726960181;ext=22\n+19726960181 x 23\n(972) 696-0181',
   });
-  assert.deepEqual(result.emails, [
-    { value: 'Sales@Buyer.example.org', href: 'mailto:Sales@Buyer.example.org' },
-    { value: 'info@buyer.example.org', href: 'mailto:info@buyer.example.org' },
-  ]);
+  assert.deepEqual(
+    result.emails.map(({ value, href }) => ({ value, href })),
+    [
+      { value: 'Sales@Buyer.example.org', href: 'mailto:Sales@Buyer.example.org' },
+      { value: 'info@buyer.example.org', href: 'mailto:info@buyer.example.org' },
+    ],
+  );
   assert.equal(result.phones.length, 4);
   assert.equal(result.phones[0].href, 'tel:+19726960181');
   assert.equal(result.phones[1].href, 'tel:+19726960181;ext=22');
@@ -34,7 +37,10 @@ test('人工清空后的联系方式不从历史采集记录中复活，原始�
     phone: '',
     contactEvidence: [original, evidence('phone', '+1 9726960181')],
   });
-  assert.deepEqual(result.emails, []);
+  assert.deepEqual(
+    result.emails.map(({ value, href }) => ({ value, href })),
+    [],
+  );
   assert.deepEqual(result.phones, []);
   assert.equal(result.evidenceGroups.length, 2);
   assert.deepEqual(result.evidenceGroups[0].records[0], {

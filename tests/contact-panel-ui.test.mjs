@@ -79,6 +79,14 @@ const render = (overrides = {}, editable = true) =>
       ...(editable ? { onSaved() {} } : {}),
     }),
   );
+
+test('邮箱旁展示用途、推测依据及不用于开发标记', () => {
+  const html = render();
+  assert.match(html, /销售咨询（推测）/);
+  assert.match(html, /售后服务（推测）/);
+  assert.match(html, /邮箱名称推测/);
+  assert.match(html, /不用于开发/);
+});
 const initialView = (html) =>
   html.replace(/<details\b([^>]*)>([\s\S]*?)<\/details>/g, (all, attributes, content) =>
     /\bopen(?:=|\s|$)/.test(attributes)

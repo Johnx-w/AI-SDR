@@ -536,7 +536,7 @@ test('已有第三方贸易档案只更新待核实评级与最新依据，保�
     assert.equal(result.assessment.score, 0);
     assert.equal(result.assessment.complete, false);
     assert.deepEqual(calls, { read: 0, extract: 0, model: 0 });
-    assert.match(record.fields['用户评级'], /待核实/);
+    assert.equal(record.fields['用户评级'], 'C');
     assert.match(record.fields['评级依据'], /第三方贸易\/平台档案.*不是企业官网/);
     assert.deepEqual(
       Object.fromEntries(Object.keys(businessFields).map((key) => [key, record.fields[key]])),

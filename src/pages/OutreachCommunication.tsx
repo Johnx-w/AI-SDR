@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { customerGrade } from '../domain/customer-grade.mjs';
 import type { FormEvent, ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -537,7 +538,11 @@ function CampaignEditor({
   );
   const [selectedProducts, setSelectedProducts] = useState(campaign?.filters?.products || []);
   const [selectedCategories, setSelectedCategories] = useState(campaign?.filters?.categories || []);
-  const [grades, setGrades] = useState(campaign?.filters?.grades || []);
+  const [grades, setGrades] = useState([
+    ...new Set(
+      (campaign?.filters?.grades || []).map((grade) => customerGrade(grade)).filter(Boolean),
+    ),
+  ]);
   const [claims, setClaims] = useState<Record<string, string>>(() =>
     Object.fromEntries(
       campaign
@@ -681,7 +686,7 @@ function CampaignEditor({
         </div>
         <span className="outreach-field-label">客户评级 · 不选表示不限制评级</span>
         <div className="outreach-choices">
-          {['A', 'B', 'C', '待核实', '待补全'].map((grade) => (
+          {['A', 'B', 'C'].map((grade) => (
             <label
               className={`outreach-choice ${grades.includes(grade) ? 'selected' : ''}`}
               key={grade}
@@ -1973,8 +1978,13 @@ export function OutreachCommunication() {
                         <div>
                           <dt>评级</dt>
                           <dd>
-                            {shownDetail.campaign.filters?.grades.join('、') ||
-                              '不限制评级，仍须具备匹配与联系依据'}
+                            {[
+                              ...new Set(
+                                shownDetail.campaign.filters?.grades
+                                  .map((grade) => customerGrade(grade))
+                                  .filter(Boolean),
+                              ),
+                            ].join('、') || '不限制评级，仍须具备匹配与联系依据'}
                           </dd>
                         </div>
                         <div>

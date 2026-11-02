@@ -1,3 +1,5 @@
+import { emailPurpose } from './email-purpose.mjs';
+
 const text = (value) => (value === undefined || value === null ? '' : String(value));
 const keyText = (value) => text(value).trim().toLowerCase().replace(/\s+/g, ' ');
 const control = /[\u0000-\u001f\u007f]/;
@@ -159,7 +161,14 @@ export function buildContactPresentation(lead = {}) {
   }
 
   return {
-    emails: currentValues(lead.email, 'email'),
+    emails: currentValues(lead.email, 'email').map((item) => ({
+      ...item,
+      purpose: emailPurpose(
+        item.value,
+        Array.isArray(lead.contactEvidence) ? lead.contactEvidence : [],
+        lead.website,
+      ),
+    })),
     phones: currentValues(lead.phone, 'phone'),
     social: [...socials.values()],
     evidenceGroups: [...groups.values()],

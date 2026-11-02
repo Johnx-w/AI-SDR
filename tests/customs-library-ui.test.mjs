@@ -119,8 +119,10 @@ test('客户库筛选展示中文市场、固定评级顺序和完整开发状�
   assert.equal((marketOptions.match(/<option value="待核实">待核实<\/option>/g) || []).length, 1);
   assert.match(
     html,
-    /<option value="A">A<\/option><option value="B">B<\/option><option value="C">C<\/option><option value="待核实">待核实<\/option>/,
+    /<option value="A">A<\/option><option value="B">B<\/option><option value="C">C<\/option>/,
   );
+  const gradeOptions = html.match(/<select aria-label="评级筛选"[^>]*>([\s\S]*?)<\/select>/)?.[1];
+  assert.doesNotMatch(gradeOptions, /待核实|待补全|未评级/);
   for (const status of [
     '待开发',
     '已联系',

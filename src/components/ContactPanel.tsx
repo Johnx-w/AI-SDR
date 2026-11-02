@@ -206,15 +206,20 @@ export function ContactPanel({
               </h4>
               {channel.values.length ? (
                 <div className="contact-primary-values">
-                  {channel.values.map((item) =>
-                    item.href ? (
-                      <a href={item.href} key={item.value}>
-                        {item.value}
-                      </a>
-                    ) : (
-                      <span key={item.value}>{item.value}</span>
-                    ),
-                  )}
+                  {channel.values.map((item) => (
+                    <div className="contact-address" key={item.value}>
+                      {item.href ? <a href={item.href}>{item.value}</a> : <span>{item.value}</span>}
+                      {item.purpose && (
+                        <small title={item.purpose.quote || item.purpose.basis}>
+                          {item.purpose.label}
+                          {item.purpose.inferred ? '（推测）' : ''}
+                          {' · '}
+                          {item.purpose.basis}
+                          {!item.purpose.eligible && ' · 不用于开发'}
+                        </small>
+                      )}
+                    </div>
+                  ))}
                 </div>
               ) : (
                 <p className="contact-not-recorded">{channel.empty}</p>

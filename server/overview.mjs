@@ -197,7 +197,7 @@ export class OverviewService {
         customerId,
         name: customer?.name || `${customerId}（企业资料暂不可用）`,
         market: customer?.market || '未记录',
-        grade: customer?.grade || '未评级',
+        grade: customer?.grade || 'C',
         ...value,
       });
     };

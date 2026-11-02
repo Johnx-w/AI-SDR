@@ -4,6 +4,7 @@ import { readAssessmentSummary } from './customer-assessment.mjs';
 import { domainKey } from './website-identity.mjs';
 import { customerSource, customerWebsite, fieldValue } from './customer-fields.mjs';
 import { normalizeDevelopmentStatus } from './lead-development.mjs';
+import { customerGrade } from '../src/domain/customer-grade.mjs';
 
 export const fieldText = (value) => {
   if (value == null) return '';
@@ -56,7 +57,8 @@ export function mapFeishuRecord(record) {
     match: '',
     score: assessment?.score ?? null,
     assessment,
-    grade: ['A', 'B', 'C', '待核实', '待补全', '暂不开发'].includes(grade) ? grade : '未评级',
+    grade: customerGrade(grade, assessment?.status),
+    excluded: grade === '暂不开发' || assessment?.status === '暂不开发',
     ratingReason: read('评级依据'),
     status: normalizeDevelopmentStatus(read('开发状态')),
     region: read('州 / 城市'),

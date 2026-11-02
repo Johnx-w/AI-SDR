@@ -48,7 +48,7 @@ test('真实零售卷帘机会贴materials标签不能用成品定制和消费�
     products,
   );
   assert.deepEqual(opportunities, []);
-  assert.equal(evaluate(opportunities).grade, null);
+  assert.equal(evaluate(opportunities).grade, 'C');
 });
 
 test('specific也核对每个计分引文方向，不把成品供货定制电动和结账挪给真实面料副线', () => {
@@ -123,11 +123,11 @@ test('只有已核实卷帘产品线时仍给企业C初评级，错误材料标�
     id: 'fixture-catalog-assessment',
   });
   assert.equal(result.grade, 'C');
-  assert.equal(result.status, '常规开发');
+  assert.equal(result.status, '低投入开发');
   assert.equal(result.direction, 'finished');
   assert.equal(result.product, 'roller blinds');
   assert.equal(result.supplyOpportunity.procurementStatus, 'unconfirmed');
-  assert.equal(result.score, 55);
+  assert.equal(result.score, 30);
 });
 
 test('真正的面料分销可计材料机会，不要求公开采购需求', () => {

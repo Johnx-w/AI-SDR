@@ -1,3 +1,4 @@
+import type { EmailPurpose } from './email-purpose.mjs';
 export interface ContactPresentationRecord {
   label: string;
   value: string;
@@ -7,6 +8,7 @@ export interface ContactPresentationRecord {
 export interface ContactPresentationValue {
   value: string;
   href?: string;
+  purpose?: EmailPurpose;
 }
 export interface ContactPresentationSocial {
   platform: string;
@@ -21,6 +23,7 @@ export interface ContactPresentationEvidenceGroup {
   records: ContactPresentationRecord[];
 }
 export interface ContactPresentationLead {
+  website?: string;
   email?: string;
   phone?: string;
   contactEvidence?: {
