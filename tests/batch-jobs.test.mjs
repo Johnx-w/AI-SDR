@@ -80,6 +80,51 @@ test('全局淘汰和证据不足的候选不占新增名额，队列继续补�
     assert.equal(result.pending, 0);
     assert.equal(result.reason, 'research_limit');
     assert.ok(result.rows.every((row) => row.result === 'rejected'));
+    assert.ok(result.rows.every((row) => !('source_url' in row) && !('domain' in row)));
+  } finally {
+    manager.close();
+  }
+});
+
+test('明确排除只保留统计明细，终态清除待处理候选', async () => {
+  const usage = { model_calls: 1, cache_hits: 0, input_chars: 100 };
+  const { manager } = harness({
+    discover: async () => ({
+      candidates: [
+        { source_url: 'https://rejected.example/', source_title: 'Rejected' },
+        { source_url: 'https://queued.example/', source_title: 'Queued' },
+      ],
+      skipped_existing: [{ url: 'https://known.example/' }],
+    }),
+    research: async () => ({
+      outcome: 'rejected',
+      reason: '产品不匹配',
+      research: { ok: false, reason: '产品不匹配' },
+      research_usage: usage,
+    }),
+  });
+  try {
+    const created = manager.create({ ...input, target_count: 1, research_budget: 1 }, 'rejected-redaction');
+    await manager.work(created.id);
+    const job = manager.get(created.id);
+    assert.equal(job.reason, 'research_limit');
+    assert.equal(job.rejected, 1);
+    assert.equal(job.searchStats[0].rejected, 1);
+    assert.deepEqual(job.rows, [{
+      search_id: job.searchStats[0].id,
+      operation_id: `${job.id}-1`,
+      result: 'rejected',
+      reason: '产品不匹配',
+      research_usage: usage,
+    }]);
+    assert.deepEqual(job.researchUsage, usage);
+    assert.deepEqual(job.queue, []);
+    assert.deepEqual(job.seen, []);
+    assert.deepEqual(job.skippedDomains, []);
+    assert.deepEqual(job.searchSignatures, []);
+    assert.equal(job.pendingSearch, null);
+    assert.equal(job.current, null);
+    assert.equal(manager.view(job).queued, 0);
   } finally {
     manager.close();
   }
@@ -492,7 +537,7 @@ test('读阶段服务中断经核对后自动重试一次并继续下一候选',
     assert.equal(attempts[0].source_url, original.source_url);
     assert.notEqual(attempts[0].operation_id, original.operation_id);
     assert.equal(attempts[0].interruptionRetries, 1);
-    assert.equal(recovered.queue.length, 1);
+    assert.equal(recovered.queue.length, 0);
   } finally {
     manager?.close();
     rmSync(dir, { recursive: true, force: true });
