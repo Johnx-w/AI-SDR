@@ -61,9 +61,9 @@ test('拒绝结果只清理所属客户表的模型响应缓存', () => {
   const a = new AcquisitionStore(':memory:', 'scope-a');
   try {
     a.saveModelResponse(key(), response('rejected'));
-    a.db.prepare('INSERT INTO research_model_responses VALUES(?,?,?,?)').run(
-      'scope-b', key(), Date.now(), JSON.stringify(response('other scope')),
-    );
+    a.db
+      .prepare('INSERT INTO research_model_responses VALUES(?,?,?,?)')
+      .run('scope-b', key(), Date.now(), JSON.stringify(response('other scope')));
     a.discardModelResponse(key());
     assert.equal(a.modelResponse(key()), null);
     assert.equal(a.db.prepare('SELECT COUNT(*) AS n FROM research_model_responses').get().n, 1);

@@ -104,19 +104,24 @@ test('明确排除只保留统计明细，终态清除待处理候选', async ()
     }),
   });
   try {
-    const created = manager.create({ ...input, target_count: 1, research_budget: 1 }, 'rejected-redaction');
+    const created = manager.create(
+      { ...input, target_count: 1, research_budget: 1 },
+      'rejected-redaction',
+    );
     await manager.work(created.id);
     const job = manager.get(created.id);
     assert.equal(job.reason, 'research_limit');
     assert.equal(job.rejected, 1);
     assert.equal(job.searchStats[0].rejected, 1);
-    assert.deepEqual(job.rows, [{
-      search_id: job.searchStats[0].id,
-      operation_id: `${job.id}-1`,
-      result: 'rejected',
-      reason: '产品不匹配',
-      research_usage: usage,
-    }]);
+    assert.deepEqual(job.rows, [
+      {
+        search_id: job.searchStats[0].id,
+        operation_id: `${job.id}-1`,
+        result: 'rejected',
+        reason: '产品不匹配',
+        research_usage: usage,
+      },
+    ]);
     assert.deepEqual(job.researchUsage, usage);
     assert.deepEqual(job.queue, []);
     assert.deepEqual(job.seen, []);

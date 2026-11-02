@@ -147,7 +147,9 @@ const supportsProductEvidence = (evidence, product, direction) => {
   );
 };
 const normalizedProductName = (value) =>
-  compact(value).toLowerCase().replace(/\s*&\s*/g, ' and ');
+  compact(value)
+    .toLowerCase()
+    .replace(/\s*&\s*/g, ' and ');
 const genericSupplyRole = (quote) =>
   /\b(?:sell|sells|selling|sold|retail(?:er|ing)?|distribut\w*|suppl\w*|manufactur\w*|produc(?:e|es|ed|ing)|offer(?:s|ing)?)\b|供应|供货|销售|零售|批发|经销|制造|生产/i.test(
     quote,
@@ -155,7 +157,15 @@ const genericSupplyRole = (quote) =>
   /\bwindow\s+(?:coverings?|furnishings?|treatments?)\b|\b(?:blinds?\s*(?:,|and|&)\s*shades?|shades?\s*(?:,|and|&)\s*blinds?)\b|窗饰|窗帘产品/i.test(
     quote,
   );
-const supportsScopedFact = (fact, quote, product, direction, related, page, verifiedProductFacts) => {
+const supportsScopedFact = (
+  fact,
+  quote,
+  product,
+  direction,
+  related,
+  page,
+  verifiedProductFacts,
+) => {
   if (supportsProductEvidence(quote, product, direction)) return true;
   if (!related || !productDirections(quote).includes(direction)) return false;
   if (positiveProductKinds.has(fact.kind)) {

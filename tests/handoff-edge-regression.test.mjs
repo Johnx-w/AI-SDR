@@ -57,7 +57,14 @@ test('有效业务联系表单可满足公司级入口而不强求公开邮箱�
 });
 
 test('高优先或常规客户可凭已核实产品与公司联系入口交接，经营年限未知不阻断', () => {
-  const contacts = [{ kind: 'email', value: 'sales@buyer.example.org', quote: 'sales@buyer.example.org', source_url: site }];
+  const contacts = [
+    {
+      kind: 'email',
+      value: 'sales@buyer.example.org',
+      quote: 'sales@buyer.example.org',
+      source_url: site,
+    },
+  ];
   for (const grade of ['高优先', '常规开发']) {
     const handoff = calculateHandoffReadiness({
       research,
@@ -66,7 +73,12 @@ test('高优先或常规客户可凭已核实产品与公司联系入口交接�
         status: grade,
         direction: 'finished',
         product: 'roller blinds',
-        dimensions: { P: { score: 40 }, R: { score: null }, D: { score: null }, V: { score: null } },
+        dimensions: {
+          P: { score: 40 },
+          R: { score: null },
+          D: { score: null },
+          V: { score: null },
+        },
       },
       contacts,
     });

@@ -176,11 +176,13 @@ test('明确不匹配不缓存模型响应，操作只保留统计和固定原�
   const f = fixture();
   try {
     f.state.text = text + ' We sell camping tents to households.';
-    f.raw.products = [{
-      value: 'camping tents',
-      quote: 'We sell camping tents to households.',
-      source_url: source,
-    }];
+    f.raw.products = [
+      {
+        value: 'camping tents',
+        quote: 'We sell camping tents to households.',
+        source_url: source,
+      },
+    ];
     const first = await f.research('rejected-first');
     const second = await f.research('rejected-second');
     assert.equal(first.outcome, 'rejected');
