@@ -172,6 +172,52 @@ test('相同研究正文和条件跨操作复用模型响应，仍新抓官网�
   }
 });
 
+test('明确不匹配不缓存模型响应，操作只保留统计和固定原因', async () => {
+  const f = fixture();
+  try {
+    f.state.text = text + ' We sell camping tents to households.';
+    f.raw.products = [{
+      value: 'camping tents',
+      quote: 'We sell camping tents to households.',
+      source_url: source,
+    }];
+    const first = await f.research('rejected-first');
+    const second = await f.research('rejected-second');
+    assert.equal(first.outcome, 'rejected');
+    assert.equal(second.outcome, 'rejected');
+    assert.equal(f.state.calls, 2);
+    assert.equal(first.research_usage.cache_hits, 0);
+    assert.equal(second.research_usage.cache_hits, 0);
+    assert.equal(f.state.writes, 0);
+    const stored = f.store.get('rejected-first');
+    assert.equal(stored.state, 'completed');
+    assert.equal(stored.research_response, undefined);
+    assert.equal(stored.research_pages, undefined);
+    assert.equal(stored.input, undefined);
+    assert.equal(stored.evidence, undefined);
+    assert.equal(stored.output.handoff.contacts.length, 0);
+    assert.ok(!JSON.stringify(stored).includes(source));
+    const key = researchCacheKey({
+      ...f.state.request,
+      schema: companyResearchSchema,
+      identity: f.providers.model.cacheIdentity,
+    });
+    assert.equal(f.store.modelResponse(key), null);
+    f.store.saveModelResponse(key, {
+      status: 'completed',
+      output: [{ content: [{ type: 'output_text', text: JSON.stringify(f.raw) }] }],
+    });
+    const cached = await f.research('rejected-cache-hit');
+    assert.equal(cached.outcome, 'rejected');
+    assert.equal(cached.research_usage.cache_hits, 1);
+    assert.equal(f.state.calls, 2);
+    assert.equal(f.store.modelResponse(key), null);
+    assert.deepEqual(await f.research('rejected-first'), first);
+  } finally {
+    f.service.close();
+  }
+});
+
 test('正文、目标条件或模型身份变化触发新研究，而不是沿用旧模型结果', async () => {
   const f = fixture();
   try {
@@ -224,9 +270,11 @@ test('模型前规则预筛不发生成请求，幂等读取也不重复研究',
   try {
     f.state.text = 'We sell camping tents and outdoor cooking equipment. '.repeat(4);
     const result = await f.research('pre-screen');
+    assert.equal(result.outcome, 'rejected');
     assert.equal(result.research_usage.model_calls, 0);
     assert.equal(result.research_usage.input_chars, 0);
     assert.equal(f.state.calls, 0);
+    assert.ok(!JSON.stringify(f.store.get('pre-screen')).includes(source));
     await f.research('pre-screen');
     assert.equal(f.state.reads, 1);
     assert.equal(f.state.calls, 0);
@@ -238,6 +286,7 @@ test('模型前规则预筛不发生成请求，幂等读取也不重复研究',
 test('缓存存储不可用不丢失当前有效响应，也不重试已经发出的模型请求', async () => {
   const f = fixture();
   try {
+    f.raw.products = [{ value: 'zip screens', quote: text, source_url: source }];
     f.store.saveModelResponse = () => {
       throw new Error('cache unavailable');
     };

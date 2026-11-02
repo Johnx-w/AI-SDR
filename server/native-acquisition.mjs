@@ -590,6 +590,23 @@ export class NativeAcquisition {
       明细: row ? [row] : [],
     };
   }
+  rejectNewCandidate(operation, reason) {
+    const minimal = {
+      id: operation.id,
+      scope: operation.scope,
+      stage: operation.stage,
+      createdAt: operation.createdAt,
+      research_usage: operation.research_usage,
+      web_usage: operation.web_usage,
+    };
+    const output = this.output(minimal, {
+      research: { ok: false, reason },
+      outcome: 'rejected',
+      reason,
+    });
+    this.store.complete(minimal, output);
+    return output;
+  }
   async research(input, item) {
     // Also validate restored tasks and callers that bypass HTTP validation.
     input = { ...input, ...validateTarget(input) };
@@ -709,11 +726,9 @@ export class NativeAcquisition {
         };
         op.research = research;
         this.store.save(op);
-        const output = this.output(op, {
-          research,
-          reason: research.reason,
-          ...(research.review_required ? { outcome: 'review' } : {}),
-        });
+        if (!research.review_required && research.product_match === 'not_matched')
+          return this.rejectNewCandidate(op, research.reason);
+        const output = this.output(op, { research, reason: research.reason, outcome: 'review' });
         this.store.complete(op, output);
         return output;
       }
@@ -761,15 +776,6 @@ export class NativeAcquisition {
           if (Number.isSafeInteger(value) && value >= 0) op.research_usage[key] = value;
         this.store.save(op);
         parsed = parseCompanyResearch(response, page, input);
-        if (cacheKey && typeof this.store.saveModelResponse === 'function') {
-          try {
-            this.store.saveModelResponse(cacheKey, response);
-          } catch {
-            // Reuse is an optimization, not a prerequisite for completing the
-            // current validated result or a reason to repeat its model call.
-            op.research_usage.cache_unavailable = true;
-          }
-        }
       }
       op.research_response = response;
       this.store.save(op);
@@ -821,15 +827,46 @@ export class NativeAcquisition {
         research.product_match === 'matched' &&
         research.required_match !== 'not_matched' &&
         !hardMismatch;
+      if (hardMismatch && cacheKey && typeof this.store.discardModelResponse === 'function') {
+        try {
+          this.store.discardModelResponse(cacheKey);
+        } catch {
+          op.research_usage.cache_unavailable = true;
+        }
+      }
+      if (hardMismatch && !item.target_record_id) {
+        const reason =
+          research.entity_type === 'individual'
+            ? '官网主体不是经营企业'
+            : research.product_match === 'not_matched'
+              ? '官网产品与本次目标不相关'
+              : research.country_match === 'not_matched'
+                ? '官网所在国家与目标市场不符'
+                : research.audience_match === 'not_matched'
+                  ? '官网服务客群与本次筛选不符'
+                  : research.customer_type_match === 'not_matched'
+                    ? '官网客户类型与本次筛选不符'
+                    : research.profile_match === 'not_matched'
+                      ? '官网业务画像与本次筛选不符'
+                      : research.required_match === 'not_matched'
+                        ? '不符合本次必需条件'
+                        : '官网经营资格与本次目标不符';
+        return this.rejectNewCandidate(op, reason);
+      }
+      if (!hardMismatch && !op.research_usage.cache_hits && cacheKey && typeof this.store.saveModelResponse === 'function') {
+        try {
+          this.store.saveModelResponse(cacheKey, response);
+        } catch {
+          // Reuse is an optimization, not a prerequisite for completing the
+          // current validated result or a reason to repeat its model call.
+          op.research_usage.cache_unavailable = true;
+        }
+      }
       if (!broadAdmissionReady && !item.target_record_id) {
         const output = this.output(op, {
           research,
-          outcome: hardMismatch ? 'rejected' : 'review',
-          reason:
-            research.reason ||
-            (hardMismatch
-              ? '官网主体与目标市场或产品范围不匹配'
-              : '官网主体或窗饰产品关联尚未核实'),
+          outcome: 'review',
+          reason: research.reason || '官网主体或窗饰产品关联尚未核实',
         });
         this.store.complete(op, output);
         return output;
