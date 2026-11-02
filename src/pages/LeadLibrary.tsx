@@ -55,6 +55,14 @@ const safeUrl = (s: string) => {
     return undefined;
   }
 };
+const isLegacyGrade = (grade: string) => ['A', 'B', 'C'].includes(grade);
+const priorityOrder = (
+  a: { grade: string; createdAt?: number | null },
+  b: { grade: string; createdAt?: number | null },
+) => {
+  const rank = (grade: string) => (grade === '高优先' ? 0 : grade === '常规开发' ? 1 : 2);
+  return rank(a.grade) - rank(b.grade) || (b.createdAt ?? 0) - (a.createdAt ?? 0);
+};
 export function LeadLibrary() {
   const { notify } = useWorkspace();
   const [params, setParams] = useSearchParams();
@@ -151,7 +159,7 @@ export function LeadLibrary() {
         (!product || leadProductCategories(l.product).includes(product)) &&
         (!status || l.status === status),
     )
-    .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+    .sort(priorityOrder);
   const pages = Math.max(1, Math.ceil(filtered.length / 8));
   const current = Math.min(page, pages);
   const rows = filtered.slice((current - 1) * 8, current * 8);
@@ -172,7 +180,7 @@ export function LeadLibrary() {
     const selectedIds = new Set(filtered.map((lead) => lead.id));
     try {
       const full = await leadLibrary.exportDetails();
-      const exported = full.filter((lead) => selectedIds.has(lead.id));
+      const exported = full.filter((lead) => selectedIds.has(lead.id)).sort(priorityOrder);
       if (exported.length !== selectedIds.size)
         throw new Error('客户列表已发生变化，请刷新后重新导出');
       exportCsv(
@@ -183,8 +191,7 @@ export function LeadLibrary() {
           市场: marketLabel(l.market),
           类型: typeNames[l.type] || l.type,
           产品: l.product,
-          评分: l.score ?? '未评分',
-          初评结果: l.grade,
+          开发优先级: isLegacyGrade(l.grade) ? `${l.grade}（旧版）` : l.grade,
           评级依据: l.ratingReason || '',
           开发状态: l.status,
           广告代码: l.advertisingCodes || '',
@@ -283,14 +290,17 @@ export function LeadLibrary() {
         {[
           { name: '全部客户', value: leads.length },
           {
-            name: 'A 级客户',
-            value: leads.filter((l) => l.grade === 'A').length,
+            name: '高优先',
+            value: leads.filter((l) => l.grade === '高优先').length,
           },
           {
-            name: '待补资料',
+            name: '常规开发',
+            value: leads.filter((l) => l.grade === '常规开发').length,
+          },
+          {
+            name: '待核实',
             value: leads.filter((l) => ['未评级', '待核实', '待补全'].includes(l.grade)).length,
           },
-          { name: '已记录邮箱', value: leads.filter((l) => l.email).length },
         ].map((x) => (
           <div key={x.name}>
             <span>{x.name}</span>
@@ -327,10 +337,12 @@ export function LeadLibrary() {
               options: [...new Set([...leads.map((l) => marketLabel(l.market)), '待核实'])],
             },
             {
-              label: '评级',
+              label: '优先级',
               val: grade,
               set: setGrade,
-              options: [...new Set(['A', 'B', 'C', '待核实', ...leads.map((l) => l.grade)])],
+              options: [
+                ...new Set(['高优先', '常规开发', '待核实', ...leads.map((l) => l.grade)]),
+              ].filter(Boolean),
             },
             {
               label: '产品',
@@ -357,7 +369,7 @@ export function LeadLibrary() {
               <option value="">全部{f.label}</option>
               {f.options.map((o) => (
                 <option value={o} key={o}>
-                  {o}
+                  {f.label === '优先级' && isLegacyGrade(o) ? `${o}（旧版）` : o}
                 </option>
               ))}
             </select>
@@ -381,7 +393,7 @@ export function LeadLibrary() {
           >
             清空筛选
           </button>
-          <span>共 {filtered.length} 条线索 · 最新录入优先</span>
+          <span>共 {filtered.length} 条线索 · 高优先先显示</span>
         </div>
         {!remote && !error ? (
           <div className="library-loading">
@@ -404,7 +416,7 @@ export function LeadLibrary() {
                 <tr>
                   <th>公司名称／来源</th>
                   <th>市场与客户类型</th>
-                  <th>初评结果</th>
+                  <th>开发优先级</th>
                   <th>联系准备</th>
                   <th>开发状态</th>
                   <th />
@@ -450,21 +462,41 @@ export function LeadLibrary() {
                     </td>
                     <td>
                       <div className="reference-score">
-                        <span className={'grade-box grade-' + l.grade}>
-                          {l.score === null || !['A', 'B', 'C'].includes(l.grade) ? '—' : l.grade}
+                        <span
+                          className={
+                            'grade-box grade-' +
+                            (l.grade === '高优先' ? 'A' : l.grade === '常规开发' ? 'B' : l.grade)
+                          }
+                        >
+                          {l.grade === '高优先'
+                            ? '高'
+                            : l.grade === '常规开发'
+                              ? '常'
+                              : isLegacyGrade(l.grade)
+                                ? l.grade
+                                : '—'}
                         </span>
                         <div>
                           <strong>
                             {l.grade}
-                            <small>{l.score === null ? '' : ' · 已支持' + l.score + '分'}</small>
+                            {isLegacyGrade(l.grade) ? '（旧版）' : ''}
+                            {isLegacyGrade(l.grade) && l.score !== null && (
+                              <small> · 旧规则{l.score}分</small>
+                            )}
                           </strong>
-                          {l.score !== null ? (
+                          {isLegacyGrade(l.grade) && l.score !== null ? (
                             <div className="tiny-track">
                               <i style={{ width: l.score + '%' }} />
                             </div>
                           ) : (
                             <span className="subtext">
-                              {l.grade === '未评级' ? '尚未自动评级' : '手工记录'}
+                              {['高优先', '常规开发'].includes(l.grade)
+                                ? l.matchLevel
+                                  ? '匹配等级：' + l.matchLevel
+                                  : '匹配等级见最新评估'
+                                : l.grade === '未评级'
+                                  ? '尚未自动评级'
+                                  : '查看评级依据'}
                             </span>
                           )}
                           <button

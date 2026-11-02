@@ -35,10 +35,28 @@ test('P/R/D/V按维度展示原评分，结论来自本维度事实，未知与�
   );
   assert.equal(result[0].conclusion, '主营产品与目标品类对口');
   assert.equal(result[1].conclusion, '现有证据显示无适用供货角色');
-  assert.equal(result[2].conclusion, '持续经营依据待补充');
-  assert.deepEqual(result[2].basis, ['待补充：企业年限与供货流程待核实']);
+  assert.equal(result[2].conclusion, '持续经营尚无公开依据');
+  assert.deepEqual(result[2].basis, []);
   assert.equal(result[3].conclusion, '具备定制与电动系统特征');
   assert.deepEqual(input, before, '展示整理不得修改评分或事实');
+});
+
+test('新版证据维度保留未知而不生成补资料提示，真实冲突仍可核实', () => {
+  const result = buildAssessmentDimensions({
+    ruleVersion: 'acquisition-v4.0',
+    dimensions: {
+      P: dimension(null, 40, [fact('core_product', '卷帘')], {
+        conflict: true,
+        missing: '同产品事实冲突',
+      }),
+      D: dimension(null, 20, [], { missing: '经营年限待补充' }),
+    },
+  });
+  assert.equal(result[0].missing, '同产品事实冲突');
+  assert.ok(result[0].basis.includes('需核实：同产品事实冲突'));
+  assert.equal(result[1].missing, '');
+  assert.equal(result[1].conclusion, '持续经营尚无公开依据');
+  assert.deepEqual(result[1].basis, []);
 });
 
 test('冲突事实保留，不能用单个正向事实生成肯定结论', () => {

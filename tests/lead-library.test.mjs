@@ -74,7 +74,25 @@ test('summary omits full dossiers while preserving rating and contact indicators
   );
   assert.equal(
     summarizeLead(lead({ grade: '未评级', ratingReason: '', assessment: null })).ratingSummary,
-    '关键依据待补充',
+    '关键依据尚未核实',
+  );
+  assert.equal(
+    summarizeLead(lead({ email: '', phone: '', contactEvidence: [] })).contactSummary.label,
+    '暂无公开联系入口',
+  );
+  assert.equal(
+    summarizeLead(lead({
+      grade: '高优先',
+      assessment: {
+        matchLevel: '明确匹配',
+        prioritySignals: [{ label: '主营产品' }, { label: '专业供货角色' }],
+      },
+    })).ratingSummary,
+    '主营产品、专业供货角色已核实',
+  );
+  assert.equal(
+    summarizeLead(lead({ grade: '高优先', assessment: { matchLevel: '明确匹配' } })).matchLevel,
+    '明确匹配',
   );
 });
 
