@@ -133,7 +133,6 @@ function dimensionScore(opportunity, at) {
     [...custom, ...advanced],
     custom.length || advanced.length ? '' : '定制/电动或工程配套特征尚未取得依据',
   );
-  // Customs analysis is a later, independent assessment, never an initial-score dimension.
   const dimensions = { P, R, D, V };
   for (const [key, dimension] of Object.entries(dimensions)) dimension.maximum = maximums[key];
   return dimensions;
@@ -325,10 +324,6 @@ export function formatAssessmentReason(snapshot) {
       ([key, d]) =>
         key + ' ' + labels[key] + '：' + (d.score === null ? '未知' : d.score) + '/' + d.maximum,
     ),
-    // Preserve the explanation when formatting a historical five-dimension snapshot.
-    ...(snapshot.dimensions.I
-      ? ['海关：规模5/频率6/新近性4；当前未接入或未关联，不假设15分。']
-      : []),
   ];
   if (snapshot.incompleteReason) lines.push('本轮研究限制：' + snapshot.incompleteReason);
   if (snapshot.missing.length) lines.push('待补充：' + snapshot.missing.join('；'));

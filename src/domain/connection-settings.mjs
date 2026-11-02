@@ -9,11 +9,6 @@ const groups = {
     fields: ['RESEARCH_MODEL_API_KEY', 'RESEARCH_MODEL_BASE_URL', 'RESEARCH_MODEL_MODEL'],
     legacy: ['DEEPSEEK_API_KEY', 'DEEPSEEK_MODEL'],
   },
-  CUSTOMS_PROVIDER: {
-    provider: 'billofladingdata',
-    fields: ['CUSTOMS_API_KEY', 'CUSTOMS_BASE_URL'],
-    legacy: [],
-  },
 };
 const has = (object, key) => Object.hasOwn(object, key);
 const fieldMap = (settings) => new Map(settings.fields.map((field) => [field.key, field]));
@@ -43,10 +38,6 @@ function defaultValue(key, fields, state) {
   if (key === 'RESEARCH_MODEL_MODEL')
     return providerFor(fields, state, 'RESEARCH_MODEL_PROVIDER') === 'deepseek'
       ? fields.get('DEEPSEEK_MODEL')?.value || 'deepseek-flash'
-      : '';
-  if (key === 'CUSTOMS_BASE_URL')
-    return providerFor(fields, state, 'CUSTOMS_PROVIDER') === 'billofladingdata'
-      ? 'https://tradedata.billofladingdata.com'
       : '';
   return '';
 }

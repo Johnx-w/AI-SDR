@@ -1,7 +1,6 @@
 import { acquisitionConfig } from './acquisition-config.mjs';
 import { FeishuClient } from './feishu-direct.mjs';
 import { NativeAcquisition } from './native-acquisition.mjs';
-import { customsConfig } from './customs-discovery.mjs';
 import { CustomerArchive } from './customer-archive.mjs';
 
 // HTTP routes and the batch scheduler share the direct acquisition service.
@@ -36,11 +35,10 @@ export function createAcquisitionProvider({
       ...config,
       configured: config.nativeReady,
       transport: 'direct',
-      customs: customsConfig(env),
       webProvider: config.webSearchProvider,
       modelProvider: config.researchModelProvider,
       note: config.nativeReady
-        ? '后端直连网页检索、研究模型与飞书；海关发现独立配置，真实任务结果见任务记录。'
+        ? '后端直连网页检索、研究模型与飞书；真实任务结果见任务记录。'
         : '后端直连配置缺失：' + config.missing.join('、'),
     },
     readLeads: async () => {

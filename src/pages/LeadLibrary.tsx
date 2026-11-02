@@ -18,7 +18,7 @@ import { SupplementPanel } from '../components/SupplementPanel';
 import type { SupplementContext } from '../services/leadSupplements';
 import { WebsiteEvidencePanel } from '../components/WebsiteEvidencePanel';
 import { CustomerBusinessSummary } from '../components/CustomerBusinessSummary';
-import { AssessmentPanel, CustomsEvidence } from '../components/AssessmentPanel';
+import { AssessmentPanel } from '../components/AssessmentPanel';
 import { leadLibrary, startLeadLibraryPolling } from '../services/leadLibrary';
 import type { LeadList, Prospect } from '../services/leadLibrary';
 import { exportCsv } from '../services/csv';
@@ -427,23 +427,6 @@ export function LeadLibrary() {
                           <strong>{l.name}</strong>
                           <span className="subtext">{l.domain || '域名待核实'}</span>
                           <span className="subtext">企业 · B端</span>
-                          {l.customsSummary.recordCount ? (
-                            <button
-                              className="text-link"
-                              aria-label={`查看 ${l.name} 的海关记录`}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                open(l.id, '海关记录');
-                              }}
-                            >
-                              海关记录 {l.customsSummary.recordCount} 条
-                              {l.customsSummary.unverified ? ' · 身份待核实' : ''}
-                            </button>
-                          ) : (
-                            <span className="subtext">
-                              {l.customsSummary.buyerCount ? '海关线索待补票据' : '海关记录未关联'}
-                            </span>
-                          )}
                         </div>
                       </div>
                     </td>
@@ -640,7 +623,6 @@ export function LeadLibrary() {
                     <div className="detail-tabs">
                       {[
                         '客户画像',
-                        '海关记录',
                         '最新评估',
                         '官网证据',
                         '联系方式',
@@ -663,9 +645,6 @@ export function LeadLibrary() {
                         onAssessment={() => setTab('最新评估')}
                         onSupplement={setSupplement}
                       />
-                    )}
-                    {tab === '海关记录' && (
-                      <CustomsEvidence buyers={viewed.customsEvidence || []} />
                     )}
                     {tab === '最新评估' && (
                       <AssessmentPanel

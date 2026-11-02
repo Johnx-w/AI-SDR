@@ -149,40 +149,6 @@ test('旧队列中的未知贸易平台由正式研究入口正文识别，不�
   }
 });
 
-test('只在经销商摘要提及品牌时不排队为该海关买方官网', async () => {
-  const service = new NativeAcquisition({
-    env,
-    customs: {
-      discover: async () => ({
-        buyers: [{ id: 'maxxmar', name: 'MAXXMAR INC.', shipments: [], product_family: 'fabrics' }],
-        usage: {},
-      }),
-    },
-    feishu: { records: async () => [] },
-    providers: {
-      web: {
-        search: async () => ({
-          results: [
-            {
-              url: 'https://localdealer.example.org/',
-              title: 'Local Dealer Blinds',
-              content: 'We are an authorized dealer for Maxxmar window fashions.',
-            },
-          ],
-        }),
-      },
-      model: {},
-    },
-  });
-  try {
-    const found = await service.discoverShipments({ country: 'Canada' }, {}, []);
-    assert.equal(found.candidates.length, 0);
-    assert.equal(found.review_candidates.length, 1);
-  } finally {
-    service.close();
-  }
-});
-
 test('产品品牌和客户/贸易记录主体不是网页自身经营者', () => {
   const source = 'https://localdealer.example.org/';
   for (const quote of [
@@ -197,47 +163,5 @@ test('产品品牌和客户/贸易记录主体不是网页自身经营者', () =
       source,
     );
     assert.equal(result.name, null, quote);
-  }
-});
-
-test('同一海关买方保留有界的多个官网候选，后续主体冲突时还能继续核实', async () => {
-  const service = new NativeAcquisition({
-    env,
-    customs: {
-      discover: async () => ({
-        buyers: [
-          {
-            id: 'acme',
-            name: 'ACME WINDOW COVERINGS INC.',
-            shipments: [],
-            product_family: 'fabrics',
-          },
-        ],
-        usage: {},
-      }),
-    },
-    feishu: { records: async () => [] },
-    providers: {
-      web: {
-        search: async () => ({
-          results: ['ca', 'us', 'uk', 'au'].map((country) => ({
-            url: `https://acme-${country}.example.org/`,
-            title: 'Acme Window Coverings',
-          })),
-        }),
-      },
-      model: {},
-    },
-  });
-  try {
-    const found = await service.discoverShipments({ country: 'United States' }, {}, []);
-    assert.deepEqual(
-      found.candidates.map((row) => row.domain),
-      ['acme-ca.example.org', 'acme-us.example.org', 'acme-uk.example.org'],
-    );
-    assert.equal(new Set(found.candidates.map((row) => row.customs_buyer_key)).size, 1);
-    assert.ok(found.candidates[0].customs_buyer_key);
-  } finally {
-    service.close();
   }
 });

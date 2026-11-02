@@ -223,19 +223,13 @@ export function createApp({
           recordCommunication: (detail) =>
             recordMailConversation({ store: business.state().store, ...detail }),
         }));
-  const checkCapabilities = (input) => {
-    if (['customs', 'dual'].includes(input.acquisition_channel)) {
-      if (!provider.info.customs?.configured) throw new ApiError(503, '请先配置海关数据连接');
-    }
-    return input;
-  };
   const plans = () =>
     (schedules ??= new AcquisitionSchedules({
       path: env.SCHEDULE_DB_PATH || ':memory:',
       jobs,
       ready: () => provider.info.configured,
       available: () => running === 0 && ![...runs.values()].some((run) => run.status === 'unknown'),
-      checkInput: (input) => checkCapabilities(input),
+      checkInput: (input) => validateInput(input),
       scope: acquisitionScope,
     }));
   const overview = new OverviewService({
@@ -426,9 +420,7 @@ export function createApp({
           throw new ApiError(405, '不支持的产品目录操作');
         }
         if (url.pathname === `${prefix}/search-preview` && request.method === 'POST') {
-          const input = checkCapabilities(
-            validateInput({ ...(await readJson(request)), query_mode: 'auto' }),
-          );
+          const input = validateInput({ ...(await readJson(request)), query_mode: 'auto' });
           return json(response, 200, { queries: searchPlan(input) });
         }
         if (
@@ -454,7 +446,7 @@ export function createApp({
                 name: body.name,
                 timing: body.timing,
                 input: {
-                  ...checkCapabilities(validateInput(body.input)),
+                  ...validateInput(body.input),
                   target_count: validateCount(body.input?.target_count),
                 },
               },
@@ -634,7 +626,7 @@ export function createApp({
             if (running) throw new ApiError(409, '单次任务正在执行');
             const body = await readJson(request);
             const input = {
-              ...checkCapabilities(validateInput(body)),
+              ...validateInput(body),
               target_count: validateCount(body.target_count),
             };
             const job = manager.create(input, request.headers['idempotency-key']);
@@ -720,7 +712,7 @@ export function createApp({
         if (url.pathname === `${prefix}/runs` && request.method === 'POST') {
           if (!provider.info.configured)
             throw new ApiError(503, '获客执行引擎尚未配置，请先完成接入配置。');
-          const input = checkCapabilities(validateInput(await readJson(request)));
+          const input = validateInput(await readJson(request));
           const requestId = request.headers['idempotency-key'] || randomUUID();
           if (typeof requestId !== 'string' || !/^[\w-]{8,100}$/.test(requestId))
             throw new ApiError(400, '无效的 Idempotency-Key');

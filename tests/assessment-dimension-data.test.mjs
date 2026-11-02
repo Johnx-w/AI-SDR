@@ -49,7 +49,6 @@ function fixture() {
     store: {
       contactCorrections: () => ({}),
       companyIdentity: () => null,
-      customsEvidence: () => [],
     },
     assessments: {
       latest: () => stored,

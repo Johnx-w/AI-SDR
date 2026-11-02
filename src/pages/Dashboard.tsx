@@ -54,7 +54,6 @@ const jobReasons: Record<string, string> = {
   search_limit: '已达到搜索次数上限',
   time_limit: '已达到运行时间上限',
   exhausted: '当前条件下的候选已处理完',
-  customs_budget: '已达到本轮海关读取预算',
   stopped: '本轮已停止，已入库客户保留',
   interrupted: '服务曾中断，继续前需核对',
   uncertain: '执行结果待确认，已暂停',

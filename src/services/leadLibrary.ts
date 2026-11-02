@@ -1,5 +1,4 @@
 import type { AssessmentSummary } from '../components/AssessmentPanel';
-import type { CustomsBuyerEvidence } from '../domain/types';
 import type { ManualConfirmation } from './leadSupplements';
 
 export interface Prospect {
@@ -24,7 +23,6 @@ export interface Prospect {
   assessment?: AssessmentSummary | null;
   confirmations?: ManualConfirmation[];
   manualPurchaseNeed?: string;
-  customsEvidence?: CustomsBuyerEvidence[];
   status: string;
   region: string;
   city: string;
@@ -83,7 +81,6 @@ export type LeadSummary = Pick<
   companyIdentity?: Omit<NonNullable<Prospect['companyIdentity']>, 'evidence' | 'notes'> | null;
   ratingSummary: string;
   contactSummary: { label: string; detail: string };
-  customsSummary: { recordCount: number; buyerCount: number; unverified: boolean };
 };
 
 export interface LeadMetadata {

@@ -12,8 +12,7 @@ export interface WorkflowInput {
   country: string;
   region: string;
   product: string;
-  acquisition_channel: 'web' | 'customs' | 'dual' | 'tavily_web';
-  customs_record_budget?: number;
+  acquisition_channel: 'web' | 'tavily_web';
   research_budget?: number;
   search_query: string;
 }
@@ -45,7 +44,7 @@ export interface SearchMetric {
   review: number;
   failed: number;
   ratings: Record<string, number>;
-  source_kind?: 'web' | 'customs';
+  source_kind?: 'web';
   family?: string;
   usage?: {
     returned_records?: number;
@@ -58,31 +57,8 @@ export interface SearchMetric {
 export interface DiscoveryQuery {
   country: string;
   query: string;
-  source_kind?: 'web' | 'customs';
+  source_kind?: 'web';
   family?: string;
-}
-export interface CustomsBuyerEvidence {
-  id: string;
-  name: string;
-  product_family: string;
-  records: {
-    id: string;
-    provider?: string;
-    date?: string | null;
-    description?: string;
-    bill_of_lading_number?: string | null;
-    source_url?: string | null;
-    quantity?: { value: number; unit: string | null } | null;
-    weight?: { value: number; unit: string | null } | null;
-  }[];
-  metrics?: {
-    record_count: number;
-    bill_of_lading_count: number;
-    unnumbered_record_count: number;
-    active_months: string[];
-    last_event_date: string | null;
-  };
-  match?: { status: 'verified' | 'name_only' | 'pending' | 'conflict' | string; reason: string };
 }
 export interface IntegrationStatus {
   configured: boolean;
@@ -91,7 +67,6 @@ export interface IntegrationStatus {
   missing?: string[];
   transport: 'direct';
   note: string;
-  customs?: { configured: boolean; missing: string[]; provider: string };
   webProvider?: string;
   modelProvider?: string;
 }
@@ -127,7 +102,6 @@ export interface AcquisitionJob {
   searches: number;
   researched: number;
   review?: number;
-  customsUsedRecords?: number;
   researchUsage?: ResearchUsage;
   searchStats?: SearchMetric[];
   queryPlan?: DiscoveryQuery[];
@@ -137,8 +111,7 @@ export interface AcquisitionJob {
   rows: {
     domain?: string;
     source_url?: string;
-    source_kind?: 'web' | 'customs';
-    customs_evidence?: CustomsBuyerEvidence;
+    source_kind?: 'web';
     result: string;
     name?: string;
     reason?: string;

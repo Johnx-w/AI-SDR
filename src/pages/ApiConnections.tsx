@@ -22,13 +22,6 @@ const groups = [
     detail: '搜索企业官网并读取网页正文，网页服务可独立替换。',
   },
   {
-    title: '海关记录找买家',
-    icon: Database,
-    prefix: 'CUSTOMS_',
-    detail:
-      '可选连接。按具体货物发现北美面料、组件和 plantation shutters 买方，再进行官网核实。数据服务商可更换，未配置不影响官网通道。',
-  },
-  {
     title: '企业研究 · 大语言模型',
     icon: Sparkles,
     prefix: 'RESEARCH_MODEL_',
@@ -49,10 +42,6 @@ const providerOptions: Record<string, { value: string; label: string }[]> = {
   RESEARCH_MODEL_PROVIDER: [
     { value: 'deepseek', label: 'DeepSeek' },
     { value: 'openai_compatible', label: 'OpenAI 兼容服务' },
-  ],
-  CUSTOMS_PROVIDER: [
-    { value: 'billofladingdata', label: 'BillOfLadingData' },
-    { value: 'http', label: '兼容 HTTP 服务' },
   ],
 };
 
@@ -119,9 +108,7 @@ export function ApiConnections() {
         <div className="connection-settings-summary">
           <div>
             <strong>Node.js 直连配置</strong>
-            <p>
-              发现来源、海关服务与研究模型可分别替换。已保存密钥以脱敏摘要显示，修改时重新输入。
-            </p>
+            <p>网页检索与研究模型可分别替换。已保存密钥以脱敏摘要显示，修改时重新输入。</p>
           </div>
           {settings && (
             <Badge tone={settings.ready ? 'green' : 'amber'}>

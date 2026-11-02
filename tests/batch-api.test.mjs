@@ -40,6 +40,21 @@ test('批量接口立即接收、持久查询、幂等返回、校验数量且�
       body: JSON.stringify(body),
     });
   try {
+    for (const acquisition_channel of ['customs', 'dual']) {
+      const retired = { ...input, acquisition_channel };
+      for (const path of ['/jobs', '/search-preview', '/runs'])
+        assert.equal((await post(path, retired)).status, 400);
+      assert.equal(
+        (
+          await post('/schedules', {
+            name: 'retired channel',
+            input: retired,
+            timing: { repeat: 'once', startDate: '2030-01-01', times: ['09:00'] },
+          })
+        ).status,
+        400,
+      );
+    }
     for (const target_count of [0, 201, 1.2, '5'])
       assert.equal((await post('/jobs', { ...input, target_count })).status, 400);
     const response = await post('/jobs', input);

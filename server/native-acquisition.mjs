@@ -4,8 +4,6 @@ import { createResearchProviders } from './research-providers.mjs';
 import { researchCacheKey } from './research-reuse.mjs';
 import { boundedResearchPages } from './research-input.mjs';
 import { compactResearchText } from './research-text.mjs';
-import { CustomsDiscovery, customsConfig } from './customs-discovery.mjs';
-import { matchShipmentBuyer } from './shipment-evidence.mjs';
 import { AcquisitionStore } from './acquisition-store.mjs';
 import { FeishuClient, encodeResearchFields, recordsForDomain } from './feishu-direct.mjs';
 import { fieldText } from './feishu.mjs';
@@ -144,58 +142,6 @@ export function selectWebsiteCandidates(results, knownDomains = [], limit = 20) 
   };
 }
 
-// Name evidence is necessary to queue a customs website, not proof of identity.
-// Keep the later official-page/party/address match as the final association gate.
-function shipmentWebsiteNameScore(result, buyerName) {
-  const normalized = (value) =>
-    String(value || '')
-      .normalize('NFKC')
-      .toLowerCase()
-      .replace(/[^\p{L}\p{N}]+/gu, ' ')
-      .trim();
-  const name = normalized(buyerName)
-    .replace(
-      /\b(?:incorporated|corporation|limited|inc|corp|ltd|llc|company|co|gmbh|pty|the)\b/g,
-      ' ',
-    )
-    .replace(/\s+/g, ' ')
-    .trim();
-  const words = name.split(' ').filter(Boolean);
-  const distinctive = words.filter(
-    (word) =>
-      word.length >= 3 &&
-      !/^(?:blinds?|shades?|shutters?|windows?|coverings?|fabrics?|components?|products?|distribution|group|international|home|and|for|to|go)$/.test(
-        word,
-      ),
-  );
-  const text = normalized(
-    [result.title, result.content, result.raw_content].filter(Boolean).join(' '),
-  );
-  const host = domainKey(result.url).replace(/[^\p{L}\p{N}]/gu, '');
-  const inHost = (word) => host.includes(word.replace(/ /g, ''));
-  const contains = (word) => (' ' + text + ' ').includes(' ' + word + ' ') || inHost(word);
-  const evidence = distinctive.length ? distinctive : [name];
-  if ((!distinctive.length && (words.length < 2 || name.length < 6)) || !evidence.every(contains))
-    return 0;
-  // A dealer mentioning a supplier is not the supplier's official site. Keep
-  // normal brand/legal-name relations for the later verbatim identity audit.
-  const escaped = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  if (
-    evidence.some((word) =>
-      new RegExp(
-        '\\b(?:dealers?|distributors?|resellers?|retailers?|stockists?|partners?)' +
-          '(?:\\s+\\w+){0,2}\\s+(?:for|of)\\s+' +
-          escaped(word) +
-          '\\b',
-      ).test(text),
-    )
-  )
-    return 0;
-  // A brand's own domain is a stronger locator than a dealer mentioning it.
-  // Neither is sufficient to bypass the later official-page identity check.
-  return evidence.every(inHost) ? 2 : 1;
-}
-
 // Provider-reported billing only: an attempted call without valid usage makes
 // the total unknown, rather than silently treating its missing credits as zero.
 function webUsageCounter(operation) {
@@ -233,13 +179,11 @@ export class NativeAcquisition {
     store,
     assessments,
     providers,
-    customs,
   } = {}) {
     this.env = env;
     this.fetch = fetchImpl;
     this.readPage = readPage;
     this.providers = providers || createResearchProviders({ env, fetchImpl });
-    this.customs = customs;
     this.feishu = feishu || new FeishuClient({ env, fetchImpl });
     this.store =
       store ||
@@ -258,8 +202,6 @@ export class NativeAcquisition {
     return {
       ruleVersion: ASSESSMENT_RULE_VERSION,
       markets,
-      customs: customsConfig(this.env).configured ? 'discovery_connected' : 'not_connected',
-      customsIncludedInInitialScore: false,
       assessmentStorage: 'latest_only',
       businessSchemaVersion: BUSINESS_SCHEMA_VERSION,
     };
@@ -296,7 +238,6 @@ export class NativeAcquisition {
           ...lead,
           contactEvidence,
           companyIdentity: this.store.companyIdentity(lead.id, lead.website, lead.name),
-          customsEvidence: this.store.customsEvidence(lead.website),
         };
         const stored = lead.assessment?.id
           ? this.assessments.summary(lead.assessment.id)
@@ -464,7 +405,6 @@ export class NativeAcquisition {
     if (search?.country && !input.market_countries.includes(search.country))
       throw Object.assign(new Error('搜索国家不在当前支持的市场范围内'), { status: 400 });
     this.ensureConfigured();
-    if (search.source_kind === 'customs') return this.discoverShipments(input, search, seen);
     const records = await this.feishu.records();
     const known = records.map((r) => domainKey(customerWebsite(r))).filter(Boolean);
     const excluded = [...new Set([...known, ...seen])];
@@ -482,96 +422,6 @@ export class NativeAcquisition {
       stage: 'select',
       source: this.providers.web.provider,
       usage: data.usage,
-    };
-  }
-  async discoverShipments(input, search, seen) {
-    this.customs ||= new CustomsDiscovery({ env: this.env, fetchImpl: this.fetch });
-    const found = await this.customs.discover(input, search);
-    const candidates = [],
-      reviews = [];
-    const webUsage = webUsageCounter('search');
-    const records = await this.feishu.records();
-    for (const buyer of found.buyers) {
-      // A provider URL is only a candidate; never skip website verification.
-      let sites = buyer.source_url
-        ? selectWebsiteCandidates(
-            [{ url: buyer.source_url }].filter((r) => shipmentWebsiteNameScore(r, buyer.name)),
-            [],
-            1,
-          ).candidates
-        : [];
-      if (!sites.length) {
-        webUsage.start();
-        const result = await this.providers.web.search({
-          query: [
-            '"' + buyer.name.replace(/["\r\n]/g, ' ') + '"',
-            buyer.address || '',
-            input.country || search.country || '',
-            'official website',
-          ]
-            .join(' ')
-            .slice(0, 395),
-          search_depth: 'basic',
-          max_results: 5,
-          include_answer: false,
-          include_raw_content: false,
-          auto_parameters: false,
-        });
-        webUsage.observe(result);
-        sites = selectWebsiteCandidates(
-          result.results
-            .map((r) => ({ result: r, score: shipmentWebsiteNameScore(r, buyer.name) }))
-            .filter((entry) => entry.score)
-            .sort((a, b) => b.score - a.score)
-            .map((entry) => entry.result),
-          [],
-          3,
-        ).candidates;
-      }
-      if (!sites.length) {
-        reviews.push({
-          name: buyer.name,
-          buyer_id: buyer.id,
-          source_kind: 'customs',
-          reason: '找到相关货运记录，尚未找到名称可对应海关买方的独立官网，待人工核实',
-          customs_evidence: buyer,
-        });
-        continue;
-      }
-      // Search evidence is a locator only. Retain bounded alternatives so an
-      // incorrect first result cannot consume the buyer without a second try.
-      // This key groups retries, not independently verified company identities.
-      const buyerKey = JSON.stringify([
-        buyer.provider || buyer.records?.[0]?.provider || this.customs.provider?.id || 'customs',
-        buyer.id || buyer.name,
-        buyer.id ? '' : buyer.address || '',
-      ]);
-      for (const site of sites) {
-        const priorResearch = this.store.websiteResearch(site.source_url);
-        const evidence = this.store.saveCustomsEvidence(
-          site.source_url,
-          buyer,
-          priorResearch ? matchShipmentBuyer(buyer, priorResearch, site.source_url) : null,
-          priorResearch?.record_id,
-        );
-        const matching = recordsForDomain(records, site.domain);
-        candidates.push({
-          ...site,
-          source_kind: 'customs',
-          customs_buyer_key: buyerKey,
-          customs_evidence: evidence,
-          ...(matching.length === 1 ? { target_record_id: matching[0].record_id } : {}),
-        });
-      }
-    }
-    return {
-      candidates,
-      review_candidates: reviews,
-      usage: { ...found.usage, ...webUsage.snapshot() },
-      next_search: found.next_search,
-      source: 'customs',
-      stage: 'select',
-      skipped_existing: [],
     };
   }
   async collect(sourceUrl) {
@@ -936,35 +786,6 @@ export class NativeAcquisition {
         research.reason = '官网部分页面未取得有效正文，采集未完成，待补充核实';
       }
       op.research = research;
-      if (item.source_kind === 'customs') {
-        const associations = this.store
-          .customsEvidence(item.source_url)
-          .map((buyer) =>
-            this.store.saveCustomsEvidence(
-              item.source_url,
-              buyer,
-              matchShipmentBuyer(buyer, research, item.source_url),
-              item.target_record_id,
-            ),
-          );
-        research.customs_evidence = associations;
-        const matchingBuyer = associations.some(
-          (b) =>
-            b.match.status !== 'conflict' &&
-            (!item.customs_evidence ||
-              (b.id === item.customs_evidence.id &&
-                b.product_family === item.customs_evidence.product_family)),
-        );
-        if (!matchingBuyer) {
-          const output = this.output(op, {
-            research,
-            outcome: 'review',
-            reason: '海关买方与官网经营主体不一致，待人工消歧',
-          });
-          this.store.complete(op, output);
-          return output;
-        }
-      }
       op.evidence = page.website_metadata;
       op.research_pages = page.research_pages;
       op.usage = op.research_usage.cache_hits ? undefined : response.usage;
@@ -1280,13 +1101,6 @@ export class NativeAcquisition {
     op.recordVerifiedAt ||= new Date().toISOString();
     if (op.research?.company_name && op.recordId) {
       this.store.saveWebsiteResearch(op.source_url, op.research, op.recordId);
-      for (const buyer of this.store.customsEvidence(op.source_url))
-        this.store.saveCustomsEvidence(
-          op.source_url,
-          buyer,
-          matchShipmentBuyer(buyer, op.research, op.source_url),
-          op.recordId,
-        );
     }
     if (op.research?.company_identity && op.recordId) {
       const name = op.fields?.['公司名称'] || op.fields?.['客户名称'];
@@ -1361,6 +1175,7 @@ export class NativeAcquisition {
     return { settled: true, output };
   }
   async run(input, id = randomUUID()) {
+    input = { ...input, ...validateTarget(input) };
     this.ensureConfigured();
     const { operation: op, existing } = this.store.begin(id, { input, mode: 'run' });
     if (existing) {
@@ -1373,16 +1188,13 @@ export class NativeAcquisition {
       const found = await this.discover(input, {
         ...searchPlan(input)[0],
         run_id: id,
-        remaining_budget: input.customs_record_budget || 300,
       });
       if (!found.candidates.length) {
         const output = this.output(op, {
           outcome: found.review_candidates?.length ? 'review' : 'no_new_candidates',
           skipped: found.skipped_existing,
           research: { review_candidates: found.review_candidates || [] },
-          reason: found.review_candidates?.length
-            ? '相关货运买方尚未取得可核实官网，已保留待核实项'
-            : '本次搜索没有新的独立企业官网',
+          reason: '本次搜索没有新的独立企业官网',
         });
         this.store.complete(op, output);
         return output;
@@ -1397,7 +1209,6 @@ export class NativeAcquisition {
     }
   }
   close() {
-    this.customs?.close?.();
     this.assessments.close();
     this.supplements.close();
     this.store.close();

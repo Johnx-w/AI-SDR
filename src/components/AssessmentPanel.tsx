@@ -1,7 +1,6 @@
 import { Fragment } from 'react';
 import { ArrowUpRight } from 'lucide-react';
 import { Badge } from './ui';
-import type { CustomsBuyerEvidence } from '../domain/types';
 import { formatBeijingText, formatBeijingTime } from '../domain/date-time.mjs';
 import { buildAssessmentDimensions } from '../domain/assessment-dimensions.mjs';
 import type { SupplementContext } from '../services/leadSupplements';
@@ -47,21 +46,6 @@ interface Props {
   researchAt?: string | number | null;
   onSupplement?: (context: SupplementContext) => void;
 }
-const customsFamilyNames: Record<string, string> = {
-  fabrics: '窗饰面料',
-  fabric: '窗饰面料',
-  components: '组件与叶片',
-  plantation_shutters: '透气窗',
-  finished_blinds: '成品帘',
-  outdoor_shading: '户外遮阳',
-  samples: '窗饰样本册',
-};
-const customsMatchNames: Record<string, string> = {
-  verified: '买方身份关联已核实',
-  name_only: '仅名称一致 · 待核实',
-  pending: '买方身份待核实',
-  conflict: '身份存在冲突 · 不作已确认关联',
-};
 function evidenceUrl(value?: string | null) {
   try {
     const url = new URL(value || '');
@@ -71,159 +55,6 @@ function evidenceUrl(value?: string | null) {
   } catch {
     return undefined;
   }
-}
-
-type CustomsRecord = CustomsBuyerEvidence['records'][number];
-const customsUnits: Record<string, string> = {
-  CTN: '箱',
-  CTNS: '箱',
-  CARTON: '箱',
-  CARTONS: '箱',
-  ROL: '卷',
-  ROLL: '卷',
-  ROLLS: '卷',
-  PCS: '件',
-  PIECES: '件',
-  SET: '套',
-  SETS: '套',
-  PKG: '包',
-  PKGS: '包',
-  M: '米',
-  MTR: '米',
-  SQM: '平方米',
-};
-function shipmentQuantity(record: CustomsRecord) {
-  const quantity = record.quantity;
-  if (!quantity || !Number.isFinite(quantity.value) || quantity.value < 0) return '未提供';
-  const value = quantity.value.toLocaleString('zh-CN', { maximumFractionDigits: 20 });
-  const unit = quantity.unit?.trim();
-  if (!unit) return `${value}（单位未提供）`;
-  const label = customsUnits[unit.toUpperCase()];
-  return label ? `${value} ${label}（${unit}）` : `${value} ${unit}`;
-}
-function shipmentProduct(description?: string) {
-  const text = (description || '').replace(/[-_/]/g, ' ').replace(/\s+/g, ' ').trim();
-  // Labels only translate explicit cargo phrases; the complete original stays in details.
-  const phrases: [RegExp, string][] = [
-    [/\bpvc\s+blind(?:window)?\s+(?:window\s+)?blind\s+components?\b/i, 'PVC 百叶窗组件'],
-    [/\bvertical\s+blinds?\s+components?\b/i, '垂直百叶组件'],
-    [/\bfaux\s*wood\s+blinds?\b(?!\s+(?:components?|parts?))/i, '仿木百叶帘'],
-    [/\b(?:roller\s+(?:blinds?|shades?))\s+fabrics?\b/i, '卷帘面料'],
-    [/\bpolyester\s+sun\s*screen\s+fabrics?\b/i, '聚酯遮阳面料'],
-    [/\bzebra\s+(?:blinds?|shades?)\s+fabrics?\b/i, '斑马帘面料'],
-    [/\b(?:honeycomb|cellular)\s+(?:blinds?|shades?)\s+fabrics?\b/i, '蜂巢帘面料'],
-    [/\bplantation\s+shutters?\b/i, '透气窗'],
-    [/\b(?:outdoor\s+)?zip\s*screens?\b|\bziptrack\s+blinds?\b/i, '户外防风帘'],
-    [/\b(?:roller\s+(?:blinds?|shades?))\b(?!\s+(?:fabric|component|part|clutch|sample))/i, '卷帘'],
-  ];
-  const labels = phrases.filter(([pattern]) => pattern.test(text)).map(([, label]) => label);
-  if (!labels.length && /\bsun\s*screen\s+fabrics?\b/i.test(text)) return '遮阳面料';
-  return [...new Set(labels)].join('、') || text || '产品未提供';
-}
-const shipmentBillKey = (record: CustomsRecord) =>
-  record.bill_of_lading_number
-    ? JSON.stringify([record.provider || '', record.bill_of_lading_number])
-    : null;
-
-export function CustomsEvidence({ buyers }: { buyers: CustomsBuyerEvidence[] }) {
-  return (
-    <section className="customs-evidence" aria-label="海关逐票证据">
-      <h3>海关记录</h3>
-      {!buyers.length ? (
-        <p>尚无关联到该官网的海关记录。</p>
-      ) : (
-        buyers.map((buyer) => {
-          const verified = buyer.match?.status === 'verified';
-          const records = buyer.records || [];
-          const billCounts = new Map<string, number>();
-          for (const record of records) {
-            const key = shipmentBillKey(record);
-            if (key) billCounts.set(key, (billCounts.get(key) || 0) + 1);
-          }
-          const billNumbers = new Set(records.map((r) => r.bill_of_lading_number).filter(Boolean));
-          return (
-            <section className="customs-buyer" key={`${buyer.id}:${buyer.product_family}`}>
-              <div className="customs-buyer-heading">
-                <strong>{customsFamilyNames[buyer.product_family] || buyer.product_family}</strong>
-                <Badge tone={verified ? 'green' : 'amber'}>
-                  {customsMatchNames[buyer.match?.status || 'pending'] || '买方身份待核实'}
-                </Badge>
-              </div>
-              {!!records.length && (
-                <p className="customs-record-count">
-                  {records.length} 条记录 ·{' '}
-                  {billNumbers.size ? `${billNumbers.size} 个提单号` : '提单号未提供'}
-                </p>
-              )}
-              {buyer.records?.length ? (
-                <table className="customs-product-table">
-                  <thead>
-                    <tr>
-                      <th scope="col">记录日期</th>
-                      <th scope="col">产品</th>
-                      <th scope="col">进口数量</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {records.map((record, index) => {
-                      const sharedBill = (billCounts.get(shipmentBillKey(record) || '') || 0) > 1;
-                      return (
-                        <tr key={`${record.provider || ''}:${record.id}:${index}`}>
-                          <td className="customs-record-date">
-                            {formatBeijingText(record.date || '日期未知')}
-                          </td>
-                          <td>
-                            <strong>{shipmentProduct(record.description)}</strong>
-                            <details className="customs-record-details">
-                              <summary>原始记录</summary>
-                              <div className="customs-record-source">
-                                <p className="assessment-reason">
-                                  {record.description || '未提供货物描述'}
-                                </p>
-                                <p>
-                                  {formatBeijingText(record.date || '日期未知')} · B/L：
-                                  {record.bill_of_lading_number || '未提供提单号'}
-                                </p>
-                                <small>
-                                  {record.provider && `${record.provider} · `}记录 ID：
-                                  {record.id || '未知'}
-                                </small>
-                                <p>
-                                  {evidenceUrl(record.source_url) ? (
-                                    <a
-                                      href={evidenceUrl(record.source_url)}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                    >
-                                      查看原始来源
-                                    </a>
-                                  ) : (
-                                    <small>服务商未提供可打开的原始来源链接。</small>
-                                  )}
-                                </p>
-                              </div>
-                            </details>
-                          </td>
-                          <td className="customs-record-quantity">
-                            {shipmentQuantity(record)}
-                            {sharedBill && (
-                              <small className="customs-shared-bill">同提单 · 数量不累加</small>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              ) : (
-                <p>海关线索待补票据。</p>
-              )}
-            </section>
-          );
-        })
-      )}
-    </section>
-  );
 }
 function assessmentPresentation(
   assessment: AssessmentSummary | null | undefined,

@@ -88,7 +88,6 @@ export function summarizeLead(lead) {
     'createdAt',
     'updatedAt',
   ];
-  const buyers = Array.isArray(lead.customsEvidence) ? lead.customsEvidence : [];
   return {
     version: contentVersion(lead),
     ...Object.fromEntries(
@@ -107,15 +106,6 @@ export function summarizeLead(lead) {
       : null,
     ratingSummary: ratingSummary(lead),
     contactSummary: contactSummary(lead),
-    customsSummary: {
-      recordCount: new Set(
-        buyers.flatMap((buyer) =>
-          (buyer.records || []).map((record) => `${record.provider || ''}:${record.id}`),
-        ),
-      ).size,
-      buyerCount: buyers.length,
-      unverified: buyers.some((buyer) => buyer.match?.status !== 'verified'),
-    },
   };
 }
 

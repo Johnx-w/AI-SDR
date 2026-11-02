@@ -45,7 +45,6 @@ test('明确经营主体名称优先，品牌名作为别名保留并留原始�
   assert.equal(result.company_identity.legal_name, 'Example Imports LLC');
   assert.ok(result.company_identity.aliases.includes('Bright Screens'));
   assert.equal(result.company_identity.status, 'legal_name_self_reported');
-  assert.equal(result.company_identity.customs_match_status, 'requires_identity_match');
 });
 
 test('有官网名称但没有明确法定名称时保留未知，不补猜法律后缀', () => {
@@ -56,7 +55,7 @@ test('有官网名称但没有明确法定名称时保留未知，不补猜法�
   assert.equal(result.company_identity.status, 'website_name_only');
 });
 
-test('并列多个经营法人时保留冲突，不任选一个用于海关或自动发布匹配', () => {
+test('并列多个经营法人时保留冲突，不任选一个用于自动发布匹配', () => {
   const text =
     'Bright Screens. Privacy: Example US LLC and Example Canada Ltd operate different regional websites.';
   const result = parse(
