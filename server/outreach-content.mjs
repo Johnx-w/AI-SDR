@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { isIP } from 'node:net';
 import { domainKey } from './website-identity.mjs';
+import { assessmentSummaryFields } from './customer-fields.mjs';
 import { businessProductRelation, countryMatches, windowProductDirections } from './relevance.mjs';
 import { researchProviderConfig } from './acquisition-config.mjs';
 import { createResearchProviders } from './research-providers.mjs';
@@ -500,6 +501,10 @@ export function selectOutreachCandidates({
       ['待核实', '待补全', '暂不开发'].includes(lead.grade)
     ) {
       reject('match_unverified', '客户匹配依据待核实或已明确不匹配，暂缓自动首封');
+      continue;
+    }
+    if (assessmentSummaryFields(raw.assessment)['待确认事项']) {
+      reject('assessment_conflict', '客户经营事实或必需条件仍有冲突，暂缓自动首封');
       continue;
     }
     const identities = [lead.customerId, lead.companyDomain, ...lead.emails]

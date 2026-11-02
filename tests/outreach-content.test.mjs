@@ -119,6 +119,26 @@ test('已入库但匹配待核实的客户不进入自动首封', () => {
   assert.equal(result.blocked[0].reasonCode, 'match_unverified');
 });
 
+test('高优先客户的其他产品仍有事实冲突时暂停自动首封', () => {
+  const input = fixture();
+  input.leads[0].grade = '高优先';
+  input.leads[0].assessment = {
+    matchLevel: '明确匹配',
+    opportunities: [
+      { direction: 'finished', product: 'PVC shutters', status: '高优先' },
+      {
+        direction: 'finished',
+        product: 'Other shades',
+        status: '待核实',
+        dimensions: { P: { conflict: true, missing: '同一产品的经营事实相互冲突，需核实' } },
+      },
+    ],
+  };
+  const result = selectOutreachCandidates(input);
+  assert.equal(result.eligible.length, 0);
+  assert.equal(result.blocked[0].reasonCode, 'assessment_conflict');
+});
+
 test('邮箱容量分配先给高优先客户，常规开发保持入库顺序', () => {
   const input = fixture();
   const base = input.leads[0];
