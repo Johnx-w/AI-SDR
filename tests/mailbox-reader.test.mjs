@@ -360,7 +360,7 @@ test('an operation timeout closes the transport and rejects without provider det
       },
     }),
   });
-  await assert.rejects(reader.read({ since }), { code: 'MAILBOX_READ_FAILED' });
+  await assert.rejects(reader.read({ since }), { code: 'MAILBOX_READ_TIMEOUT' });
   assert.equal(closed, true);
 });
 
@@ -463,7 +463,7 @@ test('a timed-out fetch releases an acquired read-only lock before returning', a
     timeoutMs: 10,
     imapFactory: () => h.client,
   });
-  await assert.rejects(reader.read({ since }), { code: 'MAILBOX_READ_FAILED' });
+  await assert.rejects(reader.read({ since }), { code: 'MAILBOX_READ_TIMEOUT' });
   assert.equal(h.calls.filter((call) => call[0] === 'release').length, 1);
   assert.equal(h.calls.at(-1), 'logout');
 });

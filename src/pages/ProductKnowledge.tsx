@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Archive, ExternalLink, Plus, RefreshCw, Search } from 'lucide-react';
 import { PageHeading } from '../components/PageHeading';
+import { ProductDocuments } from '../components/ProductDocuments';
 import { Badge, Empty, Modal } from '../components/ui';
 import type { OutreachFact } from '../outreachApi';
 import './ProductKnowledge.css';
@@ -49,6 +50,7 @@ interface ProductDraft {
   approvedBy: string;
   notes: string;
   outreachFacts: OutreachFact[];
+  documentIds?: string[];
 }
 interface ProductKnowledge extends ProductDraft {
   id: string;
@@ -258,6 +260,25 @@ export function ProductKnowledgePage() {
         'outreachFacts',
         editor.value.outreachFacts.map((fact) => (fact.id === id ? { ...fact, ...values } : fact)),
       );
+  }
+  function useDocument(id: string, specifications: string) {
+    if (!editor) return;
+    const combined = [editor.value.specifications, specifications].filter(Boolean).join('\n\n');
+    if (combined.length > 12000) {
+      setFormError('合并后参数超过 12000 字符，请先精简候选参数或现有产品参数');
+      return;
+    }
+    setFormError('');
+    setEditor({
+      ...editor,
+      value: {
+        ...editor.value,
+        specifications: combined,
+        documentIds: [...new Set([...(editor.value.documentIds || []), id])],
+        status: 'draft',
+        approvedBy: '',
+      },
+    });
   }
   function acceptSaved(result: SaveResult, requestedStatus?: ProductDraft['status']) {
     setProducts((current) => [
@@ -660,6 +681,13 @@ export function ProductKnowledgePage() {
                 </label>
               </div>
             </fieldset>
+            <ProductDocuments
+              key={editor.original?.id || editor.key}
+              productId={editor.original?.id}
+              documentIds={editor.value.documentIds || []}
+              disabled={saving || refreshRequired}
+              onUse={useDocument}
+            />
             <fieldset disabled={saving || refreshRequired}>
               <legend>规格与资料依据</legend>
               <div className="knowledge-fields">
@@ -667,6 +695,7 @@ export function ProductKnowledgePage() {
                   已核实参数
                   <textarea
                     rows={4}
+                    maxLength={12000}
                     placeholder="记录适用产品、参数值、单位和范围，并在下方补充依据"
                     value={editor.value.specifications}
                     onChange={(event) => change('specifications', event.target.value)}
@@ -867,7 +896,7 @@ export function ProductKnowledgePage() {
                 )}
               </div>
               <p className="knowledge-form-note">
-                审核前请核对以上资料及来源。计划另行授权后，系统可在已确认范围内自动发信；修改资料后需重新审核，未授权范围不会自动扩大。
+                审核前请对照原文件核对以上资料及来源，特别是型号、图号版本、尺寸、单位和公差。资料审核不代表原文件可外发，也不启用自动回信。已授权的邮件流程仅可使用适用的已审核资料；修改资料后需重新审核。
               </p>
             </fieldset>
             <div className="modal-actions">

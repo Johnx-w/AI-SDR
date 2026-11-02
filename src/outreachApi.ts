@@ -107,7 +107,7 @@ export interface OutreachDelivery {
 export interface OutreachState {
   mailboxes: OutreachMailbox[];
   campaigns: OutreachCampaign[];
-  deliveries: OutreachDelivery[];
+  deliveryStats: Record<OutreachDeliveryStatus | 'total', number>;
   products: OutreachProduct[];
   readiness: { generatorConfigured: boolean };
   review: {

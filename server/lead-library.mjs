@@ -4,6 +4,7 @@ import { dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { customerWebsite } from './customer-fields.mjs';
 import { domainKey } from './website-identity.mjs';
+import { projectCustomerGrade } from './customer-assessment.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const plainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -37,9 +38,9 @@ function validateLead(lead) {
 }
 
 function ratingSummary(lead) {
-  if (['高优先', '常规开发'].includes(lead.grade)) {
+  if (['A', 'B'].includes(lead.grade)) {
     const labels = (lead.assessment?.prioritySignals || []).map((signal) => signal.label);
-    return labels.length ? [...new Set(labels)].slice(0, 2).join('、') + '已核实' : '查看评级依据';
+    if (labels.length) return [...new Set(labels)].slice(0, 2).join('、') + '已核实';
   }
   const lines = text(lead.assessment?.evidenceReason || lead.ratingReason)
     .split('\n')
@@ -47,9 +48,11 @@ function ratingSummary(lead) {
     .filter(Boolean);
   const pending = lines.find((line) => /^(待补充依据|待补充)[:：]/.test(line));
   const reason =
-    (['待核实', '待补全', '未评级'].includes(lead.grade) ? pending : '') ||
+    (['C', '待核实', '待补全', '未评级'].includes(lead.grade) ? pending : '') ||
     lines.find((line) => /^(主营产品|明确经营品类|专业供货角色|综合供货角色)[:：]/.test(line)) ||
-    (['待核实', '待补全', '未评级'].includes(lead.grade) ? '关键依据尚未核实' : '查看评级依据');
+    (['C', '待核实', '待补全', '未评级'].includes(lead.grade)
+      ? '关键依据尚未核实'
+      : '查看评级依据');
   return reason.length > 46 ? reason.slice(0, 45) + '…' : reason;
 }
 
@@ -383,7 +386,7 @@ export class LeadLibrary {
           if (mirror.remoteId !== row.record_id) aliases.add(mirror.remoteId);
         }
         for (const lead of this.snapshot(true).leads)
-          if (!aliases.has(lead.id)) records.set(lead.id, lead);
+          if (!aliases.has(lead.id)) records.set(lead.id, projectCustomerGrade(lead));
         for (const [id, lead] of changes) records.set(id, lead);
         const syncedAt =
           typeof data.syncedAt === 'string' && Number.isFinite(Date.parse(data.syncedAt))
@@ -402,7 +405,9 @@ export class LeadLibrary {
         });
         const prior = new Map(
           this.db
-            .prepare('SELECT record_id,position,version FROM lead_library_customers WHERE scope=?')
+            .prepare(
+              'SELECT record_id,position,version,summary FROM lead_library_customers WHERE scope=?',
+            )
             .all(this.scope)
             .map((row) => [row.record_id, row]),
         );
@@ -423,7 +428,7 @@ export class LeadLibrary {
             writes.push({ kind: 'insert', row });
           } else {
             prior.delete(row.id);
-            if (old.version !== row.version) {
+            if (old.version !== row.version || old.summary !== row.summary) {
               counts.updated++;
               writes.push({ kind: 'update', row });
             } else {

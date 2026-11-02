@@ -136,6 +136,72 @@ test('cached reads never connect; an accepted first touch joins an actual reply 
   assert.equal(h.inbox.detail(threadId).messages.at(-1).deliveryStatus, 'received');
 });
 
+test('accepted delivery backfill is incremental across reads, new sends, and restart', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'mail-deliveries-'));
+  const path = join(directory, 'outreach.sqlite');
+  const h = harness(t, { path });
+  let reopened;
+  t.after(async () => {
+    await reopened?.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+  const delivery = (id) => ({
+    id,
+    campaignId: 'campaign',
+    mailboxId: 'one',
+    from: h.boxes[0].email,
+    to: `${id}@buyer.example`,
+    subject: 'Introduction',
+    bodyText: 'Original message body',
+    status: 'accepted',
+    messageId: `<${id}@brand.example>`,
+    sentAt: at,
+  });
+  h.service.putDelivery(delivery('historical'));
+  h.service.db.exec(`
+    CREATE TABLE import_writes (kind TEXT);
+    CREATE TRIGGER log_message_update AFTER UPDATE ON mailbox_thread_messages
+      BEGIN INSERT INTO import_writes VALUES ('message'); END;
+    CREATE TRIGGER log_thread_update AFTER UPDATE ON mailbox_threads
+      BEGIN INSERT INTO import_writes VALUES ('thread'); END;
+  `);
+  const writes = () =>
+    h.service.db.prepare('SELECT count(*) AS count FROM import_writes').get().count;
+  assert.equal(h.inbox.list().total, 1);
+  const id = h.inbox.list().items[0].id;
+  const afterBackfill = writes();
+  h.inbox.detail(id);
+  h.inbox.list();
+  assert.equal(writes(), afterBackfill);
+  h.service.putDelivery(delivery('new'));
+  assert.equal(h.inbox.list().total, 2);
+  assert.equal(writes(), afterBackfill);
+  reopened = new OutreachService({
+    path,
+    mailboxes: { list: () => structuredClone(h.boxes) },
+  });
+  assert.equal(reopened.conversations.list().total, 2);
+  assert.equal(reopened.conversations.detail(id).messages[0].bodyText, 'Original message body');
+  assert.equal(writes(), afterBackfill);
+});
+
+test('one list reads the customer snapshot once for unmatched conversations', (t) => {
+  let reads = 0;
+  const h = harness(t, {
+    customers: () => {
+      reads++;
+      return [{ id: 'customer', name: 'Buyer', email: 'buyer@buyer.example' }];
+    },
+  });
+  for (let index = 0; index < 3; index++)
+    h.inbox.putMessage(
+      h.boxes[0],
+      received(`unmatched-${index}`, { from: `other-${index}@buyer.example` }),
+    );
+  assert.equal(h.inbox.list().total, 3);
+  assert.equal(reads, 1);
+});
+
 test('read state survives repeat sync and only a newly received message restores unread', async (t) => {
   const h = harness(t);
   const message = received('reply');

@@ -40,7 +40,7 @@ const libraryScope = createHash('sha256')
     ]),
   )
   .digest('hex');
-const gradeNames = ['高优先', '常规开发'];
+const gradeNames = ['A', 'B', 'C'];
 const json = (path) => JSON.parse(readFileSync(path, 'utf8'));
 const byId = (rows, key) => new Map(rows.map((row) => [row[key], row]));
 const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);

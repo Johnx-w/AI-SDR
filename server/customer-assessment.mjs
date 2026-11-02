@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 import { domainKey } from './website-identity.mjs';
-import { customerWebsite } from './customer-fields.mjs';
+import { customerWebsite, fieldValue } from './customer-fields.mjs';
 import { businessProductRelation, windowProductDirections } from './relevance.mjs';
 
-export const ASSESSMENT_RULE_VERSION = 'acquisition-v4.0';
+export const ASSESSMENT_RULE_VERSION = 'acquisition-v5.0';
 export const directionNames = { finished: '成品', materials: '材料配件', samples: '样本展示' };
 export const ASSESSMENT_HISTORY_FORMAT = 'evidence-v1';
 export function assessmentRating(snapshot) {
@@ -11,6 +11,43 @@ export function assessmentRating(snapshot) {
     snapshot.grade ||
     (['待核实', '待补全', '暂不开发'].includes(snapshot.status) ? snapshot.status : '待核实')
   );
+}
+export function customerGrade(snapshot) {
+  if (!snapshot || snapshot.status === '暂不开发') return null;
+  if (['A', 'B', 'C'].includes(snapshot.grade)) return snapshot.grade;
+  if (snapshot.ruleVersion !== 'acquisition-v4.0') return null;
+  if (snapshot.status === '待核实') return 'C';
+  const product = snapshot.dimensions?.P?.score;
+  const role = snapshot.dimensions?.R?.score;
+  if (snapshot.grade === '高优先' && product === 40 && role >= 25) return 'A';
+  if (snapshot.grade === '常规开发') return product >= 30 && role !== 10 ? 'B' : 'C';
+  return null;
+}
+
+export function projectCustomerGrade(lead) {
+  const assessment = lead.assessment;
+  if (
+    assessment?.ruleVersion !== 'acquisition-v4.0' ||
+    assessment.manualOverride ||
+    fieldValue(lead.fields, '用户评级') !== assessmentRating(assessment)
+  )
+    return lead;
+  const grade = customerGrade(assessment);
+  if (!grade) return lead;
+  return {
+    ...lead,
+    grade,
+    assessment: {
+      ...assessment,
+      grade,
+      opportunities: assessment.opportunities?.map((opportunity) => ({
+        ...opportunity,
+        grade:
+          customerGrade({ ...opportunity, ruleVersion: assessment.ruleVersion }) ||
+          opportunity.grade,
+      })),
+    },
+  };
 }
 const labels = {
   P: '产品契合',
@@ -154,9 +191,10 @@ function gradeOpportunity(opportunity, dimensions, research) {
   const has = (...kinds) => (opportunity.facts || []).some((f) => kinds.includes(f.kind));
   let grade = null,
     status;
-  if (P.conflict || R.conflict || has('identity_conflict', 'mandatory_requirement'))
+  if (P.conflict || R.conflict || has('identity_conflict', 'mandatory_requirement')) {
+    grade = 'C';
     status = '待核实';
-  else if (
+  } else if (
     research.entity_type === 'individual' ||
     P.score === 0 ||
     R.score === 0 ||
@@ -171,10 +209,22 @@ function gradeOpportunity(opportunity, dimensions, research) {
     research.eligibility?.status === 'rejected'
   )
     status = '暂不开发';
-  else if (research.entity_type !== 'business') status = '待核实';
-  else if (research.review_required || research.required_match === 'unknown')
+  else if (research.entity_type !== 'business') {
+    grade = 'C';
     status = '待核实';
-  else grade = status = P.score === 40 && R.score >= 25 ? '高优先' : '常规开发';
+  } else if (research.review_required || research.required_match === 'unknown') {
+    grade = 'C';
+    status = '待核实';
+  } else if (P.score === 40 && R.score >= 25) {
+    grade = 'A';
+    status = '优先开发';
+  } else if (P.score >= 30 && R.score !== 10) {
+    grade = 'B';
+    status = '可开发';
+  } else {
+    grade = 'C';
+    status = '低投入开发';
+  }
   const matchLevel =
     status === '待核实'
       ? '待核实'
@@ -222,9 +272,7 @@ export function assessCompany({ research, target, at = Date.now(), id }) {
           direction: windowProductDirections(productFact.value)[0],
           product: productFact.value,
           relationship: relation.kind,
-          facts: [
-            { ...productFact, kind: 'secondary_product' },
-          ],
+          facts: [{ ...productFact, kind: 'secondary_product' }],
         },
       ];
     }
@@ -249,14 +297,7 @@ export function assessCompany({ research, target, at = Date.now(), id }) {
     };
   });
   // Invalid/blocked directions never outrank an eligible opportunity at this enterprise.
-  const rank = (o) =>
-    o.grade === '高优先'
-      ? 3
-      : o.grade === '常规开发'
-        ? 2
-        : o.status === '暂不开发'
-          ? 0
-          : 1;
+  const rank = (o) => (o.grade === 'A' ? 3 : o.grade === 'B' ? 2 : o.status === '暂不开发' ? 0 : 1);
   opportunities.sort((a, b) => rank(b) - rank(a));
   const best = opportunities[0];
   const relation =
@@ -294,7 +335,9 @@ export function assessCompany({ research, target, at = Date.now(), id }) {
         ? { environment_preference: target.environment_preference }
         : {}),
     },
-    grade: best?.grade || null,
+    grade:
+      best?.grade ||
+      (best?.status === '暂不开发' || research.entity_type === 'individual' ? null : 'C'),
     status: best?.status || (research.entity_type === 'individual' ? '暂不开发' : '待核实'),
     matchLevel: best?.matchLevel || (research.entity_type === 'individual' ? '不匹配' : '待核实'),
     prioritySignals: best?.prioritySignals || [],
@@ -329,7 +372,7 @@ export function assessCompany({ research, target, at = Date.now(), id }) {
 }
 
 export function formatAssessmentReason(snapshot) {
-  const current = snapshot.ruleVersion === ASSESSMENT_RULE_VERSION;
+  const current = ['acquisition-v4.0', ASSESSMENT_RULE_VERSION].includes(snapshot.ruleVersion);
   const lines = [
     '[自动评估 ' + snapshot.id + ']',
     '规则版本：' + snapshot.ruleVersion,
@@ -361,7 +404,13 @@ export function formatAssessmentReason(snapshot) {
             (snapshot.complete ? '评分维度依据齐全' : '部分评分依据缺失，未按比例补满'),
           ...Object.entries(snapshot.dimensions).map(
             ([key, d]) =>
-              key + ' ' + labels[key] + '：' + (d.score === null ? '未知' : d.score) + '/' + d.maximum,
+              key +
+              ' ' +
+              labels[key] +
+              '：' +
+              (d.score === null ? '未知' : d.score) +
+              '/' +
+              d.maximum,
           ),
         ]),
   ];
@@ -477,7 +526,7 @@ export function readAssessmentSummary(value) {
   const ruleVersion = reason.match(/(?:^|\n)规则版本：([^\n]+)/)?.[1];
   const evaluatedAt = reason.match(/(?:^|\n)评估时间：([^\n]+)/)?.[1];
   if (!ruleVersion) return null;
-  if (ruleVersion === ASSESSMENT_RULE_VERSION) {
+  if (['acquisition-v4.0', ASSESSMENT_RULE_VERSION].includes(ruleVersion)) {
     const priority = reason.match(/(?:^|\n)开发优先级：([^\n]+)/)?.[1];
     const matchLevel = reason.match(/(?:^|\n)匹配等级：([^\n]+)/)?.[1];
     if (!priority || !matchLevel) return null;

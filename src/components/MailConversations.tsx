@@ -179,7 +179,7 @@ export function MailSyncSummary({ statuses: syncStatuses }: { statuses: MailboxS
           {failures.length ? `${failures.length} 个邮箱同步异常` : '邮箱同步状态'}
         </span>
         <span>
-          最近同步 {lastSync ? formatTime(lastSync) : '尚未同步'}
+          最近成功同步 {lastSync ? formatTime(lastSync) : '尚未同步'}
           <ChevronDown size={14} />
         </span>
       </summary>
@@ -194,6 +194,34 @@ export function MailSyncSummary({ statuses: syncStatuses }: { statuses: MailboxS
               {!!item.folders?.length && <small>已同步文件夹：{item.folders.join('、')}</small>}
               {item.hasMore && <small>还有邮件待同步，可再次点击同步邮件继续读取。</small>}
               {item.error && <p role="alert">{item.error}</p>}
+              {item.lastError && (
+                <details>
+                  <summary>最近失败诊断{!item.error && '（已恢复）'}</summary>
+                  <small>
+                    {formatTime(item.lastError.occurredAt)} ·{' '}
+                    {
+                      {
+                        credentials: '读取本地凭证',
+                        connect: '连接与认证',
+                        folders: '获取文件夹',
+                        read: '读取邮件',
+                        validate: '校验同步结果',
+                        save: '本地保存',
+                      }[item.lastError.stage]
+                    }
+                  </small>
+                  <small>{item.lastError.message}</small>
+                  <small>
+                    {[
+                      item.lastError.code,
+                      item.lastError.providerCode,
+                      item.lastError.responseStatus,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </small>
+                </details>
+              )}
             </div>
           ))
         ) : (

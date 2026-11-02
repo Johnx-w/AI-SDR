@@ -45,6 +45,7 @@ export async function handleOutreach({ request, url, service, readJson, idempote
   const mailbox = path.match(/^\/mailboxes\/([\w-]+)(?:\/(verify))?$/);
   if (mailbox) {
     const [, id, action] = mailbox;
+    if (!action && method === 'GET') return service.mailboxes.get(id);
     if (action === 'verify' && method === 'POST') return service.mailboxes.verify(id);
     if (!action && method === 'PUT') {
       const body = await readJson(request);

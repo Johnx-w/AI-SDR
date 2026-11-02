@@ -106,3 +106,42 @@ test('维度只输出可检查的事实字段，不把内部元数据混进前�
   assert.equal(entry.quote, stored.dimensions.P.facts[0].quote);
   assert.equal(entry.source_url, stored.dimensions.P.facts[0].source_url);
 });
+
+test('供货机会分别保留自身事实、判断和人工来源，潜在投入品区分经营依据与目标产品', () => {
+  const { engine, stored, lead, mainFacts, otherFact } = fixture();
+  const manual = {
+    ...fact('specialist_supply', '人工核实面料供货角色', website + 'fabric'),
+    origin: 'manual',
+    confirmationId: 'confirmation-fabric',
+    confirmedBy: '业务员甲',
+    confirmedAt: '2026-11-02T05:00:00Z',
+    internal_analysis: 'internal-only',
+  };
+  stored.opportunities[1].facts.push(manual);
+  stored.opportunities[1].dimensions.R.facts = [manual];
+  stored.opportunities[0].relationship = 'potential_input';
+  stored.target.product = 'Zip screen fabric';
+  const before = structuredClone(stored);
+  const opportunities = engine.decorateLeads({ leads: [lead] }).leads[0].assessment.opportunities;
+  assert.equal(opportunities.length, 2);
+  const [main, materials] = opportunities;
+  assert.equal(main.basisProduct, 'Zip screens');
+  assert.equal(main.targetProduct, 'Zip screen fabric');
+  assert.equal(main.direction, 'finished', '经营依据仍属于成品方向');
+  assert.equal(main.relationship, 'potential_input');
+  assert.deepEqual(main.facts, mainFacts);
+  assert.equal(main.grade, stored.opportunities[0].grade);
+  assert.equal(main.matchLevel, stored.opportunities[0].matchLevel);
+  assert.deepEqual(main.missing, stored.opportunities[0].missing);
+  assert.ok(!main.facts.some((entry) => entry.value === otherFact.value));
+  assert.deepEqual(
+    materials.facts.map((entry) => entry.value),
+    [otherFact.value, manual.value],
+  );
+  const { internal_analysis, ...publicManual } = manual;
+  assert.deepEqual(materials.facts[1], publicManual);
+  assert.deepEqual(materials.dimensions.R.facts, [publicManual]);
+  assert.equal(materials.targetProduct, undefined);
+  assert.ok(!materials.facts.some((entry) => entry.value === mainFacts[0].value));
+  assert.deepEqual(stored, before, '补充展示数据不改变快照和评级');
+});

@@ -18,7 +18,6 @@ import { SupplementPanel } from '../components/SupplementPanel';
 import type { SupplementContext } from '../services/leadSupplements';
 import { WebsiteEvidencePanel } from '../components/WebsiteEvidencePanel';
 import { CustomerBusinessSummary } from '../components/CustomerBusinessSummary';
-import { AssessmentPanel } from '../components/AssessmentPanel';
 import { leadLibrary, startLeadLibraryPolling } from '../services/leadLibrary';
 import type { LeadList, Prospect } from '../services/leadLibrary';
 import { exportCsv } from '../services/csv';
@@ -55,12 +54,11 @@ const safeUrl = (s: string) => {
     return undefined;
   }
 };
-const isLegacyGrade = (grade: string) => ['A', 'B', 'C'].includes(grade);
 const priorityOrder = (
   a: { grade: string; createdAt?: number | null },
   b: { grade: string; createdAt?: number | null },
 ) => {
-  const rank = (grade: string) => (grade === '高优先' ? 0 : grade === '常规开发' ? 1 : 2);
+  const rank = (grade: string) => ({ A: 0, B: 1, C: 2 })[grade] ?? 3;
   return rank(a.grade) - rank(b.grade) || (b.createdAt ?? 0) - (a.createdAt ?? 0);
 };
 export function LeadLibrary() {
@@ -80,6 +78,7 @@ export function LeadLibrary() {
   const [status, setStatus] = useState('');
   const [page, setPage] = useState(1);
   const [tab, setTab] = useState('客户画像');
+  const [focusOpportunity, setFocusOpportunity] = useState(false);
   const [supplement, setSupplement] = useState<SupplementContext | undefined>(undefined);
   const detailBody = useRef<HTMLDivElement>(null);
   const mounted = useRef(false);
@@ -169,10 +168,25 @@ export function LeadLibrary() {
     const dialog = body?.closest('dialog');
     if (dialog) dialog.scrollTop = 0;
   }, [supplement, tab, viewed?.id]);
+  useEffect(() => {
+    if (!focusOpportunity || tab !== '客户画像' || supplement) return;
+    const frame = requestAnimationFrame(() => {
+      const section = detailBody.current?.querySelector<HTMLElement>('#profile-opportunities');
+      if (!section) return;
+      section.focus({ preventScroll: true });
+      const dialog = section.closest('dialog');
+      if (dialog)
+        dialog.scrollTop +=
+          section.getBoundingClientRect().top - dialog.getBoundingClientRect().top - 20;
+      setFocusOpportunity(false);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focusOpportunity, tab, supplement, viewed]);
   const open = (id: string, detailTab = '客户画像') => {
     setSupplement(undefined);
     setParams({ dataset: 'real', lead: id });
-    setTab(detailTab);
+    setFocusOpportunity(detailTab === '供货机会');
+    setTab(detailTab === '供货机会' ? '客户画像' : detailTab);
   };
   const close = () => setParams({ dataset: 'real' });
   const download = async () => {
@@ -191,7 +205,7 @@ export function LeadLibrary() {
           市场: marketLabel(l.market),
           类型: typeNames[l.type] || l.type,
           产品: l.product,
-          开发优先级: isLegacyGrade(l.grade) ? `${l.grade}（旧版）` : l.grade,
+          客户评级: l.grade,
           评级依据: l.ratingReason || '',
           开发状态: l.status,
           广告代码: l.advertisingCodes || '',
@@ -289,18 +303,10 @@ export function LeadLibrary() {
       <div className="library-stats">
         {[
           { name: '全部客户', value: leads.length },
-          {
-            name: '高优先',
-            value: leads.filter((l) => l.grade === '高优先').length,
-          },
-          {
-            name: '常规开发',
-            value: leads.filter((l) => l.grade === '常规开发').length,
-          },
-          {
-            name: '待核实',
-            value: leads.filter((l) => ['未评级', '待核实', '待补全'].includes(l.grade)).length,
-          },
+          ...['A', 'B', 'C'].map((grade) => ({
+            name: `${grade} 级`,
+            value: leads.filter((lead) => lead.grade === grade).length,
+          })),
         ].map((x) => (
           <div key={x.name}>
             <span>{x.name}</span>
@@ -337,12 +343,10 @@ export function LeadLibrary() {
               options: [...new Set([...leads.map((l) => marketLabel(l.market)), '待核实'])],
             },
             {
-              label: '优先级',
+              label: '评级',
               val: grade,
               set: setGrade,
-              options: [
-                ...new Set(['高优先', '常规开发', '待核实', ...leads.map((l) => l.grade)]),
-              ].filter(Boolean),
+              options: [...new Set(['A', 'B', 'C', ...leads.map((l) => l.grade)])].filter(Boolean),
             },
             {
               label: '产品',
@@ -369,7 +373,7 @@ export function LeadLibrary() {
               <option value="">全部{f.label}</option>
               {f.options.map((o) => (
                 <option value={o} key={o}>
-                  {f.label === '优先级' && isLegacyGrade(o) ? `${o}（旧版）` : o}
+                  {o}
                 </option>
               ))}
             </select>
@@ -393,7 +397,7 @@ export function LeadLibrary() {
           >
             清空筛选
           </button>
-          <span>共 {filtered.length} 条线索 · 高优先先显示</span>
+          <span>共 {filtered.length} 条线索 · A 级先显示</span>
         </div>
         {!remote && !error ? (
           <div className="library-loading">
@@ -416,7 +420,7 @@ export function LeadLibrary() {
                 <tr>
                   <th>公司名称／来源</th>
                   <th>市场与客户类型</th>
-                  <th>开发优先级</th>
+                  <th>客户评级</th>
                   <th>联系准备</th>
                   <th>开发状态</th>
                   <th />
@@ -462,49 +466,20 @@ export function LeadLibrary() {
                     </td>
                     <td>
                       <div className="reference-score">
-                        <span
-                          className={
-                            'grade-box grade-' +
-                            (l.grade === '高优先' ? 'A' : l.grade === '常规开发' ? 'B' : l.grade)
-                          }
-                        >
-                          {l.grade === '高优先'
-                            ? '高'
-                            : l.grade === '常规开发'
-                              ? '常'
-                              : isLegacyGrade(l.grade)
-                                ? l.grade
-                                : '—'}
+                        <span className={'grade-box grade-' + l.grade}>
+                          {['A', 'B', 'C'].includes(l.grade) ? l.grade : '—'}
                         </span>
                         <div>
-                          <strong>
-                            {l.grade}
-                            {isLegacyGrade(l.grade) ? '（旧版）' : ''}
-                            {isLegacyGrade(l.grade) && l.score !== null && (
-                              <small> · 旧规则{l.score}分</small>
-                            )}
-                          </strong>
-                          {isLegacyGrade(l.grade) && l.score !== null ? (
-                            <div className="tiny-track">
-                              <i style={{ width: l.score + '%' }} />
-                            </div>
-                          ) : (
-                            <span className="subtext">
-                              {['高优先', '常规开发'].includes(l.grade)
-                                ? l.matchLevel
-                                  ? '匹配等级：' + l.matchLevel
-                                  : '匹配等级见最新评估'
-                                : l.grade === '未评级'
-                                  ? '尚未自动评级'
-                                  : '查看评级依据'}
-                            </span>
-                          )}
+                          <strong>{l.grade}</strong>
+                          <span className="subtext">
+                            {l.matchLevel ? '匹配等级：' + l.matchLevel : '查看评级依据'}
+                          </span>
                           <button
                             className="rating-reason-short text-link"
                             aria-label={`查看 ${l.name} 的评级依据`}
                             onClick={(e) => {
                               e.stopPropagation();
-                              open(l.id, '最新评估');
+                              open(l.id, '供货机会');
                             }}
                           >
                             {l.ratingSummary}
@@ -653,17 +628,13 @@ export function LeadLibrary() {
                 ) : (
                   <>
                     <div className="detail-tabs">
-                      {[
-                        '客户画像',
-                        '最新评估',
-                        '官网证据',
-                        '联系方式',
-                        '沟通与跟进',
-                        '原始字段',
-                      ].map((t) => (
+                      {['客户画像', '官网证据', '联系方式', '沟通与跟进', '原始字段'].map((t) => (
                         <button
                           className={tab === t ? 'active' : ''}
-                          onClick={() => setTab(t)}
+                          onClick={() => {
+                            setFocusOpportunity(false);
+                            setTab(t);
+                          }}
                           key={t}
                         >
                           {t}
@@ -674,16 +645,6 @@ export function LeadLibrary() {
                       <CustomerProfile
                         lead={viewed}
                         typeLabel={typeNames[viewed.type] || viewed.type}
-                        onAssessment={() => setTab('最新评估')}
-                        onSupplement={setSupplement}
-                      />
-                    )}
-                    {tab === '最新评估' && (
-                      <AssessmentPanel
-                        key={viewed.id}
-                        assessment={viewed.assessment}
-                        ratingReason={viewed.ratingReason}
-                        researchAt={viewed.updatedAt}
                         onSupplement={setSupplement}
                       />
                     )}

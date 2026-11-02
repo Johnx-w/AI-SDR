@@ -143,7 +143,7 @@ test('mail sync failures remain visible per account and describe incomplete fold
   assert.match(html, /IMAP 暂时无法连接/);
   assert.match(html, /已同步文件夹：INBOX、Sent/);
   assert.match(html, /还有邮件待同步/);
-  assert.match(html, /最近同步 10\/27 09:00/);
+  assert.match(html, /最近成功同步 10\/27 09:00/);
 });
 
 test('mail conversation entry shows the requested account, local-cache scope and read-only empty loading layout', () => {

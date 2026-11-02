@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { isIP } from 'node:net';
 import { DatabaseSync } from 'node:sqlite';
+import { ProductDocuments } from './product-documents.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const categories = ['ventilation', 'shutters', 'indoor', 'outdoor', 'other'];
@@ -25,6 +26,7 @@ const factKeys = [
   'effectiveDate',
   'notes',
   'outreachFacts',
+  'documentIds',
 ];
 const allowedKeys = new Set([
   ...factKeys,
@@ -166,6 +168,8 @@ function normalize(value) {
   const attachments = list(value.attachments, '附件链接', 10, 2000).map((url) =>
     safeUrl(url, '附件链接'),
   );
+  const documentIds = list(value.documentIds, '原文件编号', 20, 67);
+  if (documentIds.some((id) => !/^pd_[a-f0-9]{64}$/u.test(id))) throw fail(400, '原文件编号无效');
   return {
     name: text(value.name, '产品名称', 160, true),
     englishName: text(value.englishName, '产品英文名称', 160),
@@ -185,6 +189,7 @@ function normalize(value) {
     approvedBy: text(value.approvedBy, '审核人', 100),
     notes: text(value.notes, '备注', 4000),
     outreachFacts: outreachFacts(value.outreachFacts),
+    ...(documentIds.length ? { documentIds } : {}),
   };
 }
 
@@ -199,6 +204,7 @@ export class ProductKnowledge {
       CREATE TABLE IF NOT EXISTS product_knowledge_requests(
         request_key TEXT PRIMARY KEY, body_hash TEXT NOT NULL, product_id TEXT NOT NULL
       );`);
+    this.documents = new ProductDocuments(this.db);
   }
   get(id) {
     const row = this.db.prepare('SELECT data FROM product_knowledge WHERE id=?').get(id);
@@ -253,6 +259,13 @@ export class ProductKnowledge {
         throw fail(409, '产品资料已更新，请刷新后再保存');
       if (!prior && expected !== undefined && expected !== 0)
         throw fail(409, '新产品资料不能指定已有版本');
+      for (const id of normalized.documentIds || []) {
+        const document = this.db
+          .prepare('SELECT product_id FROM product_documents WHERE id=?')
+          .get(id);
+        if (!document || document.product_id !== prior?.id)
+          throw fail(400, '原文件必须属于当前产品，请刷新资料后重试');
+      }
       const changedFacts =
         prior &&
         factKeys.some((key) => JSON.stringify(prior[key]) !== JSON.stringify(normalized[key]));
@@ -261,9 +274,12 @@ export class ProductKnowledge {
       if (needsReview) normalized.status = 'draft';
       if (
         normalized.status === 'approved' &&
-        (!normalized.approvedBy || (!normalized.sourceUrl && !normalized.attachments.length))
+        (!normalized.approvedBy ||
+          (!normalized.sourceUrl &&
+            !normalized.attachments.length &&
+            !normalized.documentIds?.length))
       )
-        throw fail(400, '审核通过需要填写审核人及产品来源或附件链接');
+        throw fail(400, '审核通过需要填写审核人及产品来源、附件链接或已关联原文件');
       const now = new Date().toISOString();
       const approvedUnchanged =
         prior?.status === 'approved' && !changedFacts && prior.approvedBy === normalized.approvedBy;

@@ -98,6 +98,36 @@
   margin: 0;
   padding-left: 20px;
 }
+.customer-development-compact {
+  padding: 12px 16px;
+}
+.customer-development-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  list-style: none;
+  cursor: pointer;
+}
+.customer-development-strip::before {
+  content: '▸';
+}
+.customer-development-management[open] > .customer-development-strip::before {
+  content: '▾';
+}
+.customer-development-manage-label {
+  margin-left: auto;
+  color: var(--color-primary-text);
+}
+.customer-development-strip-reason {
+  flex-basis: 100%;
+  color: var(--color-text-muted);
+}
+.customer-development-management-body {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+}
 .mail-conversation-heading + .customer-development {
   margin: 0 20px 16px;
 }

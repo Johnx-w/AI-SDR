@@ -461,9 +461,7 @@ export function selectOutreachCandidates({
       ? existing + (allocated.get(mailbox.id) || 0)
       : Number.POSITIVE_INFINITY;
   };
-  for (const raw of [...leads].sort(
-    (a, b) => Number(b.grade === '高优先') - Number(a.grade === '高优先'),
-  )) {
+  for (const raw of [...leads].sort((a, b) => Number(b.grade === 'A') - Number(a.grade === 'A'))) {
     const lead = normalizeOutreachLead(raw);
     const assignment = array(campaign.senderAssignments).find(
       (row) => row.customerId === lead.customerId,
@@ -487,19 +485,16 @@ export function selectOutreachCandidates({
     const grades = array(campaign.filters?.grades);
     if (grades.length && !grades.includes(lead.grade)) {
       if (
-        ['高优先', '常规开发'].includes(lead.grade) &&
-        grades.some((grade) => ['A', 'B', 'C'].includes(grade))
+        ['A', 'B', 'C'].includes(lead.grade) &&
+        grades.some((grade) => ['高优先', '常规开发'].includes(grade))
       )
         reject(
           'legacy_grade_filter',
-          '计划仍使用旧 A/B/C 等级筛选，请更新等级筛选为高优先或常规开发后重新核对',
+          '计划仍使用旧高优先／常规开发筛选，请更新为 A/B/C 后重新核对',
         );
       continue;
     }
-    if (
-      ['待核实', '不匹配'].includes(lead.matchLevel) ||
-      ['待核实', '待补全', '暂不开发'].includes(lead.grade)
-    ) {
+    if (lead.matchLevel === '不匹配' || ['待核实', '待补全', '暂不开发'].includes(lead.grade)) {
       reject('match_unverified', '客户匹配依据待核实或已明确不匹配，暂缓自动首封');
       continue;
     }

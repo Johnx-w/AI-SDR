@@ -98,30 +98,30 @@ test('首封按有来源的经营产品及当前审核版本匹配，不把评�
   assert.equal(chosen.leadSnapshot.status, '待开发');
 });
 
-test('旧 A/B/C 筛选遇到新优先级显式阻断，新筛选可继续生成首封候选', () => {
+test('旧高优先筛选遇到 A/B/C 显式阻断，新筛选可继续生成首封候选', () => {
   const input = fixture();
-  input.leads[0].grade = '高优先';
-  input.campaign.filters.grades = ['B'];
+  input.leads[0].grade = 'A';
+  input.campaign.filters.grades = ['高优先'];
   const legacy = selectOutreachCandidates(input);
   assert.equal(legacy.eligible.length, 0);
   assert.equal(legacy.blocked[0].reasonCode, 'legacy_grade_filter');
-  assert.match(legacy.blocked[0].reason, /更新.*等级筛选/);
-  input.campaign.filters.grades = ['高优先'];
+  assert.match(legacy.blocked[0].reason, /更新为 A\/B\/C/);
+  input.campaign.filters.grades = ['A'];
   assert.equal(selectOutreachCandidates(input).eligible.length, 1);
 });
 
-test('已入库但匹配待核实的客户不进入自动首封', () => {
+test('C 级资料缺项可进入首封候选，事实冲突仍单独阻断', () => {
   const input = fixture();
-  input.leads[0].grade = '待核实';
+  input.leads[0].grade = 'C';
   input.leads[0].assessment = { matchLevel: '待核实' };
   const result = selectOutreachCandidates(input);
-  assert.equal(result.eligible.length, 0);
-  assert.equal(result.blocked[0].reasonCode, 'match_unverified');
+  assert.equal(result.eligible.length, 1);
+  assert.equal(result.blocked.length, 0);
 });
 
 test('高优先客户的其他产品仍有事实冲突时暂停自动首封', () => {
   const input = fixture();
-  input.leads[0].grade = '高优先';
+  input.leads[0].grade = 'A';
   input.leads[0].assessment = {
     matchLevel: '明确匹配',
     opportunities: [
@@ -139,7 +139,7 @@ test('高优先客户的其他产品仍有事实冲突时暂停自动首封', ()
   assert.equal(result.blocked[0].reasonCode, 'assessment_conflict');
 });
 
-test('邮箱容量分配先给高优先客户，常规开发保持入库顺序', () => {
+test('邮箱容量分配先给 A 级客户，B 级保持入库顺序', () => {
   const input = fixture();
   const base = input.leads[0];
   input.leads = [
@@ -147,14 +147,14 @@ test('邮箱容量分配先给高优先客户，常规开发保持入库顺序',
       ...base,
       id: 'regular',
       website: 'https://regular.example.org',
-      grade: '常规开发',
+      grade: 'B',
       email: 'info@regular.example.org',
     },
     {
       ...base,
       id: 'high',
       website: 'https://high.example.org',
-      grade: '高优先',
+      grade: 'A',
       email: 'info@high.example.org',
     },
   ].map((lead) => ({

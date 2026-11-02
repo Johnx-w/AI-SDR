@@ -25,18 +25,6 @@
   gap: 4px;
   font-size: 12px;
 }
-.profile-actions {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-  font-size: 12px;
-}
-.profile-actions .text-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
 .profile-pending li > span {
   margin-right: 10px;
 }
@@ -117,11 +105,6 @@
   font-size: 11px;
   overflow-wrap: anywhere;
 }
-.profile-business-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 16px;
-}
 .profile-business-card {
   padding: 16px;
   border: 1px solid var(--color-border);
@@ -138,6 +121,11 @@
 }
 .profile-pending {
   background: var(--color-surface-hover);
+  border-left: 3px solid var(--color-warning);
+}
+.profile-pending p {
+  font-size: 12px;
+  line-height: 1.7;
 }
 .profile-empty {
   color: var(--color-text-muted);
@@ -198,10 +186,91 @@
   white-space: pre-wrap;
 }
 @media (max-width: 640px) {
-  .profile-business-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
   .profile-overview {
     padding: 16px;
   }
+}
+.profile-opportunities {
+  display: grid;
+  gap: 12px;
+}
+.profile-opportunity-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 20px;
+}
+.profile-opportunity h4 {
+  margin: 0;
+  font-size: 13px;
+}
+.profile-opportunity-analysis {
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--color-surface-muted);
+  font-size: 12px;
+  line-height: 1.8;
+}
+.profile-opportunity-reasons p {
+  margin: 0;
+}
+.profile-evidence summary,
+.profile-other-opportunity summary {
+  cursor: pointer;
+  color: var(--color-primary-text);
+  font-size: 12px;
+}
+.profile-other-opportunity {
+  border-top: 1px solid var(--color-border);
+  padding-top: 14px;
+}
+.profile-other-opportunity > summary {
+  line-height: 1.8;
+}
+.profile-other-opportunity > summary span {
+  margin-left: 12px;
+  color: var(--color-text-muted);
+}
+.profile-other-opportunity > article {
+  margin-top: 14px;
+}
+.profile-source {
+  margin: 10px 0;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--color-surface-muted);
+  overflow-wrap: anywhere;
+}
+.profile-source blockquote {
+  margin: 8px 0;
+  padding-left: 12px;
+  border-left: 2px solid var(--color-border-strong);
+  white-space: pre-wrap;
+}
+.profile-source small,
+.profile-manual-source {
+  display: block;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+.profile-source a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-primary-text);
+}
+.profile-manual-priority,
+.profile-opportunity-limitation,
+.profile-assessment-record {
+  font-size: 12px;
+  line-height: 1.8;
+}
+.profile-manual-priority .badge {
+  margin-right: 10px;
+}
+.profile-assessment-record pre {
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }

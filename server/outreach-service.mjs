@@ -94,7 +94,15 @@ export class OutreachService {
     this.conversations = new MailConversations({
       db: this.db,
       mailboxes,
-      deliveries: () => this.deliveries(),
+      deliveries: () =>
+        this.db
+          .prepare(
+            `SELECT data FROM outreach_deliveries WHERE state='accepted'
+            AND NOT EXISTS (SELECT 1 FROM mailbox_imported_deliveries
+              WHERE delivery_id=outreach_deliveries.id)`,
+          )
+          .all()
+          .map((row) => JSON.parse(row.data)),
       customers,
       recordCommunication,
       now,
@@ -165,14 +173,23 @@ export class OutreachService {
       .run(c.id, JSON.stringify(data));
     return this.withStats(data);
   }
-  deliveries(campaignId) {
-    return (
-      campaignId
-        ? this.db
-            .prepare('SELECT data FROM outreach_deliveries WHERE campaign_id=? ORDER BY rowid')
-            .all(campaignId)
-        : this.db.prepare('SELECT data FROM outreach_deliveries ORDER BY rowid DESC').all()
-    ).map((r) => JSON.parse(r.data));
+  deliveries(campaignId, states) {
+    const where = [],
+      params = [];
+    if (campaignId) {
+      where.push('campaign_id=?');
+      params.push(campaignId);
+    }
+    if (states) {
+      where.push(`state IN (${states.map(() => '?').join(',')})`);
+      params.push(...states);
+    }
+    return this.db
+      .prepare(
+        `SELECT data FROM outreach_deliveries${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY rowid${campaignId ? '' : ' DESC'}`,
+      )
+      .all(...params)
+      .map((r) => JSON.parse(r.data));
   }
   listDeliveries({ page = 1, pageSize = 20, campaignId = 'all', status = 'all', q = '' } = {}) {
     const size = [10, 20, 50, 100].includes(Number(pageSize)) ? Number(pageSize) : 20;
@@ -202,7 +219,9 @@ export class OutreachService {
     const totalPages = Math.max(1, Math.ceil(total / size));
     const currentPage = Math.min(requestedPage, totalPages);
     const items = this.db
-      .prepare(`SELECT data FROM outreach_deliveries${clause} ORDER BY rowid DESC LIMIT ? OFFSET ?`)
+      .prepare(
+        `SELECT json_remove(data, '$.candidate') AS data FROM outreach_deliveries${clause} ORDER BY rowid DESC LIMIT ? OFFSET ?`,
+      )
       .all(...params, size, (currentPage - 1) * size)
       .map((row) => JSON.parse(row.data));
     return { items, total, page: currentPage, pageSize: size, totalPages };
@@ -230,7 +249,12 @@ export class OutreachService {
       blocked: 0,
       sending: 0,
     };
-    for (const d of this.deliveries(c.id)) if (d.status in stats) stats[d.status]++;
+    for (const row of this.db
+      .prepare(
+        'SELECT state, count(*) AS count FROM outreach_deliveries WHERE campaign_id=? GROUP BY state',
+      )
+      .all(c.id))
+      if (row.state in stats) stats[row.state] = row.count;
     return { ...c, stats };
   }
   detail(id) {
@@ -247,8 +271,8 @@ export class OutreachService {
         .map((m) => [m.id, m.email, m.displayName, m.signature, m.signatureDesign]),
     );
   }
-  review() {
-    const tests = this.campaigns().filter(
+  review(campaigns = this.campaigns()) {
+    const tests = campaigns.filter(
       (c) =>
         c.mode === 'internal_test' &&
         c.status === 'completed' &&
@@ -276,18 +300,36 @@ export class OutreachService {
     };
   }
   async state() {
-    const mailboxes = this.mailboxes.list();
+    const mailboxes = this.mailboxes.list().map(({ signatureDesign, ...mailbox }) => mailbox);
+    const campaigns = this.campaigns();
+    const deliveryStats = {
+      total: 0,
+      draft: 0,
+      queued: 0,
+      sending: 0,
+      accepted: 0,
+      failed: 0,
+      unknown: 0,
+      blocked: 0,
+      cancelled: 0,
+    };
+    for (const row of this.db
+      .prepare('SELECT state, count(*) AS count FROM outreach_deliveries GROUP BY state')
+      .all()) {
+      deliveryStats.total += row.count;
+      if (row.state in deliveryStats) deliveryStats[row.state] = row.count;
+    }
     let generatorConfigured = false;
     try {
       generatorConfigured = !!this.generatorClient().configured;
     } catch {}
     return {
       mailboxes,
-      campaigns: this.campaigns(),
-      deliveries: this.deliveries().slice(0, 500),
+      campaigns,
+      deliveryStats,
       products: this.products(),
       readiness: { generatorConfigured },
-      review: this.review(),
+      review: this.review(campaigns),
     };
   }
   saveCampaign(input, id) {
@@ -449,8 +491,8 @@ export class OutreachService {
   }
   refreshProductMaterials() {
     if (this.closed) return;
-    for (const delivery of this.deliveries().filter(
-      (row) => row.mode === 'production' && ['draft', 'queued'].includes(row.status),
+    for (const delivery of this.deliveries(undefined, ['draft', 'queued']).filter(
+      (row) => row.mode === 'production',
     )) {
       const reason = this.materialReason(delivery);
       if (!reason) continue;
@@ -461,7 +503,7 @@ export class OutreachService {
       (row) => row.mode === 'production' && ['active', 'ready'].includes(row.status),
     )) {
       if (this.preparing.has(campaign.id) || campaign.scope !== this.getScope()) continue;
-      const canRefresh = this.deliveries(campaign.id).some(
+      const canRefresh = this.deliveries(campaign.id, ['blocked']).some(
         (delivery) =>
           delivery.status === 'blocked' &&
           delivery.materialRefresh &&
@@ -1109,7 +1151,7 @@ export class OutreachService {
         });
         continue;
       }
-      for (const d of this.deliveries(c.id).filter((d) => d.status === 'queued')) {
+      for (const d of this.deliveries(c.id, ['queued'])) {
         if (used.has(d.mailboxId)) continue;
         const m = this.mailboxes.get(d.mailboxId);
         if (!this.canDispatch(c, d, m)) continue;
@@ -1119,7 +1161,13 @@ export class OutreachService {
       if (this.closed) break;
       const current = this.campaign(c.id);
       if (current.status !== 'active') continue;
-      const rows = this.deliveries(c.id);
+      const rows = this.db
+        .prepare(
+          `SELECT state AS status,
+          CASE WHEN state='blocked' THEN json_extract(data,'$.materialRefresh') ELSE 0 END AS materialRefresh
+         FROM outreach_deliveries WHERE campaign_id=?`,
+        )
+        .all(c.id);
       const consumed = rows.filter((d) =>
         ['accepted', 'unknown', 'sending', 'failed'].includes(d.status),
       ).length;

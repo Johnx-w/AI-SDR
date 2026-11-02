@@ -161,6 +161,26 @@ test('已登记的外发事实保留稳定编号，删除只影响选择的资�
   );
 });
 
+test('文件候选只在用户采用后进入草稿，保留原有参数并清除审核状态', async (t) => {
+  const current = { ...fixture([]), specifications: '原有已核实参数' };
+  const h = setup(t, current);
+  h.click('查看 / 编辑');
+  h.change('资料状态', 'approved');
+  h.change('审核人', '审核人');
+  const panel = elements(h.render()).find((node) => node.type?.name === 'ProductDocuments');
+  assert.equal(panel.props.productId, current.id);
+  assert.deepEqual(panel.props.documentIds, []);
+  assert.equal(h.writes.length, 0);
+  panel.props.onUse('pd_' + 'a'.repeat(64), '宽度 50 mm\n依据：规格.pdf，第 1 页，正视图');
+  assert.equal(h.field('资料状态').props.value, 'draft');
+  assert.match(h.field('已核实参数').props.value, /^原有已核实参数\n\n宽度 50 mm/);
+  assert.equal(h.writes.length, 0, '采用候选后仍需显式保存');
+  await h.submit();
+  assert.equal(h.writes[0].status, 'draft');
+  assert.equal(h.writes[0].approvedBy, '');
+  assert.deepEqual(h.writes[0].documentIds, ['pd_' + 'a'.repeat(64)]);
+});
+
 test('计划引用资料库事实无需重复声明，兼容旧介绍且只展示邮箱负责的产品', async (t) => {
   const page = new URL('../src/pages/OutreachCommunication.tsx', import.meta.url);
   const fact = {
@@ -306,29 +326,34 @@ test('计划引用资料库事实无需重复声明，兼容旧介绍且只展�
   const legacyPlan = {
     generationMode: 'professional',
     outreachClaims: [],
-    filters: { markets: [], grades: ['B'], products: [] },
+    filters: { markets: [], grades: ['高优先'], products: [] },
   };
   states.editor = [];
   let tree = render(legacyPlan);
-  assert.match(text(tree), /旧版等级筛选（B）/);
-  assert.match(text(tree), /高优先/);
-  assert.match(text(tree), /常规开发/);
-  const choice = (label) => elements(tree).find((node) => node.type === 'label' && text(node).includes(label));
+  assert.match(text(tree), /旧版等级筛选（高优先）/);
+  assert.match(text(tree), /A/);
+  assert.match(text(tree), /B/);
+  const choice = (label) =>
+    elements(tree).find((node) => node.type === 'label' && text(node).includes(label));
   const input = (label) => elements(choice(label)).find((node) => node.type === 'input');
-  assert.equal(input('B（旧筛选，需移除）').props.checked, true);
+  assert.equal(input('高优先（旧筛选，需移除）').props.checked, true);
   saved = undefined;
-  elements(tree).find((node) => node.type === 'form').props.onSubmit({ preventDefault() {}, currentTarget: {} });
+  elements(tree)
+    .find((node) => node.type === 'form')
+    .props.onSubmit({ preventDefault() {}, currentTarget: {} });
   assert.equal(saved, undefined, '旧等级不能原样保存为新计划筛选');
   tree = render(legacyPlan);
   assert.match(
     elements(tree).find((node) => node.type?.name === 'InlineError').props.value,
     /移除旧版等级筛选/,
   );
-  input('B（旧筛选，需移除）').props.onChange({ target: { checked: false } });
+  input('高优先（旧筛选，需移除）').props.onChange({ target: { checked: false } });
   tree = render(legacyPlan);
-  input('高优先').props.onChange({ target: { checked: true } });
+  input('A').props.onChange({ target: { checked: true } });
   tree = render(legacyPlan);
-  elements(tree).find((node) => node.type === 'form').props.onSubmit({ preventDefault() {}, currentTarget: {} });
+  elements(tree)
+    .find((node) => node.type === 'form')
+    .props.onSubmit({ preventDefault() {}, currentTarget: {} });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(saved.filters.grades, ['高优先']);
+  assert.deepEqual(saved.filters.grades, ['A']);
 });

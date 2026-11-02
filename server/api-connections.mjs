@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { documentModelConfig } from './product-documents.mjs';
 import {
   acquisitionConfig,
   providerBaseUrl,
@@ -24,6 +25,9 @@ const fields = [
   ],
   ['DEEPSEEK_API_KEY', 'DeepSeek API Key', true],
   ['DEEPSEEK_MODEL', 'DeepSeek 模型', false],
+  ['DOCUMENT_MODEL_BASE_URL', '资料识别 API 基础地址（含 /v1）', false],
+  ['DOCUMENT_MODEL_API_KEY', '资料识别 API Key', true],
+  ['DOCUMENT_MODEL_MODEL', '支持图片和 PDF 的模型名称', false],
   ['FEISHU_APP_ID', '飞书 App ID', false],
   ['FEISHU_APP_SECRET', '飞书 App Secret', true],
   ['FEISHU_APP_TOKEN', '多维表格 App Token', true],
@@ -146,6 +150,7 @@ export class ApiConnections {
       throw fail('研究模型名称格式不正确');
     try {
       acquisitionConfig(merged);
+      documentModelConfig(merged);
     } catch (error) {
       throw fail(error.message);
     }

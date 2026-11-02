@@ -64,3 +64,40 @@ test('发送记录搜索保留国际客户名称的Unicode大小写匹配', (t) 
   assert.equal(service.listDeliveries({ q: 'élan' }).total, 1);
   assert.equal(service.listDeliveries({ q: 'über' }).items[0].id, 'unicode');
 });
+
+test('沟通中心状态统计全部发送记录，完整记录和邮箱署名按需读取', async (t) => {
+  const logo = 'A'.repeat(100_000);
+  const mailbox = {
+    id: 'sales',
+    email: 'sales@example.org',
+    signatureDesign: { logo: { contentBase64: logo } },
+  };
+  const service = new OutreachService({
+    mailboxes: { list: () => [mailbox], get: () => mailbox },
+  });
+  t.after(() => service.close());
+  service.putCampaign({ id: 'campaign', name: 'Plan' });
+  for (let index = 0; index < 523; index++)
+    service.putDelivery({
+      id: `delivery-${index}`,
+      campaignId: 'campaign',
+      status: index < 510 ? 'accepted' : 'failed',
+      candidate: { evidence: 'full candidate' },
+      bodyText: 'Full email content',
+    });
+  const state = await service.state();
+  assert.equal(state.deliveryStats.total, 523);
+  assert.equal(state.deliveryStats.accepted, 510);
+  assert.equal(state.deliveryStats.failed, 13);
+  assert.equal(state.deliveries, undefined);
+  assert.equal(state.mailboxes[0].signatureDesign, undefined);
+  assert.equal(service.listDeliveries().items[0].candidate, undefined);
+  assert.equal(service.listDeliveries().items[0].bodyText, 'Full email content');
+  assert.equal(service.detail('campaign').deliveries[0].candidate.evidence, 'full candidate');
+  const mailboxDetail = await handleOutreach({
+    request: { method: 'GET' },
+    url: new URL('http://localhost/api/v1/outreach/mailboxes/sales'),
+    service,
+  });
+  assert.equal(mailboxDetail.signatureDesign.logo.contentBase64, logo);
+});

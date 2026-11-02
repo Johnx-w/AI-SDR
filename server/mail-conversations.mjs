@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { mailSyncFailure } from './mail-sync-errors.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -52,6 +53,9 @@ export class MailConversations {
       CREATE TABLE IF NOT EXISTS mailbox_sync_state (
         account_key TEXT PRIMARY KEY, data TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS mailbox_imported_deliveries (
+        delivery_id TEXT PRIMARY KEY
+      );
     `);
   }
 
@@ -85,6 +89,7 @@ export class MailConversations {
       email: mailbox.email,
       lastSyncAt: state.lastSyncAt || null,
       error: state.error || null,
+      lastError: state.lastError || null,
       syncing: this.pending.has(keyFor(mailbox)),
       hasMore: state.hasMore || false,
       folders: state.folders || [],
@@ -196,7 +201,9 @@ export class MailConversations {
     const to = text(input.to, 4000).trim();
     const occurredAt = Number.isFinite(Date.parse(input.occurredAt)) ? iso(input.occurredAt) : null;
     if (!from || !to || !occurredAt || !['inbound', 'outbound'].includes(input.direction)) {
-      throw fail(502, '邮件数据不完整，未推进同步位置');
+      throw Object.assign(fail(502, '邮件数据不完整，未推进同步位置'), {
+        code: 'MAILBOX_SYNC_INVALID',
+      });
     }
     const references = [
       ...new Set(
@@ -312,21 +319,24 @@ export class MailConversations {
             ? { customerId: delivery.customerId, companyName: delivery.companyName }
             : {},
         );
+        this.db
+          .prepare('INSERT OR IGNORE INTO mailbox_imported_deliveries VALUES (?)')
+          .run(delivery.id);
       }
     });
   }
 
-  localCustomer(thread) {
+  localCustomer(thread, customers = () => this.customers()) {
     if (thread.customerId) return thread;
     const participant = address(thread.participant);
     if (!participant) return thread;
-    let customers;
+    let available;
     try {
-      customers = this.customers();
+      available = customers();
     } catch {
       return thread;
     }
-    const matched = customers.filter((customer) => {
+    const matched = available.filter((customer) => {
       const emails = [
         customer.email,
         ...(customer.contactEvidence || [])
@@ -348,12 +358,23 @@ export class MailConversations {
     this.importDeliveries();
     const selected = this.selected(mailboxId);
     const query = text(q, 500).toLowerCase().trim();
+    let customerList;
+    const customers = () => {
+      if (customerList === undefined) {
+        try {
+          customerList = this.customers();
+        } catch {
+          customerList = [];
+        }
+      }
+      return customerList;
+    };
     const items = selected
       .flatMap((mailbox) =>
         this.db
           .prepare('SELECT data FROM mailbox_threads WHERE account_key=?')
           .all(keyFor(mailbox))
-          .map((row) => this.localCustomer(JSON.parse(row.data))),
+          .map((row) => this.localCustomer(JSON.parse(row.data), customers)),
       )
       .filter(
         (thread) =>
@@ -419,8 +440,12 @@ export class MailConversations {
     const row = this.db.prepare('SELECT data FROM mailbox_sync_state WHERE account_key=?').get(key);
     const prior = row ? JSON.parse(row.data) : {};
     const since = prior.since || iso(this.now() - 30 * 86400000);
+    let stage = 'read';
     try {
-      if (!mailbox.configured) throw fail(409, '请先配置邮箱客户端授权码');
+      if (!mailbox.configured)
+        throw Object.assign(fail(409, '请先配置邮箱客户端授权码'), {
+          code: 'MAILBOX_NOT_CONFIGURED',
+        });
       const batch = await this.mailboxes.readMailbox(mailbox.id, {
         // One bounded rescan upgrades previously cached text-only messages. Later
         // pages continue from their returned cursors, using the original window.
@@ -428,9 +453,14 @@ export class MailConversations {
         since,
       });
       const current = this.mailboxes.list().find((item) => item.id === mailbox.id);
-      if (!current || keyFor(current) !== key) throw fail(409, '邮箱身份已变化，请刷新后重新同步');
+      if (!current || keyFor(current) !== key)
+        throw Object.assign(fail(409, '邮箱身份已变化，请刷新后重新同步'), {
+          code: 'MAILBOX_IDENTITY_CHANGED',
+        });
+      stage = 'validate';
       if (!Array.isArray(batch.folders)) throw fail(502, '邮件同步结果无效');
       let imported = 0;
+      stage = 'save';
       this.transaction(() => {
         const cursors = { ...prior.cursors };
         for (const folder of batch.folders) {
@@ -441,7 +471,7 @@ export class MailConversations {
             folder.nextUid < 1 ||
             !Array.isArray(folder.messages)
           ) {
-            throw fail(502, '邮件同步位置无效');
+            throw Object.assign(fail(502, '邮件同步位置无效'), { code: 'MAILBOX_SYNC_INVALID' });
           }
           for (const message of folder.messages) {
             imported += this.putMessage(mailbox, {
@@ -467,6 +497,7 @@ export class MailConversations {
           since,
           lastSyncAt: iso(this.now()),
           error: null,
+          lastError: prior.lastError || null,
           folders: batch.folders.map((folder) => folder.path),
           hasMore: !!batch.hasMore,
           skipped: batch.folders.reduce((sum, folder) => sum + (folder.skipped || 0), 0),
@@ -484,12 +515,13 @@ export class MailConversations {
       }
       return imported;
     } catch (error) {
-      // Provider errors and credentials never enter the read model or HTTP responses.
-      const safe =
-        error?.code === 'MAILBOX_NOT_CONFIGURED' || !mailbox.configured
-          ? '请先配置邮箱客户端授权码'
-          : '收件同步失败，请检查邮箱授权码及 IMAP 服务后重试';
-      this.saveState(key, { ...prior, since, error: safe });
+      const failure = mailSyncFailure(error, stage);
+      this.saveState(key, {
+        ...prior,
+        since,
+        error: failure.message,
+        lastError: { ...failure.diagnostic, message: failure.message, occurredAt: iso(this.now()) },
+      });
       return 0;
     }
   }

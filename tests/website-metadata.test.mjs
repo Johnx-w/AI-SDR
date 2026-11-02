@@ -48,6 +48,19 @@ test('企业结构化地址与服务地区独立，分享链接不作为社媒�
   assert.equal(mapped.serviceAreas, 'Miami, Florida');
   assert.equal(mapped.social.length, 1);
 });
+test('服务地区不收录官网宣传句', () => {
+  const sourceUrl = 'https://abcblinds.com.au/';
+  const content =
+    '<script type="application/ld+json">' +
+    JSON.stringify({ '@type': 'Organization', url: sourceUrl, areaServed: 'Western Australia' }) +
+    '</script><p>Proudly serving Western Australia for over 50 years, ABC Blinds & Awnings is not just based here — we&#x27;re built here</p>' +
+    '<p>Proudly serving Western Australia for over 50 years, ABC Blinds & Awnings is not just based here — we’re built here</p>';
+  const evidence = combineWebsiteEvidence([{ url: sourceUrl, content }]);
+  assert.deepEqual(
+    evidence.service_areas.map((area) => area.name),
+    ['Western Australia'],
+  );
+});
 test('没有地址时不把目标/服务城市当成企业所在地；JSON-LD 和原文保留证据', () => {
   const e = combineWebsiteEvidence([
     { url, content: `<script type="application/ld+json">${JSON.stringify(service)}</script>` },
