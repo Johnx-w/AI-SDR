@@ -37,6 +37,10 @@ function validateLead(lead) {
 }
 
 function ratingSummary(lead) {
+  if (['高优先', '常规开发'].includes(lead.grade)) {
+    const labels = (lead.assessment?.prioritySignals || []).map((signal) => signal.label);
+    return labels.length ? [...new Set(labels)].slice(0, 2).join('、') + '已核实' : '查看评级依据';
+  }
   const lines = text(lead.assessment?.evidenceReason || lead.ratingReason)
     .split('\n')
     .map((line) => line.trim())
@@ -45,7 +49,7 @@ function ratingSummary(lead) {
   const reason =
     (['待核实', '待补全', '未评级'].includes(lead.grade) ? pending : '') ||
     lines.find((line) => /^(主营产品|明确经营品类|专业供货角色|综合供货角色)[:：]/.test(line)) ||
-    (['待核实', '待补全', '未评级'].includes(lead.grade) ? '关键依据待补充' : '查看评级依据');
+    (['待核实', '待补全', '未评级'].includes(lead.grade) ? '关键依据尚未核实' : '查看评级依据');
   return reason.length > 46 ? reason.slice(0, 45) + '…' : reason;
 }
 
@@ -64,7 +68,7 @@ function contactSummary(lead) {
   if (lead.phone) return { label: '已记录电话', detail: `${count(lead.phone)} 个公开电话入口` };
   const forms = (lead.contactEvidence || []).filter((entry) => entry.kind === 'form');
   if (forms.length) return { label: '已有联系表单', detail: `${forms.length} 个官网表单` };
-  return { label: '联系入口待补', detail: '未发现公开邮箱或办公电话' };
+  return { label: '暂无公开联系入口', detail: '官网未见公开邮箱、办公电话或联系表单' };
 }
 
 // Persist the projection separately so a list read never parses the research dossier.
@@ -104,6 +108,7 @@ export function summarizeLead(lead) {
           status: lead.companyIdentity.status || '',
         }
       : null,
+    matchLevel: text(lead.assessment?.matchLevel),
     ratingSummary: ratingSummary(lead),
     contactSummary: contactSummary(lead),
   };

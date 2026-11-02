@@ -96,20 +96,19 @@ test('客户画像首次展示简洁概览和评级入口，自动评估报告�
   const html = renderProfile();
   const visible = initialView(html);
   assert.match(visible, /经营户外防风帘与室内窗饰/);
-  assert.match(visible, /已支持 85\/100/);
+  assert.match(visible, /旧版评估/);
+  assert.doesNotMatch(visible, /85\/100/);
   assert.match(visible, /查看完整评估/);
   assert.match(visible, /零售商、安装服务商/);
   assert.doesNotMatch(html, /ev_fixture_123|acquisition-v3\.2|评级口径|We supply made-to-measure/);
 });
 
-test('潜在供货机会不冒充已确认采购需求，重要未知项保持可见且不被研究日志淹没', () => {
+test('潜在供货机会不冒充采购需求，普通官网缺项不生成补档任务', () => {
   const visible = initialView(renderProfile());
   assert.match(visible, /潜在供货机会/);
   assert.match(visible, /成品 · 防风帘/);
-  assert.match(visible, /未确认企业是否接受海外供货/);
-  assert.equal((visible.match(/未确认企业是否接受海外供货/g) || []).length, 1);
-  assert.match(visible, /具体采购需求待确认/);
-  assert.match(visible, /经营法人名称待核实/);
+  assert.doesNotMatch(visible, /未确认企业是否接受海外供货|具体采购需求待确认|经营法人名称待核实/);
+  assert.doesNotMatch(visible, /待确认|补充资料/);
   assert.doesNotMatch(visible, /公开采购需求|本次没有重新抓取|研究限制：/);
 });
 
@@ -152,7 +151,8 @@ test('最新评估首次展示判断摘要，完整原文来源和其他方向�
   assert.match(html, /We supply made-to-measure zip screens\./);
   assert.match(html, /https:\/\/buyer\.example\.org\/products/);
   assert.match(html, /材料 · Roller fabric：B，已支持60分/);
-  assert.match(visible, /未确认企业是否接受海外供货/);
+  assert.match(visible, /旧版评估/);
+  assert.doesNotMatch(visible, /未确认企业是否接受海外供货/);
   assert.doesNotMatch(visible, /ev_fixture_123|acquisition-v3\.2/);
   const technical = technicalDisclosure(html);
   assert.ok(technical, '技术信息可供展开核对');
@@ -232,6 +232,38 @@ const dimensionAssessment = {
     },
   },
 };
+const currentAssessment = {
+  ...dimensionAssessment,
+  grade: '高优先',
+  status: '高优先',
+  ruleVersion: 'acquisition-v4.0',
+  matchLevel: '明确匹配',
+  prioritySignals: [
+    {
+      kind: 'core_product',
+      label: '主营产品',
+      quote: 'We supply made-to-measure zip screens.',
+      source_url: 'https://buyer.example.org/products',
+    },
+    {
+      kind: 'specialist_supply',
+      label: '专业供货角色',
+      quote: 'We supply zip screens to trade customers.',
+      source_url: 'https://buyer.example.org/trade',
+    },
+  ],
+  missing: [],
+  dimensions: {
+    P: dimensionAssessment.dimensions.P,
+    R: {
+      score: 30,
+      maximum: 30,
+      facts: [{ kind: 'specialist_supply', value: '专业供货', quote: 'We supply zip screens to trade customers.', source_url: 'https://buyer.example.org/trade' }],
+    },
+    D: dimensionAssessment.dimensions.D,
+    V: { score: null, maximum: 10, missing: '定制资料不足', facts: [] },
+  },
+};
 const contentText = (html) => html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
 const dimensionCards = (html) =>
   [
@@ -240,7 +272,24 @@ const dimensionCards = (html) =>
     ),
   ].map(([card]) => card);
 
-test('评估按维度显示简短结论与依据，已知零分和未知分保持区别', () => {
+test('新版档案显示匹配等级与有来源的优先线索，未知年限和定制不变成补档任务', () => {
+  const profile = initialView(renderProfile({
+    grade: '高优先',
+    score: 70,
+    assessment: currentAssessment,
+    pendingQuestions: '',
+  }));
+  assert.match(profile, /高优先|匹配等级：明确匹配|优先线索/);
+  assert.match(profile, /主营产品、专业供货角色/);
+  assert.doesNotMatch(profile, /\/100|待确认|经营法人名称待核实|具体采购需求待确认/);
+  const panel = initialView(renderAssessment({ assessment: currentAssessment, onSupplement() {} }));
+  assert.match(panel, /匹配等级：明确匹配|We supply zip screens to trade customers/);
+  assert.match(panel, /href="https:\/\/buyer\.example\.org\/trade"/);
+  assert.match(panel, /持续经营尚无公开依据/);
+  assert.doesNotMatch(panel, /\/100|待补充|补充资料|定制资料不足/);
+});
+
+test('旧评估按维度保留历史分项，普通未知不再提示人工补档', () => {
   const html = renderAssessment({ assessment: dimensionAssessment });
   const visible = initialView(html);
   const cards = dimensionCards(html).map((card) => contentText(initialView(card)));
@@ -254,13 +303,14 @@ test('评估按维度显示简短结论与依据，已知零分和未知分保�
   assert.match(role, /现有证据显示无适用供货角色/);
   const sustained = cards.find((card) => card.includes('持续经营'));
   assert.match(sustained, /未知\s*\/\s*20/);
-  assert.match(sustained, /持续经营依据待补充/);
-  assert.match(sustained, /企业持续经营年限尚未核实/);
+  assert.match(sustained, /持续经营尚无公开依据/);
+  assert.doesNotMatch(sustained, /企业持续经营年限尚未核实|待补充/);
   const customization = cards.find((card) => card.includes('定制与系统特征'));
   assert.match(customization, /5\s*\/\s*10/);
   assert.match(customization, /具备定制特征/);
   assert.match(customization, /支持按尺寸定制/);
-  assert.match(contentText(visible), /已支持 45\s*\/\s*100/);
+  assert.match(contentText(visible), /旧版评估/);
+  assert.doesNotMatch(contentText(visible), /45\s*\/\s*100/);
   assert.doesNotMatch(
     visible,
     /The full original|We install customer supplied products|https:\/\/buyer\.example\.org\/zip-screens/,
@@ -296,12 +346,12 @@ test('人工调整标记和北京时间在精简后的评估首屏仍然保留',
     renderAssessment({ assessment: { ...dimensionAssessment, grade: 'B', manualOverride: true } }),
   );
   assert.match(visible, /主表评级已人工修改/);
-  assert.match(visible, /分数来自最新自动评估，客户评级已人工调整/);
+  assert.match(visible, /客户优先级已人工调整；自动评估依据仍保留/);
   assert.match(visible, /评估更新：2026年10月24日 18:42（北京时间）/);
   assert.match(visible, /官网取证：2026年10月22日 14:05（北京时间）/);
 });
 
-test('客户画像待确认与缺失评分维度都显示补充资料入口', () => {
+test('普通官网缺项不生成补资料入口，真实产品冲突仍可核实', () => {
   const profile = renderToStaticMarkup(
     React.createElement(CustomerProfile, {
       lead: { ...lead, assessment: dimensionAssessment, pendingQuestions: '' },
@@ -310,22 +360,34 @@ test('客户画像待确认与缺失评分维度都显示补充资料入口', ()
       onSupplement() {},
     }),
   );
-  assert.match(profile, /aria-label="补充资料：企业持续经营年限尚未核实"/);
-  assert.match(profile, /aria-label="补充资料：经营法人名称待核实"/);
-  assert.match(profile, /aria-label="补充资料：具体采购需求待确认"/);
+  assert.doesNotMatch(profile, /企业持续经营年限尚未核实|经营法人名称待核实|具体采购需求待确认/);
   const assessed = renderAssessment({ assessment: dimensionAssessment, onSupplement() {} });
   const cards = dimensionCards(assessed);
-  assert.match(
-    cards.find((card) => card.includes('持续经营评分')),
-    /aria-label="补充资料：持续经营"/,
-  );
   assert.doesNotMatch(
-    cards.find((card) => card.includes('经营角色评分')),
-    /补充资料/,
+    cards.find((card) => card.includes('持续经营评分')),
+    /补充资料|核实冲突/,
+  );
+  const conflictAssessment = {
+    ...dimensionAssessment,
+    missing: ['同产品事实冲突'],
+    dimensions: {
+      ...dimensionAssessment.dimensions,
+      P: { ...dimensionAssessment.dimensions.P, score: null, conflict: true, missing: '同产品事实冲突' },
+    },
+  };
+  const conflictProfile = renderProfile({
+    assessment: conflictAssessment,
+    pendingQuestions: '同产品事实冲突',
+  });
+  assert.match(conflictProfile, /需核实事项/);
+  const conflictPanel = renderAssessment({ assessment: conflictAssessment, onSupplement() {} });
+  assert.match(
+    conflictPanel,
+    /aria-label="核实冲突：产品契合"/,
   );
 });
 
-test('确认记录默认折叠，已确认名称和采购需求解除待确认但记录不能遮蔽评分缺项', () => {
+test('确认记录默认折叠，已确认名称与采购需求显示，旧评分缺项不形成任务', () => {
   const confirmation = {
     id: 'manual-1',
     category: 'profile',
@@ -350,7 +412,7 @@ test('确认记录默认折叠，已确认名称和采购需求解除待确认�
     confirmations: [confirmation],
   });
   const visible = initialView(html);
-  assert.match(visible, /企业持续经营年限尚未核实/);
+  assert.doesNotMatch(visible, /企业持续经营年限尚未核实/);
   assert.doesNotMatch(visible, /经营法人名称待核实|具体采购需求待确认/);
   assert.match(visible, /已确认采购需求|采购防风帘样品两套/);
   assert.doesNotMatch(visible, /人工电话核对原文|李明/);
@@ -389,7 +451,7 @@ test('人工评分依据保留确认人和北京时间，来源默认折叠', ()
   assert.match(html, /依据由确认人补充/);
 });
 
-test('关联成品对应的材料采购缺项进入采购需求并预选目标材料，不能默认使用成品产品', () => {
+test('潜在材料采购机会不自动生成采购补档任务', () => {
   const note = '材料或配件采购方式、规格、数量与负责人待沟通';
   const scopedAssessment = {
     ...assessment,
@@ -399,41 +461,9 @@ test('关联成品对应的材料采购缺项进入采购需求并预选目标�
     missing: [note],
     supplyOpportunity: { targetProduct: 'Roller fabric', note, procurementStatus: 'unconfirmed' },
   };
-  const contexts = [];
-  function pendingButton(element) {
-    if (!React.isValidElement(element)) return undefined;
-    if (element.type === 'button' && element.props['aria-label'] === '补充资料：' + note)
-      return element;
-    return React.Children.toArray(element.props.children).map(pendingButton).find(Boolean);
-  }
-  const profile = CustomerProfile({
-    lead: { ...lead, assessment: scopedAssessment, pendingQuestions: note },
-    typeLabel: '零售商',
-    onAssessment() {},
-    onSupplement(context) {
-      contexts.push(context);
-    },
-  });
-  pendingButton(profile).props.onClick();
-  const latest = AssessmentPanel({
-    assessment: scopedAssessment,
-    onSupplement(context) {
-      contexts.push(context);
-    },
-  });
-  pendingButton(latest).props.onClick();
-  assert.deepEqual(contexts, [
-    {
-      category: 'purchase_need',
-      pendingItem: note,
-      product: 'Roller fabric',
-      direction: 'materials',
-    },
-    {
-      category: 'purchase_need',
-      pendingItem: note,
-      product: 'Roller fabric',
-      direction: 'materials',
-    },
-  ]);
+  const profile = renderProfile({ assessment: scopedAssessment, pendingQuestions: note });
+  const latest = renderAssessment({ assessment: scopedAssessment, onSupplement() {} });
+  assert.doesNotMatch(initialView(profile), /材料或配件采购方式、规格、数量与负责人待沟通|待确认/);
+  assert.doesNotMatch(initialView(latest), /材料或配件采购方式、规格、数量与负责人待沟通|补充资料/);
+  assert.match(latest, /Roller fabric/);
 });

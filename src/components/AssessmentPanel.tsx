@@ -37,6 +37,9 @@ export interface AssessmentSummary {
   dimensions?: Record<string, Dimension>;
   missing?: string[];
   manualOverride?: boolean;
+  matchLevel?: string;
+  prioritySignals?: { kind: string; label: string; quote: string; source_url: string }[];
+  legacy?: boolean;
   opportunities?: { direction: string; product: string; facts?: Dimension['facts'] }[];
   supplyOpportunity?: { targetProduct?: string; procurementStatus?: string; note?: string } | null;
 }
@@ -66,7 +69,7 @@ function assessmentPresentation(
     .map((line) => line.trim())
     .filter(Boolean);
   const technical =
-    /^(?:\[自动评估(?:\s|\])|自动评估编号[:：]|规则版本[:：]|评估时间[:：]|评级口径[:：])/;
+    /^(?:\[自动评估(?:\s|\])|自动评估编号[:：]|规则版本[:：]|评估时间[:：]|评级口径[:：]|匹配等级[:：]|开发优先级[:：]|优先线索[:：])/;
   const limitations = [
     ...new Set(
       [
@@ -151,8 +154,11 @@ export function AssessmentPanel({
   const legacyRule = ratingReason.match(/(?:^|\n)规则版本[:：]\s*([^\n]+)/)?.[1];
   const legacyTime = ratingReason.match(/(?:^|\n)评估时间[:：]\s*([^\n]+)/)?.[1];
   const dimensions = buildAssessmentDimensions(assessment, ratingReason);
+  const current = assessment?.ruleVersion === 'acquisition-v4.0' && !assessment.legacy;
   const pending = presentation.pending.filter(
-    (item) => !dimensions.some((dimension) => dimension.missing === item),
+    (item) =>
+      /冲突|强制|不一致|必需/.test(item) &&
+      !dimensions.some((dimension) => dimension.missing === item),
   );
   const directionNames: Record<string, string> = {
     finished: '成品',
@@ -174,9 +180,13 @@ export function AssessmentPanel({
       {assessment ? (
         <div className="assessment-current">
           <strong>
-            {assessment.grade || assessment.status || '未评级'} · 已支持 {assessment.score}/100
+            {assessment.grade || assessment.status || '未评级'}
           </strong>
-          <Badge>{assessment.complete ? '评分维度完整' : '含未知维度'}</Badge>
+          {current ? (
+            assessment.matchLevel && <Badge>匹配等级：{assessment.matchLevel}</Badge>
+          ) : (
+            <Badge>旧版评估</Badge>
+          )}
           {assessment.manualOverride && <Badge>主表评级已人工修改</Badge>}
           <div className="assessment-dates">
             <span>评估更新：{formatBeijingTime(assessment.evaluatedAt)}</span>
@@ -185,11 +195,11 @@ export function AssessmentPanel({
             )}
           </div>
           {assessment.manualOverride && (
-            <p className="assessment-override-note">分数来自最新自动评估，客户评级已人工调整。</p>
+            <p className="assessment-override-note">客户优先级已人工调整；自动评估依据仍保留。</p>
           )}
         </div>
       ) : !hasEvidence ? (
-        <p>尚无当前规则的自动评估。企业研究完成后会显示最新评分、依据与待补资料。</p>
+        <p>尚无自动评估。企业研究完成后会显示匹配依据与开发优先级。</p>
       ) : (
         <div className="assessment-dates">
           {legacyTime && <span>评估更新：{formatBeijingTime(legacyTime)}</span>}
@@ -198,19 +208,42 @@ export function AssessmentPanel({
           )}
         </div>
       )}
+      {current && !!assessment.prioritySignals?.length && (
+        <section className="assessment-notes" aria-label="优先线索">
+          <h4>优先线索</h4>
+          <ul>
+            {assessment.prioritySignals.map((signal, index) => (
+              <li key={`${signal.kind}-${index}`}>
+                <strong>{signal.label}</strong>
+                {signal.quote && ' · ' + formatBeijingText(signal.quote.slice(0, 150))}
+                {evidenceUrl(signal.source_url) && (
+                  <>{' · '}<a href={evidenceUrl(signal.source_url)} target="_blank" rel="noopener noreferrer">查看来源</a></>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {dimensions.length > 0 && (
-        <section className="assessment-dimension-list" aria-label="评分维度">
+        <section className="assessment-dimension-list" aria-label={current ? '业务证据' : '旧版评分维度'}>
           {dimensions.map((dimension) => (
             <article
               className="assessment-dimension-card"
-              aria-label={dimension.name + '评分'}
+              aria-label={dimension.name + (current ? '证据' : '评分')}
               key={dimension.key}
             >
               <div className="assessment-dimension-heading">
                 <h4>{dimension.name}</h4>
                 <strong>
-                  {dimension.score === null ? '未知' : dimension.score}
-                  <small> / {dimension.maximum}</small>
+                  {current
+                    ? dimension.conflict
+                      ? '依据冲突'
+                      : dimension.score === null
+                        ? '未见公开依据'
+                        : dimension.score === 0
+                          ? '明确不适用'
+                          : '已核实'
+                    : <>{dimension.score === null ? '未知' : dimension.score}<small> / {dimension.maximum}</small></>}
                 </strong>
               </div>
               <p className="assessment-dimension-conclusion">
@@ -225,17 +258,17 @@ export function AssessmentPanel({
                   ))}
                 </ul>
               )}
-              {dimension.missing &&
+              {dimension.conflict && dimension.missing &&
                 dimension.missing !== dimension.conclusion &&
                 !dimension.basis.slice(0, 2).some((basis) => basis.includes(dimension.missing)) && (
                   <p className="assessment-dimension-missing">
                     {formatBeijingText(dimension.missing)}
                   </p>
                 )}
-              {onSupplement && (dimension.missing || dimension.score === null) && (
+              {onSupplement && dimension.conflict && (
                 <button
                   className="text-link assessment-supplement-link"
-                  aria-label={'补充资料：' + dimension.name}
+                  aria-label={'核实冲突：' + dimension.name}
                   onClick={() =>
                     onSupplement({
                       category: 'assessment',
@@ -244,7 +277,7 @@ export function AssessmentPanel({
                     })
                   }
                 >
-                  补充资料
+                  核实依据
                 </button>
               )}
               {dimension.facts.length > 0 && (
@@ -286,8 +319,8 @@ export function AssessmentPanel({
         </section>
       )}
       {!!pending.length && (
-        <section className="assessment-notes" aria-label="待补资料">
-          <h4>待补资料</h4>
+        <section className="assessment-notes" aria-label="需核实的冲突">
+          <h4>需核实的冲突</h4>
           <ul>
             {pending.map((item) => (
               <li key={item}>
@@ -295,7 +328,7 @@ export function AssessmentPanel({
                 {onSupplement && (
                   <button
                     className="text-link assessment-supplement-link"
-                    aria-label={'补充资料：' + item}
+                    aria-label={'核实冲突：' + item}
                     onClick={() =>
                       onSupplement({
                         category: /采购需求|采购方式/.test(item) ? 'purchase_need' : 'profile',
@@ -310,7 +343,7 @@ export function AssessmentPanel({
                       })
                     }
                   >
-                    补充资料
+                    核实依据
                   </button>
                 )}
               </li>
@@ -355,7 +388,9 @@ export function AssessmentPanel({
               </>
             )}
           </dl>
-          <p>评级口径：A/B/C 表示初始开发优先级，未知项不补分。</p>
+          <p>{current
+            ? '开发优先级依据同一产品方向的主营产品与供货角色；其他官网缺项不降低等级。'
+            : '旧版 A/B/C 按当时规则计算，保留历史结果。'}</p>
         </details>
       )}
     </section>
