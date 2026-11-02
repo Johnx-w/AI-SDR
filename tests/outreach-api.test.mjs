@@ -6,7 +6,7 @@ import { OutreachService } from '../server/outreach-service.mjs';
 test('mailbox signature uploads accept a logo above 32 KB while enforcing the mailbox request limit', async (t) => {
   const saved = [];
   const server = createApp({
-    env: { ACQUISITION_PROVIDER: 'n8n' },
+    env: {},
     outreachServiceFactory: () => ({
       mailboxes: {
         save: (input) => {
@@ -57,7 +57,7 @@ test('多邮箱接口可直接访问并限制本机来源，内部测试需要�
     close: async () => {},
   };
   const server = createApp({
-    env: { ACQUISITION_PROVIDER: 'n8n' },
+    env: {},
     outreachServiceFactory: () => service,
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
@@ -122,7 +122,7 @@ test('取消触达接口核对确认和版本并可重复请求，保留详情�
   const completed = service.saveCampaign({ name: 'Completed', mailboxIds: [] });
   service.putCampaign({ ...completed, status: 'completed' });
   const server = createApp({
-    env: { ACQUISITION_PROVIDER: 'n8n' },
+    env: {},
     outreachServiceFactory: () => service,
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));

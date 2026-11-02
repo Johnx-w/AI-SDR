@@ -19,7 +19,6 @@ const fact = (kind, value = kind) => ({ kind, value, quote: value, source_url: s
 function fixture({ gradeOnly = false, potentialInput = false } = {}) {
   const folder = mkdtempSync(join(tmpdir(), 'lead-supplements-'));
   const env = {
-    ACQUISITION_PROVIDER: 'native',
     FEISHU_APP_ID: 'test-app',
     FEISHU_APP_SECRET: 'test-secret',
     FEISHU_APP_TOKEN: 'test-base',
@@ -617,7 +616,7 @@ test('实际HTTP补充入口验证保存编号和跨站请求，保存及刷新�
   }
 });
 
-test('HTTP可恢复原未确认表单与保存编号，核对成功后不再提供待恢复记录', async () => {
+test('HTTP补充先完成本地保存，飞书失败不要求重填表单，恢复后继续同步', async () => {
   const f = fixture();
   const app = createApp({ env: f.env, fetchImpl: f.fetchImpl, nativeImpl: f.engine });
   await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
@@ -630,16 +629,21 @@ test('HTTP可恢复原未确认表单与保存编号，核对成功后不再提�
     });
   try {
     const input = f.input();
+    const remoteBefore = f.record();
     f.mode('no-commit');
-    assert.equal((await post(input, 'recovery-original-key')).status, 502);
-    const { pending } = await (await fetch(url)).json();
-    assert.equal(pending.key, 'recovery-original-key');
-    assert.deepEqual(pending.input, input);
-    assert.equal(f.lead().score, 55);
-    f.mode('normal');
-    const saved = await post(pending.input, pending.key);
+    const saved = await post(input, 'recovery-original-key');
     assert.equal(saved.status, 200);
     assert.equal((await saved.json()).lead.score, 85);
+    assert.deepEqual(await (await fetch(url)).json(), { pending: null });
+    const libraryUrl = `http://127.0.0.1:${app.address().port}/api/v1/leads/real`;
+    const local = await (await fetch(libraryUrl)).json();
+    assert.equal(local.leads[0].score, 85);
+    assert.equal(local.sync.pendingWrites, 1);
+    assert.deepEqual(f.record(), remoteBefore);
+    f.mode('normal');
+    const synced = await (await fetch(libraryUrl + '/refresh', { method: 'POST' })).json();
+    assert.equal(synced.sync.pendingWrites, 0);
+    assert.equal(synced.leads[0].score, 85);
     assert.deepEqual(await (await fetch(url)).json(), { pending: null });
     assert.equal(f.writes(), 2);
   } finally {

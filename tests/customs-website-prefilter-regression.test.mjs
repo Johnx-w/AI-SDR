@@ -6,7 +6,6 @@ import { CustomsDiscovery, customsSearchPlan } from '../server/customs-discovery
 import { normalizeShipment } from '../server/customs-provider.mjs';
 
 const researchEnv = {
-  ACQUISITION_PROVIDER: 'native',
   TAVILY_API_KEY: 'fixture-search',
   DEEPSEEK_API_KEY: 'fixture-model',
   FEISHU_APP_ID: 'fixture-app',

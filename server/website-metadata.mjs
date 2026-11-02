@@ -1,7 +1,6 @@
 import { extractContacts } from './contact-extractor.mjs';
 import { extractAdvertisingCodes } from './advertising-codes.mjs';
 import { normalizePhoneLines } from './phone-format.mjs';
-// These helpers are also embedded in n8n Code nodes; keep them dependency-free.
 export function websiteTextExcerpt(content, limit = 12000) {
   const text = String(content || '')
     .replace(/!\[[^\]]*\]\(\s*data:[^)]*\)/gi, '')

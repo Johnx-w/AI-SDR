@@ -6,7 +6,6 @@ test('新候选模型输出达到上限时明确说明完整JSON未取得，不�
   let modelCalls = 0;
   const service = new NativeAcquisition({
     env: {
-      ACQUISITION_PROVIDER: 'native',
       TAVILY_API_KEY: 'fixture-search',
       DEEPSEEK_API_KEY: 'fixture-model',
       FEISHU_APP_ID: 'fixture-app',

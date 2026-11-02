@@ -253,7 +253,16 @@ function assertSchema(fields, expected) {
 }
 
 export class CustomerBusinessFeishu {
-  constructor({ env = {}, fetchImpl = fetch, client, journal, checkpoint, journalPath } = {}) {
+  constructor({
+    env = {},
+    fetchImpl = fetch,
+    client,
+    journal,
+    checkpoint,
+    journalPath,
+    customerRemoteId = (id) => id,
+  } = {}) {
+    this.customerRemoteId = customerRemoteId;
     this.env = env;
     this.client = client || new FeishuClient({ env, fetchImpl });
     this.configured =
@@ -525,8 +534,9 @@ export class CustomerBusinessFeishu {
       }
       const productVersions = new Map(products.map((product) => [product.id, product.version]));
       const customer = (entry) => {
-        assert(customers.has(entry.customerId), '业务记录关联的客户不在T2中');
-        return [entry.customerId];
+        const remoteId = this.customerRemoteId(entry.customerId);
+        assert(remoteId && customers.has(remoteId), '客户档案尚未同步至飞书T2，请先核对客户同步');
+        return [remoteId];
       };
       const productIds = (entry) => unique(entry.productIds || []);
       const productLinks = (entry) =>

@@ -1,23 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import vm from 'node:vm';
 import {
   combineWebsiteEvidence,
   enrichmentFields,
   planWebsitePages,
   extractWebsiteMetadata,
 } from '../server/website-metadata.mjs';
-import { enrichmentHelpers } from '../server/n8n-enrichment.mjs';
 import { mapFeishuRecord } from '../server/feishu.mjs';
-import { readFile } from 'node:fs/promises';
-import { improveContactNode } from '../server/n8n-contacts.mjs';
-import { removeCityTarget } from '../server/n8n-search-target.mjs';
-import {
-  upgradeRecordBuilder,
-  evidenceCode,
-  mergeSupplementCode,
-  newFeishuFields,
-} from '../server/n8n-enrichment.mjs';
 const url = 'https://vtrackscreens.com/screens/florida/miami/';
 const org = {
   '@type': 'Organization',
@@ -89,7 +78,7 @@ test('补全保留原有电话/社媒，空值不清除已有地址与服务地�
   assert.equal(result.fields['服务地区'], 'Miami, Florida');
   assert.equal(result.fields['Facebook'], 'https://www.facebook.com/old');
 });
-test('限制站内补全范围，拒绝私有域名与跨站联系页；n8n 无网络沙箱可运行', () => {
+test('限制站内补全范围，拒绝私有域名与跨站联系页', () => {
   assert.deepEqual(
     planWebsitePages(
       'https://vtrackscreens.com',
@@ -98,90 +87,4 @@ test('限制站内补全范围，拒绝私有域名与跨站联系页；n8n 无�
     ['https://vtrackscreens.com/', 'https://vtrackscreens.com/contact/'],
   );
   assert.deepEqual(planWebsitePages('https://127.0.0.1/'), []);
-  const output = vm.runInNewContext(
-    enrichmentHelpers +
-      ';combineWebsiteEvidence([{url:' +
-      JSON.stringify(url) +
-      ',content:' +
-      JSON.stringify(html) +
-      '}])',
-  );
-  assert.equal(output.addresses[0].city, 'Lavon');
-  assert.equal(output.service_areas[0].name, 'Miami, Florida');
-});
-
-test('生产 n8n 证据采集、补充正文失败降级、飞书映射贯通，目标州不污染实际地址', async () => {
-  const original = await readFile(
-    new URL('./fixtures/n8n-build-record-original.txt', import.meta.url),
-    'utf8',
-  );
-  const code = upgradeRecordBuilder(removeCityTarget(improveContactNode(original)));
-  const nodes = {
-    检查正文: { source_url: url, page_text: 'Motorized patio screens in Miami.' },
-    官网补全页面: [{ url }],
-    'Tavily Extract': { results: [] },
-    最终结果: [
-      {
-        ok: true,
-        source_url: url,
-        company_name: 'V-Track Screens',
-        actual_country: null,
-        customer_type: 'manufacturer',
-        products: ['screens'],
-        fit_status: 'review',
-        facts: [],
-      },
-    ],
-    配置搜索目标: { country: 'United States', region: 'Florida', product: 'screens' },
-    获取飞书Token: { body: { code: 0, tenant_access_token: 'test-only' } },
-  };
-  const run = (script, input) =>
-    JSON.parse(
-      JSON.stringify(
-        vm.runInNewContext('(function(){' + script + '})()', {
-          $: (name) => ({
-            first: () => ({ json: nodes[name] }),
-            all: () => nodes[name].map((json) => ({ json })),
-          }),
-          $input: { first: () => ({ json: input }), all: () => [{ json: input }] },
-        }),
-      ),
-    );
-  nodes['汇总官网证据'] = run(evidenceCode, { statusCode: 200, html })[0].json;
-  nodes['归并官网补全'] = run(mergeSupplementCode, { error: 'optional page unavailable' })[0].json;
-  const fields = [
-    'customer_id',
-    '客户名称',
-    '来源链接',
-    '来源渠道',
-    '主体类型',
-    '国家',
-    '州',
-    '州 / 城市',
-    '客户类型',
-    '相关产品',
-    '画像JSON',
-    '邮箱',
-    '电话',
-    '匹配状态',
-    '首次发现时间',
-    ...newFeishuFields,
-  ];
-  const result = run(code, {
-    code: 0,
-    data: {
-      items: fields.map((field_name) => ({
-        field_name,
-        type: field_name === '首次发现时间' ? 5 : 1,
-      })),
-    },
-  })[0].json;
-  assert.equal(result.ready, true);
-  assert.equal(result.insert_fields['州 / 城市'], 'TX · Lavon');
-  assert.equal(result.insert_fields['国家'], 'United States');
-  assert.equal(result.insert_fields['服务地区'], 'Miami, Florida');
-  assert.ok(result.insert_fields['Instagram'].includes('vtrackscreens'));
-  assert.equal(result.website_key, 'vtrackscreens.com');
-  const p = JSON.parse(result.insert_fields['画像JSON']);
-  assert.equal(p.task_target.region, 'Florida');
 });

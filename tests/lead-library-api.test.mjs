@@ -1,3 +1,4 @@
+import { withFeishuAuth } from './helpers/feishu.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -7,9 +8,10 @@ import { createApp } from '../server/app.mjs';
 import { mapFeishuRecord } from '../server/feishu.mjs';
 
 const env = {
-  N8N_BASE_URL: 'https://workspace.example.org',
-  FEISHU_READ_WEBHOOK_URL: 'https://workspace.example.org/webhook/read-customers',
-  N8N_WEBHOOK_SECRET: 'private-fixture-secret',
+  FEISHU_APP_ID: 'fixture-app',
+  FEISHU_TABLE_ID: 'fixture-table',
+  FEISHU_APP_SECRET: 'fixture-secret',
+  FEISHU_APP_TOKEN: 'fixture-base',
 };
 const record = (id = 'rec_one', name = '客户一') => ({
   record_id: id,
@@ -40,10 +42,10 @@ test('客户摘要与详情独立，连续列表、详情和导出读取复用�
   let reads = 0;
   const server = await open({
     env,
-    fetchImpl: async () => {
+    fetchImpl: withFeishuAuth(async () => {
       reads++;
       return response([record()]);
-    },
+    }),
   });
   try {
     const list = await (await fetch(server.base + '/list')).json();
@@ -66,20 +68,20 @@ test('客户摘要与详情独立，连续列表、详情和导出读取复用�
   }
 });
 
-test('飞书刷新期间仍立即提供已有列表，刷新成功后显示新增及删除结果', async () => {
+test('飞书刷新期间立即提供已有档案，刷新只导入新增客户且不删除本地记录', async () => {
   let finish;
   let started;
   const refreshing = new Promise((resolve) => (started = resolve));
   let reads = 0;
   const server = await open({
     env,
-    fetchImpl: async () => {
+    fetchImpl: withFeishuAuth(async () => {
       if (++reads === 1) return response([record()]);
       started();
       return new Promise(
         (resolve) => (finish = () => resolve(response([record('rec_two', '客户二')]))),
       );
-    },
+    }),
   });
   let request;
   try {
@@ -93,7 +95,8 @@ test('飞书刷新期间仍立即提供已有列表，刷新成功后显示新�
     const updated = await (await request).json();
     assert.equal(updated.leads[0].id, 'rec_two');
     assert.equal(updated.sync.refreshing, false);
-    assert.equal((await fetch(server.base + '/rec_one')).status, 404);
+    assert.equal(updated.total, 2);
+    assert.equal((await fetch(server.base + '/rec_one')).status, 200);
     assert.equal(reads, 2);
   } finally {
     finish?.();
@@ -107,11 +110,11 @@ test('刷新失败不删除客户，错误不泄露凭证，跨站刷新被拒�
   let reads = 0;
   const server = await open({
     env,
-    fetchImpl: async () => {
+    fetchImpl: withFeishuAuth(async () => {
       reads++;
-      if (failed) throw new Error(env.N8N_WEBHOOK_SECRET);
+      if (failed) throw new Error(env.FEISHU_APP_SECRET);
       return response([record()]);
-    },
+    }),
   });
   try {
     await fetch(server.base + '/list');
@@ -121,7 +124,7 @@ test('刷新失败不删除客户，错误不泄露凭证，跨站刷新被拒�
     const cached = await (await fetch(server.base + '/list')).json();
     assert.equal(cached.leads[0].id, 'rec_one');
     assert.ok(cached.sync.error);
-    assert.equal(JSON.stringify(cached).includes(env.N8N_WEBHOOK_SECRET), false);
+    assert.equal(JSON.stringify(cached).includes(env.FEISHU_APP_SECRET), false);
     assert.equal(
       (
         await fetch(server.base + '/refresh', {
@@ -131,7 +134,7 @@ test('刷新失败不删除客户，错误不泄露凭证，跨站刷新被拒�
       ).status,
       403,
     );
-    assert.equal(reads, 2);
+    assert.equal(reads, 4);
   } finally {
     await server.close();
   }
@@ -142,14 +145,17 @@ test('重启从SQLite读取客户，切换客户表不会展示上一张表的�
   const persistent = { ...env, LEAD_LIBRARY_DB_PATH: join(folder, 'leads.sqlite') };
   let server;
   try {
-    server = await open({ env: persistent, fetchImpl: async () => response([record()]) });
+    server = await open({
+      env: persistent,
+      fetchImpl: withFeishuAuth(async () => response([record()])),
+    });
     await fetch(server.base + '/list');
     await server.close();
     server = await open({
       env: persistent,
-      fetchImpl: async () => {
+      fetchImpl: withFeishuAuth(async () => {
         throw new Error('upstream offline');
-      },
+      }),
     });
     const cached = await (await fetch(server.base + '/list')).json();
     assert.equal(cached.leads[0].id, 'rec_one');
@@ -157,7 +163,7 @@ test('重启从SQLite读取客户，切换客户表不会展示上一张表的�
     await server.close();
     server = await open({
       env: { ...persistent, FEISHU_TABLE_ID: 'another-table' },
-      fetchImpl: async () => response([record('rec_two', '另一张表')]),
+      fetchImpl: withFeishuAuth(async () => response([record('rec_two', '另一张表')])),
     });
     const changed = await (await fetch(server.base + '/list')).json();
     assert.equal(changed.leads[0].id, 'rec_two');
@@ -176,7 +182,6 @@ test('精简飞书字段修改联系方式后，SQLite档案仍保留后台完�
   const confirmations = [{ id: 'manual_confirmation', confirmedBy: '业务员' }];
   const server = await open({
     env: {
-      ACQUISITION_PROVIDER: 'native',
       FEISHU_APP_ID: 'fixture',
       FEISHU_APP_SECRET: 'fixture',
       FEISHU_APP_TOKEN: 'fixture',
@@ -193,10 +198,11 @@ test('精简飞书字段修改联系方式后，SQLite档案仍保留后台完�
       },
       close() {},
     },
-    fetchImpl: async (url) =>
+    fetchImpl: withFeishuAuth(async (url) =>
       new URL(url).pathname.includes('/auth/')
         ? Response.json({ code: 0, tenant_access_token: 'fixture-token', expire: 3600 })
         : response([current]),
+    ),
   });
   try {
     await fetch(server.base + '/list');
@@ -227,11 +233,11 @@ test('性能与同步指标可独立读取，不触发飞书请求且不包含�
   let fail = false;
   const server = await open({
     env,
-    fetchImpl: async () => {
+    fetchImpl: withFeishuAuth(async () => {
       reads++;
       if (fail) throw new Error('private upstream secret');
       return response([record()]);
-    },
+    }),
   });
   try {
     const before = await (await fetch(server.base + '/metrics')).json();
@@ -257,7 +263,7 @@ test('性能与同步指标可独立读取，不触发飞书请求且不包含�
     fail = true;
     assert.equal((await fetch(server.base + '/refresh', { method: 'POST' })).status, 502);
     const metrics = await (await fetch(server.base + '/metrics')).json();
-    assert.equal(reads, 3);
+    assert.equal(reads, 5);
     assert.equal(metrics.performance.list.count, 1);
     assert.equal(metrics.performance.detail.count, 2);
     assert.equal(metrics.performance.detail.errors, 1);

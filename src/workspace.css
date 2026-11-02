@@ -546,8 +546,7 @@ summary:focus-visible {
   height: 40px;
 }
 .connection-control-row > input,
-.connection-control-row > select,
-.connection-field > .connection-model-directory {
+.connection-control-row > select {
   width: 100%;
   height: 40px;
   min-height: 40px;
@@ -581,15 +580,6 @@ summary:focus-visible {
   color: var(--color-text-muted);
   min-height: 20px;
   line-height: 20px;
-  margin: 0;
-}
-.connection-model-tools {
-  display: grid;
-  justify-items: start;
-  gap: 8px;
-  margin-bottom: 18px;
-}
-.connection-model-tools p {
   margin: 0;
 }
 .connection-clear input[type='checkbox'] {

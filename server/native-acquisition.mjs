@@ -1247,7 +1247,7 @@ export class NativeAcquisition {
       const written = await this.feishu.write(op.action, op.fields, op.recordId, op.clientToken);
       op.recordId = written.record_id;
       this.store.save(op);
-      if (!(await this.verify(op))) throw new Error('飞书写入后读回不一致');
+      if (!(await this.verify(op))) throw new Error('客户档案保存后读回不一致');
       return await this.finishWritten(op);
     } catch (error) {
       op.state = 'uncertain';
@@ -1255,7 +1255,9 @@ export class NativeAcquisition {
       throw conflict(
         op.stage === 'assessment'
           ? '客户资料已更新，最新评估保存待核对；勿重复研究'
-          : '飞书写入结果待核对，未自动重复写入',
+          : this.feishu.localFirst
+            ? '本地客户档案保存结果待核对，未重复保存'
+            : '飞书写入结果待核对，未自动重复写入',
       );
     }
   }
@@ -1301,6 +1303,7 @@ export class NativeAcquisition {
       this.store.save(op);
       this.assessments.save(op.assessment, await this.feishu.record(op.recordId));
     }
+    this.feishu.persist?.(op.recordId);
     const output = this.output(op, {
       research: op.research,
       row: {
@@ -1312,9 +1315,11 @@ export class NativeAcquisition {
         ? op.assessment.incompleteReason
           ? '研究资料不足，已保存待核实评级与最新依据并核对'
           : '企业资料与当前评级已读回，最新评估依据已保存'
-        : op.action === 'insert'
-          ? '飞书新增并读回核验成功'
-          : '飞书更新并读回核验成功',
+        : this.feishu.localFirst
+          ? '客户档案已保存至本地数据库，飞书同步在后台核对'
+          : op.action === 'insert'
+            ? '飞书新增并读回核验成功'
+            : '飞书更新并读回核验成功',
     });
     this.store.complete(op, output);
     return output;

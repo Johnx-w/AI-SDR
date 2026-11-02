@@ -7,7 +7,6 @@ import type {
   ScheduleTiming,
   ConnectionSettings,
   ProductSelection,
-  ConnectionModelCatalog,
   DiscoveryQuery,
 } from '../domain/types';
 
@@ -118,20 +117,6 @@ export const connectionsApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ values, clear }),
     }),
-  models: async (
-    values: Record<string, string>,
-    clear: string[],
-  ): Promise<ConnectionModelCatalog> => {
-    const response = await fetch('/api/v1/connections/models', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ values, clear }),
-      signal: AbortSignal.timeout(30000),
-    });
-    const body = await response.json().catch(() => ({ error: '服务未返回有效 JSON' }));
-    if (!response.ok) throw new Error(body.error || '读取模型目录失败');
-    return body;
-  },
 };
 
 export interface LocationOptions {

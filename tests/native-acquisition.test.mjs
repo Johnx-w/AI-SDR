@@ -12,7 +12,6 @@ import { mapFeishuRecord } from '../server/feishu.mjs';
 
 const site = 'https://acme.example.org/';
 const env = {
-  ACQUISITION_PROVIDER: 'native',
   TAVILY_API_KEY: 'test-tavily',
   DEEPSEEK_API_KEY: 'test-deepseek',
   DEEPSEEK_MODEL: 'deepseek-flash',
@@ -883,10 +882,10 @@ test('补采超出正文预算的引文不能用于企业准入', async () => {
   }
 });
 
-test('缺少直连凭证时禁止运行，但允许查看历史；不会退回 n8n', async () => {
+test('缺少直连凭证时禁止运行，但允许查看历史', async () => {
   let calls = 0;
   const app = createApp({
-    env: { ACQUISITION_PROVIDER: 'native' },
+    env: {},
     fetchImpl: async () => {
       calls++;
       throw new Error('must not call');
@@ -930,7 +929,11 @@ test('原生研究贯通官网补全、来源校验、飞书写入及读回；�
     assert.deepEqual(await svc.research(input, item), output);
     assert.equal(f.calls.length, count);
     await assert.rejects(svc.research({ ...input, product: 'changed' }, item), /不能更换/);
-    assert.ok(f.calls.every((c) => !c.url.includes('n8n')));
+    assert.ok(
+      f.calls.every((c) =>
+        ['open.feishu.cn', 'api.tavily.com', 'api.deepseek.com'].includes(new URL(c.url).hostname),
+      ),
+    );
     const modelCall = f.calls.find((c) => c.url.includes('deepseek'));
     assert.equal(modelCall.body.text.format.type, 'json_schema');
     assert.equal(modelCall.body.model, 'deepseek-flash');
@@ -1140,7 +1143,7 @@ test('读回字段不一致不宣称成功；跨域跳转与缺少正文不调�
 test('迁移后旧引擎的暂停任务无法交给新引擎继续', async () => {
   const folder = mkdtempSync(join(tmpdir(), 'native-provider-')),
     path = join(folder, 'jobs.sqlite');
-  let manager = new BatchJobs({ path, schedule: false, provider: 'n8n' });
+  let manager = new BatchJobs({ path, schedule: false, provider: 'retired' });
   const job = manager.create({ ...input, target_count: 1 }, 'provider-switch-test');
   manager.close();
   manager = new BatchJobs({ path, schedule: false, provider: 'native' });
@@ -1152,7 +1155,7 @@ test('迁移后旧引擎的暂停任务无法交给新引擎继续', async () =>
   }
 });
 
-test('统一获客接口以 native 引擎完成单家批量任务，无 n8n 请求且不泄露凭证', async () => {
+test('统一获客接口以 native 引擎完成单家批量任务，仅使用官方接口且不泄露凭证', async () => {
   const f = fixture(),
     svc = f.make();
   const app = createApp({ env, fetchImpl: f.fetchImpl, nativeImpl: svc });
@@ -1180,7 +1183,11 @@ test('统一获客接口以 native 引擎完成单家批量任务，无 n8n 请�
     assert.equal(final.inserted, 1);
     assert.equal(final.countPolicy, 'broad-business-v1');
     assert.equal(final.provider, 'native');
-    assert.ok(f.calls.every((c) => !c.url.includes('n8n')));
+    assert.ok(
+      f.calls.every((c) =>
+        ['open.feishu.cn', 'api.tavily.com', 'api.deepseek.com'].includes(new URL(c.url).hostname),
+      ),
+    );
     const history = await (await fetch(root + '/executions')).json();
     assert.equal(history.data[0].status, 'completed');
   } finally {

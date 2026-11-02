@@ -9,7 +9,6 @@ const source = 'https://blinds.example.org/';
 const text =
   'Example Blinds supplies zip screens to dealers nationwide in the United States. We are a window coverings business with a showroom and product catalogue for trade customers.';
 const env = {
-  ACQUISITION_PROVIDER: 'native',
   TAVILY_API_KEY: 'fixture-search',
   DEEPSEEK_API_KEY: 'fixture-model',
   FEISHU_APP_ID: 'fixture-app',

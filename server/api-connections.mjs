@@ -14,7 +14,7 @@ const fields = [
   ['RESEARCH_MODEL_PROVIDER', '研究模型提供方', false, ['deepseek', 'openai_compatible']],
   ['RESEARCH_MODEL_BASE_URL', '研究模型 API 基础地址', false],
   ['RESEARCH_MODEL_API_KEY', '研究模型 API Key', true],
-  ['RESEARCH_MODEL_MODEL', '研究模型名称', false],
+  ['RESEARCH_MODEL_MODEL', '研究使用的模型', false],
   ['RESEARCH_MODEL_MAX_OUTPUT_TOKENS', '单次模型输出上限', false],
   [
     'RESEARCH_MODEL_REASONING_EFFORT',
@@ -58,7 +58,7 @@ export class ApiConnections {
     if (path) {
       try {
         const stored = JSON.parse(readFileSync(path, 'utf8'));
-        for (const key of [...fields.map(([key]) => key), 'ACQUISITION_PROVIDER'])
+        for (const [key] of fields)
           if (typeof stored[key] === 'string') this.saved[key] = stored[key];
       } catch (error) {
         if (error.code !== 'ENOENT') throw new Error('API 连接配置无法读取，请检查本机配置文件');
@@ -67,53 +67,6 @@ export class ApiConnections {
   }
   environment() {
     return { ...this.base, ...this.saved };
-  }
-  // Preview only the model connection. Draft credentials never reach disk or the
-  // acquisition provider, and unrelated connection fields are not accepted.
-  previewModelEnvironment(body) {
-    const allowed = new Set(
-      fields.map(([key]) => key).filter((key) => /^(RESEARCH_MODEL_|DEEPSEEK_)/.test(key)),
-    );
-    if (
-      !body ||
-      typeof body !== 'object' ||
-      Array.isArray(body) ||
-      !body.values ||
-      typeof body.values !== 'object' ||
-      Array.isArray(body.values)
-    )
-      throw fail('请提交有效的模型连接设置');
-    const cleared = body.clear ?? [];
-    if (!Array.isArray(cleared) || cleared.some((key) => !allowed.has(key)))
-      throw fail('模型列表只接受模型连接配置');
-    const next = this.environment();
-    for (const [key, value] of Object.entries(body.values)) {
-      if (
-        !allowed.has(key) ||
-        typeof value !== 'string' ||
-        value.length > 2000 ||
-        /[\r\n\0]/.test(value)
-      )
-        throw fail('模型连接配置项格式不正确');
-      if (key.endsWith('_API_KEY') && value.includes('*'))
-        throw fail('脱敏摘要不能用于读取模型，请输入完整的新密钥或使用已保存密钥');
-      if (value.trim()) next[key] = value.trim();
-    }
-    for (const key of cleared) next[key] = '';
-    try {
-      // Ignore the unrelated web connection when validating a model preview.
-      researchProviderConfig({
-        RESEARCH_MODEL_PROVIDER: next.RESEARCH_MODEL_PROVIDER,
-        RESEARCH_MODEL_BASE_URL: next.RESEARCH_MODEL_BASE_URL,
-        RESEARCH_MODEL_API_KEY: next.RESEARCH_MODEL_API_KEY,
-        RESEARCH_MODEL_MODEL: next.RESEARCH_MODEL_MODEL,
-        DEEPSEEK_API_KEY: next.DEEPSEEK_API_KEY,
-        DEEPSEEK_MODEL: next.DEEPSEEK_MODEL,
-      });
-    } catch (error) {
-      throw fail(error.message);
-    }
-    return next;
   }
   view() {
     const env = this.environment();
@@ -138,7 +91,7 @@ export class ApiConnections {
       CUSTOMS_PROVIDER: 'billofladingdata',
     };
     return {
-      provider: env.ACQUISITION_PROVIDER || 'n8n',
+      provider: 'native',
       webSearchProvider: config.webSearchProvider,
       researchModelProvider: config.researchModelProvider,
       fields: fields.map(([key, label, secret, options]) => ({
@@ -172,7 +125,7 @@ export class ApiConnections {
     const cleared = body.clear ?? [];
     if (!Array.isArray(cleared) || cleared.some((key) => !known.has(key)))
       throw fail('包含不支持的配置项');
-    const next = { ...this.saved, ACQUISITION_PROVIDER: 'native' };
+    const next = { ...this.saved };
     const current = this.environment();
     for (const [key, value] of Object.entries(body.values)) {
       if (

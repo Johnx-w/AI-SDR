@@ -2,6 +2,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createHash } from 'node:crypto';
+import { customerWebsite } from './customer-fields.mjs';
+import { domainKey } from './website-identity.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const plainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -162,6 +164,13 @@ export class LeadLibrary {
       );
       CREATE TABLE IF NOT EXISTS lead_library_metrics (
         scope TEXT PRIMARY KEY, data TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS customer_archive_sync (
+        scope TEXT NOT NULL, record_id TEXT NOT NULL, data TEXT NOT NULL,
+        PRIMARY KEY(scope,record_id)
+      );
+      CREATE TABLE IF NOT EXISTS customer_archive_schema (
+        scope TEXT PRIMARY KEY, data TEXT NOT NULL
       );`);
     this.migrateVersions();
     this.meta = this.db
@@ -247,7 +256,7 @@ export class LeadLibrary {
       total: this.db
         .prepare('SELECT count(*) AS count FROM lead_library_customers WHERE scope=?')
         .get(this.scope).count,
-      source: 'feishu',
+      source: 'sqlite',
       scope: this.scope,
       sync: {
         refreshing: !!this.pending,
@@ -259,7 +268,21 @@ export class LeadLibrary {
         mode: this.mode,
         intervalMs: this.intervalMs,
         metrics: this.metrics(),
+        ...this.mirrorStatus(),
       },
+    };
+  }
+
+  mirrorStatus() {
+    return {
+      ...this.db
+        .prepare(
+          `SELECT count(*) AS pendingWrites,
+      coalesce(max(nullif(json_extract(data,'$.error'),'')),'') AS writeError
+      FROM customer_archive_sync WHERE scope=?
+      AND json_extract(data,'$.revision') > json_extract(data,'$.syncedRevision')`,
+        )
+        .get(this.scope),
     };
   }
 
@@ -349,6 +372,23 @@ export class LeadLibrary {
         }
         if (data.total !== undefined && data.total !== data.leads.length)
           throw fail(502, '飞书客户分页不完整，已保留上次成功同步的数据');
+        // Feishu imports add history; they never replace or delete the local master dossier.
+        const aliases = new Set();
+        for (const row of this.db
+          .prepare('SELECT record_id,data FROM customer_archive_sync WHERE scope=?')
+          .all(this.scope)) {
+          const mirror = JSON.parse(row.data);
+          const domain = domainKey(customerWebsite(mirror.record));
+          for (const [id, lead] of records)
+            if (
+              id !== row.record_id &&
+              (id === mirror.remoteId || (domain && domainKey(lead.website) === domain))
+            )
+              records.delete(id);
+          if (mirror.remoteId !== row.record_id) aliases.add(mirror.remoteId);
+        }
+        for (const lead of this.snapshot(true).leads)
+          if (!aliases.has(lead.id)) records.set(lead.id, lead);
         for (const [id, lead] of changes) records.set(id, lead);
         const syncedAt =
           typeof data.syncedAt === 'string' && Number.isFinite(Date.parse(data.syncedAt))
@@ -486,7 +526,7 @@ export class LeadLibrary {
     return this.pending;
   }
 
-  upsert(patch) {
+  upsert(patch, { mirror } = {}) {
     this.assertOpen();
     if (!plainObject(patch) || typeof patch.id !== 'string' || !patch.id)
       throw fail(400, '客户编号无效');
@@ -498,7 +538,7 @@ export class LeadLibrary {
     const lead = { ...(prior ? JSON.parse(prior.detail) : {}), ...patch };
     validateLead(lead);
     const projection = summarizeLead(lead);
-    if (prior?.version === projection.version) {
+    if (prior?.version === projection.version && !mirror) {
       if (this.refreshChanges) this.refreshChanges.set(lead.id, structuredClone(lead));
       return lead;
     }
@@ -521,16 +561,19 @@ export class LeadLibrary {
           summary=excluded.summary,detail=excluded.detail,version=excluded.version`,
         )
         .run(this.scope, lead.id, position, summary, detail, projection.version);
-      if (this.meta)
+      if (mirror)
         this.db
-          .prepare('UPDATE lead_library_sync SET revision=? WHERE scope=?')
-          .run(revision, this.scope);
+          .prepare('INSERT OR REPLACE INTO customer_archive_sync VALUES(?,?,?)')
+          .run(this.scope, lead.id, JSON.stringify(mirror));
+      this.db
+        .prepare('INSERT OR REPLACE INTO lead_library_sync VALUES(?,?,?,?)')
+        .run(this.scope, this.meta?.synced_at || '', this.meta?.refreshed_at || 0, revision);
       this.db.exec('COMMIT');
     } catch (error) {
       this.db.exec('ROLLBACK');
       throw error;
     }
-    if (this.meta) this.meta.revision = revision;
+    this.meta = { synced_at: '', refreshed_at: 0, ...this.meta, revision };
     if (this.refreshChanges) this.refreshChanges.set(lead.id, JSON.parse(detail));
     return lead;
   }

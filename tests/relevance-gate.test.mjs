@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { NativeAcquisition, selectWebsiteCandidates } from '../server/native-acquisition.mjs';
 
 const env = {
-  ACQUISITION_PROVIDER: 'native',
   TAVILY_API_KEY: 'test-tavily',
   DEEPSEEK_API_KEY: 'test-deepseek',
   DEEPSEEK_MODEL: 'deepseek-flash',

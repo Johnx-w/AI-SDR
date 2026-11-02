@@ -8,9 +8,6 @@ import {
   enrichmentFields,
   websiteTextExcerpt,
 } from '../server/website-metadata.mjs';
-import { checkExtractedCandidates } from '../server/n8n-acquisition.mjs';
-import vm from 'node:vm';
-import { mergeSupplementCode } from '../server/n8n-enrichment.mjs';
 import { extractContacts } from '../server/contact-extractor.mjs';
 const url = 'https://shadeotech.com/contact-shadeotech-window-fashions/';
 const fixture = await readFile(
@@ -71,14 +68,10 @@ test('完整读取大于512KB页面的页尾；超过4MB明确失败而非成功
 test('内嵌图片不占用 Dify 正文窗口，保留真实联系证据及来源；同地址跨页合并不丢地图链接', () => {
   const content =
     '![](data:image/png;base64,' + 'A'.repeat(150000) + ')\n\nCompany products\n' + fixture;
-  const p = checkExtractedCandidates({ source_url: url }, [
-    { results: [{ url, raw_content: content }] },
-  ]);
-  assert.ok(p.page_text.includes('3235 Skylane'));
-  assert.ok(!p.page_text.includes('data:image'));
-  assert.ok(p.page_text.length <= 12000);
-  assert.equal(p.source_url, url);
-  assert.equal(p.has_text, true);
+  const text = websiteTextExcerpt(content);
+  assert.ok(text.includes('3235 Skylane'));
+  assert.ok(!text.includes('data:image'));
+  assert.ok(text.length <= 12000);
   const e = combineWebsiteEvidence([
     { url, content: fixture },
     {
@@ -87,21 +80,6 @@ test('内嵌图片不占用 Dify 正文窗口，保留真实联系证据及来�
     },
   ]);
   assert.equal(e.addresses[0].map_url, 'https://maps.app.goo.gl/PAFh2THBiuCAuuLJA');
-  const merged = vm.runInNewContext('(function(){' + mergeSupplementCode + '})()', {
-    $: () => ({
-      first: () => ({ json: { source_url: url, page_text: 'Contact', website_metadata: e } }),
-    }),
-    $input: {
-      first: () => ({
-        json: {
-          results: [{ url, raw_content: '3235 Skylane Dr. Unit 111, Carrollton, TX, 75006.' }],
-        },
-      }),
-    },
-  });
-  assert.equal(
-    merged[0].json.website_metadata.addresses[0].map_url,
-    'https://maps.app.goo.gl/PAFh2THBiuCAuuLJA',
-  );
+
   assert.equal(websiteTextExcerpt('![](data:image/png;base64,AAAA)'), '');
 });

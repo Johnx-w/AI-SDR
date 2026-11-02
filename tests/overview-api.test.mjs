@@ -1,3 +1,4 @@
+import { withFeishuAuth } from './helpers/feishu.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { withApp } from './helpers/http.mjs';
@@ -5,17 +6,17 @@ import { withApp } from './helpers/http.mjs';
 test('总览HTTP只读聚合真实客户与本地业务，不调用搜索、邮件或飞书写入', async () => {
   const calls = [];
   const env = {
-    ACQUISITION_PROVIDER: 'n8n',
-    N8N_BASE_URL: 'https://example.test',
-    FEISHU_READ_WEBHOOK_URL: 'https://example.test/webhook/read',
-    N8N_WEBHOOK_SECRET: 'fixture-secret',
+    FEISHU_APP_ID: 'fixture-app',
+    FEISHU_TABLE_ID: 'fixture-table',
+    FEISHU_APP_SECRET: 'fixture-secret',
+    FEISHU_APP_TOKEN: 'fixture-base',
   };
   await withApp(
     {
       env,
-      fetchImpl: async (url, options) => {
+      fetchImpl: withFeishuAuth(async (url, options) => {
         calls.push({ url: String(url), method: options?.method || 'GET' });
-        assert.equal(String(url), env.FEISHU_READ_WEBHOOK_URL);
+        assert.equal(new URL(url).origin, 'https://open.feishu.cn');
         return Response.json({
           code: 0,
           data: {
@@ -25,7 +26,7 @@ test('总览HTTP只读聚合真实客户与本地业务，不调用搜索、邮�
             has_more: false,
           },
         });
-      },
+      }),
     },
     async (root) => {
       const response = await fetch(
@@ -58,9 +59,9 @@ test('客户入口未接通时总览其它本地来源仍可读，客户数不�
   await withApp(
     {
       env: {},
-      fetchImpl: async () => {
+      fetchImpl: withFeishuAuth(async () => {
         throw new Error('不应请求外部服务');
-      },
+      }),
     },
     async (root) => {
       const response = await fetch(root + '/api/v1/overview');

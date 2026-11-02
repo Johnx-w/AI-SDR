@@ -89,7 +89,7 @@ export type LeadSummary = Pick<
 export interface LeadMetadata {
   syncedAt: string | null;
   total: number;
-  source: 'feishu';
+  source: 'feishu' | 'sqlite';
   scope: string;
   sync: {
     refreshing: boolean;
@@ -99,6 +99,8 @@ export interface LeadMetadata {
     revision: number | string;
     mode?: 'active' | 'idle';
     intervalMs?: number;
+    pendingWrites?: number;
+    writeError?: string;
     metrics?: {
       attempts: number;
       successes: number;

@@ -15,7 +15,6 @@ const draft = {
 
 async function serve(folder, externalCalls) {
   const env = {
-    ACQUISITION_PROVIDER: 'native',
     CONNECTIONS_PATH: join(folder, 'connections.json'),
     BATCH_DB_PATH: join(folder, 'products.sqlite'),
     PRODUCT_KNOWLEDGE_DB_PATH: join(folder, 'products.sqlite'),

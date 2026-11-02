@@ -1,8 +1,10 @@
 import fs from 'node:fs/promises';
-import { readFeishu } from '../server/feishu.mjs';
 const count = Number(process.argv[2] || 1);
-const base = 'http://127.0.0.1:4311/api/v1/integrations/n8n';
-const before = await readFeishu({ env: process.env, fetchImpl: fetch });
+const base = 'http://127.0.0.1:4311/api/v1/acquisition';
+const before = await fetch('http://127.0.0.1:4311/api/v1/leads/real').then(async (response) => {
+  if (!response.ok) throw new Error('客户档案读取失败');
+  return response.json();
+});
 await fs.writeFile(`artifacts/batch-live-${count}-before.json`, JSON.stringify(before));
 const requestId = `batch-live-${count}-${Date.now()}`;
 const response = await fetch(base + '/jobs', {
@@ -38,7 +40,10 @@ while (['running', 'stopping'].includes(job.status)) {
     }),
   );
 }
-const after = await readFeishu({ env: process.env, fetchImpl: fetch });
+const after = await fetch('http://127.0.0.1:4311/api/v1/leads/real').then(async (response) => {
+  if (!response.ok) throw new Error('客户档案读取失败');
+  return response.json();
+});
 const previous = new Set(before.leads.map((l) => l.id));
 const added = after.leads.filter((l) => !previous.has(l.id));
 const verified = job.rows

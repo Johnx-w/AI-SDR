@@ -8,7 +8,6 @@ const fixture = JSON.parse(
   readFileSync(new URL('./fixtures/exporthub-marketplace-20261024.json', import.meta.url), 'utf8'),
 );
 const env = {
-  ACQUISITION_PROVIDER: 'native',
   TAVILY_API_KEY: 'fixture-search',
   DEEPSEEK_API_KEY: 'fixture-model',
   FEISHU_APP_ID: 'fixture-app',

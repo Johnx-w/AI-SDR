@@ -1,7 +1,6 @@
 import { normalizePhone } from './phone-format.mjs';
 import { phoneMetadata } from './phone-metadata.mjs';
 
-// 此纯函数同时用于本地官网补全与 n8n 入库节点，避免两条链路使用不同规则。
 export function extractContacts({ content, sourceUrl, country = '' }) {
   const decode = (s) =>
     String(s || '')

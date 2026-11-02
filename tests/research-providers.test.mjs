@@ -7,7 +7,6 @@ import { parseCompanyResearch } from '../server/company-research.mjs';
 
 const legacyEnv = Object.fromEntries(nativeRequirements.map((key) => [key, 'fixture-' + key]));
 const genericEnv = {
-  ACQUISITION_PROVIDER: 'native',
   WEB_SEARCH_PROVIDER: 'http',
   WEB_SEARCH_BASE_URL: 'https://search.example.org/api/',
   WEB_SEARCH_API_KEY: 'fixture-generic-search',
@@ -19,6 +18,30 @@ const genericEnv = {
 };
 const messages = [{ role: 'user', content: 'Research only supplied official website evidence.' }];
 const schema = { type: 'object', properties: {}, additionalProperties: false };
+
+test('保存选中的模型后，实际请求的 model 字段使用该 ID 而不是旧模型', async () => {
+  for (const provider of ['deepseek', 'openai_compatible']) {
+    const connections = new ApiConnections({ env: { ...genericEnv, DEEPSEEK_MODEL: 'old-model' } });
+    connections.update({
+      values: {
+        RESEARCH_MODEL_PROVIDER: provider,
+        RESEARCH_MODEL_MODEL: 'selected-model',
+      },
+    });
+    let request;
+    const providers = createResearchProviders({
+      env: connections.environment(),
+      fetchImpl: async (url, options) => {
+        request = { url, body: JSON.parse(options.body), auth: options.headers.Authorization };
+        return Response.json({});
+      },
+    });
+    await providers.model.research({ messages, schema });
+    assert.equal(request.body.model, 'selected-model');
+    assert.equal(request.auth, 'Bearer fixture-generic-model');
+    assert.ok(request.url.endsWith(provider === 'deepseek' ? '/responses' : '/chat/completions'));
+  }
+});
 
 test('现有网页提供方原样传递 basic 与 advanced 提取层级，不隐式重复请求', async () => {
   for (const env of [legacyEnv, genericEnv]) {
@@ -287,9 +310,7 @@ test('上游非 JSON、HTTP 错误、网络异常及缺少配置不泄露凭证�
 
 test('连接设置支持可替换提供方和可选海关配置，读取不泄露密钥且非法更新不生效', () => {
   const connections = new ApiConnections({ env: legacyEnv });
-  const values = Object.fromEntries(
-    Object.entries(genericEnv).filter(([key]) => key !== 'ACQUISITION_PROVIDER'),
-  );
+  const values = Object.fromEntries(Object.entries(genericEnv));
   const view = connections.update({
     values: {
       ...values,
@@ -327,7 +348,5 @@ test('连接设置支持可替换提供方和可选海关配置，读取不泄�
   }
   connections.update({ values: {}, clear: ['CUSTOMS_API_KEY'] });
   assert.equal(connections.view().ready, true);
-  assert.throws(() => connections.update({ values: { ACQUISITION_PROVIDER: 'native' } }), {
-    status: 400,
-  });
+  assert.equal(connections.update({ values: {} }).provider, 'native');
 });

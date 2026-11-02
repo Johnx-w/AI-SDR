@@ -86,12 +86,10 @@ export interface CustomsBuyerEvidence {
 }
 export interface IntegrationStatus {
   configured: boolean;
-  provider?: 'n8n' | 'native';
+  provider?: 'native';
   nativeReady?: boolean;
   missing?: string[];
-  workflowId: string;
-  editorUrl: string;
-  transport: 'webhook' | 'direct';
+  transport: 'direct';
   note: string;
   customs?: { configured: boolean; missing: string[]; provider: string };
   webProvider?: string;
@@ -199,12 +197,6 @@ export interface ConnectionSettings {
     required?: boolean;
     description?: string;
   }[];
-}
-export interface ConnectionModelCatalog {
-  status: 'available' | 'unsupported';
-  provider: string;
-  models: { id: string; name?: string; ownedBy?: string; contextWindow?: number }[];
-  message?: string;
 }
 
 export interface ScheduleTiming {

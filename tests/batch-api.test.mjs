@@ -1,13 +1,8 @@
+import { feishuEnv, withFeishuAuth } from './helpers/feishu.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../server/app.mjs';
-const env = {
-  N8N_BASE_URL: 'https://vynox.app.n8n.cloud',
-  N8N_WEBHOOK_URL: 'https://vynox.app.n8n.cloud/webhook/test-only',
-  N8N_WEBHOOK_ENABLED: 'true',
-  N8N_WEBHOOK_SECRET: 'test-only',
-  FEISHU_READ_WEBHOOK_URL: 'https://vynox.app.n8n.cloud/webhook/read-test-only',
-};
+const env = { ...feishuEnv, TAVILY_API_KEY: 'test', DEEPSEEK_API_KEY: 'test' };
 const input = {
   country: 'United States',
   region: 'Florida',
@@ -23,16 +18,21 @@ test('批量接口立即接收、持久查询、幂等返回、校验数量且�
   let calls = 0;
   const app = createApp({
     env,
-    fetchImpl: async (url) => {
-      if (String(url).includes('/webhook/read-test-only'))
-        return Response.json({ code: 0, data: { items: [], has_more: false } });
-      calls++;
-      await gate;
-      return new Response(JSON.stringify([{ candidates: [] }]), { status: 200 });
+    fetchImpl: withFeishuAuth(async () =>
+      Response.json({ code: 0, data: { items: [], has_more: false } }),
+    ),
+    nativeImpl: {
+      async discover() {
+        calls++;
+        await gate;
+        return { candidates: [] };
+      },
+      decorateLeads: (data) => data,
+      close() {},
     },
   });
   await new Promise((r) => app.listen(0, '127.0.0.1', r));
-  const root = `http://127.0.0.1:${app.address().port}/api/v1/integrations/n8n`;
+  const root = `http://127.0.0.1:${app.address().port}/api/v1/acquisition`;
   const post = (path, body, key = 'batch-api-idem') =>
     fetch(root + path, {
       method: 'POST',

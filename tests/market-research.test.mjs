@@ -7,8 +7,6 @@ import {
   extractCatalogProducts,
   planWebsitePages,
 } from '../server/website-metadata.mjs';
-import { recoveryPlanCode } from '../server/n8n-recovery.mjs';
-import vm from 'node:vm';
 import { extractContacts } from '../server/contact-extractor.mjs';
 const target = { country: 'Europe', region: '', product: 'screens', audience: 'BC' };
 test('加拿大省区和欧洲有效；移除的市场和分组下的州不可使用', () => {
@@ -175,19 +173,6 @@ test('补抓只发现同站正文页面，忽略联系表单插件 CSS 和 oEmbe
   const html =
     '<link href="/wp-content/plugins/contact-form/styles.css"><link href="/wp-json/oembed?url=contact"><a href="/about/">About</a><a href="https://other.org/contact">Contact</a>';
   assert.deepEqual(planWebsitePages(source_url, html), [source_url, source_url + 'about/']);
-  const data = {
-    Plans: [{ json: { url: source_url } }],
-    HTML: [{ json: { statusCode: 200, html } }],
-    Page: [{ json: { source_url } }],
-  };
-  const r = vm.runInNewContext(
-    '(function(){' + recoveryPlanCode('Plans', 'HTML', 'Page') + '})()',
-    {
-      $: (name) => ({ all: () => data[name], first: () => data[name][0] }),
-    },
-  )[0].json;
-  assert.equal(r.needs_recovery, true);
-  assert.deepEqual([...r.fallback_urls], [source_url + 'about/']);
 });
 
 test('加拿大本地格式电话可提取，欧洲和东南亚地址国家代码保存为英文国家名', () => {

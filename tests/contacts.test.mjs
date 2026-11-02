@@ -1,10 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import vm from 'node:vm';
 import { extractContacts } from '../server/contact-extractor.mjs';
-import { improveContactNode } from '../server/n8n-contacts.mjs';
-import { removeCityTarget } from '../server/n8n-search-target.mjs';
 import { mapFeishuRecord } from '../server/feishu.mjs';
 
 const sourceUrl = 'https://shadeboys.com/cities/florida/miami/outdoor-zip-track-blinds';
@@ -91,105 +87,4 @@ test('飞书字段为空时读取已有画像联系证据；原始字段保留',
   assert.equal(lead.phone, '');
   assert.equal(lead.email, 'sales@shadeboys.com');
   assert.equal(lead.fields['电话'], undefined);
-});
-test('n8n 入库节点回归：修复美国漏采，保持原画像、去重键、字段映射和失败分支', async () => {
-  const original = await readFile(
-    new URL('./fixtures/n8n-build-record-original.txt', import.meta.url),
-    'utf8',
-  );
-  const improved = removeCityTarget(improveContactNode(original));
-  const fieldNames = [
-    'customer_id',
-    '客户名称',
-    '来源链接',
-    '来源渠道',
-    '主体类型',
-    '国家',
-    '客户类型',
-    '相关产品',
-    '画像JSON',
-    '邮箱',
-    '电话',
-    '匹配状态',
-    '首次发现时间',
-  ];
-  const nodes = {
-    最终结果: [
-      {
-        ok: true,
-        source_url: sourceUrl,
-        company_name: 'Shade Boys',
-        actual_country: 'United States',
-        customer_type: 'installer',
-        products: ['zip screens'],
-        fit_status: 'matched',
-        facts: [{ field: 'product', value: 'zip screens' }],
-      },
-    ],
-    获取飞书Token: { body: { code: 0, tenant_access_token: 'test-token' } },
-    配置搜索目标: {
-      country: 'United States',
-      region: 'Florida',
-      city: 'Miami',
-      product: 'pergolas, motors',
-      search_query: 'pergolas, motors Florida',
-    },
-    'Tavily Extract': {
-      results: [
-        { url: sourceUrl, raw_content: markdown },
-        { url: 'https://unrelated.com', raw_content: 'Contact 212-555-1234' },
-      ],
-    },
-  };
-  function run(code, missingField = false) {
-    return JSON.parse(
-      JSON.stringify(
-        vm.runInNewContext(
-          '(function(){' + code + '})()',
-          {
-            $: (name) => ({
-              first: () => ({ json: nodes[name] }),
-              all: () => nodes[name].map((json) => ({ json })),
-            }),
-            $input: {
-              first: () => ({
-                json: {
-                  code: 0,
-                  data: {
-                    items: fieldNames
-                      .filter((x) => !missingField || x !== '电话')
-                      .map((field_name) => ({
-                        field_name,
-                        type: field_name === '首次发现时间' ? 5 : 1,
-                      })),
-                  },
-                },
-              }),
-            },
-          },
-          { timeout: 2000 },
-        ),
-      ),
-    );
-  }
-  assert.equal(run(original)[0].json.insert_fields['电话'], undefined);
-  const output = run(improved)[0].json;
-  assert.equal(output.ready, true);
-  assert.equal(output.website_key, 'shadeboys.com');
-  assert.equal(output.new_customer_id, 'web_shadeboys.com');
-  assert.equal(output.insert_fields['国家'], 'United States');
-  assert.equal(output.insert_fields['匹配状态'], '匹配');
-  assert.equal(output.insert_fields['电话'].split('\n').length, 2);
-  const profile = JSON.parse(output.insert_fields['画像JSON']);
-  assert.equal('city' in profile.task_target, false);
-  assert.equal(profile.task_target.region, 'Florida');
-  assert.equal(profile.task_target.product, 'pergolas, motors');
-  assert.equal(profile.actual_country, 'United States');
-  assert.equal(profile.latest_research.contact_extraction_version, 'multi-market-v2');
-  assert.equal(
-    profile.latest_research.contact_evidence.every((c) => c.source_url === sourceUrl),
-    true,
-  );
-  assert.equal(run(improved, true)[0].json.ready, false);
-  assert.throws(() => improveContactNode(improved), /已升级/);
 });

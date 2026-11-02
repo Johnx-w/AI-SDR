@@ -19,11 +19,22 @@ const fail = (status, message) => Object.assign(new Error(message), { status });
 // The HTTP entry point owns graph persistence and its collaboration mirror.
 // A saved business record remains readable when the mirror needs reconciliation.
 export class CustomerBusinessApi {
-  constructor({ getEnv, fetchImpl = fetch, knowledge, loadCustomers }) {
+  constructor({
+    getEnv,
+    fetchImpl = fetch,
+    knowledge,
+    loadCustomers,
+    customerRecord,
+    customerRemoteId,
+    syncCustomers,
+  }) {
     this.getEnv = getEnv;
     this.fetch = fetchImpl;
     this.knowledge = knowledge;
     this.loadCustomers = loadCustomers;
+    this.customerRecord = customerRecord;
+    this.customerRemoteId = customerRemoteId;
+    this.syncCustomers = syncCustomers;
     this.active = 0;
     this.current = null;
     this.syncTail = Promise.resolve();
@@ -41,11 +52,12 @@ export class CustomerBusinessApi {
     const store = new CustomerBusiness({
       path,
       scope,
-      customer: async (id) => client.record(id),
+      customer: async (id) => this.customerRecord?.(id) || client.record(id),
       product: async (id) => this.knowledge().get(id),
     });
     const mirror = new CustomerBusinessFeishu({
       env,
+      customerRemoteId: this.customerRemoteId,
       fetchImpl: this.fetch,
       journalPath:
         env.BUSINESS_MIRROR_JOURNAL_PATH || (path === ':memory:' ? ':memory:' : undefined),
@@ -67,6 +79,7 @@ export class CustomerBusinessApi {
       .then(async () => {
         try {
           const workspace = state.store.view();
+          await this.syncCustomers?.();
           const productIds = new Set([
             ...workspace.demands.flatMap((row) => row.productIds || []),
             ...workspace.tasks.flatMap((row) => row.productIds || []),

@@ -13,6 +13,30 @@ const evidence = {
   method: 'mailto_link',
   status: '公开未验证',
 };
+
+test('客户证据查询使用索引定位当前企业，避免每位客户扫描全部研究正文', (t) => {
+  const store = new AcquisitionStore(':memory:', 'project/table');
+  t.after(() => store.close());
+  const { operation } = store.begin('indexed-evidence', {});
+  Object.assign(operation, {
+    recordId: 'customer-1',
+    source_url: 'https://customer.example/',
+    evidence: { contacts: [evidence] },
+  });
+  store.complete(operation, {});
+  const prepare = store.db.prepare.bind(store.db);
+  let evidenceQuery;
+  store.db.prepare = (sql) => {
+    if (sql.includes('FROM acquisition_operations')) evidenceQuery = sql;
+    return prepare(sql);
+  };
+  assert.deepEqual(store.researchEmailEvidence('customer-1', 'https://customer.example/'), [
+    evidence,
+  ]);
+  const plan = prepare('EXPLAIN QUERY PLAN ' + evidenceQuery).all('project/table', 'customer-1');
+  assert.match(plan.map((row) => row.detail).join('\n'), /USING INDEX/);
+  assert.doesNotMatch(plan.map((row) => row.detail).join('\n'), /SCAN acquisition_operations/);
+});
 function fixture(t) {
   const store = new AcquisitionStore(':memory:', 'project/table');
   t.after(() => store.close());

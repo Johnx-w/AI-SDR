@@ -73,8 +73,8 @@ test('只累加真实返回的研究统计；复用结果不再累计旧请求�
   }
 });
 
-test('旧结果和 n8n 无 usage 时保持未知，不伪造模型零调用或 Token', async () => {
-  const manager = harness({ provider: 'n8n' });
+test('旧结果缺少 usage 时保持未知，不伪造模型零调用或 Token', async () => {
+  const manager = harness({ provider: 'retired' });
   try {
     const job = current(manager, manager.create(input, 'usage-unknown-1'));
     await manager.accept(job, failure());

@@ -45,6 +45,12 @@ export class AcquisitionStore {
     this.db.exec(
       'PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS acquisition_operations (id TEXT PRIMARY KEY, hash TEXT NOT NULL, data TEXT NOT NULL);',
     );
+    this.db
+      .exec(`CREATE INDEX IF NOT EXISTS acquisition_customer_evidence ON acquisition_operations(
+      json_extract(data,'$.scope'), json_extract(data,'$.recordId'),
+      COALESCE(json_extract(data,'$.recordVerifiedAt'),json_extract(data,'$.updatedAt'),
+        json_extract(data,'$.createdAt'),'') DESC, id DESC
+    ) WHERE json_extract(data,'$.state')='completed'`);
     this.db.exec(
       'CREATE TABLE IF NOT EXISTS company_identities(scope TEXT NOT NULL, record_id TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(scope, record_id))',
     );
