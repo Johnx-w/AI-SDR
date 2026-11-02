@@ -182,9 +182,7 @@ export function AssessmentPanel({
       </header>
       {assessment ? (
         <div className="assessment-current">
-          <strong>
-            {assessment.grade || assessment.status || '未评级'}
-          </strong>
+          <strong>{assessment.grade || assessment.status || '未评级'}</strong>
           {current ? (
             assessment.matchLevel && <Badge>匹配等级：{assessment.matchLevel}</Badge>
           ) : (
@@ -220,7 +218,16 @@ export function AssessmentPanel({
                 <strong>{signal.label}</strong>
                 {signal.quote && ' · ' + formatBeijingText(signal.quote.slice(0, 150))}
                 {evidenceUrl(signal.source_url) && (
-                  <>{' · '}<a href={evidenceUrl(signal.source_url)} target="_blank" rel="noopener noreferrer">查看来源</a></>
+                  <>
+                    {' · '}
+                    <a
+                      href={evidenceUrl(signal.source_url)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      查看来源
+                    </a>
+                  </>
                 )}
               </li>
             ))}
@@ -228,7 +235,10 @@ export function AssessmentPanel({
         </section>
       )}
       {dimensions.length > 0 && (
-        <section className="assessment-dimension-list" aria-label={current ? '业务证据' : '旧版评分维度'}>
+        <section
+          className="assessment-dimension-list"
+          aria-label={current ? '业务证据' : '旧版评分维度'}
+        >
           {dimensions.map((dimension) => (
             <article
               className="assessment-dimension-card"
@@ -238,15 +248,22 @@ export function AssessmentPanel({
               <div className="assessment-dimension-heading">
                 <h4>{dimension.name}</h4>
                 <strong>
-                  {current
-                    ? dimension.conflict
-                      ? '依据冲突'
-                      : dimension.score === null
-                        ? '未见公开依据'
-                        : dimension.score === 0
-                          ? '明确不适用'
-                          : '已核实'
-                    : <>{dimension.score === null ? '未知' : dimension.score}<small> / {dimension.maximum}</small></>}
+                  {current ? (
+                    dimension.conflict ? (
+                      '依据冲突'
+                    ) : dimension.score === null ? (
+                      '未见公开依据'
+                    ) : dimension.score === 0 ? (
+                      '明确不适用'
+                    ) : (
+                      '已核实'
+                    )
+                  ) : (
+                    <>
+                      {dimension.score === null ? '未知' : dimension.score}
+                      <small> / {dimension.maximum}</small>
+                    </>
+                  )}
                 </strong>
               </div>
               <p className="assessment-dimension-conclusion">
@@ -261,7 +278,8 @@ export function AssessmentPanel({
                   ))}
                 </ul>
               )}
-              {dimension.conflict && dimension.missing &&
+              {dimension.conflict &&
+                dimension.missing &&
                 dimension.missing !== dimension.conclusion &&
                 !dimension.basis.slice(0, 2).some((basis) => basis.includes(dimension.missing)) && (
                   <p className="assessment-dimension-missing">
@@ -391,9 +409,11 @@ export function AssessmentPanel({
               </>
             )}
           </dl>
-          <p>{current
-            ? '开发优先级依据同一产品方向的主营产品与供货角色；其他官网缺项不降低等级。'
-            : '旧版评级按当时规则计算，保留历史结果。'}</p>
+          <p>
+            {current
+              ? '开发优先级依据同一产品方向的主营产品与供货角色；其他官网缺项不降低等级。'
+              : '旧版评级按当时规则计算，保留历史结果。'}
+          </p>
         </details>
       )}
     </section>

@@ -102,7 +102,9 @@ export function CustomerProfile({
         .filter(
           (item) =>
             item &&
-            !/^(暂无已记录的待确认事项|暂无|无|经营法人名称待核实|具体采购需求待确认)$/.test(item) &&
+            !/^(暂无已记录的待确认事项|暂无|无|经营法人名称待核实|具体采购需求待确认)$/.test(
+              item,
+            ) &&
             !/^材料或配件采购方式、规格、数量与负责人待沟通/.test(item),
         ),
     ),
@@ -187,12 +189,10 @@ export function CustomerProfile({
             {lead.assessment?.ruleVersion &&
               !['acquisition-v4.0', 'acquisition-v5.0'].includes(lead.assessment.ruleVersion) && (
                 <Badge>旧版评估</Badge>
-            )}
+              )}
             {lead.assessment &&
               ['acquisition-v4.0', 'acquisition-v5.0'].includes(lead.assessment.ruleVersion) &&
-              lead.assessment.matchLevel && (
-                <span>匹配等级：{lead.assessment.matchLevel}</span>
-            )}
+              lead.assessment.matchLevel && <span>匹配等级：{lead.assessment.matchLevel}</span>}
           </div>
           <div className="profile-actions">
             {onSupplement && (

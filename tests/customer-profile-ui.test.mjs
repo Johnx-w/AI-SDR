@@ -258,7 +258,14 @@ const currentAssessment = {
     R: {
       score: 30,
       maximum: 30,
-      facts: [{ kind: 'specialist_supply', value: '专业供货', quote: 'We supply zip screens to trade customers.', source_url: 'https://buyer.example.org/trade' }],
+      facts: [
+        {
+          kind: 'specialist_supply',
+          value: '专业供货',
+          quote: 'We supply zip screens to trade customers.',
+          source_url: 'https://buyer.example.org/trade',
+        },
+      ],
     },
     D: dimensionAssessment.dimensions.D,
     V: { score: null, maximum: 10, missing: '定制资料不足', facts: [] },
@@ -273,12 +280,14 @@ const dimensionCards = (html) =>
   ].map(([card]) => card);
 
 test('新版档案显示匹配等级与有来源的优先线索，未知年限和定制不变成补档任务', () => {
-  const profile = initialView(renderProfile({
-    grade: '高优先',
-    score: 70,
-    assessment: currentAssessment,
-    pendingQuestions: '',
-  }));
+  const profile = initialView(
+    renderProfile({
+      grade: '高优先',
+      score: 70,
+      assessment: currentAssessment,
+      pendingQuestions: '',
+    }),
+  );
   assert.match(profile, /高优先|匹配等级：明确匹配|优先线索/);
   assert.match(profile, /主营产品、专业供货角色/);
   assert.doesNotMatch(profile, /\/100|待确认|经营法人名称待核实|具体采购需求待确认/);
@@ -372,7 +381,12 @@ test('普通官网缺项不生成补资料入口，真实产品冲突仍可核�
     missing: ['同产品事实冲突'],
     dimensions: {
       ...dimensionAssessment.dimensions,
-      P: { ...dimensionAssessment.dimensions.P, score: null, conflict: true, missing: '同产品事实冲突' },
+      P: {
+        ...dimensionAssessment.dimensions.P,
+        score: null,
+        conflict: true,
+        missing: '同产品事实冲突',
+      },
     },
   };
   const conflictProfile = renderProfile({
@@ -381,10 +395,7 @@ test('普通官网缺项不生成补资料入口，真实产品冲突仍可核�
   });
   assert.match(conflictProfile, /需核实事项/);
   const conflictPanel = renderAssessment({ assessment: conflictAssessment, onSupplement() {} });
-  assert.match(
-    conflictPanel,
-    /aria-label="核实冲突：产品契合"/,
-  );
+  assert.match(conflictPanel, /aria-label="核实冲突：产品契合"/);
 });
 
 test('确认记录默认折叠，已确认名称与采购需求显示，旧评分缺项不形成任务', () => {

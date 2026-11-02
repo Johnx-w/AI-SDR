@@ -313,11 +313,14 @@ test('计划引用资料库事实无需重复声明，兼容旧介绍且只展�
   assert.match(text(tree), /旧版等级筛选（高优先）/);
   assert.match(text(tree), /A/);
   assert.match(text(tree), /B/);
-  const choice = (label) => elements(tree).find((node) => node.type === 'label' && text(node).includes(label));
+  const choice = (label) =>
+    elements(tree).find((node) => node.type === 'label' && text(node).includes(label));
   const input = (label) => elements(choice(label)).find((node) => node.type === 'input');
   assert.equal(input('高优先（旧筛选，需移除）').props.checked, true);
   saved = undefined;
-  elements(tree).find((node) => node.type === 'form').props.onSubmit({ preventDefault() {}, currentTarget: {} });
+  elements(tree)
+    .find((node) => node.type === 'form')
+    .props.onSubmit({ preventDefault() {}, currentTarget: {} });
   assert.equal(saved, undefined, '旧等级不能原样保存为新计划筛选');
   tree = render(legacyPlan);
   assert.match(
@@ -328,7 +331,9 @@ test('计划引用资料库事实无需重复声明，兼容旧介绍且只展�
   tree = render(legacyPlan);
   input('A').props.onChange({ target: { checked: true } });
   tree = render(legacyPlan);
-  elements(tree).find((node) => node.type === 'form').props.onSubmit({ preventDefault() {}, currentTarget: {} });
+  elements(tree)
+    .find((node) => node.type === 'form')
+    .props.onSubmit({ preventDefault() {}, currentTarget: {} });
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(saved.filters.grades, ['A']);
 });

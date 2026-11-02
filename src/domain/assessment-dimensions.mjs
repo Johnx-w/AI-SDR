@@ -152,7 +152,9 @@ function parseLegacyFacts(assessment, text) {
       current.source_url = field[2];
       part = 'source_url';
     } else if (
-      /^(?:待补充|本轮|研究限制|规则版本|评估时间|评级口径|用户评级|已支持分数|匹配等级|开发优先级|优先线索|需要核实的冲突|其他方向)/.test(line)
+      /^(?:待补充|本轮|研究限制|规则版本|评估时间|评级口径|用户评级|已支持分数|匹配等级|开发优先级|优先线索|需要核实的冲突|其他方向)/.test(
+        line,
+      )
     ) {
       flush();
     } else if (current && part === 'quote') {
@@ -173,8 +175,7 @@ function parseLegacyFacts(assessment, text) {
 function conclusion(key, dimension, facts, current) {
   const name = definitions[key].name;
   if (dimension.conflict) return '该维度事实存在冲突，需核实';
-  if (dimension.score === null || dimension.score === undefined)
-    return name + '尚无公开依据';
+  if (dimension.score === null || dimension.score === undefined) return name + '尚无公开依据';
   const has = (...kinds) => facts.some((fact) => kinds.includes(fact.kind));
   if (key === 'P') {
     if (has('unrelated_product')) return '现有证据显示产品不匹配';
