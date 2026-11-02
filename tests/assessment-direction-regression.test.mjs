@@ -79,7 +79,7 @@ test('specific也核对每个计分引文方向，不把成品供货定制电动
     opportunities[0].facts.map((entry) => entry.kind),
     ['core_product'],
   );
-  assert.equal(evaluate(opportunities).grade, 'C');
+  assert.equal(evaluate(opportunities).grade, '常规开发');
   assert.equal(evaluate(opportunities).dimensions.R.score, null);
 });
 
@@ -102,13 +102,13 @@ test('面料目标保留真实成品经营初评，材料采购标为待沟通�
   assert.equal(opportunities[0].direction, 'finished');
   assert.equal(opportunities[0].relationship, 'potential_input');
   const result = evaluate(opportunities);
-  assert.equal(result.grade, 'B');
+  assert.equal(result.grade, '高优先');
   assert.equal(result.dimensions.D.score, null);
   assert.equal(result.supplyOpportunity.procurementStatus, 'unconfirmed');
   assert.match(result.reason, /材料或配件采购方式、规格、数量与负责人待沟通/);
 });
 
-test('只有已核实卷帘产品线时仍给企业C初评级，错误材料标签不成为材料采购事实', () => {
+test('只有已核实卷帘产品线时仍可常规开发，错误材料标签不成为材料采购事实', () => {
   const quote = 'We sell finished roller blinds to homeowners.';
   const result = assessCompany({
     research: {
@@ -122,12 +122,12 @@ test('只有已核实卷帘产品线时仍给企业C初评级，错误材料标�
     target: { product: 'roller blind fabric' },
     id: 'fixture-catalog-assessment',
   });
-  assert.equal(result.grade, 'C');
+  assert.equal(result.grade, '常规开发');
   assert.equal(result.status, '常规开发');
   assert.equal(result.direction, 'finished');
   assert.equal(result.product, 'roller blinds');
   assert.equal(result.supplyOpportunity.procurementStatus, 'unconfirmed');
-  assert.equal(result.score, 55);
+  assert.equal(result.dimensions.R.score, null, '产品目录不自动证明供货角色');
 });
 
 test('真正的面料分销可计材料机会，不要求公开采购需求', () => {
@@ -151,7 +151,7 @@ test('真正的面料分销可计材料机会，不要求公开采购需求', ()
     [catalog('roller blind fabrics', quote)],
   );
   assert.equal(opportunities.length, 1);
-  assert.equal(evaluate(opportunities).grade, 'A');
+  assert.equal(evaluate(opportunities).grade, '高优先');
 });
 
 test('明确自有制造及同产品用料可支持材料适配，不能要求官网出售该材料或已公开求购', () => {
@@ -174,7 +174,7 @@ test('明确自有制造及同产品用料可支持材料适配，不能要求�
     [catalog('roller blinds', quote)],
   );
   assert.equal(opportunities.length, 1);
-  assert.equal(evaluate(opportunities).grade, 'A');
+  assert.equal(evaluate(opportunities).grade, '高优先');
 });
 
 test('合作工厂制造成品不能据此推断零售商自身进行材料生产采购', () => {

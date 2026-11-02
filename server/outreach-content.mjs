@@ -459,7 +459,7 @@ export function selectOutreachCandidates({
       ? existing + (allocated.get(mailbox.id) || 0)
       : Number.POSITIVE_INFINITY;
   };
-  for (const raw of leads) {
+  for (const raw of [...leads].sort((a, b) => Number(b.grade === '高优先') - Number(a.grade === '高优先'))) {
     const lead = normalizeOutreachLead(raw);
     const assignment = array(campaign.senderAssignments).find(
       (row) => row.customerId === lead.customerId,
@@ -471,8 +471,6 @@ export function selectOutreachCandidates({
         'matched'
     )
       continue;
-    if (array(campaign.filters?.grades).length && !campaign.filters.grades.includes(lead.grade))
-      continue;
     const base = {
       customerId: lead.customerId,
       companyName: lead.companyName,
@@ -482,6 +480,15 @@ export function selectOutreachCandidates({
     };
     const reject = (reasonCode, reason) =>
       blocked.push({ ...base, reasonCode, reason, leadSnapshot: lead });
+    const grades = array(campaign.filters?.grades);
+    if (grades.length && !grades.includes(lead.grade)) {
+      if (
+        ['高优先', '常规开发'].includes(lead.grade) &&
+        grades.some((grade) => ['A', 'B', 'C'].includes(grade))
+      )
+        reject('legacy_grade_filter', '计划仍使用旧 A/B/C 等级筛选，请更新等级筛选为高优先或常规开发后重新核对');
+      continue;
+    }
     const identities = [lead.customerId, lead.companyDomain, ...lead.emails]
       .filter(Boolean)
       .map((v) => v.toLowerCase());

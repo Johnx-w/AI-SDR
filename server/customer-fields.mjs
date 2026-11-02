@@ -94,7 +94,7 @@ export function assessmentSummaryFields(snapshot) {
   const opportunities = supplied.length
     ? supplied
     : snapshot.direction && snapshot.product
-      ? [{ direction: snapshot.direction, product: snapshot.product, status: snapshot.status }]
+      ? [snapshot]
       : [];
   const summary = [];
   const seen = new Set();
@@ -112,11 +112,16 @@ export function assessmentSummaryFields(snapshot) {
         (opportunity.status === '待核实' ? '（适配待核实，潜在供货机会）' : '（潜在供货机会）'),
     );
   }
-  const missing = (Array.isArray(snapshot.missing) ? snapshot.missing : [])
-    .map(clean)
-    .filter(Boolean);
-  const incompleteReason = clean(snapshot.incompleteReason);
-  if (incompleteReason) missing.push('研究限制：' + incompleteReason);
+  const pending = opportunities.flatMap((opportunity) => [
+    ...Object.values(opportunity.dimensions || {})
+      .filter((dimension) => dimension.conflict)
+      .map((dimension) => clean(dimension.missing) || '同一供货机会的依据相互冲突'),
+    ...(opportunity.requirements || [])
+      .filter((fact) => ['identity_conflict', 'mandatory_requirement'].includes(fact.kind))
+      .map((fact) =>
+        fact.kind === 'identity_conflict' ? '经营主体依据相互冲突' : '强制供货条件需核实',
+      ),
+  ]);
   const potential = snapshot.supplyOpportunity;
   if (potential?.kind === 'potential_input') {
     const product = clean(potential.targetProduct);
@@ -128,11 +133,9 @@ export function assessmentSummaryFields(snapshot) {
             ? '（采购需求已人工确认）'
             : '（相关成品经营支持的潜在关联，采购需求未确认）'),
       );
-    if (potential.procurementStatus !== 'confirmed')
-      missing.push(clean(potential.note) || '材料或配件采购方式、规格、数量与负责人待沟通');
   }
   return {
     主要供货机会: [...new Set(summary)].join('\n'),
-    待确认事项: [...new Set(missing)].join('；'),
+    待确认事项: [...new Set(pending)].join('；'),
   };
 }

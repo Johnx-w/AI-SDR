@@ -98,6 +98,34 @@ test('首封按有来源的经营产品及当前审核版本匹配，不把评�
   assert.equal(chosen.leadSnapshot.status, '待开发');
 });
 
+test('旧 A/B/C 筛选遇到新优先级显式阻断，新筛选可继续生成首封候选', () => {
+  const input = fixture();
+  input.leads[0].grade = '高优先';
+  input.campaign.filters.grades = ['B'];
+  const legacy = selectOutreachCandidates(input);
+  assert.equal(legacy.eligible.length, 0);
+  assert.equal(legacy.blocked[0].reasonCode, 'legacy_grade_filter');
+  assert.match(legacy.blocked[0].reason, /更新.*等级筛选/);
+  input.campaign.filters.grades = ['高优先'];
+  assert.equal(selectOutreachCandidates(input).eligible.length, 1);
+});
+
+test('邮箱容量分配先给高优先客户，常规开发保持入库顺序', () => {
+  const input = fixture();
+  const base = input.leads[0];
+  input.leads = [
+    { ...base, id: 'regular', website: 'https://regular.example.org', grade: '常规开发', email: 'info@regular.example.org' },
+    { ...base, id: 'high', website: 'https://high.example.org', grade: '高优先', email: 'info@high.example.org' },
+  ].map((lead) => ({
+    ...lead,
+    facts: lead.facts.map((fact) => ({ ...fact, source_url: lead.website + '/shutters' })),
+    contactEvidence: lead.contactEvidence.map((fact) => ({ ...fact, value: lead.email, source_url: lead.website + '/contact', quote: `Contact ${lead.email} for business enquiries.` })),
+  }));
+  input.mailboxes[0].dailyLimit = 1;
+  const result = selectOutreachCandidates(input);
+  assert.deepEqual(result.eligible.map((lead) => lead.customerId), ['high']);
+});
+
 test('没有事实出处时，搜索标签和主营产品摘要不能单独触发发信', () => {
   const input = fixture();
   input.leads[0].facts = input.leads[0].facts.filter((fact) => fact.field !== 'products');

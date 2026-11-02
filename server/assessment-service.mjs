@@ -6,9 +6,10 @@ import {
 } from './customer-assessment.mjs';
 
 const publicEntry = (entry) =>
-  entry && entry.snapshot.ruleVersion === ASSESSMENT_RULE_VERSION
+  entry
     ? {
         ...entry.snapshot,
+        legacy: entry.snapshot.ruleVersion !== ASSESSMENT_RULE_VERSION,
         evidenceReason: formatAssessmentEvidence(entry.snapshot),
         recordId: entry.recordId,
         savedAt: entry.savedAt || entry.updatedAt || entry.createdAt,
