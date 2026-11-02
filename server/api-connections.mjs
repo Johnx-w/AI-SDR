@@ -24,9 +24,6 @@ const fields = [
   ],
   ['DEEPSEEK_API_KEY', 'DeepSeek API Key', true],
   ['DEEPSEEK_MODEL', 'DeepSeek 模型', false],
-  ['CUSTOMS_PROVIDER', '海关数据提供方', false, ['billofladingdata', 'http']],
-  ['CUSTOMS_BASE_URL', '海关 API 基础地址', false],
-  ['CUSTOMS_API_KEY', '海关 API Key', true],
   ['FEISHU_APP_ID', '飞书 App ID', false],
   ['FEISHU_APP_SECRET', '飞书 App Secret', true],
   ['FEISHU_APP_TOKEN', '多维表格 App Token', true],
@@ -78,17 +75,11 @@ export class ApiConnections {
       RESEARCH_MODEL_MODEL: research.model.model,
       RESEARCH_MODEL_MAX_OUTPUT_TOKENS: String(research.model.maxOutputTokens),
       RESEARCH_MODEL_REASONING_EFFORT: research.model.reasoningEffort,
-      CUSTOMS_BASE_URL:
-        env.CUSTOMS_BASE_URL ||
-        (!env.CUSTOMS_PROVIDER || env.CUSTOMS_PROVIDER === 'billofladingdata'
-          ? 'https://tradedata.billofladingdata.com'
-          : env.CUSTOMS_API_URL || ''),
     };
     const defaults = {
       WEB_SEARCH_PROVIDER: 'tavily',
       RESEARCH_MODEL_PROVIDER: 'deepseek',
       DEEPSEEK_MODEL: 'deepseek-flash',
-      CUSTOMS_PROVIDER: 'billofladingdata',
     };
     return {
       provider: 'native',
@@ -153,11 +144,8 @@ export class ApiConnections {
       !/^[^\s\u0000-\u001f\u007f]{1,200}$/u.test(merged.RESEARCH_MODEL_MODEL)
     )
       throw fail('研究模型名称格式不正确');
-    if (merged.CUSTOMS_PROVIDER && !['billofladingdata', 'http'].includes(merged.CUSTOMS_PROVIDER))
-      throw fail('CUSTOMS_PROVIDER 只能是 billofladingdata 或 http');
     try {
       acquisitionConfig(merged);
-      if (merged.CUSTOMS_BASE_URL) providerBaseUrl(merged.CUSTOMS_BASE_URL, 'CUSTOMS_BASE_URL');
     } catch (error) {
       throw fail(error.message);
     }

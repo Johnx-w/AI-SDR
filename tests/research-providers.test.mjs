@@ -308,28 +308,20 @@ test('上游非 JSON、HTTP 错误、网络异常及缺少配置不泄露凭证�
   await assert.rejects(model.research({ messages, schema }), { status: 503 });
 });
 
-test('连接设置支持可替换提供方和可选海关配置，读取不泄露密钥且非法更新不生效', () => {
+test('连接设置支持可替换提供方，读取不泄露密钥且非法更新不生效', () => {
   const connections = new ApiConnections({ env: legacyEnv });
   const values = Object.fromEntries(Object.entries(genericEnv));
-  const view = connections.update({
-    values: {
-      ...values,
-      CUSTOMS_PROVIDER: 'http',
-      CUSTOMS_BASE_URL: 'https://customs.example.org/api',
-      CUSTOMS_API_KEY: 'fixture-customs-secret',
-    },
-  });
+  const view = connections.update({ values });
   assert.equal(view.ready, true);
   assert.deepEqual(view.missing, []);
-  for (const secret of [
-    'fixture-generic-search',
-    'fixture-generic-model',
-    'fixture-customs-secret',
-  ])
+  for (const secret of ['fixture-generic-search', 'fixture-generic-model'])
     assert.equal(JSON.stringify(view).includes(secret), false);
   assert.equal(view.fields.find((field) => field.key === 'WEB_SEARCH_API_KEY').required, true);
   assert.equal(view.fields.find((field) => field.key === 'TAVILY_API_KEY').required, false);
-  assert.equal(view.fields.find((field) => field.key === 'CUSTOMS_API_KEY').required, false);
+  assert.equal(
+    view.fields.find((field) => field.key === 'CUSTOMS_API_KEY'),
+    undefined,
+  );
   assert.deepEqual(view.fields.find((field) => field.key === 'RESEARCH_MODEL_PROVIDER').options, [
     'deepseek',
     'openai_compatible',
@@ -339,14 +331,12 @@ test('连接设置支持可替换提供方和可选海关配置，读取不泄�
     { WEB_SEARCH_PROVIDER: 'unsupported' },
     { RESEARCH_MODEL_PROVIDER: 'unsupported' },
     { CUSTOMS_PROVIDER: 'unsupported' },
-    { CUSTOMS_BASE_URL: 'https://user:secret@customs.example.org' },
     { RESEARCH_MODEL_BASE_URL: 'http://models.example.org' },
     { RESEARCH_MODEL_MODEL: 'model with spaces' },
   ]) {
     assert.throws(() => connections.update({ values: changes }), { status: 400 });
     assert.deepEqual(connections.environment(), before);
   }
-  connections.update({ values: {}, clear: ['CUSTOMS_API_KEY'] });
   assert.equal(connections.view().ready, true);
   assert.equal(connections.update({ values: {} }).provider, 'native');
 });

@@ -1,5 +1,4 @@
 import { acquisitionConfig, researchProviderConfig } from '../server/acquisition-config.mjs';
-import { customsConfig } from '../server/customs-discovery.mjs';
 import { FeishuClient } from '../server/feishu-direct.mjs';
 import { connectionEnvironment } from '../server/api-connections.mjs';
 const env = connectionEnvironment();
@@ -33,7 +32,6 @@ if (!config.nativeReady) {
         modelAvailable: available,
         webSearchProvider: research.web.provider,
         webSearchConfigured: true,
-        customs: customsConfig(env),
         writesPerformed: 0,
       }),
     );

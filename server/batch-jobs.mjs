@@ -39,7 +39,6 @@ const labels = {
   search_limit: '已达到搜索次数上限',
   time_limit: '已达到 6 小时运行上限',
   exhausted: '当前筛选条件下的候选已处理完',
-  customs_budget: '已达到本轮海关逐票读取预算；未读取的分页保留供下轮继续',
   stopped: '已停止，已入库客户保留',
   interrupted: '服务中断，继续前需核对当前企业',
   uncertain: '执行结果待确认，已暂停，未自动重复写入',
@@ -158,6 +157,8 @@ export class BatchJobs {
   }
   create(input, key) {
     locationOptions(input.country, input.region);
+    if (!['web', 'tavily_web', undefined].includes(input.acquisition_channel))
+      throw fail(400, '该获客渠道已停用');
     input = { ...input, target_count: validateCount(input.target_count) };
     const researchBudget = validateResearchBudget(input.research_budget, input.target_count);
     if (typeof key !== 'string' || !/^[\w-]{8,100}$/.test(key))
@@ -187,7 +188,6 @@ export class BatchJobs {
       failed: 0,
       pending: 0,
       searches: 0,
-      customsUsedRecords: 0,
       researched: 0,
       review: 0,
       queryPlan: searchPlan(input),
@@ -352,6 +352,8 @@ export class BatchJobs {
     try {
       let job = this.get(id);
       if (job.status !== 'paused') throw fail(409, '只有暂停任务可以继续');
+      if (!['web', 'tavily_web', undefined].includes(job.input.acquisition_channel))
+        throw fail(409, '该获客渠道已停用');
       if (job.provider !== this.provider)
         throw fail(409, '该任务由其他执行引擎创建，已停止支持，请核对历史结果');
       await this.reconcile(job);
@@ -502,10 +504,6 @@ export class BatchJobs {
         throw new Error('写入结果无法确认');
       }
       const acceptedRow = job.rows.at(-1);
-      if (item.customs_buyer_key && ['inserted', 'duplicate'].includes(acceptedRow.result))
-        job.queue = job.queue.filter(
-          (candidate) => candidate.customs_buyer_key !== item.customs_buyer_key,
-        );
       const metric = job.searchStats?.find((entry) => entry.id === item.search_id);
       if (metric) {
         metric.researched++;
@@ -577,48 +575,16 @@ export class BatchJobs {
           this.finish(j, 'research_limit');
           return;
         }
-        const initialSource =
-          j.input.acquisition_channel === 'dual'
-            ? ['customs', 'web'].find(
-                (source) =>
-                  !(j.searchStats || []).some(
-                    (entry) => entry.source_kind === source && entry.status === 'completed',
-                  ),
-              )
-            : null;
-        const preferredSource =
-          initialSource ||
-          (j.input.acquisition_channel === 'dual' && j.lastDiscoverySource
-            ? j.lastDiscoverySource === 'customs'
-              ? 'web'
-              : 'customs'
-            : null);
-        if (!j.queue.length || initialSource) {
+        if (!j.queue.length) {
           const plan = j.queryPlan || searchPlan(j.input);
           j.searchSignatures ||= [];
           let search = j.pendingSearch;
           // Revisit a query only when excluded domains have changed. This can
           // discover >100 companies without repeating an identical paid search.
-          for (let i = 0; !search && i < plan.length * (preferredSource ? 2 : 1); i++) {
+          for (let i = 0; !search && i < plan.length; i++) {
             const candidate = plan[j.cursor++ % plan.length];
-            if (
-              preferredSource &&
-              i < plan.length &&
-              (candidate.source_kind || 'web') !== preferredSource
-            )
-              continue;
-            if (
-              candidate.source_kind === 'customs' &&
-              (j.customsUsedRecords || 0) >= (j.input.customs_record_budget || 300)
-            )
-              continue;
             const signature = createHash('sha256')
-              .update(
-                JSON.stringify([
-                  candidate,
-                  candidate.source_kind === 'customs' ? [] : j.seen.slice(-150),
-                ]),
-              )
+              .update(JSON.stringify([candidate, j.seen.slice(-150)]))
               .digest('hex');
             if (!j.searchSignatures.includes(signature)) {
               j.searchSignatures.push(signature);
@@ -627,14 +593,7 @@ export class BatchJobs {
             }
           }
           if (!search) {
-            this.finish(
-              j,
-              (j.customsBudgetExhausted ||
-                (j.customsUsedRecords || 0) >= (j.input.customs_record_budget || 300)) &&
-                plan.some((s) => s.source_kind === 'customs')
-                ? 'customs_budget'
-                : 'exhausted',
-            );
+            this.finish(j, 'exhausted');
             return;
           }
           j.searches++;
@@ -665,18 +624,7 @@ export class BatchJobs {
           checkpoint(j);
           let found;
           try {
-            found = await this.discover(
-              j.input,
-              {
-                ...search,
-                run_id: j.id,
-                remaining_budget: Math.max(
-                  0,
-                  (j.input.customs_record_budget || 300) - (j.customsUsedRecords || 0),
-                ),
-              },
-              j.seen,
-            );
+            found = await this.discover(j.input, search, j.seen);
           } catch (error) {
             metric.status = 'failed';
             metric.error = error.status ? error.message : '本次搜索未取得结果';
@@ -685,26 +633,9 @@ export class BatchJobs {
             throw error;
           }
           metric.status = 'completed';
-          j.lastDiscoverySource = search.source_kind || 'web';
           metric.completedAt = new Date(this.now()).toISOString();
           metric.usage = found.usage || null;
-          if (found.usage?.budget_exhausted) j.customsBudgetExhausted = true;
           j.pendingSearch = null;
-          j.customsUsedRecords = Math.max(
-            j.customsUsedRecords || 0,
-            found.usage?.run_used_records || 0,
-          );
-          if (
-            found.next_search &&
-            !plan.some((s) => JSON.stringify(s) === JSON.stringify(found.next_search))
-          ) {
-            j.queryPlan ||= plan;
-            // These three packs are customs-primary. Continue paginating them
-            // before the web fallback, without starving the other first pages.
-            const webIndex = j.queryPlan.findIndex((s) => s.source_kind === 'web');
-            if (webIndex < 0) j.queryPlan.push(found.next_search);
-            else j.queryPlan.splice(webIndex, 0, found.next_search);
-          }
           for (const c of found.review_candidates || []) {
             j.review++;
             metric.review++;
@@ -754,12 +685,7 @@ export class BatchJobs {
           checkpoint(j);
           continue;
         }
-        if (j.input.acquisition_channel === 'dual' && j.lastResearchSource) {
-          const next = j.queue.findIndex((item) => item.source_kind !== j.lastResearchSource);
-          if (next > 0) j.queue.unshift(...j.queue.splice(next, 1));
-        }
         const item = j.queue.shift();
-        j.lastResearchSource = item.source_kind || 'web';
         j.current = { ...item, operation_id: `${j.id}-${j.researched + 1}` };
         j.researched++;
         checkpoint(j);

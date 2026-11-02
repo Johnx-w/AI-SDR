@@ -37,7 +37,6 @@ function fixture(index) {
     evidence: 'Synthetic benchmark fixture; no real customer data.',
     companyIdentity: null,
     assessment: null,
-    customsEvidence: [],
     facts: [
       {
         field: 'products',

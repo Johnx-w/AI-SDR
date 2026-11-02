@@ -29,9 +29,6 @@ const settings = (changes = {}) => ({
     field('RESEARCH_MODEL_API_KEY'),
     field('DEEPSEEK_API_KEY', '', { configured: true, maskedValue: 'deep********tail' }),
     field('DEEPSEEK_MODEL', 'deepseek-existing'),
-    field('CUSTOMS_PROVIDER', 'billofladingdata'),
-    field('CUSTOMS_BASE_URL', '', { effectiveValue: 'https://tradedata.billofladingdata.com' }),
-    field('CUSTOMS_API_KEY', '', { configured: true, maskedValue: '********' }),
     field('FEISHU_APP_ID', 'saved-app-id'),
   ].map((item) => ({ ...item, ...changes[item.key] })),
 });
@@ -51,7 +48,6 @@ test('统一字段隐藏旧专用配置，通用密钥展示当前供应商的�
   assert.equal(view(snapshot, state, 'WEB_SEARCH_API_KEY').maskedValue, 'tavi********tail');
   assert.equal(view(snapshot, state, 'RESEARCH_MODEL_API_KEY').maskedValue, 'deep********tail');
   assert.equal(view(snapshot, state, 'RESEARCH_MODEL_API_KEY').configured, true);
-  assert.equal(view(snapshot, state, 'CUSTOMS_API_KEY').maskedValue, '********');
 });
 
 test('显式通用密钥优先于供应商旧值，且未编辑密钥不进入表单或请求', () => {
@@ -69,10 +65,6 @@ test('有效 URL 和模型直接作为输入显示，不把默认或旧值自动
   let state = createConnectionForm();
   assert.equal(view(snapshot, state, 'WEB_SEARCH_BASE_URL').value, 'https://api.tavily.com');
   assert.equal(view(snapshot, state, 'RESEARCH_MODEL_MODEL').value, 'deepseek-existing');
-  assert.equal(
-    view(snapshot, state, 'CUSTOMS_BASE_URL').value,
-    'https://tradedata.billofladingdata.com',
-  );
   state = change(snapshot, state, 'WEB_SEARCH_BASE_URL', 'https://api.tavily.com');
   state = change(snapshot, state, 'RESEARCH_MODEL_MODEL', 'deepseek-existing');
   assert.deepEqual(connectionFormPayload(snapshot, state), { values: {}, clear: [] });
@@ -231,15 +223,12 @@ test('其他模型供应商清除通用密钥不会清除隐藏的 DeepSeek 密�
   assert.equal(view(snapshot, state, 'RESEARCH_MODEL_API_KEY').configured, false);
 });
 
-test('网页和海关供应商切换同样联动默认值，回切不意外提交默认地址', () => {
+test('网页供应商切换联动默认值，回切不意外提交默认地址', () => {
   const snapshot = settings();
   let state = change(snapshot, createConnectionForm(), 'WEB_SEARCH_PROVIDER', 'http');
-  state = change(snapshot, state, 'CUSTOMS_PROVIDER', 'http');
   assert.equal(view(snapshot, state, 'WEB_SEARCH_BASE_URL').value, '');
-  assert.equal(view(snapshot, state, 'CUSTOMS_BASE_URL').value, '');
   assert.equal(view(snapshot, state, 'WEB_SEARCH_API_KEY').configured, false);
   assert.equal(connectionFormPayload(snapshot, state).clear.includes('TAVILY_API_KEY'), false);
   state = change(snapshot, state, 'WEB_SEARCH_PROVIDER', 'tavily');
-  state = change(snapshot, state, 'CUSTOMS_PROVIDER', 'billofladingdata');
   assert.deepEqual(connectionFormPayload(snapshot, state), { values: {}, clear: [] });
 });

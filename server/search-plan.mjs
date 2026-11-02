@@ -3,16 +3,8 @@ import { locationOptions } from './search-target.mjs';
 import acquisition from '../src/data/acquisition.json' with { type: 'json' };
 import { automaticSearchPlan } from '../src/domain/search-query.mjs';
 import { isAllProductScope } from '../src/domain/acquisition-products.mjs';
-import { customsSearchPlan } from './customs-discovery.mjs';
 
 export function searchPlan(input) {
-  const channel = input.acquisition_channel;
-  if (channel === 'customs') return customsSearchPlan(input);
-  if (channel === 'dual')
-    return [
-      ...customsSearchPlan(input),
-      ...webSearchPlan(input).map((s) => ({ ...s, source_kind: 'web' })),
-    ];
   return webSearchPlan(input);
 }
 

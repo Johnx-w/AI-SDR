@@ -40,7 +40,7 @@ const deferred = () => {
 };
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-test('summary omits full dossiers while preserving rating, contact and customs indicators', () => {
+test('summary omits full dossiers while preserving rating and contact indicators', () => {
   const summary = summarizeLead(
     lead({
       createdAt: 1793145600000,
@@ -51,16 +51,6 @@ test('summary omits full dossiers while preserving rating, contact and customs i
         status: 'verified',
         evidence: [{ quote: 'FULL_IDENTITY_EVIDENCE' }],
       },
-      customsEvidence: [
-        {
-          match: { status: 'verified' },
-          records: [{ provider: 'fixture', id: 'bill-1' }],
-        },
-        {
-          match: { status: 'candidate' },
-          records: [{ provider: 'fixture', id: 'bill-1' }],
-        },
-      ],
     }),
   );
   assert.equal(summary.ratingSummary, '主营产品：卷帘');
@@ -68,7 +58,7 @@ test('summary omits full dossiers while preserving rating, contact and customs i
     label: '邮箱与电话已记录',
     detail: '1 个邮箱 · 1 个电话',
   });
-  assert.deepEqual(summary.customsSummary, { recordCount: 1, buyerCount: 2, unverified: true });
+  assert.equal(summary.customsSummary, undefined);
   assert.equal(summary.companyIdentity.legal_name, 'Acme Ltd');
   assert.doesNotMatch(
     JSON.stringify(summary),

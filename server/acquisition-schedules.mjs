@@ -109,6 +109,7 @@ export class AcquisitionSchedules {
     return { ...plan, timing: { ...plan.timing, times, time: times[0] }, lastJob };
   }
   create({ name, input, timing }, key) {
+    this.checkInput(input);
     if (typeof key !== 'string' || !/^[\w-]{8,100}$/.test(key))
       throw fail(400, '无效的 Idempotency-Key');
     if (typeof name !== 'string' || !name.trim() || name.length > 80)
@@ -150,6 +151,7 @@ export class AcquisitionSchedules {
       throw fail(409, '该计划已结束');
     if (action === 'resume') {
       if (plan.status !== 'paused') throw fail(409, '只有暂停的计划可以恢复');
+      this.checkInput(plan.input);
       plan.nextRunAt = nextOccurrence(plan.timing, this.now());
       if (!plan.nextRunAt) throw fail(409, '所选日期已没有未到的执行时间，请重新创建计划');
       plan.status = 'enabled';

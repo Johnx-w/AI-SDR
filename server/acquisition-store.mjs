@@ -3,7 +3,6 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { domainKey } from './website-identity.mjs';
-import { mergeShipmentEvidence } from './shipment-evidence.mjs';
 
 const MODEL_RESPONSE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MODEL_RESPONSE_LIMIT = 200;
@@ -56,9 +55,6 @@ export class AcquisitionStore {
     );
     this.db.exec(
       'CREATE TABLE IF NOT EXISTS customer_contact_corrections(scope TEXT NOT NULL, record_id TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(scope, record_id))',
-    );
-    this.db.exec(
-      'CREATE TABLE IF NOT EXISTS customs_company_evidence(scope TEXT NOT NULL, domain TEXT NOT NULL, buyer_key TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(scope,domain,buyer_key))',
     );
     this.db.exec(
       'CREATE TABLE IF NOT EXISTS website_research_identities(scope TEXT NOT NULL, domain TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(scope,domain))',
@@ -249,12 +245,6 @@ export class AcquisitionStore {
   close() {
     this.db.close();
   }
-  customsEvidence(website) {
-    return this.db
-      .prepare('SELECT data FROM customs_company_evidence WHERE scope=? AND domain=?')
-      .all(this.scope, domainKey(website))
-      .map((row) => JSON.parse(row.data));
-  }
   websiteResearch(website) {
     const row = this.db
       .prepare('SELECT data FROM website_research_identities WHERE scope=? AND domain=?')
@@ -284,23 +274,6 @@ export class AcquisitionStore {
         'INSERT INTO website_research_identities VALUES(?,?,?) ON CONFLICT(scope,domain) DO UPDATE SET data=excluded.data',
       )
       .run(this.scope, domainKey(website), JSON.stringify(entry));
-    return entry;
-  }
-  saveCustomsEvidence(website, buyer, match, recordId) {
-    const domain = domainKey(website);
-    if (!domain || !buyer.id) throw new Error('海关证据缺少官网或买方标识');
-    const prior = this.customsEvidence(website).find(
-      (b) => b.id === buyer.id && b.product_family === buyer.product_family,
-    );
-    const entry = mergeShipmentEvidence(prior, buyer);
-    entry.match = match || prior?.match || { status: 'pending', reason: '待官网核实买方身份' };
-    entry.record_id = recordId || prior?.record_id || null;
-    entry.checked_at = new Date().toISOString();
-    this.db
-      .prepare(
-        'INSERT INTO customs_company_evidence VALUES(?,?,?,?) ON CONFLICT(scope,domain,buyer_key) DO UPDATE SET data=excluded.data',
-      )
-      .run(this.scope, domain, buyer.id + ':' + buyer.product_family, JSON.stringify(entry));
     return entry;
   }
 }

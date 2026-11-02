@@ -42,12 +42,7 @@ test('已保存字段与实际使用的默认地址、兼容模型可查看，�
   assert.equal(field(view, 'WEB_SEARCH_BASE_URL').effectiveValue, 'https://api.tavily.com');
   assert.equal(field(view, 'RESEARCH_MODEL_BASE_URL').effectiveValue, 'https://api.deepseek.com');
   assert.equal(field(view, 'RESEARCH_MODEL_MODEL').effectiveValue, 'selected-model');
-  assert.equal(
-    field(view, 'CUSTOMS_BASE_URL').effectiveValue,
-    'https://tradedata.billofladingdata.com',
-  );
-  assert.equal(field(view, 'CUSTOMS_API_KEY').maskedValue, '');
-  assert.equal(field(view, 'CUSTOMS_BASE_URL').maskedValue, undefined);
+  assert.equal(field(view, 'CUSTOMS_BASE_URL'), undefined);
 });
 
 test('更换提供方、填写地址后只显示真实有效地址，不以旧供应商默认地址冒充', () => {
@@ -60,8 +55,6 @@ test('更换提供方、填写地址后只显示真实有效地址，不以旧�
       RESEARCH_MODEL_PROVIDER: 'openai_compatible',
       RESEARCH_MODEL_BASE_URL: 'https://models.example.org/v1',
       RESEARCH_MODEL_MODEL: 'provider/model-name',
-      CUSTOMS_PROVIDER: 'http',
-      CUSTOMS_BASE_URL: 'https://customs.example.org/shipments',
     },
   });
   const view = connections.view();
@@ -74,22 +67,10 @@ test('更换提供方、填写地址后只显示真实有效地址，不以旧�
     env: {
       WEB_SEARCH_PROVIDER: 'http',
       RESEARCH_MODEL_PROVIDER: 'openai_compatible',
-      CUSTOMS_PROVIDER: 'http',
     },
   }).view();
   assert.equal(field(blank, 'WEB_SEARCH_BASE_URL').effectiveValue, '');
   assert.equal(field(blank, 'RESEARCH_MODEL_BASE_URL').effectiveValue, '');
-  assert.equal(field(blank, 'CUSTOMS_BASE_URL').effectiveValue, '');
-  const switched = new ApiConnections({
-    env: {
-      CUSTOMS_PROVIDER: 'billofladingdata',
-      CUSTOMS_API_URL: 'https://old-http.example.org/shipments',
-    },
-  }).view();
-  assert.equal(
-    field(switched, 'CUSTOMS_BASE_URL').effectiveValue,
-    'https://tradedata.billofladingdata.com',
-  );
 });
 
 test('保存其他配置或回传摘要不覆盖密钥，替换与明确清除分别生效', () => {
@@ -101,7 +82,7 @@ test('保存其他配置或回传摘要不覆盖密钥，替换与明确清除�
   assert.equal(field(connections.view(), 'RESEARCH_MODEL_MODEL').effectiveValue, 'new-model');
   connections.update({ values: { TAVILY_API_KEY: 'tvly-new-private-value-9876' } });
   assert.equal(field(connections.view(), 'TAVILY_API_KEY').maskedValue, 'tvly********9876');
-  assert.throws(() => connections.update({ values: { CUSTOMS_API_KEY: 'abcd********9876' } }), {
+  assert.throws(() => connections.update({ values: { CUSTOMS_API_KEY: 'retired' } }), {
     status: 400,
   });
   connections.update({ values: {}, clear: ['TAVILY_API_KEY'] });

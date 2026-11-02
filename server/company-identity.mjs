@@ -41,7 +41,6 @@ export function verifyCompanyIdentity(facts, pages, sourceUrl) {
       legal_name: null,
       aliases: [],
       status: 'third_party_source',
-      customs_match_status: 'requires_identity_match',
       evidence: [],
     };
   const fields = ['company_name', 'legal_company_name', 'trading_names'];
@@ -139,7 +138,6 @@ export function verifyCompanyIdentity(facts, pages, sourceUrl) {
           ? 'website_name_only'
           : 'unverified',
     // Website self-description never proves who appears as consignee/importer.
-    customs_match_status: 'requires_identity_match',
     evidence: linked,
   };
 }
