@@ -1,9 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import vm from 'node:vm';
 import { customerEligibility } from '../server/customer-eligibility.mjs';
 import { companyResearchSchema } from '../server/company-research.mjs';
-import { researchPolicyCode } from '../scripts/research-policy-code.mjs';
 
 const business = {
   entity_type: 'business',
@@ -53,23 +51,5 @@ test('Schema 中准入字段必填但允许无证据返回 null，数组独立�
   assert.equal(
     companyResearchSchema.properties.manufactured_products.items.required.includes('quote'),
     true,
-  );
-});
-
-test('兼容 n8n 的独立 Code 节点执行相同的企业主体准入规则', () => {
-  const run = (subject, target) =>
-    vm.runInNewContext(researchPolicyCode + '\ncustomerEligibility(subject,target)', {
-      subject,
-      target,
-    });
-  const target = { product: 'outdoor zip screens' };
-  assert.equal(run(business, target).status, 'eligible');
-  assert.equal(run({ ...business, entity_type: 'individual' }, target).code, 'individual_consumer');
-  assert.equal(
-    run(
-      { ...business, production_model: 'own_factory', manufactured_products: ['Ziptrak'] },
-      target,
-    ).status,
-    'eligible',
   );
 });

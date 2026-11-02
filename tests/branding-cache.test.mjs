@@ -1,10 +1,12 @@
+import { withFeishuAuth } from './helpers/feishu.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, unlink, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, unlink, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BrandingCache } from '../server/branding-cache.mjs';
+import { DatabaseSync } from 'node:sqlite';
 import { withApp } from './helpers/http.mjs';
 
 const lead = { name: 'ShadeCo', website: 'https://shadeco.com/products' };
@@ -12,15 +14,105 @@ const logo = { url: 'https://shadeco.com/logo.svg', kind: 'logo' };
 const svg = Buffer.from(
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 80"><path fill="#123456" d="M0 0h240v80H0z"/></svg>',
 );
+const stores = new Map();
+function openCache(options) {
+  const cache = new BrandingCache(options);
+  stores.get(options.path).push(cache);
+  return cache;
+}
+
+test('成功Logo的图片和官网关系持久入库，跨年重启且官网离线也不重新抓取', async (t) => {
+  const path = await fixture(t);
+  let time = 1000;
+  let reads = 0;
+  const cache = openCache({
+    path,
+    now: () => time,
+    discover: async () => {
+      reads++;
+      return { candidates: [logo] };
+    },
+    readImage: async () => ({ body: svg }),
+  });
+  const first = await cache.get(lead);
+  await cache.close();
+  const db = new DatabaseSync(join(path, 'branding.sqlite'), { readOnly: true });
+  const row = db.prepare('SELECT body FROM branding_assets').get();
+  assert.deepEqual(Buffer.from(row.body), svg);
+  assert.equal(db.prepare('SELECT count(*) AS total FROM branding_sites').get().total, 1);
+  db.close();
+  time += 366 * 86400000;
+  const restarted = openCache({
+    path,
+    now: () => time,
+    discover: async () => {
+      reads++;
+      throw new Error('offline');
+    },
+  });
+  assert.deepEqual(await restarted.get(lead), first);
+  await Promise.all([...restarted.pending.values()]);
+  assert.equal(reads, 1);
+  const hash = first.candidates[0].url.split('/').at(-1);
+  assert.deepEqual((await restarted.asset(hash)).body, svg);
+});
+
+test('过期的旧Logo自动导入数据库，删除原缓存后重启仍能读取，损坏图片和旧失败记录不导入', async (t) => {
+  const path = await fixture(t);
+  const key = createHash('sha256').update('shadeco.com').digest('hex');
+  const hash = createHash('sha256').update(svg).digest('hex');
+  const mark = { url: '/api/v1/branding/assets/' + hash, kind: 'logo', background: 'dark' };
+  const badHash = '0'.repeat(64);
+  const emptyKey = createHash('sha256').update('other.com').digest('hex');
+  const filename = join(path, key + '.json');
+  await writeFile(join(path, hash + '.bin'), svg);
+  await writeFile(join(path, badHash + '.bin'), Buffer.from('<html>not an image</html>'));
+  await writeFile(
+    filename,
+    JSON.stringify({
+      version: 1,
+      candidates: [mark, { ...mark, url: '/api/v1/branding/assets/' + badHash }],
+      checkedAt: 1,
+      expires: 2,
+    }),
+  );
+  await writeFile(
+    join(path, emptyKey + '.json'),
+    JSON.stringify({
+      version: 1,
+      candidates: [],
+      expires: Date.now() + 86400000,
+    }),
+  );
+  let reads = 0;
+  const options = {
+    path,
+    discover: () => {
+      reads++;
+      throw new Error('offline');
+    },
+  };
+  const cache = openCache(options);
+  assert.deepEqual(await cache.get(lead), { candidates: [mark] });
+  assert.equal(cache.db.prepare('SELECT count(*) AS total FROM branding_assets').get().total, 1);
+  assert.equal(cache.db.prepare('SELECT count(*) AS total FROM branding_sites').get().total, 1);
+  await unlink(filename);
+  await unlink(join(path, hash + '.bin'));
+  await cache.close();
+  const restarted = openCache(options);
+  assert.deepEqual(await restarted.get(lead), { candidates: [mark] });
+  await Promise.all([...restarted.pending.values()]);
+  assert.equal(reads, 0);
+  assert.deepEqual((await restarted.asset(hash)).body, svg);
+});
 
 test('网站图标仅短暂缓存，官网恢复后自动升级为品牌Logo', async (t) => {
   const path = await fixture(t);
   let time = 1000;
   let reads = 0;
-  const cache = new BrandingCache({
+  const cache = openCache({
     path,
     now: () => time,
-    ttlMs: 10000,
     retryMs: 100,
     discover: async () => ({
       candidates: [{ ...logo, kind: ++reads === 1 ? 'website_icon' : 'logo' }],
@@ -35,7 +127,7 @@ test('网站图标仅短暂缓存，官网恢复后自动升级为品牌Logo', a
   assert.equal((await cache.get(lead)).candidates[0].kind, 'logo');
 });
 
-test('旧版七天图标缓存立即后台重试，已有高清Logo仍复用', async (t) => {
+test('旧版七天图标导入数据库后立即后台重试，升级为Logo后持久复用', async (t) => {
   const path = await fixture(t);
   let reads = 0;
   const options = {
@@ -45,23 +137,40 @@ test('旧版七天图标缓存立即后台重试，已有高清Logo仍复用', a
     }),
     readImage: async () => ({ body: svg }),
   };
-  await new BrandingCache(options).get(lead);
   const key = createHash('sha256').update('shadeco.com').digest('hex');
   const filename = join(path, key + '.json');
-  const legacy = JSON.parse(await readFile(filename, 'utf8'));
-  delete legacy.checkedAt;
-  await writeFile(filename, JSON.stringify(legacy));
-  const restarted = new BrandingCache(options);
+  const hash = createHash('sha256').update(svg).digest('hex');
+  await writeFile(join(path, hash + '.bin'), svg);
+  await writeFile(
+    filename,
+    JSON.stringify({
+      version: 1,
+      candidates: [{ url: '/api/v1/branding/assets/' + hash, kind: 'website_icon' }],
+      expires: Date.now() + 7 * 86400000,
+    }),
+  );
+  const restarted = openCache({
+    ...options,
+    discover: async () => {
+      reads++;
+      return { candidates: [logo] };
+    },
+  });
   assert.equal((await restarted.get(lead)).candidates[0].kind, 'website_icon');
   await Promise.all([...restarted.pending.values()]);
   assert.equal((await restarted.get(lead)).candidates[0].kind, 'logo');
-  assert.equal(reads, 2);
-  await new BrandingCache(options).get(lead);
-  assert.equal(reads, 2);
+  assert.equal(reads, 1);
+  await openCache(options).get(lead);
+  assert.equal(reads, 1);
 });
 async function fixture(t) {
   const path = await mkdtemp(join(tmpdir(), 'shadeflow-branding-'));
-  t.after(() => rm(path, { recursive: true, force: true }));
+  stores.set(path, []);
+  t.after(async () => {
+    for (const cache of stores.get(path)) await cache.close();
+    stores.delete(path);
+    await rm(path, { recursive: true, force: true });
+  });
   return path;
 }
 
@@ -80,38 +189,42 @@ test('同时打开列表和详情只抓一次，图片本地保存后跨服务�
       return { body: svg };
     },
   };
-  const cache = new BrandingCache(options);
+  const cache = openCache(options);
   const results = await Promise.all(Array.from({ length: 8 }, () => cache.get(lead)));
   assert.equal(pages, 1);
   assert.equal(images, 1);
   assert.ok(results.every((r) => r.candidates[0].url.startsWith('/api/v1/branding/assets/')));
-  const restarted = new BrandingCache(options);
+  const restarted = openCache(options);
   assert.deepEqual(await restarted.get(lead), results[0]);
   assert.equal(pages, 1);
   assert.equal(images, 1);
   const hash = results[0].candidates[0].url.split('/').at(-1);
   assert.deepEqual((await restarted.asset(hash)).body, svg);
-  await unlink(join(path, hash + '.bin'));
+  restarted.db.prepare('DELETE FROM branding_assets WHERE hash=?').run(hash);
   await restarted.get(lead);
-  assert.equal(images, 2, '丢失的缓存文件会自动修复');
+  assert.equal(images, 2, '丢失的数据库图片会自动修复');
+  restarted.db
+    .prepare('UPDATE branding_assets SET body=? WHERE hash=?')
+    .run(Buffer.from('bad'), hash);
+  await restarted.get(lead);
+  assert.equal(images, 3, '损坏的数据库图片会自动修复');
 });
 
-test('过期图片立即显示，官网失败保留旧图并延后重试', async (t) => {
+test('图标升级时立即显示已有图片，官网失败仍保留旧图并延后重试', async (t) => {
   const path = await fixture(t);
   let time = 1000,
     pages = 0,
     finish;
-  const cache = new BrandingCache({
+  const cache = openCache({
     path,
     now: () => time,
-    ttlMs: 100,
     retryMs: 50,
     discover: async () => {
       if (++pages > 1)
         return new Promise((resolve) => {
           finish = () => resolve({ candidates: [] });
         });
-      return { candidates: [logo] };
+      return { candidates: [{ ...logo, kind: 'website_icon' }] };
     },
     readImage: async () => ({ body: svg }),
   });
@@ -130,7 +243,7 @@ test('过期图片立即显示，官网失败保留旧图并延后重试', async
 test('图片失败负缓存，缺失官网不共享其他企业的Logo，不保存HTML假图片', async (t) => {
   const path = await fixture(t);
   let reads = 0;
-  const cache = new BrandingCache({
+  const cache = openCache({
     path,
     discover: async () => {
       reads++;
@@ -148,7 +261,7 @@ test('图片失败负缓存，缺失官网不共享其他企业的Logo，不保�
 test('候选Logo下载失败会继续高清备选，白色Logo保留暗背景，成功Logo不再请求图标', async (t) => {
   const path = await fixture(t);
   const calls = [];
-  const cache = new BrandingCache({
+  const cache = openCache({
     path,
     discover: async () => ({
       candidates: [
@@ -179,7 +292,7 @@ test('大量客户首次加载时限制并发抓取，候选请求仍按域名�
   let releaseFirst, enteredTwo;
   const gate = new Promise((resolve) => (releaseFirst = resolve));
   const firstWave = new Promise((resolve) => (enteredTwo = resolve));
-  const cache = new BrandingCache({
+  const cache = openCache({
     path,
     concurrency: 2,
     discover: async () => {
@@ -202,7 +315,7 @@ test('大量客户首次加载时限制并发抓取，候选请求仍按域名�
 
 test('同源图片接口提供长期缓存、ETag和HEAD，重启后仍可读，不接受任意路径', async (t) => {
   const path = await fixture(t);
-  const seeded = await new BrandingCache({
+  const seeded = await openCache({
     path,
     discover: async () => ({ candidates: [logo] }),
     readImage: async () => ({ body: svg }),
@@ -236,11 +349,12 @@ test('客户品牌入口贯通官网发现、本地图片和重复请求缓存�
     {
       env: {
         BRANDING_CACHE_PATH: path,
-        N8N_BASE_URL: 'https://workspace.example.org',
-        FEISHU_READ_WEBHOOK_URL: 'https://workspace.example.org/webhook/read-customers',
-        N8N_WEBHOOK_SECRET: 'branding-test-only',
+        FEISHU_APP_ID: 'fixture-app',
+        FEISHU_TABLE_ID: 'fixture-table',
+        FEISHU_APP_SECRET: 'fixture-secret',
+        FEISHU_APP_TOKEN: 'fixture-base',
       },
-      fetchImpl: async () =>
+      fetchImpl: withFeishuAuth(async () =>
         Response.json({
           code: 0,
           data: {
@@ -253,6 +367,7 @@ test('客户品牌入口贯通官网发现、本地图片和重复请求缓存�
             has_more: false,
           },
         }),
+      ),
       brandingOptions: {
         discover: async () => {
           pages++;

@@ -4,7 +4,6 @@ import { ApiConnections, maskConnectionSecret } from '../server/api-connections.
 import { withApp } from './helpers/http.mjs';
 
 const env = {
-  ACQUISITION_PROVIDER: 'native',
   TAVILY_API_KEY: 'tvly-original-private-value-1234',
   DEEPSEEK_API_KEY: 'model-original-private-value-5678',
   DEEPSEEK_MODEL: 'selected-model',

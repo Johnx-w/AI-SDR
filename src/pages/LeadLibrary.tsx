@@ -225,15 +225,22 @@ export function LeadLibrary() {
           onClick={() => void load(true)}
         >
           <RefreshCw size={16} className={loading || remote?.sync.refreshing ? 'spin' : ''} />
-          {loading || remote?.sync.refreshing ? '正在同步' : '刷新飞书客户'}
+          {loading || remote?.sync.refreshing ? '正在同步' : '同步飞书'}
         </button>
       </PageHeading>
       <div className="library-sync-status" role="status" aria-live="polite">
+        {remote?.source === 'sqlite' && <span>优先读取本地档案</span>}
         <span>
           {remote?.syncedAt ? `最近同步：${formatBeijingTime(remote.syncedAt)}` : '尚未同步客户'}
         </span>
         {(loading || remote?.sync.refreshing) && remote && (
           <span>正在后台同步，当前客户可继续查看</span>
+        )}
+        {!!remote?.sync.pendingWrites && (
+          <span className={remote.sync.writeError ? 'library-sync-warning' : undefined}>
+            本地已保存，{remote.sync.pendingWrites} 位客户待同步飞书
+            {remote.sync.writeError ? `：${remote.sync.writeError}` : ''}
+          </span>
         )}
         {(error || remote?.sync.error) && remote && (
           <span className="library-sync-warning">

@@ -1,6 +1,5 @@
 import { phoneMetadata } from './phone-metadata.mjs';
 
-// Keep these functions dependency-free apart from phoneMetadata: n8n embeds the same source.
 export function normalizePhone(value, country = '') {
   let raw = String(value ?? '').trim();
   try {

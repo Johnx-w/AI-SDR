@@ -1,13 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fieldText, mapFeishuRecord, readFeishu } from '../server/feishu.mjs';
+import { fieldText, mapFeishuRecord } from '../server/feishu.mjs';
+import { FeishuClient } from '../server/feishu-direct.mjs';
+import { feishuEnv, withFeishuAuth } from './helpers/feishu.mjs';
 import { createApp } from '../server/app.mjs';
 
-const env = {
-  N8N_BASE_URL: 'https://vynox.app.n8n.cloud',
-  FEISHU_READ_WEBHOOK_URL: 'https://vynox.app.n8n.cloud/webhook/read-test',
-  N8N_WEBHOOK_SECRET: 'server-only-test-secret',
-};
+const env = feishuEnv;
 const record = {
   record_id: 'rec-test',
   fields: {
@@ -84,11 +82,11 @@ test('客户录入时间优先取首次发现时间，缺失时取记录创建�
     assert.equal(mapFeishuRecord({ ...record, fields }).createdAt, null);
   }
 });
-test('真实读取遍历分页，仅服务端发送认证头，无写入请求', async () => {
+test('飞书直连遍历全部分页，仅向官方接口发送Bearer认证，无写入请求', async () => {
   const calls = [];
-  const result = await readFeishu({
+  const client = new FeishuClient({
     env,
-    fetchImpl: async (url, options) => {
+    fetchImpl: withFeishuAuth(async (url, options) => {
       calls.push({ url, options });
       return Response.json({
         code: 0,
@@ -98,52 +96,51 @@ test('真实读取遍历分页，仅服务端发送认证头，无写入请求',
           page_token: 'next/page+token',
         },
       });
-    },
+    }),
   });
+  const result = await client.readLeads();
   assert.equal(result.leads.length, 2);
   assert.equal(result.source, 'feishu');
-  assert.match(calls[1].url, /cursor=next%2Fpage%2Btoken/);
-  assert.equal(calls[0].options.headers['X-Shadeflow-Key'], env.N8N_WEBHOOK_SECRET);
-  assert.equal(calls[0].options.method, undefined);
-  assert.equal(JSON.stringify(result).includes(env.N8N_WEBHOOK_SECRET), false);
+  assert.match(calls[1].url, /page_token=next%2Fpage%2Btoken/);
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer fixture-token');
+  assert.ok(
+    calls.every(
+      (call) =>
+        new URL(call.url).origin === 'https://open.feishu.cn' && call.options.method === 'GET',
+    ),
+  );
+  assert.ok(!JSON.stringify(result).includes(env.FEISHU_APP_SECRET));
 });
-test('未配置、错误来源与上游失败均不回退为mock成功', async () => {
-  for (const config of [
-    {},
-    { ...env, FEISHU_READ_WEBHOOK_URL: 'https://untrusted.example/webhook/read' },
-    { ...env, FEISHU_READ_WEBHOOK_URL: 'https://vynox.app.n8n.cloud/workflow/test' },
+test('缺少飞书参数、上游错误和不完整分页均不会伪造成功', async () => {
+  await assert.rejects(
+    new FeishuClient({ env: {}, fetchImpl: () => assert.fail('no remote request') }).readLeads(),
+    /未配置/,
+  );
+  for (const response of [
+    new Response('', { status: 403 }),
+    Response.json({ code: 999, msg: 'upstream' }),
   ]) {
     await assert.rejects(
-      readFeishu({
-        env: config,
-        fetchImpl: () => {
-          throw new Error('must not call');
-        },
-      }),
-      /未配置/,
+      new FeishuClient({ env, fetchImpl: withFeishuAuth(async () => response) }).readLeads(),
+      /飞书/,
     );
   }
   await assert.rejects(
-    readFeishu({ env, fetchImpl: async () => new Response('', { status: 403 }) }),
-    /HTTP 403/,
-  );
-  await assert.rejects(
-    readFeishu({ env, fetchImpl: async () => Response.json({ code: 999, msg: 'upstream' }) }),
-    /返回异常/,
-  );
-  await assert.rejects(
-    readFeishu({
+    new FeishuClient({
       env,
-      fetchImpl: async () =>
+      fetchImpl: withFeishuAuth(async () =>
         Response.json({ code: 0, data: { items: [], has_more: true, page_token: 'same' } }),
-    }),
-    /分页未完整/,
+      ),
+    }).readLeads(),
+    /分页不完整/,
   );
 });
 test('真实客户接口只读，响应不泄露服务端认证', async () => {
   const app = createApp({
     env,
-    fetchImpl: async () => Response.json({ code: 0, data: { items: [record], has_more: false } }),
+    fetchImpl: withFeishuAuth(async () =>
+      Response.json({ code: 0, data: { items: [record], has_more: false } }),
+    ),
   });
   await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
   try {
@@ -152,7 +149,7 @@ test('真实客户接口只读，响应不泄露服务端认证', async () => {
     assert.equal(response.status, 200);
     const body = await response.json();
     assert.equal(body.total, 1);
-    assert.equal(JSON.stringify(body).includes(env.N8N_WEBHOOK_SECRET), false);
+    assert.equal(JSON.stringify(body).includes(env.FEISHU_APP_SECRET), false);
     assert.equal((await fetch(url, { method: 'POST' })).status, 404);
     assert.equal(
       (await fetch(url, { headers: { Origin: 'https://untrusted.example' } })).status,

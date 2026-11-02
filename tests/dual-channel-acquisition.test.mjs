@@ -150,7 +150,6 @@ test('发现失败后续跑同一查询与 run_id，避免跳过已付费但尚�
 
 test('海关连接状态不暴露凭证，未配置海关不影响官网但不能启动海关任务', async () => {
   const env = {
-    ACQUISITION_PROVIDER: 'native',
     TAVILY_API_KEY: 'web-secret',
     DEEPSEEK_API_KEY: 'model-secret',
     FEISHU_APP_ID: 'app',

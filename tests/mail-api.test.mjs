@@ -6,7 +6,6 @@ test('退役固定双邮箱接口统一返回404，应用不再读取旧试点�
   const externalCalls = [];
   const env = new Proxy(
     {
-      ACQUISITION_PROVIDER: 'n8n',
       BATCH_DB_PATH: ':memory:',
       SCHEDULE_DB_PATH: ':memory:',
     },

@@ -54,7 +54,7 @@ export class BatchJobs {
     readLeads,
     now = Date.now,
     schedule = true,
-    provider = 'n8n',
+    provider = 'native',
     scope = '',
   }) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
@@ -352,8 +352,8 @@ export class BatchJobs {
     try {
       let job = this.get(id);
       if (job.status !== 'paused') throw fail(409, '只有暂停任务可以继续');
-      if ((job.provider || 'n8n') !== this.provider)
-        throw fail(409, '该任务由其他执行引擎创建，请切回原引擎核对后继续');
+      if (job.provider !== this.provider)
+        throw fail(409, '该任务由其他执行引擎创建，已停止支持，请核对历史结果');
       await this.reconcile(job);
       job = this.get(id);
       // Reconcile any prior write first, then forbid new work in retired markets.
@@ -373,7 +373,7 @@ export class BatchJobs {
       this.provider !== 'native' ||
       job?.status !== 'paused' ||
       job.reason !== 'interrupted' ||
-      (job.provider || 'n8n') !== this.provider
+      job.provider !== this.provider
     )
       return;
     if (job.current) {

@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 import prettier from 'prettier';
 
 // Only general number patterns, country codes and dialing prefixes are vendored.
-// Runtime helpers stay dependency-free so the same rules can run in n8n.
 const source =
   'https://raw.githubusercontent.com/google/libphonenumber/master/resources/PhoneNumberMetadata.xml';
 const response = await fetch(source, { signal: AbortSignal.timeout(30000) });

@@ -1,23 +1,21 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { discoverBranding, websiteUrl } from './branding.mjs';
 import { readPublicImage, inspectBrandImage } from './branding-image.mjs';
 
 const assetPrefix = '/api/v1/branding/assets/';
 const digest = (value) => createHash('sha256').update(value).digest('hex');
-const day = 86400000;
 const version = 1;
 
-// The cache owns both discovery and the image bytes: returning a cached remote URL
-// still makes every browser depend on the customer's website on every visit.
+// Persist both the website mapping and image bytes; successful logos never expire.
 export class BrandingCache {
   constructor({
     path = '.data/branding',
     discover = discoverBranding,
     readImage = readPublicImage,
     now = Date.now,
-    ttlMs = 7 * day,
     retryMs = 30 * 60000,
     concurrency = 6,
   } = {}) {
@@ -25,7 +23,6 @@ export class BrandingCache {
     this.discover = discover;
     this.readImage = readImage;
     this.now = now;
-    this.ttlMs = ttlMs;
     this.retryMs = retryMs;
     this.concurrency = concurrency;
     this.entries = new Map();
@@ -34,11 +31,74 @@ export class BrandingCache {
     this.waiters = [];
   }
 
+  database() {
+    if (this.db) return this.db;
+    mkdirSync(this.path, { recursive: true });
+    const db = new DatabaseSync(join(this.path, 'branding.sqlite'));
+    try {
+      db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
+        CREATE TABLE IF NOT EXISTS branding_assets (hash TEXT PRIMARY KEY, body BLOB NOT NULL);
+        CREATE TABLE IF NOT EXISTS branding_sites (key TEXT PRIMARY KEY, data TEXT NOT NULL);`);
+      if (db.prepare('PRAGMA user_version').get().user_version < 1) {
+        db.exec('BEGIN IMMEDIATE');
+        try {
+          this.importLegacy(db);
+          db.exec('PRAGMA user_version=1; COMMIT');
+        } catch (error) {
+          db.exec('ROLLBACK');
+          throw error;
+        }
+      }
+      this.db = db;
+      return db;
+    } catch (error) {
+      db.close();
+      throw error;
+    }
+  }
+
+  importLegacy(db) {
+    const names = readdirSync(this.path);
+    const putAsset = db.prepare('INSERT OR IGNORE INTO branding_assets VALUES(?,?)');
+    const putSite = db.prepare('INSERT OR IGNORE INTO branding_sites VALUES(?,?)');
+    const hasAsset = db.prepare('SELECT 1 FROM branding_assets WHERE hash=?');
+    for (const name of names.filter((name) => /^[a-f0-9]{64}\.bin$/.test(name))) {
+      let body;
+      try {
+        body = readFileSync(join(this.path, name));
+      } catch {
+        continue;
+      }
+      const hash = name.slice(0, -4);
+      if (digest(body) === hash && inspectBrandImage(body)) putAsset.run(hash, body);
+    }
+    for (const name of names.filter((name) => /^[a-f0-9]{64}\.json$/.test(name))) {
+      let entry;
+      try {
+        entry = JSON.parse(readFileSync(join(this.path, name), 'utf8'));
+      } catch {
+        continue;
+      }
+      if (entry?.version !== version || !Array.isArray(entry.candidates)) continue;
+      entry.candidates = entry.candidates.filter(
+        (mark) =>
+          mark &&
+          ['logo', 'website_icon'].includes(mark.kind) &&
+          typeof mark.url === 'string' &&
+          /^\/api\/v1\/branding\/assets\/[a-f0-9]{64}$/.test(mark.url) &&
+          hasAsset.get(mark.url.slice(assetPrefix.length)),
+      );
+      // Retry old misses immediately; never migrate a temporary failure as durable data.
+      if (entry.candidates.length) putSite.run(name.slice(0, -5), JSON.stringify(entry));
+    }
+  }
+
   async get(lead) {
+    if (this.closed) throw new Error('企业 Logo 存储已关闭');
     const website = websiteUrl(lead.website || (lead.domain ? 'https://' + lead.domain : ''));
     if (!website) return { candidates: [] };
     const key = digest(website.hostname.replace(/^www\./, ''));
-    // Register before disk I/O so simultaneous list/detail callers share one read.
+    // Simultaneous list/detail callers share discovery for the same website.
     if (this.pending.has(key)) return this.pending.get(key);
     const task = this.load(key, lead).finally(() => this.pending.delete(key));
     this.pending.set(key, task);
@@ -48,12 +108,8 @@ export class BrandingCache {
   async load(key, lead) {
     let entry = this.entries.get(key);
     if (!entry) {
-      try {
-        entry = JSON.parse(await readFile(join(this.path, key + '.json'), 'utf8'));
-        if (entry.version !== version || !Array.isArray(entry.candidates)) entry = null;
-      } catch {
-        entry = null;
-      }
+      const row = this.database().prepare('SELECT data FROM branding_sites WHERE key=?').get(key);
+      entry = row ? JSON.parse(row.data) : null;
     }
     // Validate memory hits too: deleting or corrupting cached bytes must repair
     // the entry without requiring the API process to restart.
@@ -72,6 +128,8 @@ export class BrandingCache {
         entry.expires = 0;
     }
     if (entry) this.remember(key, entry);
+    if (entry?.candidates.some((mark) => mark.kind === 'logo'))
+      return { candidates: entry.candidates };
     if (entry?.expires > this.now()) return { candidates: entry.candidates };
     if (entry?.candidates.length) {
       // Serve stale pixels immediately. Refresh is tracked separately so all
@@ -82,6 +140,7 @@ export class BrandingCache {
           this.pending.delete(refreshKey),
         );
         this.pending.set(refreshKey, refresh);
+        void refresh.catch(() => {});
       }
       return { candidates: entry.candidates };
     }
@@ -134,7 +193,9 @@ export class BrandingCache {
                   return null;
                 if (info.width && info.height && (info.width < 8 || info.height < 8)) return null;
                 const hash = digest(image.body);
-                await this.write(hash + '.bin', image.body);
+                this.database()
+                  .prepare('INSERT OR REPLACE INTO branding_assets VALUES(?,?)')
+                  .run(hash, image.body);
                 return {
                   url: assetPrefix + hash,
                   kind: mark.kind,
@@ -160,41 +221,35 @@ export class BrandingCache {
         // Keep known working bytes if a website is temporarily unavailable.
       }
       const fresh = candidates.length > 0;
-      const hasLogo = candidates.some((mark) => mark.kind === 'logo');
       const entry = {
         version,
         candidates: fresh ? candidates : previous?.candidates || [],
         checkedAt: this.now(),
-        expires: this.now() + (hasLogo ? this.ttlMs : this.retryMs),
+        expires: this.now() + this.retryMs,
       };
+      this.database()
+        .prepare('INSERT OR REPLACE INTO branding_sites VALUES(?,?)')
+        .run(key, JSON.stringify(entry));
       this.remember(key, entry);
-      try {
-        await this.write(key + '.json', JSON.stringify(entry));
-      } catch {
-        // A read-only/full disk must not fail the customer library.
-      }
       return entry;
     });
   }
 
-  async write(name, body) {
-    await mkdir(this.path, { recursive: true });
-    const target = join(this.path, name);
-    const temporary = target + '.' + randomUUID() + '.tmp';
-    await writeFile(temporary, body);
-    await rename(temporary, target);
-  }
-
   async asset(hash) {
     if (!/^[a-f0-9]{64}$/.test(hash)) return null;
-    try {
-      const body = await readFile(join(this.path, hash + '.bin'));
-      if (digest(body) !== hash) return null;
-      const info = inspectBrandImage(body);
-      if (!info) return null;
-      return { body, ...info, etag: '"' + hash + '"' };
-    } catch {
-      return null;
-    }
+    const row = this.database().prepare('SELECT body FROM branding_assets WHERE hash=?').get(hash);
+    if (!row) return null;
+    const body = Buffer.from(row.body);
+    if (digest(body) !== hash) return null;
+    const info = inspectBrandImage(body);
+    if (!info) return null;
+    return { body, ...info, etag: '"' + hash + '"' };
+  }
+
+  async close() {
+    if (this.closed) return;
+    this.closed = true;
+    await Promise.allSettled([...this.pending.values()]);
+    this.db?.close();
   }
 }

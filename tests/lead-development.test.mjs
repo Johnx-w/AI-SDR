@@ -1,3 +1,4 @@
+import { withFeishuAuth } from './helpers/feishu.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { decorateLeadDevelopment } from '../server/lead-development.mjs';
@@ -33,10 +34,10 @@ test('HTTP暂缓后列表和详情立即一致、复查提醒持续存在，延�
   const today = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
   const tomorrow = new Date(Date.now() + 8 * 3600000 + 86400000).toISOString().slice(0, 10);
   const env = {
-    ACQUISITION_PROVIDER: 'n8n',
-    N8N_BASE_URL: 'https://fixture.test',
-    FEISHU_READ_WEBHOOK_URL: 'https://fixture.test/webhook/read',
-    N8N_WEBHOOK_SECRET: 'fixture',
+    FEISHU_APP_ID: 'fixture-app',
+    FEISHU_TABLE_ID: 'fixture-table',
+    FEISHU_APP_SECRET: 'fixture-secret',
+    FEISHU_APP_TOKEN: 'fixture-base',
     FEISHU_APP_ID: 'fixture-app',
     FEISHU_APP_SECRET: 'fixture-secret',
     FEISHU_APP_TOKEN: 'fixture-token',
@@ -45,16 +46,16 @@ test('HTTP暂缓后列表和详情立即一致、复查提醒持续存在，延�
   await withApp(
     {
       env,
-      fetchImpl: async (url, init = {}) => {
+      fetchImpl: withFeishuAuth(async (url, init = {}) => {
         const endpoint = String(url);
-        if (endpoint === env.FEISHU_READ_WEBHOOK_URL)
+        if (new URL(endpoint).pathname.endsWith('/records'))
           return Response.json({ code: 0, data: { items: [customer], has_more: false } });
         if (endpoint.endsWith('/auth/v3/tenant_access_token/internal'))
           return Response.json({ code: 0, tenant_access_token: 'fixture', expire: 7200 });
         assert.equal(init.method || 'GET', 'GET', '不能写入飞书或发送邮件');
         assert.ok(endpoint.endsWith('/tables/t2/records/customer-1'), endpoint);
         return Response.json({ code: 0, data: { record: customer } });
-      },
+      }),
     },
     async (root) => {
       const get = async (path) => {

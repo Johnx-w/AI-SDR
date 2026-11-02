@@ -5,8 +5,6 @@ import { encodeResearchFields } from '../server/feishu-direct.mjs';
 import { mapFeishuRecord } from '../server/feishu.mjs';
 import { AcquisitionStore } from '../server/acquisition-store.mjs';
 import { planWebsitePages } from '../server/website-metadata.mjs';
-import vm from 'node:vm';
-import { researchPolicyCode } from '../scripts/research-policy-code.mjs';
 
 const source_url = 'https://screens.example.org/';
 const fact = (value, quote) => ({ value, quote, source_url });
@@ -191,26 +189,4 @@ test('官网页面预算内补抓同站法律页，外站隐私页不当作公�
   assert.ok(plan.length <= 5);
   assert.ok(!plan.some((url) => url.includes('other.example.org')));
   assert.ok(!plan.includes(source_url + 'privacy-screens'));
-});
-
-test('兼容工作流的独立解析器执行相同名称证据校验', () => {
-  const text = 'Bright Screens supplies roller blinds to trade businesses.';
-  for (const name of ['Bright Screens', 'Invented Company LLC']) {
-    const raw = { company_name: fact(name, text), products: [fact('roller blinds', text)] };
-    const response = {
-      choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(raw) } }],
-    };
-    const result = vm.runInNewContext(
-      researchPolicyCode +
-        '\n' +
-        parseCompanyResearch.toString() +
-        '\nparseCompanyResearch(response,page,target)',
-      {
-        response,
-        page: { source_url, research_pages: [{ source_url, text }] },
-        target: { product: 'roller blinds' },
-      },
-    );
-    assert.equal(result.company_name, name === 'Bright Screens' ? name : null);
-  }
 });

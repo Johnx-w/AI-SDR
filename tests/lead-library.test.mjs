@@ -116,7 +116,7 @@ test('initial list/detail concurrent reads share one upstream sync and fresh rea
   }
 });
 
-test('expired snapshot returns immediately while a shared background sync replaces it', async () => {
+test('expired snapshot returns immediately while a shared background sync imports new history', async () => {
   let now = 1000;
   let calls = 0;
   const delayed = deferred();
@@ -136,9 +136,10 @@ test('expired snapshot returns immediately while a shared background sync replac
     await library.list();
     await tick();
     assert.equal(calls, 2);
-    delayed.resolve(response([lead({ name: 'New name' })]));
+    delayed.resolve(response([lead({ id: 'rec-new', name: 'New name' })]));
     await library.pending;
-    assert.equal((await library.list()).leads[0].name, 'New name');
+    assert.equal((await library.detail('rec-new')).lead.name, 'New name');
+    assert.equal((await library.detail('rec-1')).lead.name, 'Acme Screens');
     assert.equal((await library.list()).sync.stale, false);
   } finally {
     library.close();
@@ -232,8 +233,8 @@ test('invalid, duplicate and incomplete full responses cannot delete a successfu
       assert.equal((await library.list()).leads[0].id, 'rec-1');
     }
     next = response([]);
-    assert.equal((await library.refresh()).total, 0);
-    await assert.rejects(library.detail('rec-1'), { status: 404 });
+    assert.equal((await library.refresh()).total, 1);
+    assert.equal((await library.detail('rec-1')).lead.name, 'Acme Screens');
   } finally {
     library.close();
   }
@@ -267,7 +268,8 @@ test('verification refresh starts a new upstream read after an already running r
   const older = deferred();
   let calls = 0;
   const library = new LeadLibrary({
-    readLeads: () => (++calls === 1 ? older.promise : response([lead({ name: 'Verified new' })])),
+    readLeads: () =>
+      ++calls === 1 ? older.promise : response([lead({ id: 'rec-new', name: 'Verified new' })]),
   });
   try {
     const first = library.refresh();
@@ -393,7 +395,7 @@ test('unchanged sync and no-op upsert write no customer rows and keep revision a
   }
 });
 
-test('only changed and deleted rows are written, and customer order never changes content versions', async () => {
+test('remote edits and removals preserve local dossiers, and ordering never changes content versions', async () => {
   let next = response([lead(), lead({ id: 'rec-2', name: 'Second' }), lead({ id: 'rec-3' })]);
   const library = new LeadLibrary({ readLeads: async () => next });
   try {
@@ -402,8 +404,8 @@ test('only changed and deleted rows are written, and customer order never change
     const writes = observeCustomerWrites(library);
     next = response([lead({ name: 'Changed' }), lead({ id: 'rec-2', name: 'Second' })]);
     const changed = await library.refresh();
-    assert.deepEqual(writes(), ['update', 'delete']);
-    assert.notEqual(changed.leads[0].version, versions['rec-1']);
+    assert.deepEqual(writes(), []);
+    assert.equal(changed.leads[0].version, versions['rec-1']);
     assert.equal(changed.leads[1].version, versions['rec-2']);
     assert.deepEqual(
       Object.fromEntries(
@@ -412,7 +414,7 @@ test('only changed and deleted rows are written, and customer order never change
           changed.sync.metrics.last[key],
         ]),
       ),
-      { inserted: 0, updated: 1, deleted: 1, unchanged: 1, rowsWritten: 2 },
+      { inserted: 0, updated: 0, deleted: 0, unchanged: 3, rowsWritten: 0 },
     );
     const priorRevision = changed.sync.revision;
     next = response([...next.leads].reverse());

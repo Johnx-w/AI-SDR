@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { ApiConnections } from '../server/api-connections.mjs';
+import { createResearchProviders } from '../server/research-providers.mjs';
+import { AcquisitionReviews } from '../server/acquisition-reviews.mjs';
 import {
   AcquisitionSchedules,
   validateTiming,
@@ -27,7 +30,6 @@ const timing = {
   timezone: 'Asia/Shanghai',
 };
 const nativeEnv = {
-  ACQUISITION_PROVIDER: 'native',
   TAVILY_API_KEY: 'fixture-search-key',
   DEEPSEEK_API_KEY: 'fixture-model-key',
   FEISHU_APP_ID: 'fixture-app',
@@ -60,6 +62,47 @@ test('连接配置持久化、重载、空值保留与显式清除；读取不�
     assert.equal(restored.view().ready, false);
   } finally {
     rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test('模型配置无需读取目录，HTTP 保存和重载后研究请求使用配置的模型及原密钥', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'connection-model-config-'));
+  const path = join(dir, 'connections.json');
+  const requests = [];
+  const fetchImpl = async (url, options) => {
+    assert.equal(url, 'https://api.deepseek.com/responses');
+    assert.equal(options.method, 'POST');
+    assert.equal(options.headers.Authorization, 'Bearer ' + nativeEnv.DEEPSEEK_API_KEY);
+    requests.push(JSON.parse(options.body).model);
+    return Response.json({});
+  };
+  try {
+    await withApp({ env: { ...nativeEnv, CONNECTIONS_PATH: path }, fetchImpl }, async (base) => {
+      const removed = await fetch(base + '/api/v1/connections/models', { method: 'POST' });
+      assert.equal(removed.status, 404);
+      const response = await fetch(base + '/api/v1/connections', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values: { RESEARCH_MODEL_MODEL: 'replacement-model' }, clear: [] }),
+      });
+      assert.equal(response.status, 200);
+      const view = await response.json();
+      assert.equal(
+        view.fields.find((field) => field.key === 'RESEARCH_MODEL_MODEL').effectiveValue,
+        'replacement-model',
+      );
+      assert.deepEqual(requests, [], '配置读取和保存不请求模型服务');
+      const restored = new ApiConnections({ env: nativeEnv, path });
+      const research = createResearchProviders({ env: restored.environment(), fetchImpl });
+      await research.model.research({
+        messages: [{ role: 'user', content: 'fixture evidence' }],
+        schema: { type: 'object', properties: {} },
+      });
+      assert.deepEqual(requests, ['replacement-model']);
+      assert.equal(restored.environment().DEEPSEEK_API_KEY, nativeEnv.DEEPSEEK_API_KEY);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
@@ -215,7 +258,7 @@ test('HTTP 保存连接即时生效；计划接口校验和幂等生效，未知
       const created = await write('/api/v1/acquisition/schedules', body);
       assert.equal(created.status, 201);
       const plan = await created.json();
-      const repeat = await write('/api/v1/integrations/n8n/schedules', body);
+      const repeat = await write('/api/v1/acquisition/schedules', body);
       assert.equal((await repeat.json()).id, plan.id);
       assert.equal(
         (await write('/api/v1/acquisition/schedules', { ...body, name: '冲突计划' })).status,
@@ -236,4 +279,58 @@ test('HTTP 保存连接即时生效；计划接口校验和幂等生效，未知
       assert.equal((await write('/api/v1/connections', { values: {} }, 'PUT')).status, 409);
     },
   );
+});
+
+test('HTTP 读取已执行计划及最近任务，保留核实结果并可关闭计划', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'shadeflow-schedule-read-'));
+  const env = {
+    ...nativeEnv,
+    BATCH_DB_PATH: join(folder, 'jobs.sqlite'),
+    SCHEDULE_DB_PATH: join(folder, 'schedules.sqlite'),
+  };
+  const scope = createHash('sha256')
+    .update(JSON.stringify([env.FEISHU_APP_TOKEN, env.FEISHU_TABLE_ID]))
+    .digest('hex');
+  const jobs = new BatchJobs({ path: env.BATCH_DB_PATH, scope, schedule: false });
+  const schedules = new AcquisitionSchedules({
+    path: env.SCHEDULE_DB_PATH,
+    jobs: () => jobs,
+    scope,
+  });
+  try {
+    const job = jobs.create(input, 'schedule-read-job');
+    job.queue = [{ domain: 'example.com' }];
+    job.rows = [{ result: 'review', domain: 'example.com' }];
+    jobs.finish(job, 'stopped');
+    new AcquisitionReviews(jobs.db, scope).save(job.id, 0, { status: 'inserted' });
+    const plan = schedules.create({ name: '已执行计划', input, timing }, 'schedule-read-plan');
+    schedules.save({ ...plan, status: 'paused', lastJobId: job.id, runs: 1 });
+    const fresh = schedules.create({ name: '未执行计划', input, timing }, 'schedule-read-fresh');
+    schedules.save({ ...fresh, status: 'paused' });
+    const archived = schedules.create(
+      { name: '历史任务归档', input, timing },
+      'schedule-read-archived',
+    );
+    schedules.save({ ...archived, status: 'paused', lastJobId: 'archived-job' });
+    schedules.close();
+    jobs.close();
+    await withApp({ env }, async (base) => {
+      const path = '/api/v1/acquisition/schedules';
+      const response = await fetch(base + path);
+      assert.equal(response.status, 200);
+      const { schedules: listed } = await response.json();
+      assert.equal(listed.length, 3);
+      const recent = listed.find((item) => item.id === plan.id).lastJob;
+      assert.equal(recent.queued, 1);
+      assert.equal(recent.rows[0].review_resolution.status, 'inserted');
+      assert.equal('queue' in recent, false);
+      assert.equal(listed.find((item) => item.id === fresh.id).lastJob, null);
+      assert.equal(listed.find((item) => item.id === archived.id).lastJob, null);
+      const closed = await fetch(base + `${path}/${plan.id}/close`, { method: 'POST' });
+      assert.equal(closed.status, 200);
+      assert.equal((await closed.json()).lastJob.queued, 1);
+    });
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
 });

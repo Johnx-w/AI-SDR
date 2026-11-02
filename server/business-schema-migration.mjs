@@ -44,8 +44,8 @@ const entries = (context) =>
 
 export async function assertBusinessMigrationIdle(readApi) {
   const [jobs, schedules] = await Promise.all([
-    readApi('/api/v1/integrations/n8n/jobs'),
-    readApi('/api/v1/integrations/n8n/schedules'),
+    readApi('/api/v1/acquisition/jobs'),
+    readApi('/api/v1/acquisition/schedules'),
   ]);
   assert(Array.isArray(jobs.jobs) && Array.isArray(schedules.schedules), '任务状态响应不完整');
   assert(

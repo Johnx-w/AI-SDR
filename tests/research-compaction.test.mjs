@@ -1,11 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import vm from 'node:vm';
 import { NativeAcquisition } from '../server/native-acquisition.mjs';
 import { AcquisitionStore } from '../server/acquisition-store.mjs';
 import { companyResearchRequest, parseCompanyResearch } from '../server/company-research.mjs';
 import { verifiedAssessmentOpportunities } from '../server/assessment-evidence.mjs';
-import { researchPolicyCode } from '../scripts/research-policy-code.mjs';
 import { compactResearchText, RESEARCH_GAP } from '../server/research-text.mjs';
 import { boundedResearchPages } from '../server/research-input.mjs';
 import { thirdPartyCompanySource } from '../server/website-identity.mjs';
@@ -205,7 +203,7 @@ test('预算删节和正文精简共用原文边界，不拆Unicode，删除处�
   assert.deepEqual(forged.products, []);
 });
 
-test('精简缺口不能拼接为企业、必需条件、评级或兼容工作流引文', async () => {
+test('精简缺口不能拼接为企业、必需条件、评级引文', async () => {
   const left = 'Example Blinds Ltd supplies roller blinds.';
   const right = 'We serve trade customers nationwide.';
   const result = await collect('<p>' + left + '</p><p>Accept all cookies</p><p>' + right + '</p>');
@@ -220,16 +218,7 @@ test('精简缺口不能拼接为企业、必需条件、评级或兼容工作�
       ],
     };
     const input = { ...target, required_requirements: ['全国供货'] };
-    for (const research of [
-      parseCompanyResearch(response(raw), result, input),
-      vm.runInNewContext(
-        researchPolicyCode +
-          '\n' +
-          parseCompanyResearch.toString() +
-          '\nparseCompanyResearch(response,page,target)',
-        { response: response(raw), page: result, target: input },
-      ),
-    ]) {
+    for (const research of [parseCompanyResearch(response(raw), result, input)]) {
       assert.equal(research.company_name, null);
       assert.deepEqual(Array.from(research.products), []);
       assert.equal(research.required_match, 'unknown');

@@ -4,7 +4,6 @@ import { NativeAcquisition, selectWebsiteCandidates } from '../server/native-acq
 import { verifyCompanyIdentity } from '../server/company-identity.mjs';
 
 const env = {
-  ACQUISITION_PROVIDER: 'native',
   TAVILY_API_KEY: 'fixture-search',
   DEEPSEEK_API_KEY: 'fixture-model',
   FEISHU_APP_ID: 'fixture-app',

@@ -10,7 +10,6 @@ import { BatchJobs, validateCount, validateResearchBudget } from './batch-jobs.m
 import { AcquisitionReviews } from './acquisition-reviews.mjs';
 import { createAcquisitionProvider } from './acquisition-provider.mjs';
 import { ApiConnections } from './api-connections.mjs';
-import { discoverResearchModels } from './model-discovery.mjs';
 import { AcquisitionSchedules } from './acquisition-schedules.mjs';
 import { ProductCatalog } from './product-catalog.mjs';
 import { ProductKnowledge } from './product-knowledge.mjs';
@@ -96,6 +95,7 @@ export function createApp({
     env: connections.environment(),
     fetchImpl,
     nativeImpl,
+    customerLibrary: () => library(),
   });
   const runs = new Map();
   const brandingCache = new BrandingCache({ path: env.BRANDING_CACHE_PATH, ...brandingOptions });
@@ -117,11 +117,11 @@ export function createApp({
         scope: createHash('sha256')
           .update(
             JSON.stringify([
-              current.ACQUISITION_PROVIDER || 'n8n',
+              'native',
               current.FEISHU_APP_ID || '',
               current.FEISHU_APP_TOKEN || '',
               current.FEISHU_TABLE_ID || '',
-              current.FEISHU_READ_WEBHOOK_URL || '',
+              '',
             ]),
           )
           .digest('hex'),
@@ -135,9 +135,9 @@ export function createApp({
     return leadLibrary;
   };
   const loadLeads = () => library().all();
-  // Task deduplication and write verification must always use a fresh upstream read.
+  // Bootstrap history once; subsequent deduplication uses the local master.
   const verifiedLeads = async () => {
-    await library().refresh({ afterCurrent: true });
+    if (!library().meta) await library().refresh({ afterCurrent: true });
     return (await loadLeads()).leads;
   };
   let running = 0;
@@ -177,7 +177,9 @@ export function createApp({
   };
   const reviewPlan = (plan) => {
     const snapshot = plans().view(plan);
-    return snapshot.lastJob ? { ...snapshot, lastJob: reviewJob(snapshot.lastJob) } : snapshot;
+    return snapshot.lastJob
+      ? { ...snapshot, lastJob: reviewJob(jobs().get(snapshot.lastJob.id)) }
+      : snapshot;
   };
   let schedules;
   let products;
@@ -194,7 +196,13 @@ export function createApp({
     getEnv: () => connections.environment(),
     fetchImpl,
     knowledge,
-    loadCustomers: async () => (await loadLeads()).leads,
+    loadCustomers: async () => {
+      if (!library().meta) await library().refresh();
+      return (await loadLeads()).leads;
+    },
+    customerRecord: (id) => provider.customerRecord?.(id),
+    customerRemoteId: (id) => (provider.customerRemoteId ? provider.customerRemoteId(id) : id),
+    syncCustomers: () => provider.syncCustomers?.(),
   });
   let outbound;
   const outreach = () =>
@@ -217,23 +225,8 @@ export function createApp({
         }));
   const checkCapabilities = (input) => {
     if (['customs', 'dual'].includes(input.acquisition_channel)) {
-      if (provider.info.provider !== 'native')
-        throw new ApiError(400, '海关逐票发现需要后端直连引擎');
       if (!provider.info.customs?.configured) throw new ApiError(503, '请先配置海关数据连接');
     }
-    if (
-      provider.info.provider !== 'native' &&
-      (input.product_scope === 'all' ||
-        (input.environment_preference && input.environment_preference !== 'all') ||
-        input.customer_types?.length ||
-        input.required_requirements?.length ||
-        input.preferred_requirements ||
-        input.products?.length)
-    )
-      throw new ApiError(
-        400,
-        '全部窗饰范围、室内外偏好、多类型及产品目录获客需要在API连接中选择后端直连引擎',
-      );
     return input;
   };
   const plans = () =>
@@ -255,13 +248,7 @@ export function createApp({
     products: () => knowledge().list(),
     scope: () =>
       createHash('sha256')
-        .update(
-          JSON.stringify([
-            acquisitionScope(),
-            connections.environment().ACQUISITION_PROVIDER || 'n8n',
-            connections.environment().FEISHU_READ_WEBHOOK_URL || '',
-          ]),
-        )
+        .update(JSON.stringify([acquisitionScope(), 'native', '']))
         .digest('hex'),
   });
   const completeRun = (requestId, hash, output) => {
@@ -356,22 +343,6 @@ export function createApp({
             }),
           );
         }
-        if (url.pathname === '/api/v1/connections/models') {
-          if (request.method !== 'POST') throw new ApiError(405, '不支持的模型目录操作');
-          const preview = connections.previewModelEnvironment(await readJson(request));
-          const controller = new AbortController();
-          const abort = () => controller.abort();
-          request.once('aborted', abort);
-          try {
-            return json(
-              response,
-              200,
-              await discoverResearchModels({ env: preview, fetchImpl, signal: controller.signal }),
-            );
-          } finally {
-            request.off('aborted', abort);
-          }
-        }
         if (url.pathname === '/api/v1/business' || url.pathname.startsWith('/api/v1/business/')) {
           const result = await business.handle(request, url, readJson);
           return json(response, result.status, result.body);
@@ -385,6 +356,7 @@ export function createApp({
               business.active ||
               readingLeads ||
               leadLibrary?.refreshing ||
+              provider.syncing ||
               jobs().active() ||
               [...runs.values()].some((r) => r.status === 'unknown')
             )
@@ -402,6 +374,7 @@ export function createApp({
               env: connections.environment(),
               fetchImpl,
               nativeImpl,
+              customerLibrary: () => library(),
             });
             brandingCache.entries.clear();
             return json(response, 200, result);
@@ -445,9 +418,7 @@ export function createApp({
           if (!product) throw new ApiError(404, '产品资料不存在，请刷新资料库');
           return json(response, 200, { product, feishu: await productMirror().sync(product) });
         }
-        const prefix = url.pathname.startsWith('/api/v1/acquisition')
-          ? '/api/v1/acquisition'
-          : '/api/v1/integrations/n8n';
+        const prefix = '/api/v1/acquisition';
         if (url.pathname === `${prefix}/products`) {
           if (request.method === 'GET') return json(response, 200, { products: catalog().list() });
           if (request.method === 'POST')
@@ -688,7 +659,7 @@ export function createApp({
               });
             }
             if (request.method !== 'POST') throw new ApiError(405, '不支持的核实操作');
-            if (provider.info.provider !== 'native' || !provider.info.configured)
+            if (!provider.info.configured)
               throw new ApiError(503, '待核实企业需要已配置的直连获客引擎');
             if (running || manager.active())
               throw new ApiError(409, '当前获客任务正在处理，请完成后再核实该企业');
@@ -772,7 +743,7 @@ export function createApp({
           }
           if (running >= 1 || jobs().active())
             throw new ApiError(429, '已有获客任务正在执行或待核对，请先处理该任务。');
-          // 不自动重试：此工作流会调用付费搜索并写入飞书。
+          // 不自动重试：研究会调用付费服务，未知保存结果需先核对。
           // 为防止不确定结果被自动重复执行，本地幂等记录保留到服务重启。
           if (runs.size >= 500)
             throw new ApiError(503, '本地运行记录已满，请核对所有任务后重启服务。');
@@ -830,7 +801,10 @@ export function createApp({
     if (env.OUTREACH_DB_PATH) outreach().start();
   });
   server.on('close', () => {
-    leadLibrary?.close();
+    void brandingCache.close();
+    const customerSync = provider.closeArchive?.();
+    if (customerSync) void customerSync.finally(() => leadLibrary?.close());
+    else leadLibrary?.close();
     if (outbound) void outbound.close();
     products?.close();
     productKnowledge?.close();

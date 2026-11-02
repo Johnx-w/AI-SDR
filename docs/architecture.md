@@ -8,10 +8,10 @@
 
 | 范围            | 现有模块与职责                                                                                                                           |
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| HTTP 与引擎选择 | server/app.mjs 校验参数、来源和请求幂等；createAcquisitionProvider 选择 native／n8n                                                      |
+| HTTP 与获客入口 | server/app.mjs 校验参数、来源和请求幂等；createAcquisitionProvider 封装直连获客服务                                                      |
 | 获客调度        | batch-jobs 负责预算、进度、暂停与恢复；search-plan 负责查询；引擎负责单企业处理                                                          |
 | 检索与研究      | 检索、官网采集、结构化研究、身份／引文核验和程序评分分工，沿用共享业务函数                                                               |
-| 客户副本及评估  | lead-library 维护飞书读取副本；AssessmentStore 保留最新快照；补充资料独立留痕                                                            |
+| 客户档案及评估  | lead-library 保存 SQLite 客户主档案；customer-archive 管理后台飞书同步与编号关联；AssessmentStore 保留最新快照                           |
 | 客户业务与产品  | CustomerBusiness 维护会话、需求、消息、任务和人工归属；产品资料管理审核版本                                                              |
 | 首封开发        | outreach-service 管理计划、邮箱匹配、企业占用和发送队列；outreach-content 生成与检查                                                     |
 | 邮件收发        | mail-conversations 保存原文和同步游标；mailbox-reader 只读 IMAP；mail-replies 管理草稿与幂等回信；outreach-mailboxes 管理加密账号和 SMTP |
@@ -26,7 +26,7 @@
 
 | 范围       | 入口与用途                                                                                                                  |
 | ---------- | --------------------------------------------------------------------------------------------------------------------------- |
-| 健康与连接 | GET /api/health；GET／PUT /api/v1/connections；POST /api/v1/connections/models                                              |
+| 健康与连接 | GET /api/health；GET／PUT /api/v1/connections                                                                               |
 | 获客       | /api/v1/acquisition 下的 status、locations、products、search-preview、jobs、schedules、runs、executions                     |
 | 批量任务   | GET／POST /jobs，GET /jobs/:id，POST /jobs/:id/stop、resume                                                                 |
 | 定时计划   | GET／POST /schedules，POST /schedules/:id/pause、resume、close                                                              |
@@ -46,14 +46,17 @@
 | -------------------------- | ------------------------------------------------------------------------ |
 | 获客任务、操作及相关业务   | .data/acquisition.sqlite；ACQUISITION_DB_PATH／BATCH_DB_PATH             |
 | 定时计划                   | .data/acquisition-schedules.sqlite                                       |
-| 客户读取副本               | .data/lead-library.sqlite；LEAD_LIBRARY_DB_PATH                          |
+| 客户档案及待同步操作       | .data/lead-library.sqlite；LEAD_LIBRARY_DB_PATH                          |
+| 企业 Logo 及网站图标       | .data/branding/branding.sqlite；BRANDING_CACHE_PATH 可调整所在目录       |
 | 海关页、预算和游标         | 默认复用获客库，可指定 CUSTOMS_DB_PATH                                   |
 | 最新评估、客户业务         | 默认复用获客库，可分别指定 ASSESSMENT_DB_PATH、CUSTOMER_BUSINESS_DB_PATH |
 | 触达、会话、草稿和发送台账 | .data/outreach/outreach.sqlite；OUTREACH_DB_PATH                         |
 | 连接及邮箱配置             | .data/api-connections.json；OUTREACH_DATA_DIR 下加密邮箱文件             |
-| 其他本机材料               | Logo 缓存、原始证据、镜像核对日志及私有备份，按既有路径隔离              |
+| 其他本机材料               | 原始证据、镜像核对日志及私有备份，按既有路径隔离                         |
 
 数据库、WAL、凭证和原始业务证据不入 Git。备份先停服务或使用一致性 SQLite 备份，不能只复制运行中的主数据库文件；同时保留配置、资产及核对日志。Windows 邮箱凭证绑定当前机器／用户，迁移后重新录入。不要多个工作进程同时操作同一运行库。
+
+企业品牌图片按官网域名保存，图片内容与官网对应关系一起持久化到 SQLite。成功获取的 Logo 不设过期时间，重启或官网不可用时直接读取数据库；仅有网站图标时保留旧图并重试升级，抓取失败只短暂缓存。首次读取自动导入原 `.data/branding`（或 `BRANDING_CACHE_PATH`）下有效的 JSON／图片文件，保留原文件，旧空结果不迁移。备份时须包含品牌图片数据库，浏览器会话缓存只用于加速显示。
 
 正式入口为 server/index.mjs，提供持久化路径；测试中省略路径可使用隔离内存库，不代表正式运行可以省略存储。创建和恢复都核对作用域及版本，较旧操作不能覆盖较新事实。
 
@@ -65,15 +68,11 @@
 
 当前仅监听 127.0.0.1，邮件接口保留本机来源限制；没有团队登录、角色权限和公网生产部署。部署到公网需先完成身份认证、权限、HTTPS、备份及运行审计，不能仅改监听地址。服务端凭证不返回浏览器，前端连接覆盖与进程环境的优先级见获客说明。
 
-## 兼容 n8n 引擎
+## 执行与核对
 
-ACQUISITION_PROVIDER 选择执行引擎；旧 /api/v1/integrations/n8n 路径映射到所选引擎，不绕开配置。回退时先核对未结束任务，再修改配置并重启；若连接页有覆盖值，需同时修改，历史任务仍由创建它的引擎恢复。
+获客只使用后端直连引擎与 /api/v1/acquisition 接口。配置页只维护检索、模型、海关和飞书连接，不再提供执行引擎切换或外部工作流配置。客户读取使用 SQLite 主档案，飞书通过官方 API 导入历史记录和同步协作镜像。
 
-n8n 使用已发布 Production Webhook 和服务端 Header Auth；测试地址只适合手动监听。N8N_WEBHOOK_URL、N8N_WEBHOOK_SECRET、N8N_WEBHOOK_ENABLED 由服务端配置；执行历史 Public API 可选，客户只读入口为独立配置。开发工具 OAuth 不提供给业务网页。
-
-批量 discover／research／status 协议与旧单次 runs 区别处理。HTTP 200 或 completed 只说明拿到结果，实际写入仍需记录 ID 和读回；批量不确定操作按原编号查询，旧单次缺少恢复能力时保持待核对，不重放。
-
-工作流生成脚本依赖相应快照与共享函数，尤其历史建列／删列脚本不能作为幂等部署反复执行。修改线上流程前先读取当前版本、比较差异；原节点教程和历史 workflow ID 查 [归档](archive/2026-10-28/n8n-integration.md)，当前默认运行不需要重建旧工作流。
+HTTP 200 或 completed 只表示操作已返回，实际收录仍需本地保存与读回；飞书镜像需独立核对同步状态。不确定操作按原持久编号查询，不自动重复研究或新建记录。已退役引擎的历史任务保留查询，但不能交给直连引擎继续执行。
 
 ## 检查范围
 

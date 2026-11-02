@@ -9,7 +9,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const env = {
-  ACQUISITION_PROVIDER: 'native',
   FEISHU_APP_ID: 'test-app',
   FEISHU_APP_SECRET: 'test-secret',
   FEISHU_APP_TOKEN: 'test-base',
@@ -196,12 +195,17 @@ test('写入响应丢失时通过读回确认成功，不重复写入', async ()
   );
 });
 
-test('未保存成功时返回错误，不伪造成功或丢弃原有联系方式', async () => {
+test('飞书写入失败时本地仍保存联系方式，明确保留待同步状态', async () => {
   await withApp(
-    async ({ edit, current, writes }) => {
+    async ({ edit, current, writes, base }) => {
       const before = current();
       const response = await edit({ email: 'new@buyer.example.org' });
-      assert.equal(response.status, 502);
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).contacts.email, 'new@buyer.example.org');
+      const local = await (await fetch(base + '/api/v1/leads/real')).json();
+      assert.equal(local.leads[0].email, 'new@buyer.example.org');
+      assert.equal(local.sync.pendingWrites, 1);
+      assert.ok(local.sync.writeError);
       assert.deepEqual(current(), before);
       assert.equal(writes(), 1);
     },

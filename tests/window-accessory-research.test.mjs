@@ -1,13 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import vm from 'node:vm';
 import {
   companyResearchRequest,
   parseCompanyResearch,
   researchFields,
 } from '../server/company-research.mjs';
 import { assessCompany } from '../server/customer-assessment.mjs';
-import { researchPolicyCode } from '../scripts/research-policy-code.mjs';
 
 const source_url = 'https://fixmyblinds.com/';
 const broad = {
@@ -272,18 +270,12 @@ test('连续原文目录可支持用途，短引文不能丢掉所在页的第�
   }
 });
 
-test('提示词要求保留配件用途，兼容工作流解析器执行相同回归', () => {
+test('提示词要求保留配件用途，研究解析器保留对应产品关联', () => {
   assert.match(companyResearchRequest({}, broad).messages[0].content, /配件.*用途/);
-  const result = vm.runInNewContext(
-    researchPolicyCode +
-      '\n' +
-      parseCompanyResearch.toString() +
-      '\nparseCompanyResearch(response,page,target)',
-    {
-      response: response(catalog()),
-      page: { source_url, research_pages: [{ source_url, text: historicalText }] },
-      target: broad,
-    },
+  const result = parseCompanyResearch(
+    response(catalog()),
+    { source_url, research_pages: [{ source_url, text: historicalText }] },
+    broad,
   );
   assert.equal(result.product_match, 'matched');
 });

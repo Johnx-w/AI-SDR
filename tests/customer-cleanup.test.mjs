@@ -80,7 +80,7 @@ test('已删除的联系方式补采与 AI 搜索词接口返回404且不调用�
   try {
     const base = 'http://127.0.0.1:' + app.address().port;
     assert.equal((await fetch(base + '/api/v1/leads/real/rec-example/contacts')).status, 404);
-    for (const prefix of ['/api/v1/acquisition', '/api/v1/integrations/n8n']) {
+    for (const prefix of ['/api/v1/acquisition']) {
       assert.equal(
         (
           await fetch(base + prefix + '/search-query', {

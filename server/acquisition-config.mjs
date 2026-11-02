@@ -92,9 +92,6 @@ export function researchProviderConfig(env = {}) {
 }
 
 export function acquisitionConfig(env = {}) {
-  const provider = env.ACQUISITION_PROVIDER || 'n8n';
-  if (!['n8n', 'native'].includes(provider))
-    throw Object.assign(new Error('ACQUISITION_PROVIDER 只能是 n8n 或 native'), { status: 503 });
   const research = researchProviderConfig(env);
   const requirements = [
     ...research.web.requirements,
@@ -103,7 +100,7 @@ export function acquisitionConfig(env = {}) {
   ];
   const missing = requirements.filter((name) => !configured(env[name]));
   return {
-    provider,
+    provider: 'native',
     webSearchProvider: research.web.provider,
     researchModelProvider: research.model.provider,
     nativeReady: missing.length === 0,

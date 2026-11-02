@@ -345,6 +345,22 @@ test('两遍同步同一来信的两条需求与统一跟进任务，全部循�
   assert.equal(f.writes.length, count);
 });
 
+test('本地客户编号映射到飞书T2，尚未同步的客户不写入错误关联', async () => {
+  const f = fixture();
+  f.bridge.customerRemoteId = (id) => (id === 'local_customer' ? 'customer-1' : null);
+  const graph = workspace();
+  for (const key of ['conversations', 'demands', 'messages', 'tasks'])
+    for (const row of graph[key] || []) row.customerId = 'local_customer';
+  const result = await f.bridge.sync(graph, { products: [{ id: 'product-1', version: 2 }] });
+  assert.equal(result.status, 'synced', result.error);
+  assert.deepEqual(f.records.get('t3')[0].fields['客户'], ['customer-1']);
+  const blocked = fixture();
+  blocked.bridge.customerRemoteId = () => null;
+  const pending = await blocked.bridge.sync(graph, { products: [{ id: 'product-1', version: 2 }] });
+  assert.equal(pending.status, 'pending');
+  assert.equal(blocked.writes.length, 0);
+});
+
 test('引用产品未同步或跨客户需求引用时，整图在首次写入前返回待核对', async () => {
   for (const mutate of [
     (graph) => {
