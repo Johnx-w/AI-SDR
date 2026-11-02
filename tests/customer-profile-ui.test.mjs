@@ -7,46 +7,89 @@ import { loadModule } from './helpers/modules.mjs';
 const { CustomerProfile } = loadModule(
   new URL('../src/components/CustomerProfile.tsx', import.meta.url),
 );
-const { AssessmentPanel } = loadModule(
-  new URL('../src/components/AssessmentPanel.tsx', import.meta.url),
-);
 const sourceAt = '2026-10-22T06:05:36.566Z';
 const evaluatedAt = '2026-10-24T10:42:50.234Z';
+const productFact = {
+  kind: 'core_product',
+  value: '防风帘属于稳定主营产品线',
+  quote: 'We supply made-to-measure zip screens.',
+  source_url: 'https://buyer.example.org/products',
+};
+const roleFact = {
+  kind: 'specialist_supply',
+  value: '向贸易客户供货的专业窗饰供应商',
+  quote: 'We supply zip screens to trade customers.',
+  source_url: 'https://buyer.example.org/trade',
+};
+const materialFact = {
+  kind: 'core_product',
+  value: '卷帘生产使用遮阳面料',
+  quote: 'Our roller blinds use sunscreen fabrics.',
+  source_url: 'https://buyer.example.org/fabrics',
+};
+const primary = {
+  direction: 'finished',
+  product: 'Zip screens',
+  grade: '高优先',
+  status: '高优先',
+  matchLevel: '明确匹配',
+  relationship: 'direct_supply',
+  prioritySignals: [
+    { ...productFact, label: '主营产品' },
+    { ...roleFact, label: '专业供货角色' },
+  ],
+  facts: [productFact, roleFact],
+  dimensions: {
+    P: { score: 40, maximum: 40, facts: [productFact] },
+    R: { score: 30, maximum: 30, facts: [roleFact] },
+    D: { score: null, maximum: 20, missing: '企业持续经营年限尚未核实', facts: [] },
+    V: { score: null, maximum: 10, missing: '定制资料不足', facts: [] },
+  },
+  missing: [],
+};
+const materials = {
+  direction: 'finished',
+  product: 'Roller blinds',
+  targetProduct: 'Roller fabric',
+  basisProduct: 'Roller blinds',
+  grade: '常规开发',
+  status: '常规开发',
+  matchLevel: '潜在匹配',
+  relationship: 'potential_input',
+  prioritySignals: [],
+  facts: [materialFact],
+  dimensions: {
+    P: { score: 20, maximum: 40, facts: [materialFact] },
+    R: { score: null, maximum: 30, facts: [] },
+  },
+  missing: ['材料或配件采购方式、规格、数量与负责人待沟通'],
+};
 const rawReason = [
   '[自动评估 ev_fixture_123]',
-  '规则版本：acquisition-v3.2',
+  '规则版本：acquisition-v4.0',
   `评估时间：${evaluatedAt}`,
   '经营证据方向：成品 · Zip screens',
-  '评级口径：A/B/C表示初始开发优先级',
   '主营产品：户外防风帘',
   '原文：We supply made-to-measure zip screens.',
   '来源：https://buyer.example.org/products',
-  '其他方向（不与主方向拼分）：',
-  '材料 · Roller fabric：B，已支持60分',
 ].join('\n');
 const assessment = {
+  ...primary,
   id: 'ev_fixture_123',
-  grade: 'A',
-  score: 85,
-  complete: false,
-  ruleVersion: 'acquisition-v3.2',
+  score: 70,
+  complete: true,
+  ruleVersion: 'acquisition-v4.0',
   evaluatedAt,
-  evidenceReason: [
-    `研究限制：本次仅按新规则重算，沿用 ${sourceAt} 的官网研究证据，未重新抓取官网。；仅用已保存事实按 v3.2 复算。`,
-    '主营产品：户外防风帘',
-    '原文：We supply made-to-measure zip screens.',
-    '来源：https://buyer.example.org/products',
-  ].join('\n'),
-  missing: ['未确认企业是否接受海外供货'],
-  dimensions: { P: { score: 40, maximum: 40 }, D: { score: null, maximum: 20 } },
+  evidenceReason: rawReason,
+  opportunities: [primary, materials],
 };
 const lead = {
   name: 'Acme Screens',
-  grade: 'A',
-  score: 85,
+  grade: '高优先',
+  score: 70,
   type: 'retailer',
   product: '防风帘\n卷帘\n遮阳篷\n百叶窗\n纱窗\n布艺帘\n天窗帘',
-  status: '未记录',
+  status: '已联系',
   companyIdentity: {
     legal_name: null,
     website_name: 'Acme Screens',
@@ -57,361 +100,290 @@ const lead = {
   evidence: '经营户外防风帘与室内窗饰，提供量尺和安装服务。',
   supplyOpportunity: '成品 · 防风帘（潜在供货机会）',
   demandProducts: '',
-  pendingQuestions: `未确认企业是否接受海外供货；研究限制：沿用 ${sourceAt}，本次没有重新抓取官网。`,
+  pendingQuestions: '',
   serviceAreas: 'Sydney Region',
+  address: '10 Example Street, Sydney',
+  audience: 'BC',
   source: 'https://buyer.example.org/products',
   updatedAt: sourceAt,
   assessment,
   ratingReason: rawReason,
 };
 
-const renderProfile = (overrides = {}) =>
+const renderProfile = (overrides = {}, props = {}) =>
   renderToStaticMarkup(
     React.createElement(CustomerProfile, {
       lead: { ...lead, ...overrides },
       typeLabel: '零售商、安装服务商',
-      onAssessment() {},
-    }),
-  );
-const renderAssessment = (props = {}) =>
-  renderToStaticMarkup(
-    React.createElement(AssessmentPanel, {
-      assessment,
-      ratingReason: rawReason,
-      researchAt: sourceAt,
       ...props,
     }),
   );
-// Closed disclosures are omitted from the initial view while their summaries remain readable.
-const initialView = (html) =>
-  html.replace(/<details\b([^>]*)>([\s\S]*?)<\/details>/g, (all, attributes, content) =>
-    /\bopen(?:=|\s|$)/.test(attributes)
-      ? all
-      : content.match(/<summary\b[^>]*>[\s\S]*?<\/summary>/)?.[0] || '',
+// Model native details visibility, including nested closed disclosures.
+const initialView = (html) => {
+  const details = [];
+  let visible = '';
+  for (const [token] of html.matchAll(/<[^>]*>|[^<]+/g)) {
+    if (/^<details\b/.test(token)) {
+      details.push({ open: /\sopen(?:=|[\s>])/.test(token), summary: false });
+    } else if (/^<summary\b/.test(token)) {
+      if (details.length) details.at(-1).summary = true;
+    } else if (/^<\/summary>/.test(token)) {
+      if (details.length) details.at(-1).summary = false;
+    } else if (/^<\/details>/.test(token)) {
+      details.pop();
+    } else if (!token.startsWith('<') && details.every((detail) => detail.open || detail.summary)) {
+      visible += token + ' ';
+    }
+  }
+  return visible.replace(/\s+/g, ' ');
+};
+const labeledElement = (html, label) => {
+  const opening = [...html.matchAll(/<([a-z]+)\b[^>]*>/g)].find(([tag]) =>
+    tag.includes(`aria-label="${label}"`),
   );
-const technicalDisclosure = (html) =>
-  html.match(/<details\b[^>]*>\s*<summary>技术信息<\/summary>[\s\S]*?<\/details>/)?.[0];
+  assert.ok(opening, `缺少 ${label} 区域`);
+  const [tag, name] = opening;
+  const start = opening.index;
+  let depth = 1;
+  for (const match of html
+    .slice(start + tag.length)
+    .matchAll(new RegExp(`<(/?)${name}\\b[^>]*>`, 'g'))) {
+    depth += match[1] ? -1 : 1;
+    if (!depth) return html.slice(start, start + tag.length + match.index + match[0].length);
+  }
+  throw new Error(`区域 ${label} 没有结束标签`);
+};
 
-test('客户画像首次展示简洁概览和评级入口，自动评估报告不重复出现在画像中', () => {
+test('画像集中展示具体开发理由与供货分析，主方向展开，其他方向保留摘要', () => {
   const html = renderProfile();
   const visible = initialView(html);
   assert.match(visible, /经营户外防风帘与室内窗饰/);
-  assert.match(visible, /旧版评估/);
-  assert.doesNotMatch(visible, /85\/100/);
-  assert.match(visible, /查看完整评估/);
-  assert.match(visible, /零售商、安装服务商/);
-  assert.doesNotMatch(html, /ev_fixture_123|acquisition-v3\.2|评级口径|We supply made-to-measure/);
+  assert.match(visible, /零售商、安装服务商|企业与个人客户/);
+  assert.match(visible, /Zip screens/);
+  assert.match(visible, /高优先/);
+  assert.match(visible, /明确匹配/);
+  assert.match(visible, /防风帘属于稳定主营产品线/);
+  assert.match(visible, /向贸易客户供货的专业窗饰供应商/);
+  assert.match(visible, /供货分析/);
+  assert.match(visible, /Roller fabric/);
+  assert.doesNotMatch(visible, /卷帘生产使用遮阳面料/);
+  assert.doesNotMatch(visible, /查看完整评估|\/100|主营产品、专业供货角色/);
 });
 
-test('潜在供货机会不冒充采购需求，普通官网缺项不生成补档任务', () => {
-  const visible = initialView(renderProfile());
-  assert.match(visible, /潜在供货机会/);
-  assert.match(visible, /成品 · 防风帘/);
-  assert.doesNotMatch(visible, /未确认企业是否接受海外供货|具体采购需求待确认|经营法人名称待核实/);
-  assert.doesNotMatch(visible, /待确认|补充资料/);
-  assert.doesNotMatch(visible, /公开采购需求|本次没有重新抓取|研究限制：/);
+test('各方向经营事实保持独立，材料机会分析不冒充已确认的采购需求', () => {
+  const html = renderProfile();
+  const finished = labeledElement(html, '供货机会：成品 · Zip screens');
+  const material = labeledElement(html, '供货机会：材料配件 · Roller fabric');
+  assert.match(finished, /防风帘属于稳定主营产品线/);
+  assert.doesNotMatch(finished, /卷帘生产使用遮阳面料/);
+  assert.match(material, /卷帘生产使用遮阳面料/);
+  assert.doesNotMatch(material, /向贸易客户供货的专业窗饰供应商/);
+  assert.match(material, /潜在匹配/);
+  assert.match(material, /面料|材料/);
+  assert.match(initialView(material), /客户已经营Roller blinds.*询问是否需要Roller fabric/);
+  assert.doesNotMatch(initialView(material), /已确认采购需求|已确认采购|确定采购/);
+  assert.doesNotMatch(initialView(html), /材料或配件采购方式、规格、数量与负责人待沟通|补档任务/);
 });
 
-test('更多产品和企业资料默认折叠，同时保留完整内容供展开核对', () => {
+test('潜在供货机会移除查看依据、原文和来源展示，保留分析与经营事实', () => {
+  const unsafe = { ...roleFact, source_url: 'javascript:alert(1)' };
+  const scoped = {
+    ...primary,
+    facts: [productFact, unsafe],
+    dimensions: { ...primary.dimensions, R: { score: 30, maximum: 30, facts: [unsafe] } },
+    prioritySignals: [],
+  };
+  const html = renderProfile({ assessment: { ...assessment, ...scoped, opportunities: [scoped] } });
+  const opportunity = labeledElement(html, '潜在供货机会');
+  assert.match(opportunity, /供货分析|防风帘属于稳定主营产品线/);
+  assert.doesNotMatch(
+    opportunity,
+    /查看依据|profile-evidence|profile-source|We supply made-to-measure zip screens\.|We supply zip screens to trade customers\.|buyer\.example\.org|javascript:/,
+  );
+});
+
+test('人工经营事实随对应结论保留确认人和时间，机会区不展示原文', () => {
+  const manual = {
+    ...roleFact,
+    quote: '客户实际答复内容',
+    source_url: '',
+    origin: 'manual',
+    confirmationId: 'manual-2',
+    confirmedBy: '李明',
+    confirmedAt: evaluatedAt,
+  };
+  const scoped = {
+    ...primary,
+    facts: [productFact, manual],
+    dimensions: { ...primary.dimensions, R: { score: 30, maximum: 30, facts: [manual] } },
+    prioritySignals: [],
+  };
+  const html = renderProfile({ assessment: { ...assessment, ...scoped, opportunities: [scoped] } });
+  assert.match(html, /人工确认/);
+  assert.match(html, /李明/);
+  assert.match(html, /2026年10月24日 18:42（北京时间）/);
+  assert.doesNotMatch(labeledElement(html, '潜在供货机会'), /客户实际答复内容/);
+  assert.match(initialView(html), /人工确认.*李明/);
+  assert.match(initialView(html), /2026年10月24日 18:42（北京时间）/);
+  assert.doesNotMatch(initialView(html), /客户实际答复内容/);
+});
+
+test('真实冲突在企业概况之前显示影响和核实入口，普通未知不生成任务', () => {
+  const conflict = '同产品事实冲突';
+  const scoped = {
+    ...primary,
+    missing: [conflict],
+    dimensions: {
+      ...primary.dimensions,
+      P: { ...primary.dimensions.P, score: null, conflict: true, missing: conflict },
+    },
+  };
+  const html = renderProfile(
+    {
+      assessment: { ...assessment, ...scoped, opportunities: [scoped] },
+      pendingQuestions: conflict,
+    },
+    { onSupplement() {} },
+  );
+  const visible = initialView(html);
+  assert.ok(visible.indexOf(conflict) < visible.indexOf(lead.mainProductPreference));
+  assert.match(visible, /自动首封.*(?:暂停|暂不可发送)|暂停.*自动首封/);
+  assert.match(html, /核实依据/);
+  const normal = initialView(renderProfile());
+  assert.doesNotMatch(normal, /企业持续经营年限尚未核实|定制资料不足|需核实事项|补充资料/);
+});
+
+test('其他供货方向的真实冲突也保持置顶可见', () => {
+  const conflict = '材料产品依据冲突';
+  const scoped = {
+    ...materials,
+    missing: [conflict],
+    dimensions: {
+      ...materials.dimensions,
+      P: { ...materials.dimensions.P, conflict: true, missing: conflict },
+    },
+  };
+  const visible = initialView(
+    renderProfile({ assessment: { ...assessment, opportunities: [primary, scoped] } }),
+  );
+  assert.match(visible, /材料产品依据冲突/);
+});
+
+test('待核实的经营关联不被描述为已经发现事实冲突', () => {
+  const pending = {
+    ...primary,
+    grade: null,
+    status: '待核实',
+    matchLevel: '待核实',
+    facts: [],
+    prioritySignals: [],
+    missing: ['经营主体尚未核实'],
+    dimensions: {},
+  };
+  const visible = initialView(
+    renderProfile({
+      grade: '待核实',
+      assessment: { ...assessment, ...pending, opportunities: [pending] },
+    }),
+  );
+  assert.match(visible, /待核实/);
+  assert.doesNotMatch(visible, /解决相关冲突|存在冲突|自动首封暂不可发送/);
+});
+
+test('更多产品与企业资料默认折叠并保留完整内容', () => {
   const html = renderProfile({
     companyIdentity: { ...lead.companyIdentity, aliases: ['Acme Screens', 'Acme Trading'] },
   });
   const visible = initialView(html);
   assert.match(visible, /其余 1 项产品/);
-  assert.doesNotMatch(visible, /天窗帘|Acme Trading|完整行业画像保留/);
-  assert.match(html, /天窗帘/);
-  assert.match(html, /Acme Trading/);
-  assert.match(html, /完整行业画像保留/);
-  assert.ok(
-    [...html.matchAll(/<details\b[^>]*>/g)].every(([tag]) => !/\sopen(?:=|[\s>])/.test(tag)),
+  assert.doesNotMatch(
+    visible,
+    /天窗帘|Acme Trading|Sydney Region|10 Example Street|完整行业画像保留/,
   );
+  for (const text of [
+    '天窗帘',
+    'Acme Trading',
+    'Sydney Region',
+    '10 Example Street',
+    '完整行业画像保留',
+  ])
+    assert.ok(html.includes(text));
 });
 
-test('已记录的公开采购需求独立呈现，官网取证时间与评估更新时间均显示北京时间', () => {
+test('客户行业画像隐藏来源行，保留经营描述和依据文字', () => {
+  const html = renderProfile({
+    industryProfile:
+      '经营窗饰制造与零售。\r\n依据：Custom window furnishings — manufacture & retail\r\n来源：https://buyer.example.org/about\r\n来源: https://buyer.example.org/company',
+  });
+  const industry = html.match(/<dt>客户行业画像<\/dt><dd>([\s\S]*?)<\/dd>/)?.[1];
+  assert.ok(industry);
+  assert.match(industry, /经营窗饰制造与零售|依据：Custom window furnishings/);
+  assert.doesNotMatch(industry, /来源|https?:/);
+});
+
+test('公开与人工确认的采购需求单独显示，不由供货分析生成', () => {
   const visible = initialView(
     renderProfile({
       demandProducts: '公开寻找定制卷帘面料供应商\n依据：We are seeking roller fabric suppliers.',
+      manualPurchaseNeed: '采购防风帘样品两套',
     }),
   );
   assert.match(visible, /公开采购需求/);
   assert.match(visible, /公开寻找定制卷帘面料供应商/);
-  assert.doesNotMatch(visible, /具体采购需求待确认/);
+  assert.match(visible, /已确认采购需求/);
+  assert.match(visible, /采购防风帘样品两套/);
+  assert.doesNotMatch(
+    initialView(renderProfile()),
+    /公开采购需求|已确认采购需求|具体采购需求待确认/,
+  );
+});
+
+test('人工改级标记贴近当前客户等级，资料时间保持北京时间', () => {
+  const visible = initialView(
+    renderProfile({ grade: '常规开发', assessment: { ...assessment, manualOverride: true } }),
+  );
+  assert.match(visible, /常规开发/);
+  assert.match(visible, /人工调整|人工修改/);
   assert.match(visible, /官网取证：2026年10月22日 14:05（北京时间）/);
   assert.match(visible, /评估更新：2026年10月24日 18:42（北京时间）/);
   assert.doesNotMatch(visible, /2026-10-\d{2}T|\.234Z|\.566Z/);
 });
 
-test('最新评估首次展示判断摘要，完整原文来源和其他方向默认折叠', () => {
-  const html = renderAssessment();
+test('旧版分项和完整记录移入初评记录折叠，保留原含义及规则版本', () => {
+  const legacy = {
+    ...assessment,
+    grade: 'A',
+    score: 85,
+    ruleVersion: 'acquisition-v3.2',
+    legacy: true,
+    opportunities: [],
+    evidenceReason: rawReason.replace('acquisition-v4.0', 'acquisition-v3.2'),
+  };
+  const html = renderProfile({ grade: 'A', assessment: legacy });
   const visible = initialView(html);
-  assert.match(visible, /完整评级记录/);
-  assert.doesNotMatch(visible, /We supply made-to-measure zip screens\./);
-  assert.doesNotMatch(visible, /https:\/\/buyer\.example\.org\/products/);
-  assert.doesNotMatch(visible, /材料 · Roller fabric：B，已支持60分/);
-  assert.match(html, /We supply made-to-measure zip screens\./);
-  assert.match(html, /https:\/\/buyer\.example\.org\/products/);
-  assert.match(html, /材料 · Roller fabric：B，已支持60分/);
   assert.match(visible, /旧版评估/);
-  assert.doesNotMatch(visible, /未确认企业是否接受海外供货/);
-  assert.doesNotMatch(visible, /ev_fixture_123|acquisition-v3\.2/);
-  const technical = technicalDisclosure(html);
-  assert.ok(technical, '技术信息可供展开核对');
-  assert.doesNotMatch(technical.match(/^<details\b[^>]*>/)[0], /\sopen(?:=|[\s>])/);
-  assert.match(technical, /ev_fixture_123/);
-  assert.match(technical, /acquisition-v3\.2/);
-  assert.doesNotMatch(html, /2026-10-\d{2}T|\.234Z|\.566Z/);
-});
-
-test('缺少结构化自动评估时完整记录仍可展开，不能伪造逐维度结论', () => {
-  const html = renderAssessment({ assessment: null });
-  const visible = initialView(html);
-  assert.match(visible, /完整评级记录/);
-  assert.doesNotMatch(
-    visible,
-    /主营产品：户外防风帘|We supply made-to-measure zip screens\.|材料 · Roller fabric/,
-  );
-  assert.match(html, /主营产品：户外防风帘/);
+  assert.match(visible, /初评记录/);
+  assert.doesNotMatch(visible, /ev_fixture_123|acquisition-v3\.2|40\s*\/\s*40/);
+  assert.match(html, /ev_fixture_123/);
+  assert.match(html, /acquisition-v3\.2/);
+  assert.match(html, /40\s*(?:<[^>]*>\s*)*\/\s*40/);
   assert.match(html, /We supply made-to-measure zip screens\./);
-  assert.match(html, /材料 · Roller fabric：B，已支持60分/);
-  assert.doesNotMatch(html, /class="assessment-dimension-card/);
-  assert.match(visible, /2026年10月24日 18:42（北京时间）/);
-  assert.doesNotMatch(visible, /ev_fixture_123|acquisition-v3\.2|尚无当前规则的自动评估/);
-  assert.match(technicalDisclosure(html), /ev_fixture_123/);
 });
 
-test('结构化评估存在时，额外人工评级依据仍保留在业务内容中', () => {
-  const supplement = '人工补充依据：客户官网公布了供应商申请入口，尚未确认具体采购量。';
-  const html = renderAssessment({ ratingReason: rawReason + '\n' + supplement });
-  const businessContent = html.replace(technicalDisclosure(html), '');
-  assert.match(businessContent, /人工补充依据：客户官网公布了供应商申请入口，尚未确认具体采购量。/);
-  assert.doesNotMatch(initialView(html), /人工补充依据：客户官网公布了供应商申请入口/);
-  assert.doesNotMatch(businessContent, /ev_fixture_123|acquisition-v3\.2|2026-10-\d{2}T/);
-});
-
-const dimensionAssessment = {
-  ...assessment,
-  grade: null,
-  score: 45,
-  dimensions: {
-    P: {
-      score: 40,
-      maximum: 40,
-      facts: [
-        {
-          kind: 'core_product',
-          value: '防风帘属于稳定主营产品线',
-          quote: 'The full original product quotation is preserved for source review.',
-          source_url: 'https://buyer.example.org/zip-screens',
-        },
-      ],
-    },
-    R: {
-      score: 0,
-      maximum: 30,
-      facts: [
-        {
-          kind: 'no_supply_role',
-          value: '现有业务只提供安装服务',
-          quote: 'We install customer supplied products and do not purchase them.',
-          source_url: 'https://buyer.example.org/services',
-        },
-      ],
-    },
-    D: { score: null, maximum: 20, missing: '企业持续经营年限尚未核实', facts: [] },
-    V: {
-      score: 5,
-      maximum: 10,
-      facts: [
-        {
-          kind: 'custom_made',
-          value: '支持按尺寸定制',
-          quote: 'The full original customization quotation must not crowd the initial view.',
-          source_url: 'javascript:alert(1)',
-        },
-      ],
-    },
-  },
-};
-const currentAssessment = {
-  ...dimensionAssessment,
-  grade: '高优先',
-  status: '高优先',
-  ruleVersion: 'acquisition-v4.0',
-  matchLevel: '明确匹配',
-  prioritySignals: [
-    {
-      kind: 'core_product',
-      label: '主营产品',
-      quote: 'We supply made-to-measure zip screens.',
-      source_url: 'https://buyer.example.org/products',
-    },
-    {
-      kind: 'specialist_supply',
-      label: '专业供货角色',
-      quote: 'We supply zip screens to trade customers.',
-      source_url: 'https://buyer.example.org/trade',
-    },
-  ],
-  missing: [],
-  dimensions: {
-    P: dimensionAssessment.dimensions.P,
-    R: {
-      score: 30,
-      maximum: 30,
-      facts: [
-        {
-          kind: 'specialist_supply',
-          value: '专业供货',
-          quote: 'We supply zip screens to trade customers.',
-          source_url: 'https://buyer.example.org/trade',
-        },
-      ],
-    },
-    D: dimensionAssessment.dimensions.D,
-    V: { score: null, maximum: 10, missing: '定制资料不足', facts: [] },
-  },
-};
-const contentText = (html) => html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
-const dimensionCards = (html) =>
-  [
-    ...html.matchAll(
-      /<article\b[^>]*class="assessment-dimension-card[^"]*"[^>]*>[\s\S]*?<\/article>/g,
-    ),
-  ].map(([card]) => card);
-
-test('新版档案显示匹配等级与有来源的优先线索，未知年限和定制不变成补档任务', () => {
-  const profile = initialView(
-    renderProfile({
-      grade: '高优先',
-      score: 70,
-      assessment: currentAssessment,
-      pendingQuestions: '',
-    }),
-  );
-  assert.match(profile, /高优先|匹配等级：明确匹配|优先线索/);
-  assert.match(profile, /主营产品、专业供货角色/);
-  assert.doesNotMatch(profile, /\/100|待确认|经营法人名称待核实|具体采购需求待确认/);
-  const panel = initialView(renderAssessment({ assessment: currentAssessment, onSupplement() {} }));
-  assert.match(panel, /匹配等级：明确匹配|We supply zip screens to trade customers/);
-  assert.match(panel, /href="https:\/\/buyer\.example\.org\/trade"/);
-  assert.match(panel, /持续经营尚无公开依据/);
-  assert.doesNotMatch(panel, /\/100|待补充|补充资料|定制资料不足/);
-});
-
-test('旧评估按维度保留历史分项，普通未知不再提示人工补档', () => {
-  const html = renderAssessment({ assessment: dimensionAssessment });
-  const visible = initialView(html);
-  const cards = dimensionCards(html).map((card) => contentText(initialView(card)));
-  assert.equal(cards.length, 4);
-  const product = cards.find((card) => card.includes('产品契合'));
-  assert.match(product, /40\s*\/\s*40/);
-  assert.match(product, /主营产品与目标品类对口/);
-  assert.match(product, /防风帘属于稳定主营产品线/);
-  const role = cards.find((card) => card.includes('经营角色'));
-  assert.match(role, /0\s*\/\s*30/);
-  assert.match(role, /现有证据显示无适用供货角色/);
-  const sustained = cards.find((card) => card.includes('持续经营'));
-  assert.match(sustained, /未知\s*\/\s*20/);
-  assert.match(sustained, /持续经营尚无公开依据/);
-  assert.doesNotMatch(sustained, /企业持续经营年限尚未核实|待补充/);
-  const customization = cards.find((card) => card.includes('定制与系统特征'));
-  assert.match(customization, /5\s*\/\s*10/);
-  assert.match(customization, /具备定制特征/);
-  assert.match(customization, /支持按尺寸定制/);
-  assert.match(contentText(visible), /旧版评估/);
-  assert.doesNotMatch(contentText(visible), /45\s*\/\s*100/);
+test('没有结构化评估时保留已有评级原文，不编造分项或机会分析', () => {
+  const supplement = '人工补充依据：客户官网公布了供应商申请入口。';
+  const html = renderProfile({ assessment: null, ratingReason: rawReason + '\n' + supplement });
+  assert.match(html, /初评记录/);
+  assert.match(html, /人工补充依据：客户官网公布了供应商申请入口。/);
+  assert.match(html, /We supply made-to-measure zip screens\./);
   assert.doesNotMatch(
-    visible,
-    /The full original|We install customer supplied products|https:\/\/buyer\.example\.org\/zip-screens/,
+    initialView(html),
+    /人工补充依据：客户官网公布了供应商申请入口。|We supply made-to-measure zip screens\./,
   );
 });
 
-test('逐维度原文和来源默认折叠，安全来源可导航，脚本来源只能作为文本保留', () => {
-  const html = renderAssessment({ assessment: dimensionAssessment });
-  const disclosures = [
-    ...html.matchAll(
-      /<details\b[^>]*class="assessment-dimension-sources[^"]*"[^>]*>[\s\S]*?<\/details>/g,
-    ),
-  ].map(([detail]) => detail);
-  assert.equal(disclosures.length, 3);
-  for (const detail of disclosures) {
-    assert.doesNotMatch(detail.match(/^<details\b[^>]*>/)[0], /\sopen(?:=|[\s>])/);
-    assert.match(detail, /原文与来源/);
-  }
-  assert.match(html, /The full original product quotation is preserved for source review\./);
-  assert.match(html, /The full original customization quotation must not crowd the initial view\./);
-  assert.match(html, /href="https:\/\/buyer\.example\.org\/zip-screens"/);
-  assert.match(html, /javascript:alert\(1\)/);
-  assert.doesNotMatch(html, /href="javascript:/);
-  const fullRecord = html.match(
-    /<details\b[^>]*class="assessment-full-evidence[^"]*"[^>]*>[\s\S]*?<\/details>/,
-  )?.[0];
-  assert.ok(fullRecord);
-  assert.doesNotMatch(fullRecord.match(/^<details\b[^>]*>/)[0], /\sopen(?:=|[\s>])/);
-});
-
-test('人工调整标记和北京时间在精简后的评估首屏仍然保留', () => {
-  const visible = initialView(
-    renderAssessment({ assessment: { ...dimensionAssessment, grade: 'B', manualOverride: true } }),
-  );
-  assert.match(visible, /主表评级已人工修改/);
-  assert.match(visible, /客户优先级已人工调整；自动评估依据仍保留/);
-  assert.match(visible, /评估更新：2026年10月24日 18:42（北京时间）/);
-  assert.match(visible, /官网取证：2026年10月22日 14:05（北京时间）/);
-});
-
-test('普通官网缺项不生成补资料入口，真实产品冲突仍可核实', () => {
-  const profile = renderToStaticMarkup(
-    React.createElement(CustomerProfile, {
-      lead: { ...lead, assessment: dimensionAssessment, pendingQuestions: '' },
-      typeLabel: '零售商',
-      onAssessment() {},
-      onSupplement() {},
-    }),
-  );
-  assert.doesNotMatch(profile, /企业持续经营年限尚未核实|经营法人名称待核实|具体采购需求待确认/);
-  const assessed = renderAssessment({ assessment: dimensionAssessment, onSupplement() {} });
-  const cards = dimensionCards(assessed);
-  assert.doesNotMatch(
-    cards.find((card) => card.includes('持续经营评分')),
-    /补充资料|核实冲突/,
-  );
-  const conflictAssessment = {
-    ...dimensionAssessment,
-    missing: ['同产品事实冲突'],
-    dimensions: {
-      ...dimensionAssessment.dimensions,
-      P: {
-        ...dimensionAssessment.dimensions.P,
-        score: null,
-        conflict: true,
-        missing: '同产品事实冲突',
-      },
-    },
-  };
-  const conflictProfile = renderProfile({
-    assessment: conflictAssessment,
-    pendingQuestions: '同产品事实冲突',
-  });
-  assert.match(conflictProfile, /需核实事项/);
-  const conflictPanel = renderAssessment({ assessment: conflictAssessment, onSupplement() {} });
-  assert.match(conflictPanel, /aria-label="核实冲突：产品契合"/);
-});
-
-test('确认记录默认折叠，已确认名称与采购需求显示，旧评分缺项不形成任务', () => {
-  const confirmation = {
-    id: 'manual-1',
-    category: 'profile',
-    pendingItem: '企业持续经营年限尚未核实',
-    content: '确认过的企业资料',
-    evidence: '人工电话核对原文',
-    confirmedBy: '李明',
-    confirmedAt: evaluatedAt,
-    direction: 'finished',
-    product: '防风帘',
-  };
+test('完整人工确认记录折叠保留，已核实资料不会重新变成普通补档任务', () => {
   const html = renderProfile({
-    assessment: { ...dimensionAssessment, missing: ['企业持续经营年限尚未核实'] },
     pendingQuestions: '经营法人名称待核实；具体采购需求待确认',
     companyIdentity: {
       legal_name: 'Acme Trading Ltd',
@@ -420,61 +392,21 @@ test('确认记录默认折叠，已确认名称与采购需求显示，旧评�
       status: 'legal_name_manual_confirmed',
     },
     manualPurchaseNeed: '采购防风帘样品两套',
-    confirmations: [confirmation],
+    confirmations: [
+      {
+        id: 'manual-1',
+        category: 'profile',
+        pendingItem: '经营法人名称待核实',
+        content: '确认过的企业资料',
+        evidence: '人工电话核对原文',
+        confirmedBy: '李明',
+        confirmedAt: evaluatedAt,
+      },
+    ],
   });
   const visible = initialView(html);
-  assert.doesNotMatch(visible, /企业持续经营年限尚未核实/);
-  assert.doesNotMatch(visible, /经营法人名称待核实|具体采购需求待确认/);
-  assert.match(visible, /已确认采购需求|采购防风帘样品两套/);
-  assert.doesNotMatch(visible, /人工电话核对原文|李明/);
-  assert.match(html, /人工电话核对原文|李明/);
-  assert.match(html, /2026年10月24日 18:42（北京时间）/);
+  assert.doesNotMatch(visible, /经营法人名称待核实|具体采购需求待确认|人工电话核对原文/);
   assert.match(html, /Acme Trading Ltd（人工确认）/);
-});
-
-test('人工评分依据保留确认人和北京时间，来源默认折叠', () => {
-  const html = renderAssessment({
-    assessment: {
-      ...dimensionAssessment,
-      dimensions: {
-        R: {
-          score: 30,
-          maximum: 30,
-          facts: [
-            {
-              kind: 'specialist_supply',
-              value: '专业供货',
-              quote: '客户实际答复内容',
-              source_url: '',
-              origin: 'manual',
-              confirmationId: 'manual-2',
-              confirmedBy: '李明',
-              confirmedAt: evaluatedAt,
-            },
-          ],
-        },
-      },
-    },
-  });
-  assert.match(html, /人工确认 · 李明 · 2026年10月24日 18:42（北京时间）/);
-  assert.match(html, /客户实际答复内容/);
-  assert.doesNotMatch(initialView(html), /客户实际答复内容|李明/);
-  assert.match(html, /依据由确认人补充/);
-});
-
-test('潜在材料采购机会不自动生成采购补档任务', () => {
-  const note = '材料或配件采购方式、规格、数量与负责人待沟通';
-  const scopedAssessment = {
-    ...assessment,
-    direction: 'finished',
-    product: 'Roller blinds',
-    dimensions: {},
-    missing: [note],
-    supplyOpportunity: { targetProduct: 'Roller fabric', note, procurementStatus: 'unconfirmed' },
-  };
-  const profile = renderProfile({ assessment: scopedAssessment, pendingQuestions: note });
-  const latest = renderAssessment({ assessment: scopedAssessment, onSupplement() {} });
-  assert.doesNotMatch(initialView(profile), /材料或配件采购方式、规格、数量与负责人待沟通|待确认/);
-  assert.doesNotMatch(initialView(latest), /材料或配件采购方式、规格、数量与负责人待沟通|补充资料/);
-  assert.match(latest, /Roller fabric/);
+  assert.match(html, /人工电话核对原文/);
+  assert.match(html, /李明/);
 });

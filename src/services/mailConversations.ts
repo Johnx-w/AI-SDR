@@ -90,6 +90,14 @@ export interface MailboxSyncStatus {
   email: string;
   lastSyncAt: string | null;
   error: string | null;
+  lastError?: {
+    occurredAt: string;
+    message: string;
+    stage: 'credentials' | 'connect' | 'folders' | 'read' | 'validate' | 'save';
+    code: string;
+    providerCode?: string;
+    responseStatus?: string;
+  } | null;
   syncing?: boolean;
   hasMore?: boolean;
   folders?: string[];

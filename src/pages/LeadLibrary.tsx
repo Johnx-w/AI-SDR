@@ -18,7 +18,6 @@ import { SupplementPanel } from '../components/SupplementPanel';
 import type { SupplementContext } from '../services/leadSupplements';
 import { WebsiteEvidencePanel } from '../components/WebsiteEvidencePanel';
 import { CustomerBusinessSummary } from '../components/CustomerBusinessSummary';
-import { AssessmentPanel } from '../components/AssessmentPanel';
 import { leadLibrary, startLeadLibraryPolling } from '../services/leadLibrary';
 import type { LeadList, Prospect } from '../services/leadLibrary';
 import { exportCsv } from '../services/csv';
@@ -79,6 +78,7 @@ export function LeadLibrary() {
   const [status, setStatus] = useState('');
   const [page, setPage] = useState(1);
   const [tab, setTab] = useState('客户画像');
+  const [focusOpportunity, setFocusOpportunity] = useState(false);
   const [supplement, setSupplement] = useState<SupplementContext | undefined>(undefined);
   const detailBody = useRef<HTMLDivElement>(null);
   const mounted = useRef(false);
@@ -168,10 +168,25 @@ export function LeadLibrary() {
     const dialog = body?.closest('dialog');
     if (dialog) dialog.scrollTop = 0;
   }, [supplement, tab, viewed?.id]);
+  useEffect(() => {
+    if (!focusOpportunity || tab !== '客户画像' || supplement) return;
+    const frame = requestAnimationFrame(() => {
+      const section = detailBody.current?.querySelector<HTMLElement>('#profile-opportunities');
+      if (!section) return;
+      section.focus({ preventScroll: true });
+      const dialog = section.closest('dialog');
+      if (dialog)
+        dialog.scrollTop +=
+          section.getBoundingClientRect().top - dialog.getBoundingClientRect().top - 20;
+      setFocusOpportunity(false);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focusOpportunity, tab, supplement, viewed]);
   const open = (id: string, detailTab = '客户画像') => {
     setSupplement(undefined);
     setParams({ dataset: 'real', lead: id });
-    setTab(detailTab);
+    setFocusOpportunity(detailTab === '供货机会');
+    setTab(detailTab === '供货机会' ? '客户画像' : detailTab);
   };
   const close = () => setParams({ dataset: 'real' });
   const download = async () => {
@@ -464,7 +479,7 @@ export function LeadLibrary() {
                             aria-label={`查看 ${l.name} 的评级依据`}
                             onClick={(e) => {
                               e.stopPropagation();
-                              open(l.id, '最新评估');
+                              open(l.id, '供货机会');
                             }}
                           >
                             {l.ratingSummary}
@@ -613,17 +628,13 @@ export function LeadLibrary() {
                 ) : (
                   <>
                     <div className="detail-tabs">
-                      {[
-                        '客户画像',
-                        '最新评估',
-                        '官网证据',
-                        '联系方式',
-                        '沟通与跟进',
-                        '原始字段',
-                      ].map((t) => (
+                      {['客户画像', '官网证据', '联系方式', '沟通与跟进', '原始字段'].map((t) => (
                         <button
                           className={tab === t ? 'active' : ''}
-                          onClick={() => setTab(t)}
+                          onClick={() => {
+                            setFocusOpportunity(false);
+                            setTab(t);
+                          }}
                           key={t}
                         >
                           {t}
@@ -634,16 +645,6 @@ export function LeadLibrary() {
                       <CustomerProfile
                         lead={viewed}
                         typeLabel={typeNames[viewed.type] || viewed.type}
-                        onAssessment={() => setTab('最新评估')}
-                        onSupplement={setSupplement}
-                      />
-                    )}
-                    {tab === '最新评估' && (
-                      <AssessmentPanel
-                        key={viewed.id}
-                        assessment={viewed.assessment}
-                        ratingReason={viewed.ratingReason}
-                        researchAt={viewed.updatedAt}
                         onSupplement={setSupplement}
                       />
                     )}

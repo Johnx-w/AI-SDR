@@ -28,6 +28,13 @@ const groups = [
     detail: '依据证据生成企业画像并执行准入判断。模型服务独立配置，可替换。',
   },
   {
+    title: '产品资料 · 图纸与规格识别',
+    icon: Sparkles,
+    prefix: 'DOCUMENT_MODEL_',
+    detail:
+      '选用支持图片、PDF 和 Responses API 的模型。点击 AI 提取时将原文件发送至此服务，提取结果需人工审核。',
+  },
+  {
     title: '客户入库 · 飞书',
     icon: Database,
     prefix: 'FEISHU_',

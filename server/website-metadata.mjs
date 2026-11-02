@@ -249,11 +249,6 @@ export function extractWebsiteMetadata({ content, sourceUrl }) {
       .replace(/<br\s*\/?\s*>|<\/(?:p|div|address|li)>/gi, '\n')
       .replace(/<[^>]*>/g, ' '),
   );
-  // Keep explicit service statements as evidence, never as the company's address.
-  for (const m of lines.matchAll(
-    /(?:^|[\n.!?])\s*((?:We\s+(?:(?:are|now|proudly)\s+)*(?:serve|service|servicing)|Proudly\s+serving|Serving|Service\s+areas?\s*:)[^\n.!?]{3,250})/gi,
-  ))
-    addArea(m[1].trim(), 'service_statement', m[1]);
   const postal = (text, method, quote, mapUrl) => {
     for (const m of text.matchAll(
       /\b(\d{1,6}[A-Z]?[ \t]+[A-Za-z0-9 .#'-]{3,100}),\s*([A-Za-z .'-]{2,45}),\s*(AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)\s*,?\s*(\d{5}(?:-\d{4})?)(?:\s*,?\s*(USA|United States(?: of America)?))?(?=[\s.\])<]|$)/g,

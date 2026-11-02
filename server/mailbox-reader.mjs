@@ -1,5 +1,6 @@
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
+import { mailSyncFailure } from './mail-sync-errors.mjs';
 
 const IMAP = Object.freeze({ host: 'imap.qiye.aliyun.com', port: 993, secure: true });
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -23,29 +24,22 @@ const HEADERS = [
   'x-autoreply',
   'x-autorespond',
 ];
-const readMessages = {
-  MAILBOX_READ_FAILED: '邮箱邮件同步失败，请检查收件连接后重试',
-  MAILBOX_READ_AUTH_FAILED: '邮箱收件验证失败，请检查账号和客户端密码',
-  MAILBOX_READ_INVALID: '邮箱收件参数不正确',
-};
-
 export class MailboxReadError extends Error {
   constructor(code = 'MAILBOX_READ_FAILED') {
-    super(readMessages[code] || readMessages.MAILBOX_READ_FAILED);
+    const failure = mailSyncFailure({ code });
+    super(failure.message);
     this.name = 'MailboxReadError';
-    this.code = Object.hasOwn(readMessages, code) ? code : 'MAILBOX_READ_FAILED';
+    this.code = failure.diagnostic.code;
     this.status = this.code === 'MAILBOX_READ_INVALID' ? 400 : 503;
   }
 }
 const invalid = () => new MailboxReadError('MAILBOX_READ_INVALID');
-const safeError = (error) =>
-  error instanceof MailboxReadError
-    ? error
-    : new MailboxReadError(
-        ['EAUTH', 'AUTHENTICATIONFAILED', 'AuthenticationFailed'].includes(error?.code)
-          ? 'MAILBOX_READ_AUTH_FAILED'
-          : 'MAILBOX_READ_FAILED',
-      );
+const safeError = (error, stage) => {
+  const failure = mailSyncFailure(error, stage);
+  return Object.assign(new MailboxReadError(failure.diagnostic.code), {
+    diagnostic: failure.diagnostic,
+  });
+};
 const clean = (value, maximum = 1000) =>
   String(value ?? '')
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, '')
@@ -390,6 +384,7 @@ export function createMailboxReader({
         connected = false,
         timer;
       const releases = new Set();
+      let stage = 'connect';
       const close = () => {
         try {
           client?.close?.();
@@ -413,6 +408,7 @@ export function createMailboxReader({
         const work = (async () => {
           await client.connect();
           connected = true;
+          stage = 'folders';
           const listed = await client.list();
           if (!Array.isArray(listed)) throw new MailboxReadError();
           const sent = listed.find(
@@ -424,6 +420,7 @@ export function createMailboxReader({
           const folders = [{ path: inbox?.path || 'INBOX', sent: false }];
           if (sent && sent.path !== folders[0].path) folders.push({ path: sent.path, sent: true });
           const results = [];
+          stage = 'read';
           for (const folder of folders)
             results.push(
               await readFolder(
@@ -445,12 +442,12 @@ export function createMailboxReader({
           new Promise((_, reject) => {
             timer = setTimeout(() => {
               close();
-              reject(new MailboxReadError());
+              reject(new MailboxReadError('MAILBOX_READ_TIMEOUT'));
             }, timeoutMs);
           }),
         ]);
       } catch (error) {
-        throw safeError(error);
+        throw safeError(error, stage);
       } finally {
         clearTimeout(timer);
         for (const release of releases) release();

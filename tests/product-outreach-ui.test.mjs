@@ -161,6 +161,26 @@ test('已登记的外发事实保留稳定编号，删除只影响选择的资�
   );
 });
 
+test('文件候选只在用户采用后进入草稿，保留原有参数并清除审核状态', async (t) => {
+  const current = { ...fixture([]), specifications: '原有已核实参数' };
+  const h = setup(t, current);
+  h.click('查看 / 编辑');
+  h.change('资料状态', 'approved');
+  h.change('审核人', '审核人');
+  const panel = elements(h.render()).find((node) => node.type?.name === 'ProductDocuments');
+  assert.equal(panel.props.productId, current.id);
+  assert.deepEqual(panel.props.documentIds, []);
+  assert.equal(h.writes.length, 0);
+  panel.props.onUse('pd_' + 'a'.repeat(64), '宽度 50 mm\n依据：规格.pdf，第 1 页，正视图');
+  assert.equal(h.field('资料状态').props.value, 'draft');
+  assert.match(h.field('已核实参数').props.value, /^原有已核实参数\n\n宽度 50 mm/);
+  assert.equal(h.writes.length, 0, '采用候选后仍需显式保存');
+  await h.submit();
+  assert.equal(h.writes[0].status, 'draft');
+  assert.equal(h.writes[0].approvedBy, '');
+  assert.deepEqual(h.writes[0].documentIds, ['pd_' + 'a'.repeat(64)]);
+});
+
 test('计划引用资料库事实无需重复声明，兼容旧介绍且只展示邮箱负责的产品', async (t) => {
   const page = new URL('../src/pages/OutreachCommunication.tsx', import.meta.url);
   const fact = {

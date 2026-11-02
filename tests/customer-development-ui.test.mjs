@@ -67,7 +67,7 @@ const settle = async () => {
   for (let index = 0; index < 8; index++) await Promise.resolve();
 };
 
-function control(t, snapshot = fixture(), api = {}) {
+function control(t, snapshot = fixture(), api = {}, compact = false, initial = {}) {
   const events = [];
   const priorWindow = globalThis.window;
   globalThis.window = { dispatchEvent: (event) => events.push(event) };
@@ -75,7 +75,7 @@ function control(t, snapshot = fixture(), api = {}) {
     if (priorWindow === undefined) delete globalThis.window;
     else globalThis.window = priorWindow;
   });
-  const states = [snapshot, false];
+  const states = [snapshot, initial.loading || false, false, initial.error || ''];
   const refs = [];
   let stateIndex, refIndex;
   const calls = [];
@@ -125,7 +125,11 @@ function control(t, snapshot = fixture(), api = {}) {
   const { CustomerDevelopmentControl } = load(entry);
   const render = () => {
     stateIndex = refIndex = 0;
-    return CustomerDevelopmentControl({ customerId: 'customer-1' });
+    return CustomerDevelopmentControl({
+      customerId: 'customer-1',
+      compact,
+      customerStatus: initial.customerStatus,
+    });
   };
   return {
     calls,
@@ -163,7 +167,59 @@ test('暂缓状态展示原因、人工历史和独立联系限制，回复仍�
 
 test('邮件开发管理展示根据真实沟通计算的当前状态', (t) => {
   const data = { ...fixture(false), sourceStatus: '待开发', status: '已联系' };
-  assert.match(control(t, data).html(), /当前开发状态：已联系/);
+  const html = control(t, data).html();
+  assert.match(html, /当前开发状态：已联系/);
+  assert.doesNotMatch(html, /customer-development-management/);
+});
+
+test('状态读取中或失败时，画像仍展示档案已有开发状态且不开放管理动作', (t) => {
+  for (const initial of [{ loading: true }, { error: '读取状态超时' }]) {
+    const html = control(t, null, {}, true, { ...initial, customerStatus: '已联系' }).html();
+    assert.match(html, /当前开发状态：已联系/);
+    assert.match(html, initial.loading ? /正在核对邮件开发状态/ : /读取状态超时/);
+    assert.doesNotMatch(html, /<button[^>]*>[\s\S]*?确认恢复开发/);
+    assert.doesNotMatch(html, /<form/);
+  }
+  const current = { ...fixture(false), sourceStatus: '已联系', status: '跟进中' };
+  assert.match(
+    control(t, current, {}, true, { customerStatus: '待开发' }).html(),
+    /当前开发状态：跟进中/,
+  );
+});
+
+test('画像状态条默认折叠管理区，保留暂缓原因、复查日与恢复操作', async (t) => {
+  const data = { ...fixture(), sourceStatus: '已联系' };
+  data.development.reviewDate = '2026-10-01';
+  const ui = control(t, data, {}, true);
+  const html = ui.html();
+  const summary = html.match(
+    /<summary class="customer-development-strip">[\s\S]*?<\/summary>/,
+  )?.[0];
+  assert.ok(summary);
+  assert.match(summary, /当前开发状态：已联系/);
+  for (const expected of [
+    '暂缓开发',
+    '管理邮件开发',
+    '客户要求稍后联系',
+    '2026-10-01',
+    '已到期，请复查',
+  ])
+    assert.ok(summary.includes(expected));
+  assert.match(html, /<details class="customer-development-management">/);
+  assert.doesNotMatch(html, /<details class="customer-development-management" open/);
+  assert.match(html, /修改复查日期/);
+  assert.match(html, /恢复开发/);
+  ui.button('恢复开发').props.onClick();
+  await settle();
+  assert.match(ui.html(), /Please contact us next month/);
+  assert.match(ui.html(), /查看开发信计划与草稿/);
+  assert.equal(ui.button('确认恢复开发').props.disabled, true);
+  ui.change('下一步发送安排', '核对新来信后安排联系');
+  ui.change('已核对最新沟通及原草稿', true);
+  ui.submit();
+  await settle();
+  assert.equal(ui.calls[0].value.action, 'resume');
+  assert.equal(ui.calls[0].value.reviewToken, 'review-1');
 });
 
 test('只有已明确关联客户的邮件会话提供开发控制，未关联会话引导客户库核对', () => {

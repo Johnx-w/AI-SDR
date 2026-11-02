@@ -37,6 +37,7 @@ interface DimensionInput {
 }
 export function buildAssessmentDimensions(
   assessment?: {
+    ruleVersion?: string;
     product?: string | null;
     direction?: string | null;
     evidenceReason?: string;

@@ -262,6 +262,33 @@ export class NativeAcquisition {
               ? Object.values(fact.value).filter(Boolean).join(', ')
               : String(fact.value ?? ''),
         });
+        const factSummary = (fact) => ({
+          kind: fact.kind,
+          value: readable(fact).value,
+          quote: fact.quote,
+          source_url: fact.source_url,
+          ...(fact.origin === 'manual'
+            ? {
+                origin: 'manual',
+                confirmationId: fact.confirmationId,
+                confirmedBy: fact.confirmedBy,
+                confirmedAt: fact.confirmedAt,
+              }
+            : {}),
+        });
+        const dimensionSummary = (dimensions) =>
+          Object.fromEntries(
+            Object.entries(dimensions || {}).map(([key, dimension]) => [
+              key,
+              {
+                score: dimension.score,
+                maximum: dimension.maximum,
+                missing: dimension.missing,
+                facts: (Array.isArray(dimension.facts) ? dimension.facts : []).map(factSummary),
+                ...(dimension.conflict ? { conflict: true } : {}),
+              },
+            ]),
+          );
         const facts = [
           ...stored.facts,
           ...stored.opportunities.flatMap((o) => o.facts.map((f) => ({ ...f, field: f.kind }))),
@@ -304,39 +331,26 @@ export class NativeAcquisition {
                 opportunities: stored.opportunities.map((o) => ({
                   direction: o.direction,
                   product: o.product,
+                  relationship: o.relationship,
+                  ...(o.relationship === 'potential_input'
+                    ? {
+                        basisProduct: o.product,
+                        targetProduct:
+                          stored.target?.product || stored.supplyOpportunity?.targetProduct,
+                      }
+                    : {}),
                   grade: o.grade,
                   status: o.status,
                   matchLevel: o.matchLevel,
                   prioritySignals: o.prioritySignals,
+                  facts: (o.facts || []).map(factSummary),
+                  dimensions: dimensionSummary(o.dimensions),
+                  missing: o.missing || [],
                 })),
                 evidenceReason: formatAssessmentEvidence(stored),
                 incompleteReason: stored.incompleteReason,
                 missing: stored.missing,
-                dimensions: Object.fromEntries(
-                  Object.entries(stored.dimensions).map(([k, d]) => [
-                    k,
-                    {
-                      score: d.score,
-                      maximum: d.maximum,
-                      missing: d.missing,
-                      facts: (Array.isArray(d.facts) ? d.facts : []).map((fact) => ({
-                        kind: fact.kind,
-                        value: readable(fact).value,
-                        quote: fact.quote,
-                        source_url: fact.source_url,
-                        ...(fact.origin === 'manual'
-                          ? {
-                              origin: 'manual',
-                              confirmationId: fact.confirmationId,
-                              confirmedBy: fact.confirmedBy,
-                              confirmedAt: fact.confirmedAt,
-                            }
-                          : {}),
-                      })),
-                      ...(d.conflict ? { conflict: true } : {}),
-                    },
-                  ]),
-                ),
+                dimensions: dimensionSummary(stored.dimensions),
               },
             },
             this.supplements.confirmations(lead.id, lead.website),

@@ -31,6 +31,7 @@ export function createAcquisitionProvider({
     customerRecord: (id) => customers.record(id),
     customerRemoteId: (id) => customers.remoteId?.(id) ?? (id.startsWith('local_') ? null : id),
     closeArchive: () => customers.close?.(),
+    decorateLeads: (data) => (service().decorateLeads ? service().decorateLeads(data) : data),
     info: {
       ...config,
       configured: config.nativeReady,

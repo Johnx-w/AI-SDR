@@ -13,6 +13,7 @@ import { ApiConnections } from './api-connections.mjs';
 import { AcquisitionSchedules } from './acquisition-schedules.mjs';
 import { ProductCatalog } from './product-catalog.mjs';
 import { ProductKnowledge } from './product-knowledge.mjs';
+import { MAX_PRODUCT_DOCUMENT_BYTES } from './product-documents.mjs';
 import { ProductKnowledgeFeishu } from './product-knowledge-feishu.mjs';
 import { CustomerBusinessApi } from './customer-business-api.mjs';
 import { searchPlan } from './search-plan.mjs';
@@ -65,7 +66,7 @@ async function readJson(request, maximum = maxJsonBytes) {
     if (size > maximum)
       throw new ApiError(
         413,
-        maximum === maxJsonBytes ? '请求体不能超过 32 KB' : '邮件及附件内容过大',
+        maximum === maxJsonBytes ? '请求体不能超过 32 KB' : '请求内容或附件过大',
       );
     chunks.push(chunk);
   }
@@ -351,6 +352,7 @@ export function createApp({
               readingLeads ||
               leadLibrary?.refreshing ||
               provider.syncing ||
+              productKnowledge?.documents.running.size ||
               jobs().active() ||
               [...runs.values()].some((r) => r.status === 'unknown')
             )
@@ -403,6 +405,46 @@ export function createApp({
             return json(response, request.method === 'POST' ? 201 : 200, { product, feishu });
           }
           throw new ApiError(405, '不支持的产品资料操作');
+        }
+        const productDocuments = url.pathname.match(
+          /^\/api\/v1\/products\/knowledge\/(pk_[a-f0-9]{32})\/documents(?:\/(pd_[a-f0-9]{64})\/(file|extract))?$/,
+        );
+        if (productDocuments) {
+          const [, productId, documentId, action] = productDocuments;
+          const product = knowledge().get(productId);
+          if (!product) throw new ApiError(404, '产品资料不存在');
+          const documents = knowledge().documents;
+          if (!documentId && request.method === 'GET')
+            return json(response, 200, { documents: documents.list(productId) });
+          if (action === 'file' && request.method === 'GET') {
+            const file = documents.get(productId, documentId);
+            response.writeHead(200, {
+              'Content-Type': file.contentType,
+              'Content-Length': file.size,
+              'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+              'X-Content-Type-Options': 'nosniff',
+              'Cache-Control': 'no-store',
+              'Content-Security-Policy': "sandbox; default-src 'none'",
+            });
+            return response.end(file.bytes);
+          }
+          if (product.status === 'archived')
+            throw new ApiError(409, '已归档产品不能上传或提取文件');
+          if (!documentId && request.method === 'POST')
+            return json(response, 201, {
+              document: documents.upload(
+                productId,
+                await readJson(request, Math.ceil(MAX_PRODUCT_DOCUMENT_BYTES / 3) * 4 + 2048),
+              ),
+            });
+          if (action === 'extract' && request.method === 'POST')
+            return json(response, 200, {
+              document: await documents.extract(productId, documentId, {
+                env: connections.environment(),
+                fetchImpl,
+              }),
+            });
+          throw new ApiError(405, '不支持的产品文件操作');
         }
         const productSync = url.pathname.match(
           /^\/api\/v1\/products\/knowledge\/(pk_[a-f0-9]{32})\/sync$/,
@@ -487,7 +529,10 @@ export function createApp({
           return await leadJson(response, 'export', loadLeads);
         const leadRoute = url.pathname.match(/^\/api\/v1\/leads\/real\/([\w-]{1,100})$/);
         if (leadRoute && request.method === 'GET')
-          return await leadJson(response, 'detail', () => library().detail(leadRoute[1]));
+          return await leadJson(response, 'detail', async () => {
+            const data = await library().detail(leadRoute[1]);
+            return { ...data, lead: provider.decorateLeads({ leads: [data.lead] }).leads[0] };
+          });
         const supplementRoute = url.pathname.match(
           /^\/api\/v1\/leads\/real\/([\w-]{1,100})\/supplements$/,
         );

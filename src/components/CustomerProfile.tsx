@@ -2,7 +2,13 @@ import { ArrowUpRight } from 'lucide-react';
 import { Badge } from './ui';
 import { CustomerDevelopment } from './CustomerDevelopment';
 import { formatBeijingText, formatBeijingTime } from '../domain/date-time.mjs';
-import type { AssessmentSummary } from './AssessmentPanel';
+import type { AssessmentSummary } from '../services/customerAssessment';
+import {
+  ProfileOpportunities,
+  InitialAssessmentRecord,
+  assessmentLimitations,
+  evidenceUrl,
+} from './ProfileOpportunities';
 import type { ManualConfirmation, SupplementContext } from '../services/leadSupplements';
 import './CustomerProfile.css';
 
@@ -34,6 +40,7 @@ interface ProfileLead {
   source: string;
   updatedAt: string | number | null;
   assessment?: AssessmentSummary | null;
+  ratingReason?: string;
   confirmations?: ManualConfirmation[];
   manualPurchaseNeed?: string;
 }
@@ -59,12 +66,10 @@ const identityKey = (value: string) => value.trim().toLocaleLowerCase().replace(
 export function CustomerProfile({
   lead,
   typeLabel,
-  onAssessment,
   onSupplement,
 }: {
   lead: ProfileLead;
   typeLabel: string;
-  onAssessment: () => void;
   onSupplement?: (context: SupplementContext) => void;
 }) {
   const overview = [lead.mainProductPreference, lead.evidence, lead.industryProfile].find(
@@ -78,56 +83,46 @@ export function CustomerProfile({
     line.replace(/（潜在供货机会）|\(潜在供货机会\)/g, '').replace(/[，,]潜在供货机会/g, ''),
   );
   const demand = businessLines(lead.demandProducts).filter((line) => meaningful(line));
-  const automaticMissing = new Set([
-    ...(lead.assessment?.missing || []),
-    ...Object.values(lead.assessment?.dimensions || {}).flatMap((dimension) =>
-      dimension.missing ? [dimension.missing] : [],
-    ),
-  ]);
+  const industryProfile = lines(lead.industryProfile)
+    .filter((line) => !/^来源[:：]/.test(line))
+    .join('\n');
+  const scopedDimensions = [lead.assessment, ...(lead.assessment?.opportunities || [])].flatMap(
+    (opportunity) =>
+      Object.entries(opportunity?.dimensions || {}).map(([key, dimension]) => ({
+        key,
+        dimension,
+        opportunity,
+      })),
+  );
   const needsReview = (item: string) => /冲突|强制|不一致|必需/.test(item);
   const pending = [
     ...new Set(
       [
-        ...(lead.assessment?.missing || []).filter(needsReview),
-        ...Object.values(lead.assessment?.dimensions || {}).flatMap((dimension) =>
-          dimension.conflict && dimension.missing ? [dimension.missing] : [],
+        ...[
+          ...(lead.assessment?.missing || []),
+          ...(lead.assessment?.opportunities || []).flatMap((o) => o.missing || []),
+        ].filter(needsReview),
+        ...scopedDimensions.flatMap(({ dimension }) =>
+          dimension.conflict ? [dimension.missing || '经营事实存在冲突'] : [],
         ),
-        ...businessLines(
-          (lead.pendingQuestions || '').replace(/(?:本轮)?研究限制[:：][\s\S]*$/, ''),
-        )
+        ...businessLines(lead.pendingQuestions)
           .flatMap((line) => line.split(/[；;]/))
-          .filter((item) => needsReview(item) || !automaticMissing.has(item)),
+          .filter(needsReview),
       ]
         .map((item) => item.trim())
-        .filter(
-          (item) =>
-            item &&
-            !/^(暂无已记录的待确认事项|暂无|无|经营法人名称待核实|具体采购需求待确认)$/.test(
-              item,
-            ) &&
-            !/^材料或配件采购方式、规格、数量与负责人待沟通/.test(item),
-        ),
+        .filter(Boolean),
     ),
-  ].filter((item) => {
-    if (needsReview(item)) return true;
-    if (
-      /经营法人名称待核实/.test(item) &&
-      lead.companyIdentity?.status === 'legal_name_manual_confirmed'
-    )
-      return false;
-    if (/具体采购需求待确认/.test(item) && lead.manualPurchaseNeed) return false;
-    return !lead.confirmations?.some(
-      (confirmation) => confirmation.category === 'profile' && confirmation.pendingItem === item,
-    );
-  });
+  ];
   const supplementContext = (item: string): SupplementContext => {
-    const dimension = Object.entries(lead.assessment?.dimensions || {}).find(
-      ([, value]) => value.conflict && value.missing === item,
-    )?.[0];
-    if (dimension && ['P', 'R', 'D', 'V'].includes(dimension))
+    const match = scopedDimensions.find(
+      ({ dimension }) => dimension.conflict && dimension.missing === item,
+    );
+    if (match && ['P', 'R', 'D', 'V'].includes(match.key))
       return {
         category: 'assessment',
-        dimension: dimension as 'P' | 'R' | 'D' | 'V',
+        dimension: match.key as 'P' | 'R' | 'D' | 'V',
+        product: match.opportunity?.product,
+        direction: match.opportunity?.direction,
         pendingItem: item,
       };
     if (/经营法人名称/.test(item)) return { category: 'legal_name', pendingItem: item };
@@ -166,10 +161,10 @@ export function CustomerProfile({
         ]
       : []),
     ...(lead.address ? [['企业实际地址', lead.address]] : []),
+    ...(lead.serviceAreas ? [['服务地区', lead.serviceAreas]] : []),
     ...(lead.source ? [['发现来源', lead.source]] : []),
     ...(lead.advertisingCodes ? [['广告代码', lead.advertisingCodes]] : []),
   ];
-  const priority: Record<string, string> = { A: '优先开发', B: '可开发', C: '较低优先级' };
   const audience =
     (
       { B: '企业客户', C: '个人客户', BC: '企业与个人客户', 'B+C': '企业与个人客户' } as Record<
@@ -179,31 +174,36 @@ export function CustomerProfile({
     )[lead.audience || ''] || lead.audience;
   return (
     <section className="customer-profile" aria-label="客户概览">
+      {!!pending.length && (
+        <section className="profile-business-card profile-pending" aria-label="需核实事项">
+          <h3>需核实事项</h3>
+          <p>经营事实或必需条件存在冲突，自动首封暂不可发送，请先核实。</p>
+          <ul>
+            {pending.map((item) => (
+              <li key={item}>
+                <span>{formatBeijingText(item)}</span>
+                {onSupplement && (
+                  <button
+                    className="text-link profile-supplement-link"
+                    onClick={() => onSupplement(supplementContext(item))}
+                    aria-label={'核实事项：' + item}
+                  >
+                    核实依据
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       <div className="profile-overview">
         <div className="profile-overview-heading">
-          <div className="profile-priority">
-            <Badge tone={['高优先', 'A'].includes(lead.grade) ? 'blue' : 'neutral'}>
-              {lead.grade}
-              {priority[lead.grade] ? ' · ' + priority[lead.grade] : ''}
-            </Badge>
-            {lead.assessment?.ruleVersion &&
-              !['acquisition-v4.0', 'acquisition-v5.0'].includes(lead.assessment.ruleVersion) && (
-                <Badge>旧版评估</Badge>
-              )}
-            {lead.assessment &&
-              ['acquisition-v4.0', 'acquisition-v5.0'].includes(lead.assessment.ruleVersion) &&
-              lead.assessment.matchLevel && <span>匹配等级：{lead.assessment.matchLevel}</span>}
-          </div>
-          <div className="profile-actions">
-            {onSupplement && (
-              <button className="text-link" onClick={() => onSupplement({ category: 'profile' })}>
-                记录已核实信息
-              </button>
-            )}
-            <button className="text-link" onClick={onAssessment}>
-              查看完整评估 <ArrowUpRight size={13} />
+          <h3>企业概况</h3>
+          {onSupplement && (
+            <button className="text-link" onClick={() => onSupplement({ category: 'profile' })}>
+              记录已核实信息
             </button>
-          </div>
+          )}
         </div>
         <p className="profile-introduction">{formatBeijingText(description)}</p>
         <dl className="profile-facts">
@@ -211,33 +211,14 @@ export function CustomerProfile({
             <dt>客户类型</dt>
             <dd>{typeLabel}</dd>
           </div>
-          {lead.assessment &&
-            ['acquisition-v4.0', 'acquisition-v5.0'].includes(lead.assessment.ruleVersion) &&
-            !!lead.assessment.prioritySignals?.length && (
-              <div>
-                <dt>优先线索</dt>
-                <dd>{lead.assessment.prioritySignals.map((signal) => signal.label).join('、')}</dd>
-              </div>
-            )}
-          {lead.serviceAreas && (
-            <div>
-              <dt>服务地区</dt>
-              <dd>{lead.serviceAreas}</dd>
-            </div>
-          )}
           {audience && (
             <div>
               <dt>服务客群</dt>
               <dd>{audience}</dd>
             </div>
           )}
-          <div>
-            <dt>开发状态</dt>
-            <dd>{lead.status}</dd>
-          </div>
         </dl>
       </div>
-      {lead.id && <CustomerDevelopment customerId={lead.id} />}
       <section className="profile-products" aria-label="主营产品">
         <h3>主营产品</h3>
         {products.length ? (
@@ -262,59 +243,69 @@ export function CustomerProfile({
           <p className="profile-empty">尚无已核实产品</p>
         )}
       </section>
-      <div className="profile-business-grid">
-        <section className="profile-business-card" aria-label="潜在供货机会">
-          <h3>潜在供货机会</h3>
-          {opportunities.length ? (
+      <section
+        id="profile-opportunities"
+        tabIndex={-1}
+        className="profile-business-card"
+        aria-label="潜在供货机会"
+      >
+        <h3>潜在供货机会</h3>
+        {!lead.assessment && (
+          <p>
+            <Badge>{lead.grade}</Badge>
+          </p>
+        )}
+        {lead.assessment?.manualOverride && (
+          <p className="profile-manual-priority">
+            <Badge>{lead.grade} · 人工调整</Badge>
+            客户优先级已人工调整；以下自动评估依据仍保留供核对。
+          </p>
+        )}
+        {(lead.assessment?.legacy ||
+          (lead.assessment?.ruleVersion &&
+            !['acquisition-v4.0', 'acquisition-v5.0'].includes(lead.assessment.ruleVersion))) && (
+          <p>
+            <Badge>旧版评估</Badge> 按原规则保留
+          </p>
+        )}
+        {assessmentLimitations(lead.assessment, lead.ratingReason)
+          .filter((text) => /失败|无法|未完成|不完整|冲突|截断/.test(text))
+          .map((text) => (
+            <p key={text} className="profile-opportunity-limitation">
+              研究限制：{formatBeijingText(text)}
+            </p>
+          ))}
+        {lead.assessment ? (
+          <ProfileOpportunities assessment={lead.assessment} ratingReason={lead.ratingReason} />
+        ) : opportunities.length ? (
+          <>
             <ul>
               {opportunities.map((item) => (
                 <li key={item}>{formatBeijingText(item)}</li>
               ))}
             </ul>
-          ) : (
-            <p className="profile-empty">尚无已记录的供货机会</p>
-          )}
-          {demand.length > 0 && (
-            <div className="profile-public-demand">
-              <h4>公开采购需求</h4>
-              <p>{formatBeijingText(demand.join('；'))}</p>
-            </div>
-          )}
-          {lead.manualPurchaseNeed && (
-            <div className="profile-public-demand">
-              <h4>
-                已确认采购需求 <small>人工确认</small>
-              </h4>
-              <p>{formatBeijingText(lead.manualPurchaseNeed)}</p>
-            </div>
-          )}
-        </section>
-        {!!pending.length && (
-          <section className="profile-business-card profile-pending" aria-label="需核实事项">
-            <h3>需核实事项</h3>
-            <ul>
-              {pending.map((item) => (
-                <li key={item}>
-                  <span>{formatBeijingText(item)}</span>
-                  {onSupplement && (
-                    <button
-                      className="text-link profile-supplement-link"
-                      onClick={() => onSupplement(supplementContext(item))}
-                      aria-label={'核实事项：' + item}
-                    >
-                      核实依据
-                    </button>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </section>
+            <p className="profile-empty">当前仅有机会摘要，逐条经营依据尚未记录。</p>
+          </>
+        ) : (
+          <p className="profile-empty">尚无已记录的供货机会</p>
         )}
-      </div>
-      <div className="profile-updated" aria-label="资料与评估时间">
-        <span>官网取证：{formatBeijingTime(lead.updatedAt, '时间未记录')}</span>
-        <span>评估更新：{formatBeijingTime(lead.assessment?.evaluatedAt, '尚未评估')}</span>
-      </div>
+        {demand.length > 0 && (
+          <div className="profile-public-demand">
+            <h4>公开采购需求</h4>
+            <p>{formatBeijingText(demand.join('；'))}</p>
+          </div>
+        )}
+        {lead.manualPurchaseNeed && (
+          <div className="profile-public-demand">
+            <h4>
+              已确认采购需求 <small>人工确认</small>
+            </h4>
+            <p>{formatBeijingText(lead.manualPurchaseNeed)}</p>
+          </div>
+        )}
+      </section>
+
+      {lead.id && <CustomerDevelopment compact customerId={lead.id} customerStatus={lead.status} />}
       {!!lead.confirmations?.length && (
         <details className="profile-more-details profile-confirmations">
           <summary>人工确认记录（{lead.confirmations.length} 条）</summary>
@@ -336,9 +327,13 @@ export function CustomerProfile({
               <p className="profile-confirmation-evidence">
                 依据：{formatBeijingText(confirmation.evidence)}
               </p>
-              {confirmation.sourceUrl && /^https?:\/\//i.test(confirmation.sourceUrl) && (
+              {evidenceUrl(confirmation.sourceUrl) && (
                 <p>
-                  <a href={confirmation.sourceUrl} target="_blank" rel="noopener noreferrer">
+                  <a
+                    href={evidenceUrl(confirmation.sourceUrl)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
                     查看来源 <ArrowUpRight size={12} />
                   </a>
                 </p>
@@ -359,10 +354,10 @@ export function CustomerProfile({
               <dd>{formatBeijingText(value)}</dd>
             </div>
           ))}
-          {lead.industryProfile && (
+          {industryProfile && (
             <div>
               <dt>客户行业画像</dt>
-              <dd>{formatBeijingText(lead.industryProfile)}</dd>
+              <dd>{formatBeijingText(industryProfile)}</dd>
             </div>
           )}
           {!!lead.companyIdentity?.notes?.length && (
@@ -373,6 +368,11 @@ export function CustomerProfile({
           )}
         </dl>
       </details>
+      <div className="profile-updated" aria-label="资料与评估时间">
+        <span>官网取证：{formatBeijingTime(lead.updatedAt, '时间未记录')}</span>
+        <span>评估更新：{formatBeijingTime(lead.assessment?.evaluatedAt, '尚未评估')}</span>
+      </div>
+      <InitialAssessmentRecord assessment={lead.assessment} ratingReason={lead.ratingReason} />
     </section>
   );
 }

@@ -23,11 +23,28 @@ const errorText = (reason: unknown) =>
 const beijingDay = () =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
 
-export function CustomerDevelopment({ customerId }: { customerId: string }) {
-  return <CustomerDevelopmentControl key={customerId} customerId={customerId} />;
+interface Props {
+  customerId: string;
+  compact?: boolean;
+  customerStatus?: string;
 }
 
-export function CustomerDevelopmentControl({ customerId }: { customerId: string }) {
+export function CustomerDevelopment({ customerId, compact = false, customerStatus = '' }: Props) {
+  return (
+    <CustomerDevelopmentControl
+      key={customerId}
+      customerId={customerId}
+      compact={compact}
+      customerStatus={customerStatus}
+    />
+  );
+}
+
+export function CustomerDevelopmentControl({
+  customerId,
+  compact = false,
+  customerStatus = '',
+}: Props) {
   const [snapshot, setSnapshot] = useState<CustomerDevelopmentSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -140,8 +157,24 @@ export function CustomerDevelopmentControl({ customerId }: { customerId: string 
     snapshot?.doNotContact ||
     /暂不开发|暂缓开发|暂停开发|停止开发|拒绝联系|已退订/.test(snapshot?.sourceStatus || '');
   const locked = loading || saving;
-  return (
-    <section className="customer-development" aria-label="邮件开发管理" aria-busy={locked}>
+  const compactStatus = snapshot?.status || snapshot?.sourceStatus || customerStatus;
+  const messages = (
+    <>
+      {loading && <p role="status">正在核对邮件开发状态…</p>}
+      {error && (
+        <p role="alert" className="customer-development-error">
+          {error}{' '}
+          <button type="button" className="text-link" disabled={locked} onClick={() => void load()}>
+            <RefreshCw size={12} />
+            重新读取
+          </button>
+        </p>
+      )}
+      {notice && <p role="status">{notice}</p>}
+    </>
+  );
+  const management = (
+    <>
       <div className="customer-development-heading">
         <h3>邮件开发</h3>
         {development && (
@@ -185,18 +218,8 @@ export function CustomerDevelopmentControl({ customerId }: { customerId: string 
           </div>
         )}
       </div>
-      {loading && <p role="status">正在核对邮件开发状态…</p>}
-      {error && (
-        <p role="alert" className="customer-development-error">
-          {error}{' '}
-          <button type="button" className="text-link" disabled={locked} onClick={() => void load()}>
-            <RefreshCw size={12} />
-            重新读取
-          </button>
-        </p>
-      )}
-      {notice && <p role="status">{notice}</p>}
-      {(snapshot?.status || snapshot?.sourceStatus) && (
+      {!compact && messages}
+      {!compact && (snapshot?.status || snapshot?.sourceStatus) && (
         <p className="customer-development-muted">
           当前开发状态：{snapshot.status || snapshot.sourceStatus}
         </p>
@@ -402,6 +425,42 @@ export function CustomerDevelopmentControl({ customerId }: { customerId: string 
             ))}
           </ol>
         </details>
+      )}
+    </>
+  );
+  return (
+    <section
+      className={`customer-development${compact ? ' customer-development-compact' : ''}`}
+      aria-label="邮件开发管理"
+      aria-busy={locked}
+    >
+      {compact ? (
+        <>
+          <details className="customer-development-management">
+            <summary className="customer-development-strip">
+              <strong>邮件开发</strong>
+              {compactStatus && <span>当前开发状态：{compactStatus}</span>}
+              {development && (
+                <Badge tone={development.paused ? 'amber' : 'neutral'}>
+                  {development.paused ? '暂缓开发' : '未设置暂缓'}
+                </Badge>
+              )}
+              <span className="customer-development-manage-label">管理邮件开发</span>
+              {development?.paused && (
+                <span className="customer-development-strip-reason">
+                  {development.reason} ·{' '}
+                  {development.reviewDate
+                    ? `${development.reviewDate} 复查（北京时间）${development.reviewDate <= beijingDay() ? ' · 已到期，请复查' : ''}`
+                    : '未设置复查日期'}
+                </span>
+              )}
+            </summary>
+            <div className="customer-development-management-body">{management}</div>
+          </details>
+          {messages}
+        </>
+      ) : (
+        management
       )}
     </section>
   );

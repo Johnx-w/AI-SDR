@@ -105,11 +105,16 @@ function encoded(product) {
     审核人: product.approvedBy || null,
     审核时间: date(product.approvedAt),
     最近更新时间: date(product.updatedAt),
-    备注: product.outreachFacts?.length
-      ? [product.notes, '开发信事实（JSON）\n' + JSON.stringify(product.outreachFacts)]
-          .filter(Boolean)
-          .join('\n\n')
-      : product.notes || null,
+    备注:
+      [
+        product.notes,
+        product.outreachFacts?.length &&
+          '开发信事实（JSON）\n' + JSON.stringify(product.outreachFacts),
+        product.documentIds?.length &&
+          '原文件编号（本地审核依据，不代表外发授权）\n' + product.documentIds.join('\n'),
+      ]
+        .filter(Boolean)
+        .join('\n\n') || null,
   };
 }
 

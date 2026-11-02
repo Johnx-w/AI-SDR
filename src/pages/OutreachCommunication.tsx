@@ -1145,6 +1145,18 @@ export function OutreachCommunication() {
     await refresh();
     setNotice('邮箱设置已保存，请验证连接。');
   }
+  async function editMailbox(id: string) {
+    setBusy(`mailbox-${id}`);
+    setError(null);
+    try {
+      const mailbox = await outreachApi<OutreachMailbox>(pathFor('mailboxes', id));
+      setMailboxEditor({ value: mailbox });
+    } catch (reason) {
+      setError(message(reason));
+    } finally {
+      setBusy(null);
+    }
+  }
   async function saveCampaign(input: CampaignInput) {
     await outreachApi(
       campaignEditor?.value ? pathFor('campaigns', campaignEditor.value.id) : '/campaigns',
@@ -1165,7 +1177,7 @@ export function OutreachCommunication() {
   }
   const mailboxes = state?.mailboxes || [];
   const campaigns = state?.campaigns || [];
-  const deliveries = state?.deliveries || [];
+  const deliveryStats = state?.deliveryStats;
   const products = state?.products || [];
   const connected = mailboxes.filter(
     (mailbox) => mailbox.configured && mailbox.smtpStatus === 'connected' && !mailbox.paused,
@@ -1184,7 +1196,7 @@ export function OutreachCommunication() {
     shownDetail?.deliveries[0];
   const needsReview = state?.review.internalTestPassed && !state.review.productionApproved;
   const currentDeliveryPreview = deliveryPreview
-    ? deliveries.find((delivery) => delivery.id === deliveryPreview.id) || deliveryPreview
+    ? recordData?.items.find((delivery) => delivery.id === deliveryPreview.id) || deliveryPreview
     : null;
 
   return (
@@ -1238,7 +1250,7 @@ export function OutreachCommunication() {
           [
             { id: 'mailboxes', label: '邮箱管理', icon: Mail, count: mailboxes.length },
             { id: 'campaigns', label: '触达计划', icon: Send, count: campaigns.length },
-            { id: 'deliveries', label: '发送记录', icon: Inbox, count: deliveries.length },
+            { id: 'deliveries', label: '发送记录', icon: Inbox, count: deliveryStats?.total || 0 },
             { id: 'conversations', label: '邮件会话', icon: MessageSquare, count: null },
           ] as const
         ).map((item) => (
@@ -1284,23 +1296,22 @@ export function OutreachCommunication() {
                     },
                     {
                       label: '服务商已接受',
-                      value: deliveries.filter((item) => item.status === 'accepted').length,
+                      value: deliveryStats?.accepted || 0,
                       detail: '含公司试发 · 提交结果',
                       icon: CheckCircle2,
                     },
                     {
                       label: '待发送',
-                      value: deliveries.filter((item) =>
-                        ['queued', 'sending'].includes(item.status),
-                      ).length,
+                      value: (deliveryStats?.queued || 0) + (deliveryStats?.sending || 0),
                       detail: '按计划节奏执行',
                       icon: Clock3,
                     },
                     {
                       label: '待处理',
-                      value: deliveries.filter((item) =>
-                        ['blocked', 'failed', 'unknown'].includes(item.status),
-                      ).length,
+                      value:
+                        (deliveryStats?.blocked || 0) +
+                        (deliveryStats?.failed || 0) +
+                        (deliveryStats?.unknown || 0),
                       detail: '查看具体原因',
                       icon: FileText,
                     },
@@ -1635,7 +1646,7 @@ export function OutreachCommunication() {
                           <button
                             className="btn secondary"
                             disabled={!!busy}
-                            onClick={() => setMailboxEditor({ value: mailbox })}
+                            onClick={() => void editMailbox(mailbox.id)}
                           >
                             <Settings2 size={15} />
                             配置

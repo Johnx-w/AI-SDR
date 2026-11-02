@@ -195,6 +195,45 @@
   background: var(--color-surface);
   border-top: 1px solid var(--color-border);
 }
+.knowledge-upload,
+.knowledge-candidate {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 12px;
+}
+.knowledge-document {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+}
+.knowledge-document-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  overflow-wrap: anywhere;
+}
+.knowledge-document-heading span,
+.knowledge-document details {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  margin: 8px 0;
+}
+.knowledge-candidate textarea {
+  width: 100%;
+  padding: 10px;
+  resize: vertical;
+  line-height: 1.7;
+}
+.knowledge-document > button {
+  margin-top: 12px;
+}
+.knowledge-extraction-warnings {
+  font-size: 12px;
+  line-height: 1.8;
+}
 @media (max-width: 640px) {
   .knowledge-fields {
     grid-template-columns: 1fr;

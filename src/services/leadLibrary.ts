@@ -1,4 +1,4 @@
-import type { AssessmentSummary } from '../components/AssessmentPanel';
+import type { AssessmentSummary } from './customerAssessment';
 import type { ManualConfirmation } from './leadSupplements';
 
 export interface Prospect {

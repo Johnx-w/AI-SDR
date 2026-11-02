@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createApp } from '../server/app.mjs';
 import { mapFeishuRecord } from '../server/feishu.mjs';
+import { assessCompany } from '../server/customer-assessment.mjs';
+import { AssessmentService } from '../server/assessment-service.mjs';
 
 const env = {
   FEISHU_APP_ID: 'fixture-app',
@@ -169,6 +171,76 @@ test('重启从SQLite读取客户，切换客户表不会展示上一张表的�
     assert.equal(changed.leads[0].id, 'rec_two');
     assert.notEqual(changed.scope, cached.scope);
     assert.equal((await fetch(server.base + '/rec_one')).status, 404);
+  } finally {
+    if (server?.app.listening) await server.close();
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
+test('既有本地档案读取时补充最新机会依据，飞书离线也无需重新研究或导入', async () => {
+  const folder = await mkdtemp(join(tmpdir(), 'lead-opportunity-projection-'));
+  const persistent = {
+    ...env,
+    LEAD_LIBRARY_DB_PATH: join(folder, 'leads.sqlite'),
+    BATCH_DB_PATH: join(folder, 'acquisition.sqlite'),
+  };
+  const current = record();
+  current.fields.初评结果 = '高优先';
+  let server;
+  try {
+    server = await open({
+      env: persistent,
+      fetchImpl: withFeishuAuth(async () => response([current])),
+    });
+    const old = await (await fetch(server.base + '/rec_one')).json();
+    assert.equal(old.lead.assessment, null);
+    await server.close();
+    const product = {
+      kind: 'core_product',
+      value: 'roller blinds',
+      quote: 'We make roller blinds.',
+      source_url: 'https://buyer.example.org/',
+    };
+    const role = {
+      kind: 'specialist_supply',
+      value: '窗饰供货商',
+      quote: '经业务员核实的供货角色',
+      source_url: '',
+      origin: 'manual',
+      confirmationId: 'confirmation-role',
+      confirmedBy: '业务员甲',
+      confirmedAt: '2026-11-02T05:00:00Z',
+    };
+    const snapshot = assessCompany({
+      id: 'ev-existing-dossier',
+      research: {
+        company_name: '客户一',
+        source_url: 'https://buyer.example.org/',
+        entity_type: 'business',
+        facts: [],
+        assessment_opportunities: [
+          { direction: 'finished', product: 'roller blinds', facts: [product, role] },
+        ],
+      },
+      target: { product: 'roller blinds', country: 'United States' },
+    });
+    const assessments = new AssessmentService({ env: persistent });
+    assessments.save(snapshot, current);
+    assessments.close();
+    let upstreamReads = 0;
+    server = await open({
+      env: persistent,
+      fetchImpl: async () => {
+        upstreamReads++;
+        throw new Error('upstream offline');
+      },
+    });
+    const detail = await (await fetch(server.base + '/rec_one')).json();
+    assert.equal(detail.version, old.version, '展示投影不改写本地档案内容版本');
+    assert.equal(detail.lead.assessment.id, snapshot.id);
+    assert.deepEqual(detail.lead.assessment.opportunities[0].facts, [product, role]);
+    assert.deepEqual(detail.lead.assessment.opportunities[0].dimensions.R.facts, [role]);
+    assert.equal(upstreamReads, 0);
   } finally {
     if (server?.app.listening) await server.close();
     await rm(folder, { recursive: true, force: true });
