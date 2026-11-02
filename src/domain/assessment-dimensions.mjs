@@ -212,7 +212,7 @@ function conclusion(key, dimension, facts, current) {
 
 export function buildAssessmentDimensions(assessment, ratingReason = '') {
   if (!assessment?.dimensions || typeof assessment.dimensions !== 'object') return [];
-  const current = assessment.ruleVersion === 'acquisition-v4.0';
+  const current = ['acquisition-v4.0', 'acquisition-v5.0'].includes(assessment.ruleVersion);
   const legacy = parseLegacyFacts(assessment, assessment.evidenceReason || ratingReason);
   return Object.entries(definitions).flatMap(([key, definition]) => {
     const dimension = assessment.dimensions[key];

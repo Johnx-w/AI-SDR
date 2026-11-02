@@ -116,10 +116,10 @@ test('历史配件目录恢复用途后正常入库、读回并保留待核实�
     assert.equal(records[0].fields.需求产品, undefined);
     assert.ok(records[0].fields.相关产品.includes(product));
     assert.equal(mapFeishuRecord(records[0]).market, '待核实');
-    assert.equal(records[0].fields.用户评级, '常规开发');
+    assert.equal(records[0].fields.用户评级, 'B');
 
     const assessment = service.assessmentHistory('rec-accessory').assessment;
-    assert.equal(assessment.grade, '常规开发');
+    assert.equal(assessment.grade, 'B');
     assert.equal(assessment.direction, 'materials');
     assert.equal(assessment.product, product);
     assert.equal(assessment.dimensions.R.score, null, '目录不能冒充经营角色');

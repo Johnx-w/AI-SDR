@@ -59,13 +59,13 @@ const confirmation = (overrides = {}) => ({
 
 test('人工确认经营角色按现有规则重算，补齐R但保留未知V和原研究限制', () => {
   const before = initial();
-  assert.equal(before.grade, '常规开发');
+  assert.equal(before.grade, 'B');
   assert.equal(before.dimensions.R.score, null);
   assert.equal(before.score, 55);
   const entry = confirmation();
   const result = recomputeFromSnapshot(before, [entry], { id: 'recomputed', at: at + 1 });
   assert.equal(result.score, 85);
-  assert.equal(result.grade, '高优先');
+  assert.equal(result.grade, 'A');
   assert.equal(result.dimensions.R.score, 30);
   assert.equal(result.dimensions.V.score, null);
   assert.deepEqual(result.missing, []);

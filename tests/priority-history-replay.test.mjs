@@ -92,26 +92,26 @@ function fixture({ productKind = 'core_product', roleKind = 'specialist_supply' 
   return { operation, entry, lead, record, scope };
 }
 
-test('按原始官网证据重放旧 B 级，主营与供货角色同向证实为高优先', () => {
+test('按原始官网证据重放旧 B 级，主营与供货角色同向证实为 A', () => {
   const plan = planPriorityHistoryReplay(fixture());
   assert.equal(plan.ok, true, plan.reason);
-  assert.equal(plan.snapshot.ruleVersion, 'acquisition-v4.0');
-  assert.equal(plan.snapshot.grade, '高优先');
+  assert.equal(plan.snapshot.ruleVersion, 'acquisition-v5.0');
+  assert.equal(plan.snapshot.grade, 'A');
   assert.equal(plan.snapshot.matchLevel, '明确匹配');
-  assert.equal(plan.fields['初评结果'], '高优先');
+  assert.equal(plan.fields['初评结果'], 'A');
   assert.equal(plan.fields['待确认事项'], '');
   assert.equal(plan.fields['评级依据'], undefined);
   assert.ok(plan.snapshot.prioritySignals.some((signal) => signal.kind === 'core_product'));
   assert.equal(plan.snapshot.id, planPriorityHistoryReplay(fixture()).snapshot.id);
 });
 
-test('旧 B 级不能映射等级，副线即使有供货角色也归常规开发', () => {
+test('旧 B 级不能机械映射，副线按证据归 B', () => {
   const plan = planPriorityHistoryReplay(fixture({ productKind: 'secondary_product' }));
   assert.equal(plan.ok, true, plan.reason);
-  assert.equal(plan.snapshot.grade, '常规开发');
+  assert.equal(plan.snapshot.grade, 'B');
 });
 
-test('现有客户证据不足时只迁为待核实，不进入自动开发优先级', () => {
+test('现有客户证据不足时归 C 并保留待核实原因', () => {
   const base = fixture();
   const content = base.operation.research_response.output[0].content[0];
   const raw = JSON.parse(content.text);
@@ -120,10 +120,10 @@ test('现有客户证据不足时只迁为待核实，不进入自动开发优�
   content.text = JSON.stringify(raw);
   const plan = planPriorityHistoryReplay(base);
   assert.equal(plan.ok, true, plan.reason);
-  assert.equal(plan.snapshot.grade, null);
+  assert.equal(plan.snapshot.grade, 'C');
   assert.equal(plan.snapshot.status, '待核实');
   assert.equal(plan.snapshot.matchLevel, '待核实');
-  assert.equal(plan.fields['初评结果'], '待核实');
+  assert.equal(plan.fields['初评结果'], 'C');
 });
 
 test('旧待核实客户缺原始响应且从无事实时，只生成说明证据缺失的待核实快照', () => {
@@ -143,6 +143,7 @@ test('旧待核实客户缺原始响应且从无事实时，只生成说明证�
       at: Date.parse('2026-10-01T00:00:00Z'),
     }),
     ruleVersion: 'acquisition-v3.2',
+    grade: null,
     reason: '旧规则待核实依据',
   };
   base.entry.snapshot = old;
@@ -163,14 +164,14 @@ test('旧待核实客户缺原始响应且从无事实时，只生成说明证�
   base.record.fields = { ...base.lead.fields, 企业官网: site, 公司名称: base.lead.name };
   const plan = planPriorityHistoryReplay(base);
   assert.equal(plan.ok, true, plan.reason);
-  assert.equal(plan.snapshot.grade, null);
+  assert.equal(plan.snapshot.grade, 'C');
   assert.equal(plan.snapshot.status, '待核实');
   assert.equal(plan.snapshot.matchLevel, '待核实');
   assert.equal(plan.snapshot.entityType, 'unknown');
   assert.deepEqual(plan.snapshot.facts, []);
   assert.deepEqual(plan.snapshot.opportunities, []);
   assert.equal(plan.snapshot.incompleteReason, '历史研究缺少可复核原始响应');
-  assert.equal(plan.fields['初评结果'], '待核实');
+  assert.equal(plan.fields['初评结果'], 'C');
   assert.equal(plan.fields['待确认事项'], '');
   old.facts.push({ kind: 'core_product', value: 'zip screens', quote: text, source_url: site });
   assert.equal(planPriorityHistoryReplay(base).reason, 'source_incomplete');
@@ -245,7 +246,7 @@ test('原始响应缺失、旧评估编号不符或新版评估均不重放', ()
       ...base,
       entry: {
         ...base.entry,
-        snapshot: { ...base.entry.snapshot, ruleVersion: 'acquisition-v4.0' },
+        snapshot: { ...base.entry.snapshot, ruleVersion: 'acquisition-v5.0' },
       },
     },
     {

@@ -184,11 +184,14 @@ export function CustomerProfile({
               {lead.grade}
               {priority[lead.grade] ? ' · ' + priority[lead.grade] : ''}
             </Badge>
-            {lead.assessment?.ruleVersion && lead.assessment.ruleVersion !== 'acquisition-v4.0' && (
-              <Badge>旧版评估</Badge>
+            {lead.assessment?.ruleVersion &&
+              !['acquisition-v4.0', 'acquisition-v5.0'].includes(lead.assessment.ruleVersion) && (
+                <Badge>旧版评估</Badge>
             )}
-            {lead.assessment?.ruleVersion === 'acquisition-v4.0' && lead.assessment.matchLevel && (
-              <span>匹配等级：{lead.assessment.matchLevel}</span>
+            {lead.assessment &&
+              ['acquisition-v4.0', 'acquisition-v5.0'].includes(lead.assessment.ruleVersion) &&
+              lead.assessment.matchLevel && (
+                <span>匹配等级：{lead.assessment.matchLevel}</span>
             )}
           </div>
           <div className="profile-actions">
@@ -208,7 +211,8 @@ export function CustomerProfile({
             <dt>客户类型</dt>
             <dd>{typeLabel}</dd>
           </div>
-          {lead.assessment?.ruleVersion === 'acquisition-v4.0' &&
+          {lead.assessment &&
+            ['acquisition-v4.0', 'acquisition-v5.0'].includes(lead.assessment.ruleVersion) &&
             !!lead.assessment.prioritySignals?.length && (
               <div>
                 <dt>优先线索</dt>

@@ -244,7 +244,7 @@ export class OverviewService {
           (record) => record.customerId,
         ),
       );
-      const priorityGrades = ['高优先', 'A', 'B', '常规开发'];
+      const priorityGrades = ['A', 'B', 'C'];
       const ranked = customers
         .filter(
           (customer) =>
@@ -262,9 +262,7 @@ export class OverviewService {
         );
       for (const customer of ranked)
         addPriority(customer.id, {
-          reason: ['高优先', '常规开发'].includes(customer.grade)
-            ? `${customer.grade}待开发客户`
-            : `${customer.grade} 级待开发客户`,
+          reason: `${customer.grade} 级待开发客户`,
           action: '查看档案与开发依据',
           to: link('/leads', { lead: customer.id }),
         });

@@ -37,6 +37,7 @@ import {
   assessmentId,
   assessmentRating,
   formatAssessmentEvidence,
+  projectCustomerGrade,
   ASSESSMENT_RULE_VERSION,
 } from './customer-assessment.mjs';
 import { AssessmentService } from './assessment-service.mjs';
@@ -267,9 +268,11 @@ export class NativeAcquisition {
         ]
           .filter((fact) => fact.origin !== 'manual')
           .map(readable);
-        const manualOverride = assessmentRating(stored) !== lead.grade;
+        const recordedGrade = fieldText(fieldValue(lead.fields, '用户评级')) || lead.grade;
+        const manualOverride = assessmentRating(stored) !== recordedGrade;
         const summaries = assessmentSummaryFields(stored);
-        return decorateDossierConfirmations(
+        return projectCustomerGrade(
+          decorateDossierConfirmations(
           {
             ...lead,
             supplyOpportunity: summaries['主要供货机会'],
@@ -331,6 +334,7 @@ export class NativeAcquisition {
             },
           },
           this.supplements.confirmations(lead.id, lead.website),
+          ),
         );
       }),
     };

@@ -154,7 +154,10 @@ export function AssessmentPanel({
   const legacyRule = ratingReason.match(/(?:^|\n)规则版本[:：]\s*([^\n]+)/)?.[1];
   const legacyTime = ratingReason.match(/(?:^|\n)评估时间[:：]\s*([^\n]+)/)?.[1];
   const dimensions = buildAssessmentDimensions(assessment, ratingReason);
-  const current = assessment?.ruleVersion === 'acquisition-v4.0' && !assessment.legacy;
+  const current =
+    !!assessment &&
+    ['acquisition-v4.0', 'acquisition-v5.0'].includes(assessment.ruleVersion) &&
+    !assessment.legacy;
   const pending = presentation.pending.filter(
     (item) =>
       /冲突|强制|不一致|必需/.test(item) &&
@@ -168,7 +171,7 @@ export function AssessmentPanel({
   return (
     <section className="assessment-panel">
       <header>
-        <h3>初始开发优先级</h3>
+        <h3>客户评级与初始开发顺序</h3>
         {assessment?.product && (
           <p>
             {assessment.direction &&
@@ -390,7 +393,7 @@ export function AssessmentPanel({
           </dl>
           <p>{current
             ? '开发优先级依据同一产品方向的主营产品与供货角色；其他官网缺项不降低等级。'
-            : '旧版 A/B/C 按当时规则计算，保留历史结果。'}</p>
+            : '旧版评级按当时规则计算，保留历史结果。'}</p>
         </details>
       )}
     </section>

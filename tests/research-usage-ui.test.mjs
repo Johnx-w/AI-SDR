@@ -71,7 +71,7 @@ test('只展示供应商已返回的 Token，缺失一侧明确未返回而不�
   assert.match(reportedZero, /Token 输入 0 \/ 输出 4/);
 });
 
-test('批次结果展示新优先级并单独保留旧等级，不展示新评分数字', () => {
+test('批次结果展示 A/B/C 并单独保留旧记录，不展示评分数字', () => {
   const html = renderToStaticMarkup(
     createElement(
       MemoryRouter,
@@ -80,18 +80,42 @@ test('批次结果展示新优先级并单独保留旧等级，不展示新评�
         job: {
           ...job,
           rows: [
-            { domain: 'a.example', result: 'inserted', assessment: { grade: '高优先', score: 70, status: '高优先' } },
-            { domain: 'b.example', result: 'inserted', assessment: { grade: 'B', score: 65, status: '可开发' } },
+            {
+              domain: 'a.example',
+              result: 'inserted',
+              assessment: { grade: '高优先', score: 70, status: '高优先' },
+            },
+            {
+              domain: 'b.example',
+              result: 'inserted',
+              assessment: { grade: 'B', score: 65, status: '可开发' },
+            },
           ],
-          searchStats: [{ id: 'search-1', query: 'blinds', country: 'US', status: 'completed', discovered: 2, duplicates: 0, researched: 2, queued: 2, review: 0, rejected: 0, failed: 0, inserted: 2, ratings: { 高优先: 1, 常规开发: 0, A: 0, B: 1, C: 0, unrated: 0 } }],
+          searchStats: [
+            {
+              id: 'search-1',
+              query: 'blinds',
+              country: 'US',
+              status: 'completed',
+              discovered: 2,
+              duplicates: 0,
+              researched: 2,
+              queued: 2,
+              review: 0,
+              rejected: 0,
+              failed: 0,
+              inserted: 2,
+              ratings: { 高优先: 1, 常规开发: 0, A: 0, B: 1, C: 0, unrated: 0 },
+            },
+          ],
         },
         control: () => {},
         busy: false,
       }),
     ),
   );
-  assert.match(html, /高优先 1 · 常规开发 0/);
-  assert.match(html, /旧版 A 0 · B 1 · C 0/);
-  assert.match(html, /旧版 B/);
+  assert.match(html, /A 0 · B 1 · C 0/);
+  assert.match(html, /旧记录 高优先 1 · 常规开发 0/);
+  assert.match(html, /旧版 高优先/);
   assert.doesNotMatch(html, /已支持70分|已支持65分|\/100/);
 });

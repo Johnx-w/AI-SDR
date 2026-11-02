@@ -35,7 +35,7 @@ function fixture({ gradeOnly = false, potentialInput = false } = {}) {
       企业官网: { link: website, text: website },
       来源链接: website,
       企业经营产品: 'roller blinds',
-      初评结果: '常规开发',
+      初评结果: 'B',
       开发状态: '待开发',
       邮箱: 'buyer@buyer.example.org',
     },
@@ -215,7 +215,7 @@ test('人工核实角色可提升优先级，V 未知不形成补档任务，证
     assert.equal(f.lead().score, 55);
     const r = await f.save(f.input());
     assert.equal(r.lead.score, 85);
-    assert.equal(r.lead.grade, '高优先');
+    assert.equal(r.lead.grade, 'A');
     assert.equal(r.lead.assessment.dimensions.R.score, 30);
     assert.equal(r.lead.assessment.dimensions.V.score, null);
     assert.deepEqual(r.lead.assessment.missing, []);
@@ -310,7 +310,7 @@ test('人工确认后官网研究失败沿用此前完整事实和人工依据�
     assert.equal(result.assessment.score, 85);
     const refreshed = f.lead();
     assert.equal(refreshed.score, 85);
-    assert.equal(refreshed.grade, '高优先');
+    assert.equal(refreshed.grade, 'A');
     assert.equal(refreshed.assessment.dimensions.P.score, 40);
     assert.equal(refreshed.assessment.dimensions.D.score, 15);
     assert.equal(refreshed.assessment.dimensions.R.score, 30);
@@ -351,7 +351,7 @@ test('远端提交后响应丢失通过读回确认；未提交时不激活事�
         await assert.rejects(() => f.save(input), { status: 502 });
         assert.equal(f.lead().score, 55);
         assert.deepEqual(f.lead().confirmations, []);
-        assert.equal(f.record().fields.初评结果, '常规开发');
+        assert.equal(f.record().fields.初评结果, 'B');
         f.restart();
         assert.equal(f.lead().score, 55);
         f.mode('normal');
@@ -374,7 +374,7 @@ test('仅初评结果一列的精简T2仍能补资料，资料历史按客户表
   try {
     const result = await f.save(f.input());
     assert.equal(result.lead.score, 85);
-    assert.equal(f.record().fields.初评结果, '高优先');
+    assert.equal(f.record().fields.初评结果, 'A');
     assert.equal(f.record().fields.待确认事项, undefined);
     assert.equal(result.lead.confirmations.length, 1);
     const foreign = new NativeAcquisition({
@@ -403,7 +403,7 @@ test('待核对保存遇到远端字段变化或新评估时停止覆盖，保�
       const pending = f.engine.supplements.pending(customerId);
       assert.equal(pending.state, 'prepared');
       assert.equal(pending.confirmation.confirmedBy, '张工');
-      if (conflict === 'remote-fields') f.changeFields({ 初评结果: 'B' });
+      if (conflict === 'remote-fields') f.changeFields({ 初评结果: 'C' });
       else
         f.engine.assessments.save(
           {

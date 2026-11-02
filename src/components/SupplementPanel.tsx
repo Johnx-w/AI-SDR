@@ -496,7 +496,7 @@ export function SupplementPanel<TLead>({
               ))}
               {dimension === 'D' && (
                 <p className="supplement-hint">
-                  经营年限、网点等资料可作为经营背景；高优先／常规开发不要求补齐这些信息。
+                  经营年限、网点等资料可作为经营背景；A/B 评级不要求补齐这些信息。
                 </p>
               )}
             </section>

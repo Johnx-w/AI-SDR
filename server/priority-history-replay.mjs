@@ -159,11 +159,7 @@ export function planPriorityHistoryReplay({ operation, entry, lead, record, scop
   } catch {
     return skipped('evidence_replay_failed');
   }
-  if (
-    !['高优先', '常规开发'].includes(snapshot.grade) &&
-    !(snapshot.grade === null && snapshot.status === '待核实' && snapshot.matchLevel === '待核实')
-  )
-    return skipped('evidence_requires_review');
+  if (!['A', 'B', 'C'].includes(snapshot.grade)) return skipped('evidence_requires_review');
   return {
     ok: true,
     snapshot,
