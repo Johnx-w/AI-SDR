@@ -8,6 +8,7 @@ import { AcquisitionStore } from '../server/acquisition-store.mjs';
 import { researchCacheKey } from '../server/research-reuse.mjs';
 import { companyResearchSchema } from '../server/company-research.mjs';
 import { BatchJobs } from '../server/batch-jobs.mjs';
+import { exclusionConditionsKey } from '../server/exclusion-conditions.mjs';
 
 const source = 'https://blinds.example.org/';
 const text =
@@ -523,7 +524,7 @@ test('发现过滤后批任务继续研究其他网站，历史排除不占研�
   }
 });
 
-test('带指定客户记录的候选在发现和研究中绕过排除', async () => {
+test('带指定客户记录的研究绕过排除', async () => {
   const f = fixture();
   try {
     f.state.text = 'We sell camping tents and outdoor cooking equipment. '.repeat(4);
@@ -535,19 +536,51 @@ test('带指定客户记录的候选在发现和研究中绕过排除', async ()
         公司名称: 'Example Blinds',
       },
     });
-    f.state.searchResults = [{ url: source, target_record_id: 'untrusted' }];
-    assert.equal((await f.service.discover(input, { query: 'zip screens' })).candidates.length, 0);
-    const found = await f.service.discover(input, {
-      query: 'zip screens',
-      target_record_id: 'rec-target',
-    });
-    assert.equal(found.candidates[0].target_record_id, 'rec-target');
-    assert.equal(found.filtered_sources.length, 0);
     f.state.text = text;
     f.raw.products = [{ value: 'zip screens', quote: text, source_url: source }];
-    await f.service.research(input, { ...found.candidates[0], operation_id: 'target-research' });
+    await f.service.research(input, {
+      source_url: source,
+      target_record_id: 'rec-target',
+      operation_id: 'target-research',
+    });
     assert.equal(f.state.reads, 2);
     assert.equal(f.state.calls, 1);
+  } finally {
+    f.service.close();
+  }
+});
+
+test('主动复核重新抓取并复用模型响应后清除旧排除', async () => {
+  const f = fixture();
+  try {
+    f.raw.company_name = null;
+    assert.equal((await f.research('cache-clear-review-first')).outcome, 'review');
+    f.state.text = text + ' We sell camping tents to households.';
+    f.raw.products = [
+      { value: 'camping tents', quote: 'We sell camping tents to households.', source_url: source },
+    ];
+    assert.equal((await f.research('cache-clear-excluded')).outcome, 'rejected');
+    assert.equal(
+      f.store.exclusion(exclusionConditionsKey(input), source)?.operation_id,
+      'cache-clear-excluded',
+    );
+    f.state.text = text;
+    f.raw.products = [];
+    const reads = f.state.reads;
+    const calls = f.state.calls;
+    const reviewed = await f.service.research(
+      input,
+      { source_url: source, operation_id: 'cache-clear-reviewed' },
+      { bypassExclusion: true },
+    );
+    assert.equal(reviewed.outcome, 'review');
+    assert.equal(reviewed.research_usage.cache_hits, 1);
+    assert.equal(reviewed.research_usage.model_calls, 0);
+    assert.equal(f.state.reads, reads + 1);
+    assert.equal(f.state.calls, calls);
+    assert.equal(f.store.exclusion(exclusionConditionsKey(input), source), null);
+    await f.research('cache-clear-after-review');
+    assert.equal(f.state.reads, reads + 2);
   } finally {
     f.service.close();
   }

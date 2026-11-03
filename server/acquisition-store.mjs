@@ -106,7 +106,6 @@ export class AcquisitionStore {
               op.input?.mode === 'run' ||
               !op.input?.item ||
               !op.input?.input ||
-              op.input.item.target_record_id ||
               !op.id ||
               !(op.updatedAt || op.createdAt)
             )

@@ -50,10 +50,6 @@ export function exclusionDecision(operation, output) {
     output.reason.trim()
   )
     return 'exclude';
-  if (
-    ['completed', 'review', 'no_new_candidates'].includes(output?.outcome) &&
-    !operation.research_usage?.cache_hits
-  )
-    return 'clear';
+  if (['completed', 'review', 'no_new_candidates'].includes(output?.outcome)) return 'clear';
   return 'ignore';
 }

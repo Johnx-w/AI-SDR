@@ -122,7 +122,7 @@ export function selectWebsiteCandidates(results, knownDomains = [], limit = 20) 
     }
     const url = source.url;
     const domain = domainKey(url.href);
-    if (known.has(domain) && !result.target_record_id) {
+    if (known.has(domain)) {
       skipped.push({ domain, url: url.href });
       continue;
     }
@@ -133,7 +133,6 @@ export function selectWebsiteCandidates(results, knownDomains = [], limit = 20) 
       source_title: result.title || '',
       source_kind: 'website',
       domain,
-      ...(result.target_record_id ? { target_record_id: result.target_record_id } : {}),
     });
     if (candidates.length >= limit) break;
   }
@@ -452,18 +451,8 @@ export class NativeAcquisition {
       auto_parameters: false,
       exclude_domains: excluded.slice(-150),
     });
-    const target = records.find((record) => record.record_id === search?.target_record_id);
-    const targetDomain = domainKey(customerWebsite(target));
-    const selected = selectWebsiteCandidates(
-      data.results.map((result) => ({
-        ...result,
-        target_record_id:
-          targetDomain && domainKey(result.url) === targetDomain ? target.record_id : undefined,
-      })),
-      excluded,
-    );
+    const selected = selectWebsiteCandidates(data.results, excluded);
     selected.candidates = selected.candidates.filter((candidate) => {
-      if (candidate.target_record_id) return true;
       const prior = this.store.exclusion(conditionsKey, candidate.source_url);
       if (!prior) return true;
       selected.filtered_sources.push({

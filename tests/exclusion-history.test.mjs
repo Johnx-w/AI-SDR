@@ -224,3 +224,36 @@ test('未知、待核实、失败及未完成采集不作为明确历史排除',
     store.close();
   }
 });
+
+test('较新定向研究的有效结论阻止旧排除复活，失败仍沿用旧排除', () => {
+  const store = new AcquisitionStore(':memory:', 'scope-a');
+  try {
+    const key = exclusionConditionsKey(target);
+    for (const [name, newer] of [
+      ['clear', 'clear'],
+      ['failure', 'failure'],
+      ['incomplete', 'clear'],
+      ['cached-clear', 'clear'],
+    ]) {
+      const url = `https://${name}.example.org/`;
+      add(store, operation(name + '-old', 'scope-a', 1, url));
+      const op = operation(name + '-targeted', 'scope-a', 2, url, newer);
+      op.input.item.target_record_id = 'rec-existing';
+      if (name === 'incomplete') op.research.incomplete_reason = 'research incomplete';
+      if (name === 'cached-clear') {
+        delete op.research_response;
+        op.research_usage = { cache_hits: 1 };
+      }
+      add(store, op);
+    }
+    assert.equal(store.exclusion(key, 'https://clear.example.org/'), null);
+    assert.equal(store.exclusion(key, 'https://cached-clear.example.org/'), null);
+    assert.equal(store.exclusion(key, 'https://failure.example.org/')?.operation_id, 'failure-old');
+    assert.equal(
+      store.exclusion(key, 'https://incomplete.example.org/')?.operation_id,
+      'incomplete-old',
+    );
+  } finally {
+    store.close();
+  }
+});
