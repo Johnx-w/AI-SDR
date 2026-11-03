@@ -85,7 +85,6 @@ export function mapFeishuRecord(record) {
     supplyOpportunity: read('主要供货机会'),
     pendingQuestions: read('待确认事项'),
     mainProductPreference: read('主营产品偏好'),
-    advertisingCodes: read('广告代码'),
     demandProducts: read('需求产品'),
     industryProfile: read('客户行业画像'),
     audience: read('服务客群'),

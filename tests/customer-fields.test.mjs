@@ -1,23 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractAdvertisingCodes } from '../server/advertising-codes.mjs';
 import { parseCompanyResearch, researchFields } from '../server/company-research.mjs';
 import { validateTarget } from '../server/search-target.mjs';
 import { searchPlan } from '../server/search-plan.mjs';
 import { mapFeishuRecord } from '../server/feishu.mjs';
 const url = 'https://company.example.org/';
-test('广告代码只从追踪配置提取；去重并保留来源，不读取查询参数或普通正文', () => {
-  const html = `<p>AW-99999999</p><a href="?gclid=1234">ad</a>
-    <script>gtag('config', 'AW-123456789');fbq('init', '123456789012345');</script>
-    <script>fbq('init', '123456789012345');ttq.load('ABCDEFGHIJKLMNOPQRST');</script>`;
-  const codes = extractAdvertisingCodes(html, url);
-  assert.deepEqual(
-    codes.map((c) => c.id),
-    ['AW-123456789', '123456789012345', 'ABCDEFGHIJKLMNOPQRST'],
-  );
-  assert.ok(codes.every((c) => c.source_url === url && html.includes(c.quote)));
-  assert.deepEqual(extractAdvertisingCodes('fbq init 123456789', url), []);
-});
 const text =
   'Acme is a wholesale distributor of imported shades, with no own factory. We supply dealers nationwide. We are seeking suppliers of blind motors. Looking for blinds? Shop our range.';
 const fact = (value, quote) => ({ value, quote, source_url: url });
@@ -51,13 +38,11 @@ test('需求产品需要企业自身公开采购证据；行业画像和客户�
   assert.equal(r.ok, true);
   assert.deepEqual(r.demand_products, ['blind motors']);
   assert.equal(r.customer_type, 'wholesaler');
-  const fields = researchFields(r, {
-    advertising_codes: [{ platform: 'Meta Pixel', id: '123456789', source_url: url }],
-  });
+  const fields = researchFields(r, {});
   assert.equal(fields['客户类型'], '批发商');
   assert.match(fields['需求产品'], /blind motors\n依据：We are seeking/);
   assert.match(fields['客户行业画像'], /批发窗饰/);
-  assert.match(fields['广告代码'], /Meta Pixel: 123456789/);
+  assert.equal(fields['广告代码'], undefined);
   assert.equal(fields['客户等级'], undefined);
   assert.equal(researchFields({}, {})['需求产品'], undefined);
 });
@@ -99,9 +84,8 @@ test('欧洲搜索不含英国，客户类型与画像贯穿校验、搜索计�
   assert.throws(() => validateTarget({ ...t, customer_profile: 'invalid' }));
   const lead = mapFeishuRecord({
     record_id: 'rec-test',
-    fields: { 广告代码: 'Meta Pixel: 123', 需求产品: 'motors', 客户行业画像: '窗饰批发' },
+    fields: { 需求产品: 'motors', 客户行业画像: '窗饰批发' },
   });
   assert.equal(lead.demandProducts, 'motors');
   assert.equal(lead.industryProfile, '窗饰批发');
-  assert.equal(lead.advertisingCodes, 'Meta Pixel: 123');
 });

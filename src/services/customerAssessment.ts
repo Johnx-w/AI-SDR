@@ -31,7 +31,6 @@ export interface AssessmentSummary extends AssessmentOpportunity {
   evidenceReason?: string;
   incompleteReason?: string | null;
   manualOverride?: boolean;
-  legacy?: boolean;
   opportunities?: (AssessmentOpportunity & { direction: string; product: string })[];
   supplyOpportunity?: { targetProduct?: string; procurementStatus?: string; note?: string } | null;
 }

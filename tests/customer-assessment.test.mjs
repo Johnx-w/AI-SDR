@@ -1,6 +1,5 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import {
   assessCompany,
   assessmentId,
@@ -84,13 +83,9 @@ test('持续经营中档按15分计算；95分来自真实业务证据而非海�
   assert.equal(result.complete, true);
 });
 
-test('新旧评估的T12证据用词按版本保留，避免旧历史读回比较失配', () => {
+test('评估证据使用当前事实名称', () => {
   const result = evaluate([...baseline.map((k) => fact(k)), fact('custom_made')]);
   assert.match(formatAssessmentEvidence(result), /定制特征/);
-  assert.match(
-    formatAssessmentEvidence({ ...result, ruleVersion: 'acquisition-v3.0' }),
-    /定制能力需求/,
-  );
 });
 
 test('同一网点重复出现不触发20分档', () => {
@@ -217,35 +212,12 @@ test('跨方向不拼分，受阻方向不能覆盖有效机会', () => {
   assert.equal(result.grade, 'A');
 });
 
-test('旧版评估保持原权重及海关未知，新版操作产生不同评估ID', () => {
-  const oldId =
-    'ev_' +
-    createHash('sha256')
-      .update(JSON.stringify(['test-scope', 'test-operation', 'acquisition-v2.1']))
-      .digest('hex')
-      .slice(0, 36);
-  const old = {
-    ...evaluate(baseline.map((k) => fact(k))),
-    id: oldId,
-    ruleVersion: 'acquisition-v2.1',
-    score: 65,
-    grade: 'B',
-    status: '可开发',
-    complete: false,
-    dimensions: {
-      P: { score: 35, maximum: 35 },
-      R: { score: 25, maximum: 25 },
-      D: { score: 5, maximum: 15 },
-      V: { score: null, maximum: 10 },
-      I: { score: null, maximum: 15 },
-    },
-  };
-  const before = structuredClone(old);
-  const reason = formatAssessmentReason(old);
-  const summary = readAssessmentSummary(reason);
-  assert.equal(summary.score, 65);
-  assert.equal(summary.ruleVersion, 'acquisition-v2.1');
-  assert.match(reason, /I 海关采购表现：未知\/15/);
-  assert.deepEqual(old, before);
-  assert.notEqual(assessmentId('test-scope', 'test-operation'), oldId);
+test('只读取当前结构的评估摘要', () => {
+  const current = evaluate(baseline.map((k) => fact(k)));
+  assert.equal(
+    readAssessmentSummary(formatAssessmentReason(current)).ruleVersion,
+    'acquisition-v5.0',
+  );
+  const old = formatAssessmentReason(current).replace('acquisition-v5.0', 'acquisition-v2.1');
+  assert.equal(readAssessmentSummary(old), null);
 });

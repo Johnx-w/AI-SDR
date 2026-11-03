@@ -65,7 +65,7 @@ test('主体不符、旧规则或复用评估编号篡改内容均被拒绝，�
   }
 });
 
-test('旧规则快照可只读显示，新评估替换时仍校验当前版本', () => {
+test('旧规则快照不再公开，新评估替换时仍校验当前版本', () => {
   const service = new AssessmentService({ env });
   const legacy = {
     ...snapshot('legacy', '2026-10-24T01:00:00Z'),
@@ -75,11 +75,11 @@ test('旧规则快照可只读显示，新评估替换时仍校验当前版本',
   };
   try {
     service.store.saveCurrent(legacy, customer.record_id);
-    assert.equal(service.latest(customer.record_id).legacy, true);
-    assert.equal(service.summary('legacy').grade, 'B');
+    assert.equal(service.latest(customer.record_id), null);
+    assert.equal(service.summary('legacy'), null);
     assert.throws(() => service.save(legacy, customer), /当前规则/);
     const current = snapshot('current', '2026-10-25T01:00:00Z');
-    assert.equal(service.save(current, customer).legacy, false);
+    assert.equal(service.save(current, customer).id, 'current');
     assert.equal(service.latest(customer.record_id).id, 'current');
     assert.equal(service.summary('legacy'), null);
   } finally {

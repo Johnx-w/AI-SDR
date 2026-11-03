@@ -160,8 +160,7 @@ test('画像集中展示具体开发理由与供货分析，主方向展开，�
   assert.match(visible, /经营户外防风帘与室内窗饰/);
   assert.match(visible, /零售商、安装服务商|企业与个人客户/);
   assert.match(visible, /Zip screens/);
-  assert.match(visible, /高优先/);
-  assert.match(visible, /明确匹配/);
+  assert.match(visible, /常规开发 · 潜在匹配/);
   assert.match(visible, /防风帘属于稳定主营产品线/);
   assert.match(visible, /向贸易客户供货的专业窗饰供应商/);
   assert.match(visible, /供货分析/);
@@ -178,7 +177,7 @@ test('各方向经营事实保持独立，材料机会分析不冒充已确认�
   assert.doesNotMatch(finished, /卷帘生产使用遮阳面料/);
   assert.match(material, /卷帘生产使用遮阳面料/);
   assert.doesNotMatch(material, /向贸易客户供货的专业窗饰供应商/);
-  assert.match(material, /潜在匹配/);
+  assert.match(initialView(html), /常规开发 · 潜在匹配/);
   assert.match(material, /面料|材料/);
   assert.match(initialView(material), /客户已经营Roller blinds.*询问是否需要Roller fabric/);
   assert.doesNotMatch(initialView(material), /已确认采购需求|已确认采购|确定采购/);
@@ -286,7 +285,7 @@ test('待核实的经营关联不被描述为已经发现事实冲突', () => {
       assessment: { ...assessment, ...pending, opportunities: [pending] },
     }),
   );
-  assert.match(visible, /待核实/);
+  assert.match(visible, /尚未核实/);
   assert.doesNotMatch(visible, /解决相关冲突|存在冲突|自动首封暂不可发送/);
 });
 
@@ -349,37 +348,15 @@ test('人工改级标记贴近当前客户等级，资料时间保持北京时�
   assert.doesNotMatch(visible, /2026-10-\d{2}T|\.234Z|\.566Z/);
 });
 
-test('旧版分项和完整记录移入初评记录折叠，保留原含义及规则版本', () => {
-  const legacy = {
-    ...assessment,
+test('机会卡片移除重复评级组件，旧规则记录不展示', () => {
+  const current = renderProfile({ grade: 'A' });
+  assert.doesNotMatch(current, /profile-priority|匹配等级：/);
+  assert.match(current, /常规开发 · 潜在匹配/);
+  const old = renderProfile({
     grade: 'A',
-    score: 85,
-    ruleVersion: 'acquisition-v3.2',
-    legacy: true,
-    opportunities: [],
-    evidenceReason: rawReason.replace('acquisition-v4.0', 'acquisition-v3.2'),
-  };
-  const html = renderProfile({ grade: 'A', assessment: legacy });
-  const visible = initialView(html);
-  assert.match(visible, /旧版评估/);
-  assert.match(visible, /初评记录/);
-  assert.doesNotMatch(visible, /ev_fixture_123|acquisition-v3\.2|40\s*\/\s*40/);
-  assert.match(html, /ev_fixture_123/);
-  assert.match(html, /acquisition-v3\.2/);
-  assert.match(html, /40\s*(?:<[^>]*>\s*)*\/\s*40/);
-  assert.match(html, /We supply made-to-measure zip screens\./);
-});
-
-test('没有结构化评估时保留已有评级原文，不编造分项或机会分析', () => {
-  const supplement = '人工补充依据：客户官网公布了供应商申请入口。';
-  const html = renderProfile({ assessment: null, ratingReason: rawReason + '\n' + supplement });
-  assert.match(html, /初评记录/);
-  assert.match(html, /人工补充依据：客户官网公布了供应商申请入口。/);
-  assert.match(html, /We supply made-to-measure zip screens\./);
-  assert.doesNotMatch(
-    initialView(html),
-    /人工补充依据：客户官网公布了供应商申请入口。|We supply made-to-measure zip screens\./,
-  );
+    assessment: { ...assessment, ruleVersion: 'acquisition-v3.2' },
+  });
+  assert.doesNotMatch(old, /旧版评估|acquisition-v3\.2|初评记录/);
 });
 
 test('完整人工确认记录折叠保留，已核实资料不会重新变成普通补档任务', () => {

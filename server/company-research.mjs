@@ -33,7 +33,7 @@ customer_type 是企业自身角色，audience 是其服务的客群：B=企业/
 production_model=own_factory（明确自有工厂、自己生产/制造）、no_own_factory（明确采购、进口、代理其他生产商产品或外包生产的经营模式）、unknown。不能仅凭未出现 factory 字样就断言无工厂，不能把经销或安装当成制造。manufactured_products 逐项列出企业明确自行生产的实际产品品类，每项附制造语境的引文；销售目录不可冒充自产清单。自有工厂或同类制造不是自动淘汰条件，材料配件和其他成品供货机会分别按证据研究。
 operating_model=local_only（经营事实表明仅本地安装/维修/零售门店，无供货渠道或跨地区经营）、beyond_local（明确进口采购、批发供货/经销网络、跨地区项目、全国/跨国配送或经营）、unknown。仅有服务城市、联系方式、住宅客群或一个门店地址不能证明“纯本地”；同样不可凭网站可访问就推断全国经营。兼营本地安装但有上述供货/进口/跨地区业务的企业选 beyond_local。证据不足返回 unknown 或 null，不为通过准入猜测事实。必须区分经营范围和服务客群，不得因 audience=C 淘汰经营主体。
 customer_type 只选一种主要经营角色：manufacturer=工厂，contractor=工程承包商，wholesaler=批发商，service_provider=服务商（含安装维修），distributor=经销商，retailer=零售商，other=有明确证据的其他行业；未知为 unknown。批发与经销需区分，不能为了满足 target.customer_type 修改事实。industry_profile 用中文概括实际行业、主营业务、经营方式和服务对象。profile_tags 可为 trade（品牌/渠道经营）、project（工程项目）、service（安装维保）、manufacturing（生产加工），每项必须有官网原文证据。target.customer_profile 是搜索画像，不是客户事实。
-demand_products 只提取企业自身明确公开的采购、求购、寻找供应商/生产商等需求，附逐字原文和来源。产品目录、销售介绍、面向访客的“looking for blinds?”或询价表单均不是企业采购需求；不得把 products、主营产品或 target.product 复制为 demand_products。没有明确采购依据必须返回空数组。广告追踪代码由独立 HTML 解析器提取，不生成或猜测广告 ID。
+demand_products 只提取企业自身明确公开的采购、求购、寻找供应商/生产商等需求，附逐字原文和来源。产品目录、销售介绍、面向访客的“looking for blinds?”或询价表单均不是企业采购需求；不得把 products、主营产品或 target.product 复制为 demand_products。没有明确采购依据必须返回空数组。
 main_product_preference 用一两句中文概括网站主营产品/产品线侧重，是分析而非实际采购偏好。必须基于产品介绍证据，禁止采购量、预算、周期、意向、决策人等推测。不得重复搜索目标当成主营产品。区分 zip screens、Venetian blinds、plantation shutters、roller shutters。如最新可见正文明确说不经营某产品，应剔除该产品；不可沿用旧记录或旧 JSON-LD 的过时产品。
 address 只能是企业实际办公/门店/工厂地址；服务城市不可冒充公司所在地。可将明确邮政地址标准化，如 TX 75006 对应美国；不能仅凭城市名或电话区号推国家。service_areas 只包括明确服务覆盖地区。不得输出邮箱/电话/社媒，由独立提取器负责。不得自行生成用户评级。` +
           assessmentInstructions +
@@ -733,10 +733,6 @@ export function researchFields(research, evidence, existing = {}, researchPages 
     research.industry_profile ? [research.industry_profile] : [],
   );
   if (industry) fields['客户行业画像'] = industry;
-  const advertising = (evidence.advertising_codes || [])
-    .map((c) => c.platform + ': ' + c.id + '\n来源：' + c.source_url)
-    .join('\n');
-  if (advertising) fields['广告代码'] = advertising;
   if (['B', 'C', 'BC'].includes(research.audience))
     fields['服务客群'] = { B: 'B端', C: 'C端', BC: 'B+C' }[research.audience];
   const address = research.address || evidence.addresses?.[0];
@@ -838,7 +834,7 @@ export function mergeResearchFields(existing, incoming) {
     );
     if (formatted) fields['电话'] = formatted;
   }
-  for (const name of ['广告代码', '需求产品', '客户行业画像']) {
+  for (const name of ['需求产品', '客户行业画像']) {
     if (!fields[name]) continue;
     const prior = text(existing[name]);
     fields[name] =

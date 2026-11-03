@@ -91,80 +91,12 @@ test('原始引文和来源逐字保留，数组及对象事实值转换为可�
   );
 });
 
-const textEvidence = [
-  '研究限制：沿用已有证据',
-  '成品 · Zip screens',
-  '主营产品：户外防风帘',
-  '原文：We supply zip screens.',
-  '来源：https://buyer.example.org/zip',
-  '定制能力需求：按尺寸定制',
-  '原文：Made to measure.',
-  '来源：https://buyer.example.org/zip',
-  '材料配件 · Roller fabric',
-  '主营产品：窗饰面料',
-  '原文：Wholesale fabrics.',
-  '来源：https://buyer.example.org/fabric',
-  '电动系统特征：面料页面的其他产品电机',
-  '原文：Different product motors.',
-  '来源：https://buyer.example.org/fabric',
-].join('\n');
-
-test('旧证据仅按主产品及供货方向归组，不跨产品拼接定制或电动依据', () => {
-  const result = buildAssessmentDimensions({
-    product: 'Zip screens',
-    direction: 'finished',
-    evidenceReason: textEvidence,
-    dimensions: {
-      P: { score: 40, maximum: 40 },
-      V: { score: 5, maximum: 10 },
-    },
-  });
-  assert.deepEqual(result[0].basis, ['主营产品：户外防风帘']);
-  assert.deepEqual(result[1].basis, ['定制特征：按尺寸定制']);
-  assert.equal(result[1].conclusion, '具备定制特征');
-  assert.ok(
-    result.every((entry) =>
-      entry.facts.every((entryFact) => entryFact.source_url.endsWith('/zip')),
-    ),
-  );
-});
-
-test('旧记录主产品缺失或不匹配时不猜测跨方向证据，已知评分也不推断经营事实', () => {
-  for (const identity of [
-    {},
-    { product: 'Unknown product' },
-    { product: 'Roller fabric', direction: 'finished' },
-  ]) {
-    const [result] = buildAssessmentDimensions({
-      ...identity,
-      evidenceReason: textEvidence,
-      dimensions: { P: { score: 40, maximum: 40 } },
-    });
-    assert.deepEqual(result.facts, []);
-    assert.equal(result.conclusion, '已记录产品契合评分');
-    assert.equal(result.score, 40);
-  }
-});
-
-test('显式空事实数组为权威记录，不能从混合文本填补；无结构化维度时不造维度', () => {
+test('无结构化维度事实时不解析旧评估文字', () => {
   const [result] = buildAssessmentDimensions({
-    product: 'Zip screens',
-    evidenceReason: textEvidence,
-    dimensions: { P: dimension(40, 40, []) },
+    evidenceReason: '主营产品：旧文字',
+    dimensions: { P: { score: 40, maximum: 40 } },
   });
   assert.deepEqual(result.facts, []);
   assert.equal(result.conclusion, '已记录产品契合评分');
-  assert.deepEqual(buildAssessmentDimensions(null, textEvidence), []);
-  assert.deepEqual(buildAssessmentDimensions({ evidenceReason: textEvidence }), []);
-});
-
-test('单产品无标题的旧标签证据可读取，并保留多行原文', () => {
-  const quote = 'We tailor blinds.\nFor every opening.';
-  const [result] = buildAssessmentDimensions(
-    { dimensions: { V: { score: 5, maximum: 10 } } },
-    `定制特征：定制窗帘\n原文：${quote}\n来源：https://buyer.example.org/contact\n待补充依据：经营年限待核实`,
-  );
-  assert.equal(result.conclusion, '具备定制特征');
-  assert.equal(result.facts[0].quote, quote);
-  assert.deepEqual(result.basis, ['定制特征：定制窗帘']);
+  assert.deepEqual(buildAssessmentDimensions({ evidenceReason: '旧文字' }), []);
 });

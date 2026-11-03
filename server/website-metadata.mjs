@@ -1,5 +1,4 @@
 import { extractContacts } from './contact-extractor.mjs';
-import { extractAdvertisingCodes } from './advertising-codes.mjs';
 import { normalizePhoneLines } from './phone-format.mjs';
 export function websiteTextExcerpt(content, limit = 12000) {
   const text = String(content || '')
@@ -427,7 +426,6 @@ export function combineWebsiteEvidence(pages, country = '') {
     snippets = [],
     serviceAreas = [],
     products = [];
-  const advertisingCodes = [];
   const parsed = pages.map((page) => ({
     page,
     meta: extractWebsiteMetadata({ content: page.content, sourceUrl: page.url }),
@@ -442,7 +440,6 @@ export function combineWebsiteEvidence(pages, country = '') {
     snippets.push(...meta.snippets);
     serviceAreas.push(...meta.service_areas);
     products.push(...extractCatalogProducts(page.content, page.url));
-    advertisingCodes.push(...extractAdvertisingCodes(page.content, page.url));
     contacts.push(
       ...extractContacts({
         content: page.content,
@@ -456,7 +453,6 @@ export function combineWebsiteEvidence(pages, country = '') {
   return {
     version: 'website-evidence-v4',
     products: unique(products, (x) => x.value.toLowerCase()),
-    advertising_codes: unique(advertisingCodes, (x) => x.platform + ':' + x.id),
     social: unique(social, (x) => x.platform + ':' + x.url),
     addresses: unique(
       addresses.sort((a, b) => addressRank(a) - addressRank(b)),

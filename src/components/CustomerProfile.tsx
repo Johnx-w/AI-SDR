@@ -36,7 +36,6 @@ interface ProfileLead {
   serviceAreas?: string;
   address?: string;
   audience?: string;
-  advertisingCodes?: string;
   source: string;
   updatedAt: string | number | null;
   assessment?: AssessmentSummary | null;
@@ -72,6 +71,11 @@ export function CustomerProfile({
   typeLabel: string;
   onSupplement?: (context: SupplementContext) => void;
 }) {
+  if (
+    lead.assessment &&
+    !['acquisition-v4.0', 'acquisition-v5.0'].includes(lead.assessment.ruleVersion)
+  )
+    lead = { ...lead, assessment: null };
   const overview = [lead.mainProductPreference, lead.evidence, lead.industryProfile].find(
     (value) => value && meaningful(value),
   );
@@ -163,7 +167,6 @@ export function CustomerProfile({
     ...(lead.address ? [['企业实际地址', lead.address]] : []),
     ...(lead.serviceAreas ? [['服务地区', lead.serviceAreas]] : []),
     ...(lead.source ? [['发现来源', lead.source]] : []),
-    ...(lead.advertisingCodes ? [['广告代码', lead.advertisingCodes]] : []),
   ];
   const audience =
     (
@@ -261,14 +264,7 @@ export function CustomerProfile({
             客户优先级已人工调整；以下自动评估依据仍保留供核对。
           </p>
         )}
-        {(lead.assessment?.legacy ||
-          (lead.assessment?.ruleVersion &&
-            !['acquisition-v4.0', 'acquisition-v5.0'].includes(lead.assessment.ruleVersion))) && (
-          <p>
-            <Badge>旧版评估</Badge> 按原规则保留
-          </p>
-        )}
-        {assessmentLimitations(lead.assessment, lead.ratingReason)
+        {assessmentLimitations(lead.assessment)
           .filter((text) => /失败|无法|未完成|不完整|冲突|截断/.test(text))
           .map((text) => (
             <p key={text} className="profile-opportunity-limitation">
@@ -276,7 +272,7 @@ export function CustomerProfile({
             </p>
           ))}
         {lead.assessment ? (
-          <ProfileOpportunities assessment={lead.assessment} ratingReason={lead.ratingReason} />
+          <ProfileOpportunities assessment={lead.assessment} />
         ) : opportunities.length ? (
           <>
             <ul>
@@ -372,7 +368,7 @@ export function CustomerProfile({
         <span>官网取证：{formatBeijingTime(lead.updatedAt, '时间未记录')}</span>
         <span>评估更新：{formatBeijingTime(lead.assessment?.evaluatedAt, '尚未评估')}</span>
       </div>
-      <InitialAssessmentRecord assessment={lead.assessment} ratingReason={lead.ratingReason} />
+      <InitialAssessmentRecord assessment={lead.assessment} />
     </section>
   );
 }

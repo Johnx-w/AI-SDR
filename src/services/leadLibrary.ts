@@ -29,7 +29,6 @@ export interface Prospect {
   address?: string;
   serviceAreas?: string;
   mainProductPreference?: string;
-  advertisingCodes?: string;
   demandProducts?: string;
   supplyOpportunity?: string;
   pendingQuestions?: string;
