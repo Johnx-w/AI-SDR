@@ -246,12 +246,20 @@ test('编辑计划保留发送时段，只有显式 null 才清除', async (t) =
   assert.equal(recovered.sendWindow, null);
 });
 
-test('自动开发直接使用客户库无来源邮箱，带固定签名发送且总量严格停在20封', async (t) => {
+test('自动开发使用同域通用邮箱或官网明确的外域业务邮箱，带固定签名且总量停在20封', async (t) => {
   const h = harness();
   t.after(() => h.service.close());
   h.state.leads = Array.from({ length: 25 }, (_, i) => buyer(`automatic-${i}`));
   for (const lead of h.state.leads) lead.contactEvidence = [];
   h.state.leads[0].email = 'buyer@gmail.com';
+  h.state.leads[0].contactEvidence = [
+    {
+      kind: 'email',
+      value: 'buyer@gmail.com',
+      quote: 'General business enquiries: buyer@gmail.com',
+      source_url: 'https://automatic-0.example.org/contact',
+    },
+  ];
   h.service.generator.generate = async ({ candidate, product, campaign }) => ({
     subject: `Supply cooperation with ${candidate.companyName}`,
     bodyText: `Hello,\n\nWe supply ${product.englishName}. Would you be open to discussing supply cooperation?`,

@@ -1,3 +1,5 @@
+import { emailPurpose } from './email-purpose.mjs';
+
 const text = (value) => (value === undefined || value === null ? '' : String(value));
 const keyText = (value) => text(value).trim().toLowerCase().replace(/\s+/g, ' ');
 const control = /[\u0000-\u001f\u007f]/;
@@ -67,6 +69,50 @@ function currentValues(value, kind) {
       values.set(identity.key, { value, ...(identity.href ? { href: identity.href } : {}) });
   }
   return [...values.values()];
+}
+
+function phonePurpose(value, evidence) {
+  const identity = phoneIdentity(value).key;
+  const entries = evidence.filter(
+    (entry) =>
+      entry?.kind === 'phone' &&
+      phoneIdentity(entry.normalized || entry.value).key === identity &&
+      entry.verification_status !== 'invalid' &&
+      entry.method !== 'guessed',
+  );
+  const types = [
+    [
+      'support',
+      '技术 / 售后电话',
+      /\b(?:technical support|tech support|customer (?:support|service)|service desk|warranty|repairs?)\b|技术支持|售后|维修/i,
+    ],
+    [
+      'finance',
+      '财务电话',
+      /\b(?:accounts? payable|accounts? receivable|billing|finance)\b|财务|账务/i,
+    ],
+    [
+      'procurement',
+      '采购 / 供应商电话',
+      /\b(?:procurement|purchasing|sourcing|buyers?|suppliers?|vendors?)\b|采购|供应商/i,
+    ],
+    ['fax', '传真', /\bfax\b|传真/i],
+    ['sales', '销售电话', /\b(?:sales|product enquiries|order enquiries)\b|销售咨询|销售部/i],
+    [
+      'general',
+      '总机 / 通用电话',
+      /\b(?:main office|main line|switchboard|reception|general enquiries|telephone|phone|call us)\b|总机|办公室电话|联系电话/i,
+    ],
+  ];
+  for (const entry of entries) {
+    const quote = text(entry.quote).trim();
+    if (!entry.source_url || !quote) continue;
+    // A shared excerpt with several numbers cannot assign one department to each number.
+    if ((quote.match(/\+?\d[\d ().-]{6,}\d/g) || []).length > 1) continue;
+    const found = types.find(([, , pattern]) => pattern.test(quote));
+    if (found) return { type: found[0], label: found[1], basis: '来源说明' };
+  }
+  return { type: 'unknown', label: '未识别', basis: '暂无逐号用途说明' };
 }
 
 function stableId(value) {
@@ -159,8 +205,21 @@ export function buildContactPresentation(lead = {}) {
   }
 
   return {
-    emails: currentValues(lead.email, 'email'),
-    phones: currentValues(lead.phone, 'phone'),
+    emails: currentValues(lead.email, 'email').map((item) => ({
+      ...item,
+      purpose: emailPurpose(
+        item.value,
+        Array.isArray(lead.contactEvidence) ? lead.contactEvidence : [],
+        lead.website,
+      ),
+    })),
+    phones: currentValues(lead.phone, 'phone').map((item) => ({
+      ...item,
+      purpose: phonePurpose(
+        item.value,
+        Array.isArray(lead.contactEvidence) ? lead.contactEvidence : [],
+      ),
+    })),
     social: [...socials.values()],
     evidenceGroups: [...groups.values()],
   };

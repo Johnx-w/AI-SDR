@@ -6,6 +6,7 @@ import { assessmentSummaryFields } from './customer-fields.mjs';
 import { businessProductRelation, countryMatches, windowProductDirections } from './relevance.mjs';
 import { researchProviderConfig } from './acquisition-config.mjs';
 import { createResearchProviders } from './research-providers.mjs';
+import { emailPurpose } from '../src/domain/email-purpose.mjs';
 
 const fail = (status, message, code) => Object.assign(new Error(message), { status, code });
 const text = (value) => (typeof value === 'string' ? value.trim() : '');
@@ -99,32 +100,6 @@ function sourceEvidence(fact, companyDomain) {
   return { id, field, value, quote, sourceUrl };
 }
 
-function dedicatedContactPurpose(address, sourceUrl, quote) {
-  const local = address.split('@')[0];
-  if (
-    /^(?:privacy(?:[._-]?(?:office|officer|team))?|data[._-]?(?:protection|rights)|dpo|dsar|gdpr|unsubscribe|opt[._-]?out|no[._-]?reply|do[._-]?not[._-]?reply|abuse|dmca(?:agent)?|copyright|legal|notices|hr|human[._-]?resources|careers?|jobs|recruit(?:ment|ing))(?:[+._-]|$)/iu.test(
-      local,
-    )
-  )
-    return true;
-  // A policy page alone does not make its contact unsuitable: some businesses
-  // publish their general commercial address there. Require an explicit purpose.
-  if (!sourceUrl) return false;
-  const source = new URL(sourceUrl);
-  if (!/(?:privacy|legal|data[-_]?protection|gdpr|ccpa)/iu.test(source.pathname + source.search))
-    return false;
-  const purpose = quote.toLowerCase().replaceAll(address, '[email]');
-  if (
-    /\b(?:general|business|commercial|sales|product|order|trade)\s+(?:enquir(?:y|ies)|inquir(?:y|ies)|questions?|contact)\b|商务(?:咨询|联系)|业务(?:咨询|联系)/iu.test(
-      purpose,
-    )
-  )
-    return false;
-  return /\bunsubscrib(?:e|ing)\b|\bopt[ -]?out\b|\b(?:privacy|data[- ]?protection|data[- ]?subject)\s+(?:rights?|requests?|questions?|concerns?|inquir(?:y|ies)|enquir(?:y|ies))\b|\bexercise\b.{0,100}\b(?:rights?|choices)\b|\b(?:access|delet(?:e|ion)|eras(?:e|ure)|correct(?:ion)?|remov(?:e|al))\b.{0,80}\b(?:personal (?:data|information)|mailing list)\b|\b(?:questions?|concerns?|inquir(?:y|ies)|enquir(?:y|ies))\b.{0,70}\b(?:privacy (?:policy|notice)|personal (?:data|information))\b|退订|取消订阅|隐私(?:权|问题|请求)|个人(?:信息|数据).{0,20}(?:删除|更正|查阅)/iu.test(
-    purpose,
-  );
-}
-
 // Only the existing research evidence establishes identity/products. Search labels,
 // grade, website names and supplyOpportunity prose cannot stand in for those facts.
 export function normalizeOutreachLead(lead = {}) {
@@ -145,21 +120,17 @@ export function normalizeOutreachLead(lead = {}) {
     const entries = array(lead.contactEvidence).filter(
       (entry) => entry?.kind === 'email' && text(entry.value).toLowerCase() === address,
     );
-    const entry = entries.find(
-      (item) =>
-        item.verification_status !== 'invalid' &&
-        !dedicatedContactPurpose(
-          address,
-          publicUrl(item.source_url || item.sourceUrl),
-          compact(item.quote),
-        ),
-    );
-    if ((!entry && entries.length) || dedicatedContactPurpose(address, '', '')) return [];
+    const purpose = emailPurpose(address, entries, website);
+    if (!purpose.eligible) return [];
+    const entry =
+      entries.find((item) => (item.source_url || item.sourceUrl) === purpose.sourceUrl) ||
+      entries[0];
     return [
       {
         email: address,
         sourceUrl: publicUrl(entry?.source_url || entry?.sourceUrl),
         quote: compact(entry?.quote),
+        purpose,
       },
     ];
   });
@@ -206,24 +177,40 @@ function identitySet(input) {
   return result;
 }
 
-function recipient(contacts, selectOne = false) {
-  const unique = [...new Map(contacts.map((contact) => [contact.email, contact])).values()];
-  const priority = (address) => {
-    const local = address.split('@')[0];
-    if (/^(?:purchasing|procurement|buying|purchases|purchase)(?:[._-]|$)/i.test(local)) return 0;
-    if (/^(?:info|contact|enquiries|inquiries)(?:[._-]|$)/i.test(local)) return 1;
-    if (/^(?:sales|office|hello|admin)(?:[._-]|$)/i.test(local)) return 2;
-    return 3;
-  };
-  unique.sort((a, b) => priority(a.email) - priority(b.email) || a.email.localeCompare(b.email));
-  if (!unique.length)
-    return { error: 'contact_unverified', reason: '客户库中没有格式有效且适合商务联系的邮箱' };
-  if (!selectOne && unique.length > 1 && priority(unique[0].email) === priority(unique[1].email))
+function recipient(contacts, product, market) {
+  const ranked = contacts.flatMap((contact) => {
+    const purpose = contact.purpose;
+    const productMatch = purpose.productScope
+      ? businessProductRelation([purpose.productScope], {
+          product: product.englishName || product.name,
+          products: [
+            { value: product.englishName || product.name, aliases: array(product.aliases) },
+          ],
+        }).status
+      : 'unknown';
+    const marketMatch = purpose.marketScope
+      ? countryMatches(purpose.marketScope, [marketName(market)])
+      : 'unknown';
+    if (productMatch === 'not_matched' || marketMatch === 'not_matched') return [];
+    return [
+      { contact, scope: Number(productMatch === 'matched') + Number(marketMatch === 'matched') },
+    ];
+  });
+  ranked.sort(
+    (a, b) =>
+      a.contact.purpose.priority - b.contact.purpose.priority ||
+      b.scope - a.scope ||
+      Number(b.contact.purpose.supplierEntry) - Number(a.contact.purpose.supplierEntry) ||
+      Number(b.contact.purpose.namedBuyer) - Number(a.contact.purpose.namedBuyer) ||
+      Number(a.contact.purpose.inferred) - Number(b.contact.purpose.inferred) ||
+      a.contact.email.localeCompare(b.contact.email),
+  );
+  if (!ranked.length)
     return {
-      error: 'contact_ambiguous',
-      reason: '存在多个同优先级联系邮箱，请先确认一个首封收件人',
+      error: 'contact_unverified',
+      reason: '首封收件人待补：客户库中没有适合供货开发信的邮箱',
     };
-  return { contact: unique[0] };
+  return { contact: ranked[0].contact };
 }
 
 export const agentForCategory = (category) =>
@@ -529,20 +516,6 @@ export function selectOutreachCandidates({
       reject('business_unverified', '缺少有来源的企业经营主体依据');
       continue;
     }
-    const contactResult = recipient(lead.contacts, campaign.generationMode === 'simple');
-    if (contactResult.error) {
-      reject(contactResult.error, contactResult.reason);
-      continue;
-    }
-    base.to = contactResult.contact.email;
-    if (
-      selectedDomains.has(lead.companyDomain) ||
-      selectedIds.has(lead.customerId) ||
-      selectedRecipients.has(base.to)
-    ) {
-      reject('duplicate_company', '同一企业或收件地址已在本次首封名单中');
-      continue;
-    }
     const matches = [];
     let missingClaim = false;
     for (const product of availableProducts) {
@@ -582,6 +555,20 @@ export function selectOutreachCandidates({
       (a, b) => b.match.score - a.match.score || a.product.id.localeCompare(b.product.id),
     );
     const chosen = matches[0];
+    const contactResult = recipient(lead.contacts, chosen.product, lead.market);
+    if (contactResult.error) {
+      reject(contactResult.error, contactResult.reason);
+      continue;
+    }
+    base.to = contactResult.contact.email;
+    if (
+      selectedDomains.has(lead.companyDomain) ||
+      selectedIds.has(lead.customerId) ||
+      selectedRecipients.has(base.to)
+    ) {
+      reject('duplicate_company', '同一企业或收件地址已在本次首封名单中');
+      continue;
+    }
     const permittedSenders = senders.filter(
       (mailbox) =>
         array(mailbox.productIds).includes(chosen.product.id) &&
