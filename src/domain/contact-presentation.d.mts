@@ -1,4 +1,3 @@
-import type { EmailPurpose } from './email-purpose.mjs';
 export interface ContactPresentationRecord {
   label: string;
   value: string;
@@ -8,7 +7,6 @@ export interface ContactPresentationRecord {
 export interface ContactPresentationValue {
   value: string;
   href?: string;
-  purpose: EmailPurpose | { type: string; label: string; basis: string };
 }
 export interface ContactPresentationSocial {
   platform: string;
@@ -23,7 +21,6 @@ export interface ContactPresentationEvidenceGroup {
   records: ContactPresentationRecord[];
 }
 export interface ContactPresentationLead {
-  website?: string;
   email?: string;
   phone?: string;
   contactEvidence?: {
@@ -33,8 +30,6 @@ export interface ContactPresentationLead {
     normalized?: string;
     quote?: string;
     source_url?: string;
-    method?: string;
-    verification_status?: string;
   }[];
   social?: { platform?: string; url?: string; quote?: string; source_url?: string }[];
   locationEvidence?: {

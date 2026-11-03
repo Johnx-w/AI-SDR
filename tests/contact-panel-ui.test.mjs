@@ -93,10 +93,6 @@ test('展示联系与修改入口，重复联系方式合并，分机不同仍�
   assert.equal(hrefCount(html, 'mailto:'), 2);
   assert.equal(hrefCount(html, 'tel:'), 2);
   assert.match(html, /;ext=4/);
-  assert.match(html, /销售咨询.*不用于自动首封/);
-  assert.match(html, /售后服务.*不用于自动首封/);
-  assert.match(html, /总机 \/ 通用电话/);
-  assert.match(html, /未识别.*暂无逐号用途说明/);
   assert.equal((html.match(/href="https:\/\/www\.facebook\.com\/Buyer\/?"/g) || []).length, 1);
 });
 

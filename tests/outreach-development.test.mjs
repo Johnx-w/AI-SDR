@@ -178,7 +178,7 @@ test('暂缓以客户编号拦截所有计划和联系人，不影响其他客�
   assert.ok(
     h.service.deliveries().some((row) => row.customerId === 'buyer-two' && row.status === 'draft'),
   );
-  const alternate = 'contact@buyer-one.example.org';
+  const alternate = 'another@buyer-one.example.org';
   h.state.leads[0].email = alternate;
   h.state.leads[0].contactEvidence[0].value = alternate;
   h.state.leads[0].contactEvidence[0].quote = `Email ${alternate}`;
