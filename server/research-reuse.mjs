@@ -4,7 +4,7 @@ const CACHE_POLICY_VERSION = 'exact-research-request-v1';
 
 // Canonical JSON: object key order is immaterial; array order and string bytes
 // are not. Reject non-JSON values rather than risking an ambiguous cache hit.
-function canonicalJson(value, ancestors = new Set()) {
+export function canonicalJson(value, ancestors = new Set()) {
   if (value === null || typeof value === 'string' || typeof value === 'boolean')
     return JSON.stringify(value);
   if (typeof value === 'number' && Number.isFinite(value)) return JSON.stringify(value);

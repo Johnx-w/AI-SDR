@@ -3,6 +3,8 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { domainKey } from './website-identity.mjs';
+import { exclusionConditionsKey } from './exclusion-conditions.mjs';
+import { exclusionDecision } from './exclusion-decision.mjs';
 
 const MODEL_RESPONSE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MODEL_RESPONSE_LIMIT = 200;
@@ -62,6 +64,147 @@ export class AcquisitionStore {
     this.db.exec(
       'CREATE TABLE IF NOT EXISTS research_model_responses(scope TEXT NOT NULL, cache_key TEXT NOT NULL, created_at INTEGER NOT NULL, response TEXT NOT NULL, PRIMARY KEY(scope,cache_key)); CREATE INDEX IF NOT EXISTS research_model_responses_age ON research_model_responses(scope,created_at)',
     );
+    this.db.exec(`CREATE TABLE IF NOT EXISTS acquisition_exclusions (
+      scope TEXT NOT NULL, conditions_key TEXT NOT NULL, domain TEXT NOT NULL,
+      reason TEXT NOT NULL, operation_id TEXT NOT NULL, excluded_at TEXT NOT NULL,
+      summary TEXT NOT NULL, PRIMARY KEY(scope,conditions_key,domain)
+    ); CREATE TABLE IF NOT EXISTS acquisition_migrations (
+      scope TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY(scope,name)
+    )`);
+  }
+  backfillExclusions() {
+    const marker = 'historical-exclusions-v1';
+    if (this.exclusionsBackfilled) return;
+    if (
+      this.db
+        .prepare('SELECT 1 FROM acquisition_migrations WHERE scope=? AND name=?')
+        .get(this.scope, marker)
+    ) {
+      this.exclusionsBackfilled = true;
+      return;
+    }
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      if (
+        !this.db
+          .prepare('SELECT 1 FROM acquisition_migrations WHERE scope=? AND name=?')
+          .get(this.scope, marker)
+      ) {
+        const decided = new Set();
+        const rows = this.db
+          .prepare(
+            `SELECT data FROM acquisition_operations
+          WHERE json_extract(data,'$.scope')=?
+          ORDER BY COALESCE(json_extract(data,'$.updatedAt'),json_extract(data,'$.createdAt'),'') DESC, id DESC`,
+          )
+          .all(this.scope);
+        for (const row of rows) {
+          let op, key, domain;
+          try {
+            op = JSON.parse(row.data);
+            if (
+              op.input?.mode === 'run' ||
+              !op.input?.item ||
+              !op.input?.input ||
+              !op.id ||
+              !(op.updatedAt || op.createdAt)
+            )
+              continue;
+            key = exclusionConditionsKey(op.input.input);
+            domain = domainKey(op.input.item.source_url);
+          } catch {
+            continue;
+          }
+          if (!domain) continue;
+          const identity = key + ':' + domain;
+          if (decided.has(identity)) continue;
+          const decision = exclusionDecision(op, op.output);
+          if (decision === 'ignore') continue;
+          decided.add(identity);
+          if (decision === 'exclude') this.insertExclusion(key, domain, op);
+        }
+        this.db
+          .prepare('INSERT INTO acquisition_migrations(scope,name) VALUES(?,?)')
+          .run(this.scope, marker);
+      }
+      this.db.exec('COMMIT');
+      this.exclusionsBackfilled = true;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+  insertExclusion(key, domain, op) {
+    const research = op.research || op.output?.research || {};
+    const summary = Object.fromEntries(
+      [
+        'entity_type',
+        'product_match',
+        'country_match',
+        'audience_match',
+        'customer_type_match',
+        'profile_match',
+        'required_match',
+      ]
+        .filter((field) => research[field] !== undefined)
+        .map((field) => [field, research[field]]),
+    );
+    if (research.eligibility?.status) summary.eligibility = research.eligibility.status;
+    if (research.relevance?.relevant === false) summary.prescreen = true;
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO acquisition_exclusions
+      (scope,conditions_key,domain,reason,operation_id,excluded_at,summary) VALUES(?,?,?,?,?,?,?)`,
+      )
+      .run(
+        this.scope,
+        key,
+        domain,
+        op.output.reason,
+        op.id,
+        op.updatedAt || op.createdAt,
+        JSON.stringify(summary),
+      );
+  }
+  exclusion(key, website) {
+    this.backfillExclusions();
+    const domain = domainKey(website);
+    return domain
+      ? this.db
+          .prepare(
+            `SELECT reason,operation_id,excluded_at,summary
+      FROM acquisition_exclusions WHERE scope=? AND conditions_key=? AND domain=?`,
+          )
+          .get(this.scope, key, domain) || null
+      : null;
+  }
+  completeResearch(op, output, key, website) {
+    this.backfillExclusions();
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      op.state = 'completed';
+      this.complete(op, output);
+      const domain = domainKey(website);
+      const decision = domain ? exclusionDecision(op, output) : 'ignore';
+      if (decision === 'exclude') {
+        this.db
+          .prepare(
+            'DELETE FROM acquisition_exclusions WHERE scope=? AND conditions_key=? AND domain=?',
+          )
+          .run(this.scope, key, domain);
+        this.insertExclusion(key, domain, op);
+      } else if (decision === 'clear')
+        this.db
+          .prepare(
+            'DELETE FROM acquisition_exclusions WHERE scope=? AND conditions_key=? AND domain=?',
+          )
+          .run(this.scope, key, domain);
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+    return output;
   }
   get(id) {
     const row = this.db.prepare('SELECT data FROM acquisition_operations WHERE id=?').get(id);

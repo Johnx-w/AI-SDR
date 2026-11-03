@@ -399,13 +399,11 @@ for (const [scenarioIndex, scenario] of [
         assert.equal(output.research.eligibility.code, scenario.code);
       } else {
         assert.equal(output.outcome, 'rejected');
-        assert.equal(output.research.product_match, undefined);
-        assert.equal(output.research.eligibility, undefined);
+        assert.ok(output.research.eligibility || output.research.product_match === 'not_matched');
         const stored = svc.store.get('policy-blocked-' + scenarioIndex);
-        assert.equal(stored.input, undefined);
+        assert.equal(stored.input.item.source_url, site);
         assert.equal(stored.research_pages, undefined);
         assert.equal(stored.research_response, undefined);
-        assert.ok(!JSON.stringify(stored).includes(site));
       }
       assert.equal(
         f.calls.some((c) => c.url.includes('/records') && ['POST', 'PUT'].includes(c.method)),

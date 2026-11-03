@@ -1,9 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { NativeAcquisition } from '../server/native-acquisition.mjs';
 import { AcquisitionStore } from '../server/acquisition-store.mjs';
 import { researchCacheKey } from '../server/research-reuse.mjs';
 import { companyResearchSchema } from '../server/company-research.mjs';
+import { BatchJobs } from '../server/batch-jobs.mjs';
+import { exclusionConditionsKey } from '../server/exclusion-conditions.mjs';
 
 const source = 'https://blinds.example.org/';
 const text =
@@ -25,7 +30,11 @@ const input = {
   acquisition_channel: 'tavily_web',
 };
 
-function fixture({ identity = { provider: 'fixture', model: 'text-v1' } } = {}) {
+function fixture({
+  identity = { provider: 'fixture', model: 'text-v1' },
+  path = ':memory:',
+  scope = 'cost-test',
+} = {}) {
   const state = {
     text,
     calls: 0,
@@ -35,8 +44,10 @@ function fixture({ identity = { provider: 'fixture', model: 'text-v1' } } = {}) 
     request: null,
     records: [],
     assessments: [],
+    searchResults: [{ url: source, title: 'Example Blinds' }],
+    searches: 0,
   };
-  const store = new AcquisitionStore(':memory:', 'cost-test');
+  const store = new AcquisitionStore(path, scope);
   const raw = {
     assessment_opportunities: [],
     company_name: { value: 'Example Blinds', quote: text, source_url: source },
@@ -73,14 +84,21 @@ function fixture({ identity = { provider: 'fixture', model: 'text-v1' } } = {}) 
         };
       },
     },
-    web: { extract: async () => ({ results: [] }) },
+    web: {
+      provider: 'fixture',
+      extract: async () => ({ results: [] }),
+      search: async () => {
+        state.searches++;
+        return { results: state.searchResults };
+      },
+    },
   };
   const service = new NativeAcquisition({
     env,
     store,
     providers,
     assessments: {
-      scope: 'cost-test',
+      scope,
       save: (snapshot) => {
         state.assessments.push(structuredClone(snapshot));
       },
@@ -172,7 +190,7 @@ test('相同研究正文和条件跨操作复用模型响应，仍新抓官网�
   }
 });
 
-test('明确不匹配不缓存模型响应，操作只保留统计和固定原因', async () => {
+test('明确不匹配跨操作跳过官网和模型，操作只保留判定摘要', async () => {
   const f = fixture();
   try {
     f.state.text = text + ' We sell camping tents to households.';
@@ -187,7 +205,7 @@ test('明确不匹配不缓存模型响应，操作只保留统计和固定原�
     const second = await f.research('rejected-second');
     assert.equal(first.outcome, 'rejected');
     assert.equal(second.outcome, 'rejected');
-    assert.equal(f.state.calls, 2);
+    assert.equal(f.state.calls, 1);
     assert.equal(first.research_usage.cache_hits, 0);
     assert.equal(second.research_usage.cache_hits, 0);
     assert.equal(f.state.writes, 0);
@@ -195,10 +213,10 @@ test('明确不匹配不缓存模型响应，操作只保留统计和固定原�
     assert.equal(stored.state, 'completed');
     assert.equal(stored.research_response, undefined);
     assert.equal(stored.research_pages, undefined);
-    assert.equal(stored.input, undefined);
+    assert.equal(stored.research.product_match, 'not_matched');
+    assert.equal(stored.input.item.source_url, source);
     assert.equal(stored.evidence, undefined);
     assert.equal(stored.output.handoff.contacts.length, 0);
-    assert.ok(!JSON.stringify(stored).includes(source));
     const key = researchCacheKey({
       ...f.state.request,
       schema: companyResearchSchema,
@@ -211,9 +229,9 @@ test('明确不匹配不缓存模型响应，操作只保留统计和固定原�
     });
     const cached = await f.research('rejected-cache-hit');
     assert.equal(cached.outcome, 'rejected');
-    assert.equal(cached.research_usage.cache_hits, 1);
-    assert.equal(f.state.calls, 2);
-    assert.equal(f.store.modelResponse(key), null);
+    assert.equal(cached.research_usage.cache_hits, 0);
+    assert.equal(f.state.calls, 1);
+    assert.ok(f.store.modelResponse(key));
     assert.deepEqual(await f.research('rejected-first'), first);
   } finally {
     f.service.close();
@@ -276,7 +294,7 @@ test('模型前规则预筛不发生成请求，幂等读取也不重复研究',
     assert.equal(result.research_usage.model_calls, 0);
     assert.equal(result.research_usage.input_chars, 0);
     assert.equal(f.state.calls, 0);
-    assert.ok(!JSON.stringify(f.store.get('pre-screen')).includes(source));
+    assert.equal(f.store.get('pre-screen').research.product_match, 'not_matched');
     await f.research('pre-screen');
     assert.equal(f.state.reads, 1);
     assert.equal(f.state.calls, 0);
@@ -321,6 +339,277 @@ test('collect的正文预算约束实际模型输入，完整HTML联系证据不
     assert.ok(sent.reduce((sum, page) => sum + page.text.length, 0) <= 80000);
     assert.ok(result.research_usage.input_chars <= 80000);
     assert.equal(result.research_usage.truncated_pages, 1);
+  } finally {
+    f.service.close();
+  }
+});
+
+test('明确预筛排除跨任务和重启命中，发现过滤且幂等重放不再抓取', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'exclusion-restart-'));
+  const path = join(folder, 'operations.sqlite');
+  try {
+    const first = fixture({ path });
+    first.state.text = 'We sell camping tents and outdoor cooking equipment. '.repeat(4);
+    const original = await first.research('exclusion-first');
+    assert.equal(original.outcome, 'rejected');
+    const found = await first.service.discover(input, { query: 'zip screens' });
+    assert.equal(found.candidates.length, 0);
+    assert.equal(found.skipped_existing_count, 0);
+    assert.match(found.filtered_sources[0].reason, /历史排除/);
+    const next = await first.research('exclusion-second');
+    assert.equal(next.outcome, 'rejected');
+    assert.match(next.reason, /exclusion-first/);
+    assert.equal(next.research_usage.cache_hits, 0);
+    assert.equal(next.research_usage.model_calls, 0);
+    assert.equal(next.research_usage.input_chars, 0);
+    assert.deepEqual(await first.research('exclusion-second'), next);
+    assert.equal(first.state.reads, 1);
+    assert.equal(first.state.calls, 0);
+    assert.equal(first.state.writes, 0);
+    first.service.close();
+
+    const reopened = fixture({ path });
+    reopened.state.text = first.state.text;
+    const afterRestart = await reopened.research('exclusion-third');
+    assert.equal(afterRestart.outcome, 'rejected');
+    assert.equal(reopened.state.reads, 0);
+    assert.equal(reopened.state.calls, 0);
+    assert.equal(reopened.state.writes, 0);
+    reopened.service.close();
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test('排除按客户库和业务条件隔离，任务预算搜索词与产品排列不改变命中', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'exclusion-conditions-'));
+  const path = join(folder, 'operations.sqlite');
+  const product = (value, direction, aliases = []) => ({
+    value,
+    label: value,
+    direction,
+    group: 'fixture',
+    aliases,
+  });
+  const target = {
+    ...input,
+    products: [
+      product('zip screens', 'finished', ['outdoor screens', 'zip blinds']),
+      product('roller blinds', 'finished', ['roller shades']),
+    ],
+    required_requirements: ['trade supply', 'United States'],
+  };
+  try {
+    const f = fixture({ path });
+    f.state.text = 'We sell camping tents and outdoor cooking equipment. '.repeat(4);
+    assert.equal((await f.research('conditions-first', target)).outcome, 'rejected');
+    const rearranged = {
+      ...target,
+      products: [...target.products].reverse().map((p) => ({
+        ...p,
+        aliases: [...p.aliases].reverse(),
+      })),
+      required_requirements: [...target.required_requirements].reverse(),
+      target_count: 50,
+      budget: 100,
+      search_query: 'different',
+      task_id: 'another',
+    };
+    assert.equal((await f.research('conditions-same', rearranged)).research_usage.model_calls, 0);
+    assert.equal(f.state.reads, 1);
+    for (const [id, changed] of [
+      [
+        'direction',
+        {
+          products: [
+            product('zip screens', 'materials', target.products[0].aliases),
+            target.products[1],
+          ],
+        },
+      ],
+      [
+        'alias',
+        { products: [product('zip screens', 'finished', ['another name']), target.products[1]] },
+      ],
+      ['required', { required_requirements: ['trade supply'] }],
+    ]) {
+      await f.research('conditions-' + id, { ...target, ...changed });
+    }
+    assert.equal(f.state.reads, 4);
+    f.service.close();
+    const other = fixture({ path, scope: 'another-library' });
+    other.state.text = f.state.text;
+    await other.research('conditions-scope', target);
+    assert.equal(other.state.reads, 1);
+    other.service.close();
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test('主动研究有效待核实结论清除旧排除，技术失败保留旧排除', async () => {
+  const f = fixture();
+  try {
+    f.state.text = 'We sell camping tents and outdoor cooking equipment. '.repeat(4);
+    assert.equal((await f.research('clear-first')).outcome, 'rejected');
+    f.state.text = text;
+    f.state.invalid = true;
+    const failed = await f.service.research(
+      input,
+      { source_url: source, operation_id: 'clear-failed' },
+      { bypassExclusion: true },
+    );
+    assert.equal(failed.outcome, 'failed');
+    f.state.text = 'We sell camping tents and outdoor cooking equipment. '.repeat(4);
+    assert.match((await f.research('clear-still-blocked')).reason, /clear-first/);
+    f.state.invalid = false;
+    f.state.text = text;
+    f.raw.company_name = null;
+    const reviewed = await f.service.research(
+      input,
+      { source_url: source, operation_id: 'clear-reviewed' },
+      { bypassExclusion: true },
+    );
+    assert.equal(reviewed.outcome, 'review');
+    const reads = f.state.reads;
+    await f.research('clear-after-review');
+    assert.equal(f.state.reads, reads + 1);
+  } finally {
+    f.service.close();
+  }
+});
+
+test('发现过滤后批任务继续研究其他网站，历史排除不占研究预算', async () => {
+  const f = fixture();
+  const second = 'https://another.example.org/';
+  let researched = 0;
+  let manager;
+  try {
+    f.state.text = 'We sell camping tents and outdoor cooking equipment. '.repeat(4);
+    await f.research('batch-excluded');
+    f.state.searchResults = [{ url: source }, { url: second }];
+    manager = new BatchJobs({
+      schedule: false,
+      discover: (...args) => f.service.discover(...args),
+      research: async (_input, item) => {
+        researched++;
+        assert.equal(item.source_url, second);
+        return {
+          outcome: 'rejected',
+          reason: 'fixture result',
+          research_usage: { model_calls: 0, cache_hits: 0, input_chars: 0 },
+        };
+      },
+      status: async () => ({ settled: false }),
+      readLeads: async () => [],
+    });
+    const job = manager.create(
+      { ...input, search_query: 'zip screens', target_count: 1, research_budget: 1 },
+      'exclusion-batch',
+    );
+    await manager.work(job.id);
+    const completed = manager.get(job.id);
+    assert.equal(researched, 1);
+    assert.equal(completed.researched, 1);
+    assert.equal(completed.searchStats[0].filtered, 1);
+    assert.equal(completed.searchStats[0].queued, 1);
+    assert.equal(completed.searchStats[0].researched, 1);
+    assert.equal(
+      completed.searchStats[0].filterReasons['历史排除：官网内容与目标产品不相关，已预筛排除'],
+      1,
+    );
+  } finally {
+    manager?.close();
+    f.service.close();
+  }
+});
+
+test('带指定客户记录的研究绕过排除', async () => {
+  const f = fixture();
+  try {
+    f.state.text = 'We sell camping tents and outdoor cooking equipment. '.repeat(4);
+    await f.research('target-excluded');
+    f.state.records.push({
+      record_id: 'rec-target',
+      fields: {
+        企业官网: source,
+        公司名称: 'Example Blinds',
+      },
+    });
+    f.state.text = text;
+    f.raw.products = [{ value: 'zip screens', quote: text, source_url: source }];
+    await f.service.research(input, {
+      source_url: source,
+      target_record_id: 'rec-target',
+      operation_id: 'target-research',
+    });
+    assert.equal(f.state.reads, 2);
+    assert.equal(f.state.calls, 1);
+  } finally {
+    f.service.close();
+  }
+});
+
+test('主动复核重新抓取并复用模型响应后清除旧排除', async () => {
+  const f = fixture();
+  try {
+    f.raw.company_name = null;
+    assert.equal((await f.research('cache-clear-review-first')).outcome, 'review');
+    f.state.text = text + ' We sell camping tents to households.';
+    f.raw.products = [
+      { value: 'camping tents', quote: 'We sell camping tents to households.', source_url: source },
+    ];
+    assert.equal((await f.research('cache-clear-excluded')).outcome, 'rejected');
+    assert.equal(
+      f.store.exclusion(exclusionConditionsKey(input), source)?.operation_id,
+      'cache-clear-excluded',
+    );
+    f.state.text = text;
+    f.raw.products = [];
+    const reads = f.state.reads;
+    const calls = f.state.calls;
+    const reviewed = await f.service.research(
+      input,
+      { source_url: source, operation_id: 'cache-clear-reviewed' },
+      { bypassExclusion: true },
+    );
+    assert.equal(reviewed.outcome, 'review');
+    assert.equal(reviewed.research_usage.cache_hits, 1);
+    assert.equal(reviewed.research_usage.model_calls, 0);
+    assert.equal(f.state.reads, reads + 1);
+    assert.equal(f.state.calls, calls);
+    assert.equal(f.store.exclusion(exclusionConditionsKey(input), source), null);
+    await f.research('cache-clear-after-review');
+    assert.equal(f.state.reads, reads + 2);
+  } finally {
+    f.service.close();
+  }
+});
+
+test('已结算的同一操作重放不清除后来更新的排除', async () => {
+  const f = fixture();
+  try {
+    f.state.text = 'We sell camping tents and outdoor cooking equipment. '.repeat(4);
+    await f.research('replay-old-exclusion');
+    f.state.text = text;
+    f.raw.company_name = null;
+    const reviewed = await f.service.research(
+      input,
+      { source_url: source, operation_id: 'replay-reviewed' },
+      { bypassExclusion: true },
+    );
+    assert.equal(reviewed.outcome, 'review');
+    f.state.text = 'We sell camping tents and outdoor cooking equipment. '.repeat(4);
+    await f.research('replay-new-exclusion');
+    assert.deepEqual(
+      await f.service.research(
+        input,
+        { source_url: source, operation_id: 'replay-reviewed' },
+        { bypassExclusion: true },
+      ),
+      reviewed,
+    );
+    assert.match((await f.research('replay-still-excluded')).reason, /replay-new-exclusion/);
   } finally {
     f.service.close();
   }
