@@ -178,9 +178,9 @@ export function encodeResearchFields(raw, definitions) {
     Object.entries(raw).filter(([key]) => !['公司名称', '客户名称'].includes(key)),
   );
   if (name) raw[nameField] = name;
-  for (const name of ['来源链接', 'customer_id', '广告代码', '需求产品', '客户行业画像'])
+  for (const name of ['来源链接', 'customer_id', '需求产品', '客户行业画像'])
     if (!resolveCustomerField(definitions, name)) throw fail('客户表缺少迁移必需字段：' + name);
-  for (const name of ['广告代码', '需求产品', '客户行业画像'])
+  for (const name of ['需求产品', '客户行业画像'])
     if (types.get(resolveCustomerField(definitions, name)) !== 1)
       throw fail('客户表字段必须为文本：' + name);
   if (![1, 3].includes(types.get('客户类型')))

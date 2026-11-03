@@ -208,7 +208,6 @@ export function LeadLibrary() {
           客户评级: l.grade,
           评级依据: l.ratingReason || '',
           开发状态: l.status,
-          广告代码: l.advertisingCodes || '',
           企业经营产品: l.product,
           主营产品概况: l.mainProductPreference || '',
           公开采购需求: l.demandProducts || '',

@@ -310,7 +310,6 @@ export class NativeAcquisition {
               assessment: {
                 id: stored.id,
                 ruleVersion: stored.ruleVersion,
-                legacy: stored.legacy,
                 evaluatedAt: stored.evaluatedAt,
                 score: stored.score,
                 grade: manualOverride

@@ -9,8 +9,7 @@
   border-radius: 12px;
   background: var(--color-surface-muted);
 }
-.profile-overview-heading,
-.profile-priority {
+.profile-overview-heading {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -50,10 +49,6 @@
 .profile-public-demand h4 small {
   color: var(--color-text-muted);
   font-weight: 400;
-}
-.profile-priority > span:last-child {
-  color: var(--color-text-secondary);
-  font-size: 12px;
 }
 .profile-introduction {
   margin: 14px 0;

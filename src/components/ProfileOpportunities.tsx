@@ -1,5 +1,3 @@
-import { ArrowUpRight } from 'lucide-react';
-import { Badge } from './ui';
 import { buildAssessmentDimensions } from '../domain/assessment-dimensions.mjs';
 import { directionLabels } from '../domain/acquisition-products.mjs';
 import { formatBeijingText, formatBeijingTime } from '../domain/date-time.mjs';
@@ -18,40 +16,6 @@ export function evidenceUrl(value?: string) {
   } catch {
     return undefined;
   }
-}
-
-function Evidence({ facts }: { facts: AssessmentFact[] }) {
-  if (!facts.length) return null;
-  return (
-    <details className="profile-evidence">
-      <summary>查看依据（{facts.length} 条）</summary>
-      {facts.map((fact, index) => (
-        <article key={index} className="profile-source">
-          {fact.origin === 'manual' && (
-            <small>
-              人工确认{fact.confirmedBy && ' · ' + fact.confirmedBy}
-              {fact.confirmedAt && ' · ' + formatBeijingTime(fact.confirmedAt)}
-            </small>
-          )}
-          <p>{formatBeijingText(fact.value)}</p>
-          <blockquote>{formatBeijingText(fact.quote || '逐条原文未记录')}</blockquote>
-          {evidenceUrl(fact.source_url) ? (
-            <a href={evidenceUrl(fact.source_url)} target="_blank" rel="noopener noreferrer">
-              查看来源 <ArrowUpRight size={12} />
-            </a>
-          ) : (
-            <span>
-              {fact.source_url
-                ? fact.source_url + '（链接不可打开）'
-                : fact.origin === 'manual'
-                  ? '依据由确认人补充'
-                  : '来源链接未记录'}
-            </span>
-          )}
-        </article>
-      ))}
-    </details>
-  );
 }
 
 function opportunityAnalysis(opportunity: AssessmentOpportunity, facts: AssessmentFact[]) {
@@ -82,22 +46,16 @@ function opportunityAnalysis(opportunity: AssessmentOpportunity, facts: Assessme
 function Opportunity({
   opportunity,
   assessment,
-  ratingReason = '',
 }: {
   opportunity: AssessmentOpportunity;
   assessment: AssessmentSummary;
-  ratingReason?: string;
 }) {
   const main =
     opportunity.direction === assessment.direction && opportunity.product === assessment.product;
-  const dimensions = buildAssessmentDimensions(
-    {
-      ...opportunity,
-      ruleVersion: assessment.ruleVersion,
-      evidenceReason: main ? assessment.evidenceReason : undefined,
-    },
-    main ? ratingReason : '',
-  );
+  const dimensions = buildAssessmentDimensions({
+    ...opportunity,
+    dimensions: opportunity.dimensions || (main ? assessment.dimensions : undefined),
+  });
   const facts = opportunity.facts?.length ? opportunity.facts : dimensions.flatMap((d) => d.facts);
   const reasons = dimensions
     .filter((d) => d.facts.length && !d.conflict)
@@ -116,12 +74,6 @@ function Opportunity({
         <h4>
           {direction} · {product}
         </h4>
-        <div className="profile-priority">
-          <Badge tone={opportunity.grade === 'A' ? 'blue' : 'neutral'}>
-            {opportunity.grade || opportunity.status || '未评级'}
-          </Badge>
-          {opportunity.matchLevel && <span>匹配等级：{opportunity.matchLevel}</span>}
-        </div>
       </div>
       <p className="profile-opportunity-analysis">
         <strong>供货分析：</strong>
@@ -164,13 +116,7 @@ function Opportunity({
   );
 }
 
-export function ProfileOpportunities({
-  assessment,
-  ratingReason = '',
-}: {
-  assessment: AssessmentSummary;
-  ratingReason?: string;
-}) {
+export function ProfileOpportunities({ assessment }: { assessment: AssessmentSummary }) {
   const opportunities: AssessmentOpportunity[] = assessment.opportunities?.length
     ? [...assessment.opportunities]
     : [assessment];
@@ -200,7 +146,6 @@ export function ProfileOpportunities({
                   : undefined),
             }}
             assessment={assessment}
-            ratingReason={ratingReason}
           />
         ) : (
           <details
@@ -226,12 +171,12 @@ export function ProfileOpportunities({
   );
 }
 
-export function assessmentLimitations(assessment?: AssessmentSummary | null, ratingReason = '') {
+export function assessmentLimitations(assessment?: AssessmentSummary | null) {
   return [
     ...new Set(
       [
         assessment?.incompleteReason || '',
-        ...(assessment?.evidenceReason || ratingReason)
+        ...(assessment?.evidenceReason || '')
           .split('\n')
           .filter((line) => /^(?:本轮)?研究限制[:：]/.test(line))
           .map((line) => line.replace(/^(?:本轮)?研究限制[:：]\s*/, '')),
@@ -247,50 +192,18 @@ export function assessmentLimitations(assessment?: AssessmentSummary | null, rat
   ];
 }
 
-export function InitialAssessmentRecord({
-  assessment,
-  ratingReason = '',
-}: {
-  assessment?: AssessmentSummary | null;
-  ratingReason?: string;
-}) {
-  if (!assessment && !ratingReason) return null;
-  const legacy =
-    assessment && !['acquisition-v4.0', 'acquisition-v5.0'].includes(assessment.ruleVersion);
-  const dimensions = legacy ? buildAssessmentDimensions(assessment, ratingReason) : [];
-  const records = [
-    ...new Set(
-      [assessment?.evidenceReason, ratingReason].filter((text): text is string => Boolean(text)),
-    ),
-  ];
+export function InitialAssessmentRecord({ assessment }: { assessment?: AssessmentSummary | null }) {
+  if (!assessment) return null;
   return (
     <details className="profile-more-details profile-assessment-record">
       <summary>初评记录</summary>
-      {assessment && (
-        <p>
-          评估编号：{assessment.id} · 规则版本：{assessment.ruleVersion}
-        </p>
-      )}
-      {legacy && <p>旧版评估按原规则保留，不换算为新版优先级。</p>}
-      {assessment?.ruleVersion === 'acquisition-v4.0' && (
-        <p>客户评级依据历史已核实证据重定级；原始评估记录保留在下方。</p>
-      )}
-      {dimensions.map((dimension) => (
-        <section key={dimension.key} aria-label={dimension.name + '评分'}>
-          <h4>
-            {dimension.name}：{dimension.score === null ? '未知' : dimension.score} /{' '}
-            {dimension.maximum}
-          </h4>
-          <p>{dimension.conclusion}</p>
-          <Evidence facts={dimension.facts} />
-        </section>
-      ))}
-      {assessmentLimitations(assessment, ratingReason).map((item) => (
+      <p>
+        评估编号：{assessment.id} · 规则版本：{assessment.ruleVersion}
+      </p>
+      {assessmentLimitations(assessment).map((item) => (
         <p key={item}>研究限制：{formatBeijingText(item)}</p>
       ))}
-      {records.map((record, index) => (
-        <pre key={index}>{formatBeijingText(record)}</pre>
-      ))}
+      {assessment.evidenceReason && <pre>{formatBeijingText(assessment.evidenceReason)}</pre>}
     </details>
   );
 }

@@ -95,7 +95,6 @@ function fixture({ identity = { provider: 'fixture', model: 'text-v1' } } = {}) 
         { field_name: 'customer_id', type: 1 },
         { field_name: '首次发现时间', type: 5 },
         { field_name: '开发状态', type: 3 },
-        { field_name: '广告代码', type: 1 },
         { field_name: '需求产品', type: 1 },
         { field_name: '客户行业画像', type: 1 },
         { field_name: '客户类型', type: 1 },

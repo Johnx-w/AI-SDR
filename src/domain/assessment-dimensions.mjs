@@ -1,27 +1,15 @@
 const definitions = {
   P: {
     name: '产品契合',
-    kinds: ['core_product', 'secondary_product', 'adjacent_product', 'unrelated_product'],
   },
   R: {
     name: '经营角色',
-    kinds: ['specialist_supply', 'general_supply', 'installation_only', 'no_supply_role'],
   },
   D: {
     name: '持续经营',
-    kinds: [
-      'current_supply_process',
-      'company_since',
-      'company_years',
-      'operating_outlet',
-      'active_dealer',
-      'completed_project',
-      'completed_commercial_project',
-    ],
   },
   V: {
     name: '定制与系统特征',
-    kinds: ['custom_made', 'motorized_system', 'commercial_specification'],
   },
 };
 const labels = {
@@ -44,29 +32,6 @@ const labels = {
   motorized_system: '电动系统特征',
   commercial_specification: '工程规格特征',
 };
-const legacyLabels = new Map([
-  ...Object.entries(labels).map(([kind, label]) => [label, kind]),
-  ['定制能力需求', 'custom_made'],
-  ['电动系统需求', 'motorized_system'],
-  ['工程规格需求', 'commercial_specification'],
-]);
-const directions = {
-  finished: 'finished',
-  成品: 'finished',
-  materials: 'materials',
-  材料: 'materials',
-  材料配件: 'materials',
-  samples: 'samples',
-  样本: 'samples',
-  样本展示: 'samples',
-};
-const identity = (value) =>
-  String(value ?? '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .replace(/（/g, '(')
-    .replace(/）/g, ')');
 const valueText = (value) => {
   if (value === undefined || value === null) return '';
   if (Array.isArray(value)) return value.map(valueText).filter(Boolean).join('、');
@@ -98,81 +63,7 @@ const normalizeFacts = (facts) => {
   return [...result.values()];
 };
 
-function scopedLegacyLines(assessment, text) {
-  const lines = String(text || '').split(/\r?\n/);
-  const sections = [];
-  for (let index = 0; index < lines.length; index++) {
-    const match = lines[index]
-      .trim()
-      .match(
-        /^(?:经营证据方向[:：]\s*)?(成品|材料配件|材料|样本展示|样本|finished|materials|samples)\s*[·・]\s*(.+)$/,
-      );
-    if (match)
-      sections.push({ index, direction: directions[match[1]], product: identity(match[2]) });
-  }
-  const otherIndex = lines.findIndex((line) => /^其他方向/.test(line.trim()));
-  if (!sections.length) return otherIndex < 0 ? lines : lines.slice(0, otherIndex);
-  const product = identity(assessment.product);
-  const direction = directions[assessment.direction];
-  const matching = sections.filter(
-    (section) =>
-      (!product || section.product === product) && (!direction || section.direction === direction),
-  );
-  // A missing or ambiguous product must never join facts from other opportunities.
-  if (matching.length !== 1) return [];
-  const section = matching[0];
-  const nextIndex =
-    sections.find((candidate) => candidate.index > section.index)?.index ?? lines.length;
-  return lines.slice(
-    section.index + 1,
-    otherIndex >= 0 ? Math.min(nextIndex, otherIndex) : nextIndex,
-  );
-}
-
-function parseLegacyFacts(assessment, text) {
-  const facts = [];
-  let current;
-  let part;
-  const flush = () => {
-    if (current) facts.push(current);
-    current = undefined;
-    part = undefined;
-  };
-  for (const rawLine of scopedLegacyLines(assessment, text)) {
-    const line = rawLine.trim();
-    const field = line.match(/^([^:：]+)[:：]\s*(.*)$/);
-    if (field && legacyLabels.has(field[1])) {
-      flush();
-      current = { kind: legacyLabels.get(field[1]), value: field[2], quote: '', source_url: '' };
-      part = 'value';
-    } else if (current && field && field[1] === '原文') {
-      current.quote = field[2];
-      part = 'quote';
-    } else if (current && field && field[1] === '来源') {
-      current.source_url = field[2];
-      part = 'source_url';
-    } else if (
-      /^(?:待补充|本轮|研究限制|规则版本|评估时间|评级口径|用户评级|已支持分数|匹配等级|开发优先级|优先线索|需要核实的冲突|其他方向)/.test(
-        line,
-      )
-    ) {
-      flush();
-    } else if (current && part === 'quote') {
-      current.quote += '\n' + rawLine;
-    } else if (
-      current &&
-      part === 'source_url' &&
-      !current.source_url &&
-      /^https?:\/\//.test(line)
-    ) {
-      current.source_url = line;
-    }
-  }
-  flush();
-  return normalizeFacts(facts);
-}
-
-function conclusion(key, dimension, facts, current) {
+function conclusion(key, dimension, facts) {
   const name = definitions[key].name;
   if (dimension.conflict) return '该维度事实存在冲突，需核实';
   if (dimension.score === null || dimension.score === undefined) return name + '尚无公开依据';
@@ -208,23 +99,17 @@ function conclusion(key, dimension, facts, current) {
     if (motor) return '存在电动或自动化系统特征';
     if (commercial) return '存在工程配套特征';
   }
-  return '已记录' + name + (current ? '依据' : '评分');
+  return '已记录' + name + '评分';
 }
 
-export function buildAssessmentDimensions(assessment, ratingReason = '') {
+export function buildAssessmentDimensions(assessment) {
   if (!assessment?.dimensions || typeof assessment.dimensions !== 'object') return [];
-  const current = ['acquisition-v4.0', 'acquisition-v5.0'].includes(assessment.ruleVersion);
-  const legacy = parseLegacyFacts(assessment, assessment.evidenceReason || ratingReason);
   return Object.entries(definitions).flatMap(([key, definition]) => {
     const dimension = assessment.dimensions[key];
     if (!dimension || typeof dimension !== 'object') return [];
-    const facts = Object.hasOwn(dimension, 'facts')
-      ? normalizeFacts(dimension.facts)
-      : legacy.filter((fact) => definition.kinds.includes(fact.kind));
+    const facts = normalizeFacts(dimension.facts);
     const missing =
-      (current && !dimension.conflict) || typeof dimension.missing !== 'string'
-        ? ''
-        : dimension.missing;
+      dimension.conflict && typeof dimension.missing === 'string' ? dimension.missing : '';
     const basis = [
       ...new Set(
         facts
@@ -239,7 +124,7 @@ export function buildAssessmentDimensions(assessment, ratingReason = '') {
         name: definition.name,
         score: dimension.score ?? null,
         maximum: dimension.maximum,
-        conclusion: conclusion(key, dimension, facts, current),
+        conclusion: conclusion(key, dimension, facts),
         basis,
         facts,
         missing,

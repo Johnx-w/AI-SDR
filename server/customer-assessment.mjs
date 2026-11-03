@@ -49,13 +49,6 @@ export function projectCustomerGrade(lead) {
     },
   };
 }
-const labels = {
-  P: '产品契合',
-  R: '经营角色',
-  D: '持续经营',
-  V: '定制与系统特征',
-  I: '海关采购表现',
-};
 const maximums = { P: 40, R: 30, D: 20, V: 10 };
 const prioritySignalLabels = {
   core_product: '主营产品',
@@ -372,20 +365,15 @@ export function assessCompany({ research, target, at = Date.now(), id }) {
 }
 
 export function formatAssessmentReason(snapshot) {
-  const current = ['acquisition-v4.0', ASSESSMENT_RULE_VERSION].includes(snapshot.ruleVersion);
   const lines = [
     '[自动评估 ' + snapshot.id + ']',
     '规则版本：' + snapshot.ruleVersion,
     '评估时间：' + snapshot.evaluatedAt,
     '经营证据方向：' + (directionNames[snapshot.direction] || '待核实') + ' · ' + snapshot.product,
-    ...(current
-      ? [
-          '匹配等级：' + snapshot.matchLevel,
-          '开发优先级：' + assessmentRating(snapshot),
-          '优先线索：' +
-            (snapshot.prioritySignals?.map((signal) => signal.label).join('、') || '暂无额外线索'),
-        ]
-      : ['评级口径：A/B/C表示初始开发优先级；资料完整度、采购需求与触达反馈另行记录']),
+    '匹配等级：' + snapshot.matchLevel,
+    '开发优先级：' + assessmentRating(snapshot),
+    '优先线索：' +
+      (snapshot.prioritySignals?.map((signal) => signal.label).join('、') || '暂无额外线索'),
     ...(snapshot.supplyOpportunity
       ? [
           '潜在供货机会：' +
@@ -394,29 +382,9 @@ export function formatAssessmentReason(snapshot) {
             snapshot.supplyOpportunity.note,
         ]
       : []),
-    ...(current
-      ? []
-      : [
-          '用户评级：' + assessmentRating(snapshot) + '；' + snapshot.status,
-          '已支持分数：' +
-            snapshot.score +
-            '/100；' +
-            (snapshot.complete ? '评分维度依据齐全' : '部分评分依据缺失，未按比例补满'),
-          ...Object.entries(snapshot.dimensions).map(
-            ([key, d]) =>
-              key +
-              ' ' +
-              labels[key] +
-              '：' +
-              (d.score === null ? '未知' : d.score) +
-              '/' +
-              d.maximum,
-          ),
-        ]),
   ];
   if (snapshot.incompleteReason) lines.push('本轮研究限制：' + snapshot.incompleteReason);
-  if (snapshot.missing?.length)
-    lines.push((current ? '需要核实的冲突：' : '待补充：') + snapshot.missing.join('；'));
+  if (snapshot.missing?.length) lines.push('需要核实的冲突：' + snapshot.missing.join('；'));
   const facts = snapshot.opportunities[0]?.facts || [];
   const used = new Set();
   for (const fact of facts) {
@@ -445,8 +413,7 @@ export function formatAssessmentReason(snapshot) {
           ' · ' +
           other.product +
           '：' +
-          (other.grade || other.status) +
-          (current ? '' : '，已支持' + other.score + '分'),
+          (other.grade || other.status),
       );
   }
   return lines.join('\n');
@@ -475,17 +442,6 @@ export function formatAssessmentEvidence(snapshot) {
     identity_conflict: '主体冲突',
     mandatory_requirement: '强制条件',
   };
-  // T12 comparisons must retain the exact formatting used by older snapshots.
-  if (
-    !snapshot.ruleVersion ||
-    /^acquisition-v[12]\./.test(snapshot.ruleVersion) ||
-    snapshot.ruleVersion === 'acquisition-v3.0'
-  )
-    Object.assign(factLabels, {
-      custom_made: '定制能力需求',
-      motorized_system: '电动系统需求',
-      commercial_specification: '工程规格需求',
-    });
   const lines = [];
   if (snapshot.incompleteReason) lines.push('研究限制：' + snapshot.incompleteReason);
   const seen = new Set();
@@ -526,22 +482,11 @@ export function readAssessmentSummary(value) {
   const ruleVersion = reason.match(/(?:^|\n)规则版本：([^\n]+)/)?.[1];
   const evaluatedAt = reason.match(/(?:^|\n)评估时间：([^\n]+)/)?.[1];
   if (!ruleVersion) return null;
-  if (['acquisition-v4.0', ASSESSMENT_RULE_VERSION].includes(ruleVersion)) {
-    const priority = reason.match(/(?:^|\n)开发优先级：([^\n]+)/)?.[1];
-    const matchLevel = reason.match(/(?:^|\n)匹配等级：([^\n]+)/)?.[1];
-    if (!priority || !matchLevel) return null;
-    return { id, ruleVersion, evaluatedAt, priority, matchLevel, score: null, assumed: false };
-  }
-  const score = Number(reason.match(/(?:^|\n)已支持分数：(\d+)\/100；/)?.[1]);
-  if (!Number.isFinite(score) || score < 0 || score > 100) return null;
-  return {
-    id,
-    score,
-    ruleVersion,
-    evaluatedAt,
-    complete: reason.includes('；资料完整') || reason.includes('；评分维度依据齐全'),
-    assumed: false,
-  };
+  if (!['acquisition-v4.0', ASSESSMENT_RULE_VERSION].includes(ruleVersion)) return null;
+  const priority = reason.match(/(?:^|\n)开发优先级：([^\n]+)/)?.[1];
+  const matchLevel = reason.match(/(?:^|\n)匹配等级：([^\n]+)/)?.[1];
+  if (!priority || !matchLevel) return null;
+  return { id, ruleVersion, evaluatedAt, priority, matchLevel, score: null, assumed: false };
 }
 
 export function assertAssessmentIdentity(snapshot, record) {

@@ -32,6 +32,12 @@ const service = {
   },
 };
 const html = `<script type="application/ld+json">${JSON.stringify([org, service])}</script><a href="https://www.facebook.com/sharer/sharer.php?u=https://vtrackscreens.com">share</a><a href="https://www.youtube.com/@Vtrackscreens"><svg/></a>`;
+test('官网元数据不再提取广告追踪代码', () => {
+  const evidence = combineWebsiteEvidence([
+    { url, content: '<script>gtag("config", "AW-123456789"); fbq("init", "123456789");</script>' },
+  ]);
+  assert.equal(Object.hasOwn(evidence, 'advertising_codes'), false);
+});
 test('企业结构化地址与服务地区独立，分享链接不作为社媒账户', () => {
   const e = combineWebsiteEvidence([{ url, content: html }]);
   assert.equal(e.addresses[0].city, 'Lavon');

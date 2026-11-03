@@ -37,11 +37,6 @@ interface DimensionInput {
 }
 export function buildAssessmentDimensions(
   assessment?: {
-    ruleVersion?: string;
-    product?: string | null;
-    direction?: string | null;
-    evidenceReason?: string;
     dimensions?: Record<string, DimensionInput>;
   } | null,
-  ratingReason?: string,
 ): PresentedAssessmentDimension[];
