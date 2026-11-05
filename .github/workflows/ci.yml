@@ -23,3 +23,13 @@ jobs:
       - run: npm run format:check
       - run: npm test
       - run: npm run build
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - run: node --test tests/release.test.mjs
