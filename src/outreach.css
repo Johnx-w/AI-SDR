@@ -130,13 +130,41 @@
   color: var(--color-text-muted);
   font-size: 12px;
 }
-.outreach-campaign-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
+.outreach-campaign-views {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 16px 20px 0;
 }
-.outreach-campaign {
-  padding: 22px;
+.outreach-page .outreach-campaign-views .btn[aria-pressed='true'] {
+  color: var(--outreach-accent);
+  background: var(--color-primary-soft);
+  border-color: var(--outreach-accent);
+}
+.outreach-campaign-table tbody tr {
+  cursor: pointer;
+}
+.outreach-campaign-name {
+  min-width: 160px;
+  max-width: 300px;
+  overflow-wrap: anywhere;
+}
+.outreach-campaign-progress-cell {
+  min-width: 120px;
+}
+.outreach-campaign-progress-cell .outreach-progress-track {
+  margin-top: 8px;
+}
+.outreach-campaign-more summary {
+  cursor: pointer;
+  padding: 8px;
+  white-space: nowrap;
+}
+.outreach-campaign-more[open] > div {
+  margin-top: 6px;
+}
+.outreach-campaign-table td small.outreach-row-error {
+  color: var(--color-text);
 }
 .outreach-card-heading {
   display: flex;
@@ -168,7 +196,6 @@
   align-self: flex-start;
   white-space: nowrap;
 }
-.outreach-campaign-icon,
 .outreach-brand-mark {
   display: inline-flex;
   flex: 0 0 auto;
@@ -179,36 +206,6 @@
   border-radius: 11px;
   background: var(--color-primary-soft);
   color: var(--outreach-accent);
-}
-.outreach-campaign-icon.test {
-  background: var(--color-surface-muted);
-  color: var(--color-text-secondary);
-}
-.outreach-campaign-progress {
-  margin: 24px 0 18px;
-}
-.outreach-campaign-progress > div:first-child {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-.outreach-campaign-progress strong {
-  font-size: 28px;
-  font-weight: 600;
-  letter-spacing: -1px;
-  font-variant-numeric: tabular-nums;
-}
-.outreach-campaign-progress strong > small {
-  font-size: 14px;
-  color: var(--color-text-muted);
-  font-weight: 400;
-  letter-spacing: 0;
-}
-.outreach-campaign-progress > div > span {
-  color: var(--color-text-muted);
-  font-size: 11px;
 }
 .outreach-progress-track {
   height: 5px;
@@ -222,36 +219,6 @@
   background: var(--outreach-accent);
   border-radius: inherit;
   transition: width 0.2s;
-}
-.outreach-campaign-meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px 14px;
-  color: var(--color-text-secondary);
-  font-size: 11px;
-}
-.outreach-campaign-meta > span {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-.outreach-campaign-stats {
-  display: flex;
-  gap: 15px;
-  flex-wrap: wrap;
-  margin: 18px 0 20px;
-  padding: 13px 0;
-  border-top: 1px solid var(--color-border);
-  border-bottom: 1px solid var(--color-border);
-  color: var(--color-text-muted);
-  font-size: 11px;
-}
-.outreach-campaign-stats b {
-  margin-left: 4px;
-  color: var(--color-text);
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
 }
 .outreach-card-actions {
   display: flex;
@@ -337,8 +304,6 @@
   color: var(--color-text-secondary);
 }
 .mail-signature-card-preview {
-  max-height: 240px;
-  overflow: auto;
   overflow-wrap: anywhere;
   color: #333;
   font-size: 12px;
@@ -1114,9 +1079,6 @@
   }
 }
 @media (max-width: 900px) {
-  .outreach-campaign-list {
-    grid-template-columns: 1fr;
-  }
   .outreach-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1167,9 +1129,6 @@
   }
   .outreach-metric {
     padding: 16px;
-  }
-  .outreach-campaign {
-    padding: 18px;
   }
   .outreach-metric > strong {
     font-size: 26px;

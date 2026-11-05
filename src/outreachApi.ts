@@ -1,4 +1,5 @@
 import type { MailSignatureDesign } from './domain/mail-signature.mjs';
+import type { DeliveryGroup } from './domain/outreach-status.mjs';
 
 export interface OutreachFact {
   id: string;
@@ -37,6 +38,7 @@ export interface OutreachMailbox {
   smtpStatus: string;
   lastCheckedAt?: string | null;
   lastError?: string | null;
+  updatedAt?: string;
 }
 
 export interface OutreachCampaign {
@@ -60,6 +62,7 @@ export interface OutreachCampaign {
   generationMode?: 'simple' | 'professional';
   outreachClaims?: { productId: string; productVersion: number; text: string }[];
   productScopes?: { productId: string; name: string; englishName: string }[];
+  deliveryGroups: Record<DeliveryGroup, number>;
   stats: {
     draft?: number;
     queued: number;
@@ -110,6 +113,7 @@ export interface OutreachState {
   mailboxes: OutreachMailbox[];
   campaigns: OutreachCampaign[];
   deliveryStats: Record<OutreachDeliveryStatus | 'total', number>;
+  deliveryGroups: Record<DeliveryGroup, number>;
   products: OutreachProduct[];
   readiness: { generatorConfigured: boolean };
   review: {

@@ -2,6 +2,49 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { OutreachService } from '../server/outreach-service.mjs';
 import { handleOutreach } from '../server/outreach-api.mjs';
+import { deliveryGroup } from '../src/domain/outreach-status.mjs';
+
+test('四类发送状态先跨记录筛选再分页，生成与人工确认分开且统计一致', async (t) => {
+  const service = new OutreachService({ mailboxes: { list: () => [] } });
+  t.after(() => service.close());
+  service.putCampaign({ id: 'one', name: 'Plan' });
+  const cases = [
+    ['draft', '', 'pending'],
+    ['draft', 'Needs approval', 'attention'],
+    ['queued', 'Queued', 'pending'],
+    ['sending', 'Submitting', 'pending'],
+    ['accepted', 'Accepted', 'sent'],
+    ['blocked', 'Blocked', 'attention'],
+    ['failed', 'Rejected', 'attention'],
+    ['unknown', 'Uncertain', 'attention'],
+    ['cancelled', 'Cancelled', 'cancelled'],
+  ];
+  for (let i = 0; i < 12; i++) {
+    for (const [status, subject, group] of cases) {
+      const delivery = { id: `${i}-${status}-${group}`, campaignId: 'one', status, subject };
+      assert.equal(deliveryGroup(delivery), group);
+      service.putDelivery(delivery);
+    }
+  }
+  const expected = { pending: 36, sent: 12, attention: 48, cancelled: 12 };
+  assert.deepEqual((await service.state()).deliveryGroups, expected);
+  assert.deepEqual(service.detail('one').campaign.deliveryGroups, expected);
+  for (const [group, total] of Object.entries(expected)) {
+    const result = await handleOutreach({
+      request: { method: 'GET' },
+      url: new URL(`http://localhost/api/v1/outreach/deliveries?group=${group}&page=2&pageSize=10`),
+      service,
+    });
+    assert.equal(result.total, total);
+    assert.equal(result.page, 2);
+    assert.equal(result.items.length, Math.min(10, total - 10));
+    assert.ok(result.items.every((delivery) => deliveryGroup(delivery) === group));
+  }
+  assert.equal(service.listDeliveries({ group: 'attention', status: 'unknown' }).total, 12);
+  assert.equal(service.listDeliveries({ group: 'attention', campaignId: 'missing' }).total, 0);
+  assert.equal(service.listDeliveries({ group: 'pending', q: 'Submitting' }).total, 12);
+  assert.throws(() => service.listDeliveries({ group: 'invalid' }), { status: 400 });
+});
 
 test('发送记录分页能访问超过最近500条的历史，先筛选再分页并限制无效页码', async (t) => {
   const service = new OutreachService({ mailboxes: { list: () => [] } });

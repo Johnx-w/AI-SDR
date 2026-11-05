@@ -18,7 +18,18 @@ const textContent = (node) => {
 
 function setup(
   status = 'ready',
-  { cancelError, deliveryStatus = 'accepted', generationMode, grades = [] } = {},
+  {
+    cancelError,
+    deliveryStatus = 'accepted',
+    generationMode,
+    acceptedCount = 1,
+    acquisitionSource,
+    grades = [],
+    extraCampaigns = [],
+    mailboxes = [],
+    mailboxDetails = {},
+    tab = 'campaigns',
+  } = {},
 ) {
   let campaign = {
     id: 'campaign-one',
@@ -28,7 +39,9 @@ function setup(
     generationMode,
     revision: 7,
     approvedRevision: 7,
-    targetCount: 150,
+    targetCount: acquisitionSource ? null : 150,
+    acquisitionSource,
+    customerIds: acquisitionSource ? ['first', 'second'] : undefined,
     mailboxIds: ['mailbox-one'],
     includeExisting: true,
     continuous: true,
@@ -36,7 +49,7 @@ function setup(
     createdAt: '2026-10-26T07:38:00Z',
     cancelledAt: status === 'cancelled' ? '2026-10-27T03:00:00Z' : undefined,
     filters: { markets: ['Australia'], grades, products: [] },
-    stats: { queued: 0, accepted: 1, failed: 0, unknown: 0, blocked: 0 },
+    stats: { queued: 0, accepted: acceptedCount, failed: 0, unknown: 0, blocked: 0 },
   };
   const deliveries = [
     {
@@ -56,13 +69,14 @@ function setup(
     },
   ];
   const state = () => ({
-    mailboxes: [],
-    campaigns: [campaign],
+    mailboxes,
+    campaigns: [campaign, ...extraCampaigns],
     deliveries,
     products: [],
     readiness: { generatorConfigured: true },
     review: { internalTestPassed: false, productionApproved: true },
   });
+  let searchParams = new URLSearchParams({ tab });
   const requests = [],
     states = [],
     refs = [],
@@ -107,12 +121,34 @@ function setup(
     if (path.href !== entry.href) return;
     if (specifier === 'react') return hooks;
     if (specifier === 'react-router-dom')
-      return { useSearchParams: () => [new URLSearchParams({ tab: 'campaigns' }), () => {}] };
+      return {
+        Link: ({ to, children, ...props }) =>
+          React.createElement('a', { ...props, href: to }, children),
+        useSearchParams: () => [
+          searchParams,
+          (next) => {
+            searchParams = next(searchParams);
+          },
+        ],
+      };
     if (specifier === '../outreachApi')
       return {
         outreachApi: async (path, init = {}) => {
           requests.push({ path, init });
           if (path === '/state') return structuredClone(state());
+          if (path.startsWith('/mailboxes/')) {
+            const mailbox = mailboxDetails[path.slice('/mailboxes/'.length)];
+            if (mailbox instanceof Error) throw mailbox;
+            return structuredClone(mailbox);
+          }
+          if (path.startsWith('/deliveries?'))
+            return {
+              items: structuredClone(deliveries),
+              total: 1,
+              page: 1,
+              pageSize: 20,
+              totalPages: 1,
+            };
           if (path === '/campaigns/campaign-one') return structuredClone({ campaign, deliveries });
           if (path === '/campaigns/campaign-one/approve') {
             deliveries[0].status = 'queued';
@@ -166,6 +202,11 @@ function setup(
       return elements().find((node) => node.props.title === '取消触达计划');
     },
     writes: () => requests.filter(({ init }) => init.method === 'POST'),
+    change(label, value) {
+      const field = elements().find((node) => node.props['aria-label'] === label);
+      assert.ok(field, `missing field ${label}`);
+      field.props.onChange({ target: { value } });
+    },
   };
 }
 
@@ -179,6 +220,35 @@ test('自动计划草稿直接提供启动入口，不展示样稿准备或审�
   assert.equal(!!h.button('启动自动发送').props.disabled, false);
   assert.equal(h.button('准备样稿'), undefined);
   assert.equal(h.button('批准此版本与样稿'), undefined);
+  assert.deepEqual(h.writes(), []);
+});
+
+test('尚无可发送邮件的就绪计划仍提示待补齐条件', async () => {
+  const h = setup('ready', { acceptedCount: 0 });
+  await h.ready();
+  assert.match(textContent(h.render()), /待补齐条件/);
+});
+
+test('运行中的获客自动首发保留在当前计划，按收录客户展示并由获客入口管理', async () => {
+  const h = setup('active', {
+    generationMode: 'simple',
+    acquisitionSource: { jobId: 'source-job', roundId: 'source-job' },
+  });
+  await h.ready();
+  assert.match(h.html(), /获客后自动首发/);
+  assert.match(h.html(), /1 \/ 2/);
+  assert.match(h.html(), /已发送 \/ 本轮收录客户/);
+  assert.match(h.html(), /automation\?tab=runs&amp;job=source-job/);
+  for (const label of ['暂停计划', '取消计划', '编辑']) assert.equal(h.button(label), undefined);
+  h.click('历史计划');
+  assert.equal(h.button('执行详情'), undefined);
+  h.click('当前计划');
+  h.click('执行详情');
+  h.render();
+  await flush();
+  assert.match(h.html(), /本轮收录 2 家/);
+  for (const label of ['暂停', '取消计划', '启动自动发送', '恢复计划'])
+    assert.equal(h.button(label), undefined);
   assert.deepEqual(h.writes(), []);
 });
 
@@ -255,6 +325,7 @@ test('confirming cancellation submits the reviewed campaign revision and keeps i
   assert.equal(h.modal(), undefined);
   assert.equal(h.button('取消计划'), undefined);
   assert.equal(h.button('编辑'), undefined);
+  h.click('历史计划');
   assert.ok(h.button('样稿与详情'));
   assert.match(h.html(), /已取消/);
   h.click('样稿与详情');
@@ -273,6 +344,7 @@ test('completed and cancelled plans retain details without controls that could r
   for (const status of ['completed', 'cancelled']) {
     const h = setup(status);
     await h.ready();
+    h.click('历史计划');
     assert.equal(h.button('取消计划'), undefined);
     assert.equal(h.button('编辑'), undefined);
     h.click('样稿与详情');
@@ -295,4 +367,172 @@ test('a rejected cancellation remains visible and does not report that the plan 
   assert.match(h.html(), /计划已更新，请刷新后重试/);
   assert.doesNotMatch(h.html(), /计划已取消，后续发送已停止/);
   assert.ok(h.button('保留计划', h.modal()));
+});
+
+test('计划表格默认只列当前正式计划，搜索筛选先于分页且历史与试发独立可查', async () => {
+  const extraCampaigns = Array.from({ length: 24 }, (_, i) => ({
+    id: `plan-${i}`,
+    name: `Europe ${i}`,
+    mode: 'production',
+    status: i === 23 ? 'paused' : 'active',
+    targetCount: 50,
+    stats: { accepted: 3 },
+    deliveryGroups: { attention: i === 23 ? 2 : 0 },
+    createdAt: '2026-11-05T00:00:00Z',
+  }));
+  extraCampaigns.push(
+    {
+      id: 'old',
+      name: 'Historical plan',
+      mode: 'production',
+      status: 'completed',
+      targetCount: 50,
+      stats: { accepted: 39 },
+    },
+    {
+      id: 'test',
+      name: 'Company test',
+      mode: 'internal_test',
+      status: 'completed',
+      targetCount: 3,
+      stats: { accepted: 3 },
+    },
+  );
+  const h = setup('active', { extraCampaigns });
+  await h.ready();
+  const rows = () =>
+    h
+      .elements()
+      .filter((node) => node.type === 'tbody')
+      .flatMap((node) => allElements(node).filter((item) => item.type === 'tr'));
+  assert.equal(rows().length, 20);
+  assert.doesNotMatch(h.html(), /Historical plan|Company test/);
+  h.click('下一页');
+  assert.equal(rows().length, 5);
+  h.change('搜索计划名称', 'eUrOpE 23');
+  assert.equal(rows().length, 1);
+  assert.match(h.html(), /第 1 \/ 1 页/);
+  h.change('搜索计划名称', '');
+  h.change('按计划状态筛选', 'attention');
+  assert.equal(rows().length, 1);
+  assert.match(h.html(), /Europe 23/);
+  h.change('按计划状态筛选', 'active');
+  h.change('每页计划条数', '10');
+  assert.equal(rows().length, 10);
+  h.click('历史计划');
+  assert.equal(rows().length, 1);
+  assert.match(h.html(), /Historical plan/);
+  assert.match(h.html(), /39 \/ 50/);
+  assert.match(h.html(), /width:78%/);
+  assert.doesNotMatch(h.html(), /Company test/);
+  h.click('公司试发');
+  assert.equal(rows().length, 1);
+  assert.match(h.html(), /Company test/);
+  assert.deepEqual(h.writes(), []);
+});
+
+test('发送记录只提供四类筛选，未知结果详情保留先核对且不重发的说明', async () => {
+  const h = setup('active', { tab: 'deliveries', deliveryStatus: 'unknown' });
+  await h.ready();
+  h.render();
+  await flush();
+  const filter = h.elements().find((node) => node.props['aria-label'] === '按发送状态筛选');
+  assert.deepEqual(
+    allElements(filter)
+      .filter((node) => node.type === 'option')
+      .map(textContent),
+    ['全部状态', '待发送', '已发送', '需处理', '已取消'],
+  );
+  h.change('按发送状态筛选', 'attention');
+  h.render();
+  await flush();
+  assert.ok(h.requests.some(({ path }) => path.includes('group=attention')));
+  assert.match(h.html(), /需处理/);
+  h.elements()
+    .find((node) => node.props['aria-label'] === '查看 Buyer company 的邮件')
+    .props.onClick();
+  assert.match(h.html(), /结果待核实；请先核对原邮箱，系统不会自动重发/);
+  assert.deepEqual(h.writes(), []);
+});
+
+test('邮箱卡片按需读取Logo，普通重渲染不重取，手动刷新及保存Logo后更新', async () => {
+  const mailbox = {
+    id: 'one',
+    email: 'sales@example.org',
+    displayName: 'Alice',
+    signature: 'Best regards, Alice',
+    productIds: [],
+  };
+  const detail = {
+    ...mailbox,
+    signatureDesign: {
+      closing: 'Best regards,',
+      companyName: 'Logo brand',
+      logoWidth: 160,
+      logo: { contentType: 'image/png', contentBase64: 'bG9nbw==' },
+    },
+  };
+  const h = setup('ready', {
+    tab: 'mailboxes',
+    mailboxes: [mailbox],
+    mailboxDetails: { one: detail },
+  });
+  await h.ready();
+  h.render();
+  await flush();
+  assert.match(h.html(), /data:image\/png;base64,bG9nbw==/);
+  assert.equal(h.requests.filter(({ path }) => path === '/mailboxes/one').length, 1);
+  h.render();
+  assert.equal(h.requests.filter(({ path }) => path === '/mailboxes/one').length, 1);
+  detail.signatureDesign.logo.contentBase64 = 'bmV3';
+  h.click('刷新');
+  await flush();
+  h.render();
+  await flush();
+  assert.match(h.html(), /data:image\/png;base64,bmV3/);
+  h.elements()
+    .find((node) => node.type === 'button' && textContent(node) === '配置')
+    .props.onClick();
+  await flush();
+  detail.signatureDesign.logo.contentBase64 = 'c2F2ZWQ=';
+  const editor = h.elements().find((node) => node.type?.name === 'MailboxEditor');
+  await editor.props.onSave({ signatureDesign: detail.signatureDesign });
+  h.render();
+  await flush();
+  assert.match(h.html(), /data:image\/png;base64,c2F2ZWQ=/);
+});
+
+test('一个邮箱签名读取失败不隐藏其他邮箱Logo，离开邮箱页不再加载图片', async () => {
+  const good = { id: 'good', signature: 'Team', productIds: [] };
+  const bad = { id: 'bad', signature: 'Other', productIds: [] };
+  const h = setup('ready', {
+    mailboxes: [good, bad],
+    mailboxDetails: {
+      good: {
+        ...good,
+        signatureDesign: {
+          companyName: 'Company',
+          logoWidth: 160,
+          logo: { contentType: 'image/png', contentBase64: 'b2s=' },
+        },
+      },
+      bad: new Error('读取失败'),
+    },
+  });
+  await h.ready();
+  assert.equal(h.requests.filter(({ path }) => path.startsWith('/mailboxes/')).length, 0);
+  h.elements()
+    .find((node) => node.props.id === 'outreach-tab-mailboxes')
+    .props.onClick();
+  h.render();
+  await flush();
+  assert.match(h.html(), /data:image\/png;base64,b2s=/);
+  assert.match(h.html(), /完整签名读取失败/);
+  h.elements()
+    .find((node) => node.props.id === 'outreach-tab-campaigns')
+    .props.onClick();
+  h.render();
+  const count = h.requests.length;
+  h.render();
+  assert.equal(h.requests.length, count);
 });

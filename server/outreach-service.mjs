@@ -12,6 +12,7 @@ import {
 import { MailConversations } from './mail-conversations.mjs';
 import { MailReplies } from './mail-replies.mjs';
 import { renderMailboxSignature, signaturePlainTextHtml } from '../src/domain/mail-signature.mjs';
+import { deliveryGroup, deliveryGroupLabels } from '../src/domain/outreach-status.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -70,6 +71,9 @@ export class OutreachService {
     // SQLite's built-in lower only handles ASCII; preserve the former browser search semantics.
     this.db.function('outreach_lower', { deterministic: true }, (value) =>
       String(value ?? '').toLowerCase(),
+    );
+    this.db.function('outreach_delivery_group', { deterministic: true }, (status, subject) =>
+      deliveryGroup({ status, subject }),
     );
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
       CREATE TABLE IF NOT EXISTS outreach_campaigns(id TEXT PRIMARY KEY,data TEXT NOT NULL);
@@ -167,7 +171,7 @@ export class OutreachService {
     return JSON.parse(r.data);
   }
   putCampaign(c) {
-    const { stats, ...data } = c;
+    const { stats, deliveryGroups, ...data } = c;
     this.db
       .prepare(
         'INSERT INTO outreach_campaigns VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data',
@@ -193,7 +197,14 @@ export class OutreachService {
       .all(...params)
       .map((r) => JSON.parse(r.data));
   }
-  listDeliveries({ page = 1, pageSize = 20, campaignId = 'all', status = 'all', q = '' } = {}) {
+  listDeliveries({
+    page = 1,
+    pageSize = 20,
+    campaignId = 'all',
+    status = 'all',
+    group = 'all',
+    q = '',
+  } = {}) {
     const size = [10, 20, 50, 100].includes(Number(pageSize)) ? Number(pageSize) : 20;
     const requestedPage = Number.isSafeInteger(Number(page)) && Number(page) > 0 ? Number(page) : 1;
     const where = [],
@@ -205,6 +216,13 @@ export class OutreachService {
     if (status !== 'all') {
       where.push('state = ?');
       params.push(status);
+    }
+    if (group !== 'all') {
+      if (!Object.hasOwn(deliveryGroupLabels, group)) throw fail(400, '请选择有效的发送状态');
+      where.push(
+        "outreach_delivery_group(state, CASE WHEN state='draft' THEN json_extract(data, '$.subject') END) = ?",
+      );
+      params.push(group);
     }
     const query = String(q).trim();
     if (query) {
@@ -242,6 +260,7 @@ export class OutreachService {
     return d;
   }
   withStats(c) {
+    const deliveryGroups = { pending: 0, sent: 0, attention: 0, cancelled: 0 };
     const stats = {
       draft: 0,
       queued: 0,
@@ -255,9 +274,18 @@ export class OutreachService {
       .prepare(
         'SELECT state, count(*) AS count FROM outreach_deliveries WHERE campaign_id=? GROUP BY state',
       )
-      .all(c.id))
-      if (row.state in stats) stats[row.state] = row.count;
-    return { ...c, stats };
+      .all(c.id)) {
+      if (row.state in stats) stats[row.state] += row.count;
+      deliveryGroups[deliveryGroup({ status: row.state })] += row.count;
+    }
+    const readyDrafts = this.db
+      .prepare(
+        "SELECT count(*) AS count FROM outreach_deliveries WHERE campaign_id=? AND state='draft' AND coalesce(json_extract(data, '$.subject'), '') != ''",
+      )
+      .get(c.id).count;
+    deliveryGroups.pending -= readyDrafts;
+    deliveryGroups.attention += readyDrafts;
+    return { ...c, stats, deliveryGroups };
   }
   detail(id) {
     return { campaign: this.withStats(this.campaign(id)), deliveries: this.deliveries(id) };
@@ -304,6 +332,7 @@ export class OutreachService {
   async state() {
     const mailboxes = this.mailboxes.list().map(({ signatureDesign, ...mailbox }) => mailbox);
     const campaigns = this.campaigns();
+    const deliveryGroups = { pending: 0, sent: 0, attention: 0, cancelled: 0 };
     const deliveryStats = {
       total: 0,
       draft: 0,
@@ -319,8 +348,16 @@ export class OutreachService {
       .prepare('SELECT state, count(*) AS count FROM outreach_deliveries GROUP BY state')
       .all()) {
       deliveryStats.total += row.count;
-      if (row.state in deliveryStats) deliveryStats[row.state] = row.count;
+      if (row.state in deliveryStats) deliveryStats[row.state] += row.count;
+      deliveryGroups[deliveryGroup({ status: row.state })] += row.count;
     }
+    const readyDrafts = this.db
+      .prepare(
+        "SELECT count(*) AS count FROM outreach_deliveries WHERE state='draft' AND coalesce(json_extract(data, '$.subject'), '') != ''",
+      )
+      .get().count;
+    deliveryGroups.pending -= readyDrafts;
+    deliveryGroups.attention += readyDrafts;
     let generatorConfigured = false;
     try {
       generatorConfigured = !!this.generatorClient().configured;
@@ -329,6 +366,7 @@ export class OutreachService {
       mailboxes,
       campaigns,
       deliveryStats,
+      deliveryGroups,
       products: this.products(),
       readiness: { generatorConfigured },
       review: this.review(campaigns),
