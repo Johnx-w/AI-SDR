@@ -429,7 +429,7 @@ test('发送记录只提供四类筛选，未知结果详情保留先核对且�
     allElements(filter)
       .filter((node) => node.type === 'option')
       .map(textContent),
-    ['全部状态', '待发送', '已发送', '需处理', '已取消'],
+    ['全部（不含已取消）', '待发送', '已发送', '需处理', '已取消'],
   );
   h.change('按发送状态筛选', 'attention');
   h.render();

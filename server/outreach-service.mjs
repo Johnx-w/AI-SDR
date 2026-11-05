@@ -209,6 +209,7 @@ export class OutreachService {
     const requestedPage = Number.isSafeInteger(Number(page)) && Number(page) > 0 ? Number(page) : 1;
     const where = [],
       params = [];
+    if (group !== 'cancelled' && status !== 'cancelled') where.push("state != 'cancelled'");
     if (campaignId !== 'all') {
       where.push('campaign_id = ?');
       params.push(campaignId);
@@ -347,7 +348,7 @@ export class OutreachService {
     for (const row of this.db
       .prepare('SELECT state, count(*) AS count FROM outreach_deliveries GROUP BY state')
       .all()) {
-      deliveryStats.total += row.count;
+      if (row.state !== 'cancelled') deliveryStats.total += row.count;
       if (row.state in deliveryStats) deliveryStats[row.state] += row.count;
       deliveryGroups[deliveryGroup({ status: row.state })] += row.count;
     }
@@ -833,6 +834,16 @@ export class OutreachService {
           return;
         const mailbox = this.mailboxes.get(candidate.mailboxId),
           product = this.products().find((p) => p.id === candidate.productId);
+        // Retry an empty, unsubmitted draft in place instead of accumulating cancellations.
+        const unfinished = this.deliveries(id).find(
+          (delivery) =>
+            delivery.customerId === candidate.customerId &&
+            delivery.status === 'blocked' &&
+            !delivery.subject &&
+            !delivery.bodyText &&
+            !delivery.attemptedAt &&
+            !delivery.messageId,
+        );
         const replaced = this.deliveries(id).find(
           (delivery) =>
             delivery.customerId === candidate.customerId &&
@@ -841,7 +852,7 @@ export class OutreachService {
         );
         if (!mailbox?.signature?.trim()) {
           this.putDelivery({
-            id: randomUUID(),
+            id: unfinished?.id || randomUUID(),
             campaignId: id,
             mode: 'production',
             customerId: candidate.customerId,
@@ -854,12 +865,12 @@ export class OutreachService {
             status: 'blocked',
             reason: '请先配置并确认该邮箱的发件签名',
             matchReason: candidate.matchReason,
-            createdAt: iso(this.now),
+            createdAt: unfinished?.createdAt || iso(this.now),
           });
           continue;
         }
         const d = {
-          id: randomUUID(),
+          id: unfinished?.id || randomUUID(),
           campaignId: id,
           mode: 'production',
           customerId: candidate.customerId,
@@ -872,7 +883,7 @@ export class OutreachService {
           status: 'draft',
           reason: '正在生成',
           matchReason: candidate.matchReason,
-          createdAt: iso(this.now),
+          createdAt: unfinished?.createdAt || iso(this.now),
           candidate,
           revision,
           senderVersion: senderVersion(mailbox),
@@ -881,7 +892,8 @@ export class OutreachService {
             candidate.materialVersion || outreachMaterialVersion(product, c, new Date(this.now())),
           ...(replaced
             ? {
-                replacesDeliveryId: replaced.id,
+                replacesDeliveryId:
+                  replaced.id === unfinished?.id ? replaced.replacesDeliveryId : replaced.id,
                 materialRefresh: true,
               }
             : {}),
@@ -890,7 +902,11 @@ export class OutreachService {
           this.transaction(() => {
             this.reserve(d);
             for (const prior of this.deliveries(id))
-              if (prior.customerId === d.customerId && prior.status === 'blocked')
+              if (
+                prior.id !== d.id &&
+                prior.customerId === d.customerId &&
+                prior.status === 'blocked'
+              )
                 this.putDelivery({
                   ...prior,
                   status: 'cancelled',

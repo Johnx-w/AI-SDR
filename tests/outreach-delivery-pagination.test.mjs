@@ -4,6 +4,23 @@ import { OutreachService } from '../server/outreach-service.mjs';
 import { handleOutreach } from '../server/outreach-api.mjs';
 import { deliveryGroup } from '../src/domain/outreach-status.mjs';
 
+test('默认发送记录和总数排除已取消，历史详情及显式取消筛选仍可查阅', async (t) => {
+  const service = new OutreachService({ mailboxes: { list: () => [] } });
+  t.after(() => service.close());
+  service.putCampaign({ id: 'cancelled-plan', status: 'cancelled' });
+  for (const status of ['accepted', 'unknown', 'failed', 'cancelled'])
+    service.putDelivery({ id: status, campaignId: 'cancelled-plan', status, companyName: 'Buyer' });
+  assert.equal(service.listDeliveries().total, 3);
+  assert.equal(service.listDeliveries({ campaignId: 'cancelled-plan', q: 'Buyer' }).total, 3);
+  assert.equal((await service.state()).deliveryStats.total, 3);
+  assert.deepEqual(
+    service.listDeliveries({ group: 'cancelled' }).items.map((row) => row.id),
+    ['cancelled'],
+  );
+  assert.equal(service.listDeliveries({ status: 'cancelled' }).total, 1);
+  assert.equal(service.detail('cancelled-plan').deliveries.length, 4);
+});
+
 test('四类发送状态先跨记录筛选再分页，生成与人工确认分开且统计一致', async (t) => {
   const service = new OutreachService({ mailboxes: { list: () => [] } });
   t.after(() => service.close());
@@ -53,7 +70,7 @@ test('发送记录分页能访问超过最近500条的历史，先筛选再分�
     service.putDelivery({
       id: `d-${i}`,
       campaignId: i % 2 ? 'one' : 'two',
-      status: i % 2 ? 'accepted' : 'cancelled',
+      status: i % 2 ? 'accepted' : 'failed',
       companyName: `客户 ${i}`,
       to: `buyer-${i}@example.org`,
       from: 'SALES@example.org',

@@ -715,6 +715,44 @@ test('没有样稿时显示实际拦截原因，已有样稿重新准备不误�
   assert.equal(h.deliveries.length, 0);
 });
 
+test('连续计划生成失败重试18轮只更新原记录，取消后不再重试', async (t) => {
+  const h = harness();
+  t.after(() => h.service.close());
+  let attempts = 0;
+  h.state.leads.push(buyer('ready-buyer'));
+  const generate = h.service.generator.generate;
+  h.service.generator.generate = async (input) => {
+    if (input.candidate.customerId === 'ready-buyer') return generate(input);
+    attempts++;
+    throw Object.assign(new Error('模型暂不可用'), { status: 503 });
+  };
+  const campaign = await prepare(h, { continuous: true, generationMode: 'simple' });
+  const original = h.service.deliveries(campaign.id)[0];
+  h.service.approve(campaign.id, campaign.revision);
+  h.service.activate(campaign.id, campaign.revision);
+  for (let i = 0; i < 18; i++) {
+    h.state.clock += 61000;
+    await h.service.tick();
+    await h.service.preparing.get(campaign.id);
+  }
+  assert.ok(attempts >= 19);
+  assert.deepEqual(
+    h.service
+      .deliveries(campaign.id)
+      .filter((row) => row.customerId === original.customerId)
+      .map((row) => row.id),
+    [original.id],
+  );
+  assert.equal(h.service.delivery(original.id).reason, '模型暂不可用');
+  h.service.cancel(campaign.id, campaign.revision, true);
+  const before = attempts;
+  h.state.clock += 61000;
+  await h.service.tick();
+  assert.equal(attempts, before);
+  assert.equal(h.deliveries.length, 1);
+  assert.equal(h.deliveries[0].to, 'info@ready-buyer.example.org');
+});
+
 test('客户库补充邮箱后重新准备样稿，旧待处理记录不再占用当前待处理计数', async (t) => {
   const h = harness();
   t.after(() => h.service.close());
@@ -729,7 +767,7 @@ test('客户库补充邮箱后重新准备样稿，旧待处理记录不再占�
   const detail = h.service.detail(campaign.id);
   assert.equal(detail.campaign.stats.blocked, 0);
   assert.equal(detail.campaign.stats.draft, 1);
-  assert.equal(detail.deliveries.filter((row) => row.status === 'cancelled').length, 1);
+  assert.equal(detail.deliveries.length, 1);
 });
 
 test('发送前异步核对期间修改邮箱身份或计划，旧草稿不能继续发送', async (t) => {
@@ -1244,6 +1282,9 @@ test('资料重做失败保留原产品与邮箱，等待后重试不会结束�
   await h.service.tick();
   await h.service.preparing.get(h.campaign.id);
   const fresh = h.service.deliveries(h.campaign.id).find((row) => row.status === 'queued');
+  assert.equal(fresh.id, failed.id);
+  assert.equal(fresh.replacesDeliveryId, h.original.id);
+  assert.equal(h.service.deliveries(h.campaign.id).length, 2);
   assert.equal(fresh.mailboxId, h.original.mailboxId);
   assert.equal(fresh.candidate.productId, h.original.candidate.productId);
 });

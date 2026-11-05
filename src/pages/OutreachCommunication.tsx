@@ -1907,7 +1907,7 @@ export function OutreachCommunication() {
                         setRecordPage(1);
                       }}
                     >
-                      <option value="all">全部状态</option>
+                      <option value="all">全部（不含已取消）</option>
                       {Object.entries(deliveryGroupLabels).map(([status, label]) => (
                         <option value={status} key={status}>
                           {label}
