@@ -1,0 +1,13 @@
+[Unit]
+Description=ShadeFlow operational email alerts
+
+[Service]
+Type=oneshot
+ExecStart=/srv/shadeflow/ops/node /srv/shadeflow/ops/ops-monitor.mjs
+UMask=0077
+TimeoutStartSec=90
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/shadeflow-monitor

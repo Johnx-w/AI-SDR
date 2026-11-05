@@ -107,6 +107,46 @@ npm run release:rollback
 
 备份和旧版本不自动删除，按磁盘使用情况人工保留或清理。若断电或进程被强制结束导致 `.release-lock` 遗留，先核对其中 PID 已不再运行，再移除锁并检查服务／版本状态，不能在另一次发布仍运行时解锁。依赖安装失败会清理临时版本，可重新执行发布；已准备完成的同一提交可复用，正在运行的同一提交通过健康检查后直接完成，不重复重启服务。
 
+## 在线备份与运维邮件
+
+云端使用 `scripts/ops-backup.mjs` 和 `scripts/ops-monitor.mjs`，独立安装到 `/srv/shadeflow/ops/`，不随应用发布自动更新。对应 systemd service/timer 源文件在 `scripts/systemd/`。运维脚本更新后重新复制；更改 unit 才执行 `systemctl daemon-reload`，无需重启 `shadeflow.service`。`/srv/shadeflow/ops/node` 链接到服务器实际 Node.js 可执行文件，Node 升级时核对该链接。
+
+每日北京时间 04:30 运行在线备份，先于现有云备份的 05:15。逐个使用 SQLite 在线备份 API 获取包含已提交 WAL 数据的副本，通过完整性和外键检查后，与 `.data` 中的其他文件、存在的 `.env`／`.env.local`、systemd 配置和发布状态一起打包。数据包括邮箱加密文件及 `.credential-key`；备份目录仅 root 可访问。源数据库只读，临时副本校验后才发布到 `/var/backups/shadeflow/backup-*.tar.gz`，`latest.json` 只指向已完成的副本。失败不覆盖上次成功结果。
+
+每个数据库各自一致，多个数据库不是同一时刻的全局事务快照。恢复后须核对跨库业务关系与发送结果，不能直接重跑结果不明的邮件。所有本机副本仍在同一块云盘；只有云备份成功收录并通过隔离恢复后，才算已验证的离机备份。副本暂不自动删除，磁盘到阈值会告警，清理前先确认云端已有可恢复版本。
+
+阿里云文件备份基础版默认排除 `/srv/`，因此原 `/srv/shadeflow/backups` 中的发布备份不在当前云备份覆盖范围。新副本放在未被排除的 `/var/backups/shadeflow`。查看“全部目录备份成功”不能代替浏览实际备份文件；每次更换计划或排除规则，应再次核实目录并隔离恢复。依据：[云备份默认排除规则](https://help.aliyun.com/zh/cloud-backup/user-guide/back-up-files-from-an-ecs-instance)。
+
+监控每 5 分钟检查应用 systemd 状态及健康接口、磁盘可用空间与 inode、在线备份任务结果与 30 小时新鲜度、HBR 客户端及最近成功备份日志、云端隔离恢复验收记录。空间不足 15% 或 inode 不足 10% 报警。相同异常每天提醒一次，异常集合变化及恢复立即通知；SMTP 失败不记为已通知，下次重试。告警不包含业务记录、配置值或密钥。
+
+配置存放在 `/srv/shadeflow/ops/monitor.json`，权限 0600，格式为：
+
+```json
+{
+  "recipient": "alerts@example.com",
+  "mailboxId": "已配置邮箱的ID",
+  "mailboxEmail": "对应发件邮箱地址",
+  "backupLog": "/opt/alibabacloud/hbrclient/logs/backup_实际计划ID.log"
+}
+```
+
+发件复用现有已验证邮箱，不更改业务邮箱配置或调用获客／客户发信任务；使用 `expectedAccount` 检查邮箱身份。共享凭证读取器会设置密钥文件权限，因此监控在 systemd 私有临时目录使用配置副本，发信后删除。生产目录在两个运维 service 中都为只读。监控状态放在 `/var/lib/shadeflow-monitor`，与业务库分开。更改发件邮箱、停用账号或撤销 SMTP 凭证后，必须重新发送测试邮件；邮件服务器接受不等于收件箱已投递。
+
+```sh
+systemctl list-timers shadeflow-backup.timer shadeflow-monitor.timer
+systemctl start shadeflow-backup.service
+/srv/shadeflow/ops/node /srv/shadeflow/ops/ops-monitor.mjs --check
+# 只向 monitor.json 中的运维收件人发送一封明确标记的测试邮件
+/srv/shadeflow/ops/node /srv/shadeflow/ops/ops-monitor.mjs --test-email
+journalctl -u shadeflow-backup.service -u shadeflow-monitor.service
+```
+
+云端恢复验收应从最新云备份点仅选择 `/var/backups/shadeflow` 的已完成归档，恢复到提前创建的隔离目录，禁止选择原路径或覆盖同名文件。对恢复归档核对 SHA-256、解包清单、每个数据库的完整性和外键、配置哈希及凭证解密；不启动应用、不连接 SMTP 或执行迁移。成功后在 `/var/lib/shadeflow-monitor/cloud-restore-verified.json` 留下 `ok: true`、`sha256`、`verifiedAt` 与云端备份点记录，再观察恢复通知。仅本机副本恢复成功时不能创建这份云端验收记录。
+
+基础版当天已有备份任务执行时，修改备份时间只能影响次日，不能靠调时间触发当日第二次备份。新增覆盖目录后应等下一轮完成再验收，见 [基础版配置限制](https://help.aliyun.com/zh/ecs/user-guide/configure-automatic-file-backup-and-restoration-for-ecs-instances)。
+
+当前监控运行于同一台主机，不能在整机宕机、整机断网或发件通道失效时可靠发送邮件；这些情况仍需要云平台或外部探测。当前也不监测获客任务的业务质量、单封邮件状态及飞书逐条同步错误。HBR 检查基于已观察到的绝对路径日志格式，格式变化或缺少配对日志时按“覆盖未知”告警，不能替代定期云端恢复演练。
+
 ## 执行与核对
 
 获客只使用后端直连引擎与 /api/v1/acquisition 接口。配置页只维护检索、模型和飞书连接，不再提供执行引擎切换或外部工作流配置。客户读取使用 SQLite 主档案，飞书通过官方 API 导入历史记录和同步协作镜像。
