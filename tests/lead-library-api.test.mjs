@@ -185,7 +185,7 @@ test('既有本地档案读取时补充最新机会依据，飞书离线也无�
     BATCH_DB_PATH: join(folder, 'acquisition.sqlite'),
   };
   const current = record();
-  current.fields.初评结果 = '高优先';
+  current.fields.初评结果 = 'A';
   let server;
   try {
     server = await open({

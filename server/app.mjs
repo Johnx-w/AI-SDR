@@ -3,6 +3,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { decorateLeadDevelopment } from './lead-development.mjs';
+import { isDevelopmentCustomer } from './customer-eligibility.mjs';
 import { BrandingCache } from './branding-cache.mjs';
 import { summarizeRunOutput } from './run-outcome.mjs';
 import { validateTarget, locationOptions } from './search-target.mjs';
@@ -204,6 +205,7 @@ export function createApp({
     customerRecord: (id) => provider.customerRecord?.(id),
     customerRemoteId: (id) => (provider.customerRemoteId ? provider.customerRemoteId(id) : id),
     syncCustomers: () => provider.syncCustomers?.(),
+    saveCustomerFields: (id, fields) => provider.saveCustomerFields(id, fields),
   });
   let outbound;
   const outreach = () =>
@@ -213,7 +215,9 @@ export function createApp({
           path: env.OUTREACH_DB_PATH || ':memory:',
           mailboxes: new OutreachMailboxes({ env }),
           loadLeads: async () =>
-            decorateLeadDevelopment(await loadLeads(), business.state().store.view()).leads,
+            decorateLeadDevelopment(await loadLeads(), business.state().store.view()).leads.filter(
+              isDevelopmentCustomer,
+            ),
           products: () => knowledge().list(),
           getEnv: () => connections.environment(),
           getScope: acquisitionScope,
@@ -278,6 +282,10 @@ export function createApp({
     const metrics = leadPerformance;
     try {
       const body = decorateLeadDevelopment(await read(), business.state().store.view());
+      if (body.leads) {
+        body.leads = body.leads.filter(isDevelopmentCustomer);
+        body.total = body.leads.length;
+      }
       const serialized = JSON.stringify(body);
       const durationMs = performance.now() - started;
       metrics.record(operation, { durationMs, bytes: Buffer.byteLength(serialized) });
@@ -401,7 +409,7 @@ export function createApp({
               throw new ApiError(400, '新增产品资料需要有效的 Idempotency-Key');
             const product = knowledge().save(value, { expectedVersion, idempotencyKey: key });
             outbound?.refreshProductMaterials?.();
-            const feishu = await productMirror().sync(product);
+            const feishu = { status: 'pending' };
             return json(response, request.method === 'POST' ? 201 : 200, { product, feishu });
           }
           throw new ApiError(405, '不支持的产品资料操作');
@@ -524,7 +532,10 @@ export function createApp({
           return await leadJson(response, 'list', () => library().list());
         }
         if (url.pathname === '/api/v1/leads/real/refresh' && request.method === 'POST')
-          return await leadJson(response, 'refresh', () => library().refresh());
+          return await leadJson(response, 'refresh', async () => {
+            await provider.syncCustomers?.();
+            return library().refresh();
+          });
         if (url.pathname === '/api/v1/leads/real' && request.method === 'GET')
           return await leadJson(response, 'export', loadLeads);
         const leadRoute = url.pathname.match(/^\/api\/v1\/leads\/real\/([\w-]{1,100})$/);
@@ -839,20 +850,25 @@ export function createApp({
   });
   server.on('listening', () => {
     plans().start();
+    if (env.BATCH_DB_PATH) business.start();
     if (env.OUTREACH_DB_PATH) outreach().start();
   });
   server.on('close', () => {
     void brandingCache.close();
-    const customerSync = provider.closeArchive?.();
-    if (customerSync) void customerSync.finally(() => leadLibrary?.close());
-    else leadLibrary?.close();
     if (outbound) void outbound.close();
-    products?.close();
-    productKnowledge?.close();
-    business.close();
+    const cleanup = () => {
+      const customerSync = provider.closeArchive?.();
+      if (customerSync) void customerSync.finally(() => leadLibrary?.close());
+      else leadLibrary?.close();
+      products?.close();
+      productKnowledge?.close();
+      if (!batch?.busy && !running) provider.close();
+    };
+    const businessSync = business.close();
+    if (businessSync) void businessSync.finally(cleanup);
+    else cleanup();
     schedules?.close();
     if (batch && !batch.busy) batch.close();
-    if (!batch?.busy && !running) provider.close();
   });
   return server;
 }

@@ -1,12 +1,4 @@
-export const developmentStatuses = [
-  '待开发',
-  '已联系',
-  '已回复',
-  '跟进中',
-  '已成交',
-  '暂缓开发',
-  '停止开发',
-];
+export const developmentStatuses = ['待开发', '已联系', '已回复', '跟进中', '已成交', '停止开发'];
 
 const marketNames: Record<string, string> = {
   'United States': '美国',

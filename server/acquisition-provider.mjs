@@ -28,6 +28,7 @@ export function createAcquisitionProvider({
       return !!customers.syncing;
     },
     syncCustomers: () => customers.sync?.(),
+    saveCustomerFields: (id, fields) => customers.write('update', fields, id),
     customerRecord: (id) => customers.record(id),
     customerRemoteId: (id) => customers.remoteId?.(id) ?? (id.startsWith('local_') ? null : id),
     closeArchive: () => customers.close?.(),
@@ -43,7 +44,6 @@ export function createAcquisitionProvider({
         : '后端直连配置缺失：' + config.missing.join('、'),
     },
     readLeads: async () => {
-      await customers.sync?.();
       const data = await feishu.readLeads();
       return service().decorateLeads ? service().decorateLeads(data) : data;
     },

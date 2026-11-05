@@ -129,7 +129,7 @@ export async function recordMailConversation({ store, conversation, messages }) 
         attachmentMetadata: message.attachments || [],
         demandIds: [],
         actualConfirmed: true,
-        origin: 'manual',
+        origin: 'mailbox',
         notes:
           message.deliveryStatus === 'accepted'
             ? '服务商已接受发送请求；尚未通过已发件箱核实，不代表客户已收到或阅读。'

@@ -217,16 +217,8 @@ test('新需求在实际发送与该需求关联的后续回复后进入跟进�
   );
 });
 
-test('自动状态只推进已有进度并保留人工限制，暂缓恢复后按真实沟通显示进度', () => {
-  for (const sourceStatus of [
-    '已回复',
-    '跟进中',
-    '已成交',
-    '暂缓开发',
-    '停止开发',
-    '暂不开发',
-    '人工跟进中',
-  ])
+test('自动状态只推进已有进度并保留人工限制', () => {
+  for (const sourceStatus of ['已回复', '跟进中', '已成交', '停止开发', '暂不开发', '人工跟进中'])
     assert.equal(
       listed(
         { messages: [message({ direction: 'outbound', deliveryStatus: 'sent' })] },
@@ -237,14 +229,11 @@ test('自动状态只推进已有进度并保留人工限制，暂缓恢复后�
   const graph = {
     messages: [message()],
     demands: [demand({ stage: 'quoting' })],
-    customerContexts: [{ customerId: lead.id, development: { version: 1, paused: true } }],
   };
-  assert.equal(listed(graph).status, '暂缓开发');
-  graph.customerContexts[0].development = { version: 2, paused: false };
   assert.equal(listed(graph).status, '跟进中');
 });
 
-test('列表详情导出状态及版本一致，仅有效进度或本客户暂缓变化影响内容版本', () => {
+test('列表详情导出状态及版本一致，仅有效进度影响内容版本', () => {
   const graph = { messages: [message()] };
   const first = listed(graph);
   const detail = decorateLeadDevelopment(

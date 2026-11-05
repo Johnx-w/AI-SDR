@@ -198,15 +198,15 @@ test('保存开发控制后的重读等待旧列表请求结束，再读取保�
   const updated = client.revalidateList();
   current.leads = current.leads.map((lead) => ({
     ...lead,
-    status: '暂缓开发',
-    version: `${lead.version}:development:1`,
+    status: '停止开发',
+    version: `${lead.version}:progress:停止开发`,
   }));
   pending.resolve(Response.json(versionedSnapshot(1)));
   await earlier;
   const result = await updated;
   assert.equal(reads, 3);
-  assert.equal(result.leads[0].status, '暂缓开发');
-  assert.equal(client.cachedList().leads[0].status, '暂缓开发');
+  assert.equal(result.leads[0].status, '停止开发');
+  assert.equal(client.cachedList().leads[0].status, '停止开发');
 });
 
 test('切换连接后立即清空缓存，切换前的读取和刷新不能重新填回旧表', async () => {

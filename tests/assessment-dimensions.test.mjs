@@ -43,7 +43,7 @@ test('P/R/D/V按维度展示原评分，结论来自本维度事实，未知与�
 
 test('新版证据维度保留未知而不生成补资料提示，真实冲突仍可核实', () => {
   const result = buildAssessmentDimensions({
-    ruleVersion: 'acquisition-v4.0',
+    ruleVersion: 'acquisition-v5.0',
     dimensions: {
       P: dimension(null, 40, [fact('core_product', '卷帘')], {
         conflict: true,

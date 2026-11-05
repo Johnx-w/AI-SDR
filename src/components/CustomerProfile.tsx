@@ -1,6 +1,5 @@
 import { ArrowUpRight } from 'lucide-react';
 import { Badge } from './ui';
-import { CustomerDevelopment } from './CustomerDevelopment';
 import { formatBeijingText, formatBeijingTime } from '../domain/date-time.mjs';
 import type { AssessmentSummary } from '../services/customerAssessment';
 import {
@@ -71,10 +70,7 @@ export function CustomerProfile({
   typeLabel: string;
   onSupplement?: (context: SupplementContext) => void;
 }) {
-  if (
-    lead.assessment &&
-    !['acquisition-v4.0', 'acquisition-v5.0'].includes(lead.assessment.ruleVersion)
-  )
+  if (lead.assessment && lead.assessment.ruleVersion !== 'acquisition-v5.0')
     lead = { ...lead, assessment: null };
   const overview = [lead.mainProductPreference, lead.evidence, lead.industryProfile].find(
     (value) => value && meaningful(value),
@@ -301,7 +297,6 @@ export function CustomerProfile({
         )}
       </section>
 
-      {lead.id && <CustomerDevelopment compact customerId={lead.id} customerStatus={lead.status} />}
       {!!lead.confirmations?.length && (
         <details className="profile-more-details profile-confirmations">
           <summary>人工确认记录（{lead.confirmations.length} 条）</summary>

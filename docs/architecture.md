@@ -1,6 +1,6 @@
 # 架构与运行
 
-当前口径：2026-10-28。React／TypeScript 网页通过同源 Node.js HTTP 接口操作后端，业务执行不依赖开发用 MCP 或 Codex OAuth。本机持久库采用 Node.js 内置 SQLite，客户与协作资料同步飞书；当前为单用户、单进程版本。
+当前口径：2026-11-05。React／TypeScript 网页通过同源 Node.js HTTP 接口操作后端，业务执行不依赖开发用 MCP 或 Codex OAuth。阿里云服务器持久库采用 Node.js 内置 SQLite，修改先写数据库，再由后台每分钟同步飞书；当前为单用户、单进程版本。
 
 业务行为分别见 [获客](acquisition.md)、[客户与产品数据](customer-data.md)、[评分](assessment.md)、[邮件沟通](outreach-first-touch.md)。[AI 业务员设计](ai-sales-agent-design.md) 明确待实现部分，不属于当前接口能力。
 

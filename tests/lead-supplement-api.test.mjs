@@ -16,7 +16,7 @@ const source = website + 'products';
 const scope = 'test-base/test-table';
 const fact = (kind, value = kind) => ({ kind, value, quote: value, source_url: source });
 
-function fixture({ gradeOnly = false, potentialInput = false } = {}) {
+function fixture({ gradeOnly = false, potentialInput = false, mirrorFields = false } = {}) {
   const folder = mkdtempSync(join(tmpdir(), 'lead-supplements-'));
   const env = {
     FEISHU_APP_ID: 'test-app',
@@ -77,6 +77,12 @@ function fixture({ gradeOnly = false, potentialInput = false } = {}) {
     throw new Error('Supplement must not research websites or call a model');
   };
   const definitions = [
+    ...(mirrorFields
+      ? ['评级依据摘要', '开发状态', '最近联系时间', '最近回复时间'].map((field_name) => ({
+          field_name,
+          type: 1,
+        }))
+      : []),
     { field_name: '初评结果', type: 3 },
     ...(!gradeOnly
       ? ['主要供货机会', '待确认事项'].map((field_name) => ({ field_name, type: 1 }))
@@ -171,6 +177,8 @@ function fixture({ gradeOnly = false, potentialInput = false } = {}) {
     },
     fetchImpl: async (url, options = {}) => {
       const path = new URL(url).pathname;
+      if (path.endsWith('/tables'))
+        return Response.json({ code: 0, data: { items: [], has_more: false } });
       if (path.endsWith('/auth/v3/tenant_access_token/internal'))
         return Response.json({ code: 0, tenant_access_token: 'test-token', expire: 3600 });
       if (path.endsWith('/records'))
@@ -583,7 +591,7 @@ test('采购确认接受真实电话纪要，保留引用原文与沟通关联',
 });
 
 test('实际HTTP补充入口验证保存编号和跨站请求，保存及刷新使用后台当前快照', async () => {
-  const f = fixture();
+  const f = fixture({ mirrorFields: true });
   const app = createApp({ env: f.env, fetchImpl: f.fetchImpl, nativeImpl: f.engine });
   await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${app.address().port}`;
@@ -609,6 +617,8 @@ test('实际HTTP补充入口验证保存编号和跨站请求，保存及刷新�
     const refreshed = await (await fetch(base + '/api/v1/leads/real')).json();
     assert.equal(refreshed.leads[0].score, 85);
     assert.equal(refreshed.leads[0].confirmations[0].confirmedBy, '张工');
+    assert.equal(f.writes(), 0);
+    await fetch(base + '/api/v1/business/sync', { method: 'POST' });
     assert.equal(f.writes(), 1);
   } finally {
     await new Promise((resolve) => app.close(resolve));
@@ -617,7 +627,7 @@ test('实际HTTP补充入口验证保存编号和跨站请求，保存及刷新�
 });
 
 test('HTTP补充先完成本地保存，飞书失败不要求重填表单，恢复后继续同步', async () => {
-  const f = fixture();
+  const f = fixture({ mirrorFields: true });
   const app = createApp({ env: f.env, fetchImpl: f.fetchImpl, nativeImpl: f.engine });
   await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
   const url = `http://127.0.0.1:${app.address().port}/api/v1/leads/real/${customerId}/supplements`;
@@ -635,12 +645,16 @@ test('HTTP补充先完成本地保存，飞书失败不要求重填表单，恢�
     assert.equal(saved.status, 200);
     assert.equal((await saved.json()).lead.score, 85);
     assert.deepEqual(await (await fetch(url)).json(), { pending: null });
+    const sync = () =>
+      fetch(`http://127.0.0.1:${app.address().port}/api/v1/business/sync`, { method: 'POST' });
+    await sync();
     const libraryUrl = `http://127.0.0.1:${app.address().port}/api/v1/leads/real`;
     const local = await (await fetch(libraryUrl)).json();
     assert.equal(local.leads[0].score, 85);
     assert.equal(local.sync.pendingWrites, 1);
     assert.deepEqual(f.record(), remoteBefore);
     f.mode('normal');
+    await sync();
     const synced = await (await fetch(libraryUrl + '/refresh', { method: 'POST' })).json();
     assert.equal(synced.sync.pendingWrites, 0);
     assert.equal(synced.leads[0].score, 85);

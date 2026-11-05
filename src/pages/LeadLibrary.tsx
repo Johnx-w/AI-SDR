@@ -111,16 +111,6 @@ export function LeadLibrary() {
     };
   }, []);
   const selectedId = params.get('lead');
-  useEffect(() => {
-    const refresh = () => {
-      void leadLibrary.revalidateList().then(
-        () => mounted.current && setError(''),
-        (error: Error) => mounted.current && setError(error.message),
-      );
-    };
-    window.addEventListener('customer-development-changed', refresh);
-    return () => window.removeEventListener('customer-development-changed', refresh);
-  }, []);
   const selectedVersion =
     remote?.leads.find((lead) => lead.id === selectedId)?.version || remote?.sync.revision;
   const viewed = leadLibrary.cachedDetail(selectedId);

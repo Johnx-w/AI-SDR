@@ -21,6 +21,8 @@ const research = {
   },
 };
 const assessment = {
+  direction: 'finished',
+  product: 'roller blinds',
   grade: 'A',
   status: '优先开发',
   complete: false,
@@ -56,7 +58,7 @@ test('有效业务联系表单可满足公司级入口而不强求公开邮箱�
   );
 });
 
-test('高优先或常规客户可凭已核实产品与公司联系入口交接，经营年限未知不阻断', () => {
+test('A或常规客户可凭已核实产品与公司联系入口交接，经营年限未知不阻断', () => {
   const contacts = [
     {
       kind: 'email',
@@ -65,7 +67,7 @@ test('高优先或常规客户可凭已核实产品与公司联系入口交接�
       source_url: site,
     },
   ];
-  for (const grade of ['高优先', '常规开发']) {
+  for (const grade of ['A', 'B']) {
     const handoff = calculateHandoffReadiness({
       research,
       assessment: {
@@ -88,8 +90,8 @@ test('高优先或常规客户可凭已核实产品与公司联系入口交接�
     calculateHandoffReadiness({
       research,
       assessment: {
-        grade: '高优先',
-        status: '高优先',
+        grade: 'A',
+        status: 'A',
         dimensions: { P: { score: 40, conflict: true } },
         requirements: [{ kind: 'identity_conflict' }],
       },

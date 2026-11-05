@@ -6,7 +6,7 @@ import {
 } from './customer-assessment.mjs';
 
 const publicEntry = (entry) =>
-  entry && ['acquisition-v4.0', ASSESSMENT_RULE_VERSION].includes(entry.snapshot.ruleVersion)
+  entry && entry.snapshot.ruleVersion === ASSESSMENT_RULE_VERSION
     ? {
         ...entry.snapshot,
         evidenceReason: formatAssessmentEvidence(entry.snapshot),

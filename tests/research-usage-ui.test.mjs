@@ -71,7 +71,7 @@ test('只展示供应商已返回的 Token，缺失一侧明确未返回而不�
   assert.match(reportedZero, /Token 输入 0 \/ 输出 4/);
 });
 
-test('批次结果展示 A/B/C 并单独保留旧记录，不展示评分数字', () => {
+test('批次结果只展示 A/B/C，不展示旧评级或评分数字', () => {
   const html = renderToStaticMarkup(
     createElement(
       MemoryRouter,
@@ -83,7 +83,7 @@ test('批次结果展示 A/B/C 并单独保留旧记录，不展示评分数字'
             {
               domain: 'a.example',
               result: 'inserted',
-              assessment: { grade: '高优先', score: 70, status: '高优先' },
+              assessment: { grade: 'A', score: 70, status: 'A' },
             },
             {
               domain: 'b.example',
@@ -105,7 +105,7 @@ test('批次结果展示 A/B/C 并单独保留旧记录，不展示评分数字'
               rejected: 0,
               failed: 0,
               inserted: 2,
-              ratings: { 高优先: 1, 常规开发: 0, A: 0, B: 1, C: 0, unrated: 0 },
+              ratings: { A: 1, B: 1, C: 0, unrated: 0 },
             },
           ],
         },
@@ -114,8 +114,7 @@ test('批次结果展示 A/B/C 并单独保留旧记录，不展示评分数字'
       }),
     ),
   );
-  assert.match(html, /A 0 · B 1 · C 0/);
-  assert.match(html, /旧记录 高优先 1 · 常规开发 0/);
-  assert.match(html, /旧版 高优先/);
+  assert.match(html, /A 1 · B 1 · C 0/);
+  assert.doesNotMatch(html, /旧记录|旧版/);
   assert.doesNotMatch(html, /已支持70分|已支持65分|\/100/);
 });

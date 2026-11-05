@@ -18,7 +18,7 @@ const target = {
   query_mode: 'auto',
 };
 
-test('历史配件目录恢复用途后正常入库、读回并保留待核实国家和常规开发', async () => {
+test('历史配件目录恢复用途后正常入库、读回并保留待核实国家和B', async () => {
   const records = [];
   const calls = { model: 0, write: 0, readback: 0 };
   const store = new AcquisitionStore(':memory:', 'accessory-regression');

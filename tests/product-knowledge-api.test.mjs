@@ -72,7 +72,7 @@ test('T5 API 空库不预置供货事实，新增操作幂等且重启后不重�
     assert.equal(first.body.product.version, 1);
     assert.equal(first.body.product.moq, '');
     assert.equal(first.body.product.specifications, '');
-    assert.equal(first.body.feishu.status, 'not_configured');
+    assert.equal(first.body.feishu.status, 'pending');
     const duplicate = await server.call(basePath, {
       method: 'POST',
       body: { ...draft },

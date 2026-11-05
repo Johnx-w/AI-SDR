@@ -99,8 +99,6 @@ const productCategories = [
   { id: 'outdoor', label: '户外遮阳' },
 ];
 const priorityGrades = ['A', 'B', 'C'];
-const obsoleteGrades = (grades?: string[]) =>
-  (grades || []).filter((grade) => !priorityGrades.includes(grade));
 const agentLabels = {
   shutter: '透气窗业务员',
   venetian: '百叶窗业务员',
@@ -578,10 +576,6 @@ function CampaignEditor({
   );
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (obsoleteGrades(grades).length) {
-      setError('请先移除旧版等级筛选，再选择 A/B/C。');
-      return;
-    }
     if (!selectedMailboxes.length) {
       setError('请至少选择一个发件邮箱。');
       return;
@@ -687,14 +681,8 @@ function CampaignEditor({
           <p>只进入尚未开发、具备可用商务邮箱及匹配依据的企业。</p>
         </div>
         <span className="outreach-field-label">客户评级 · 不选表示不限制评级</span>
-        {obsoleteGrades(grades).length > 0 && (
-          <div className="outreach-alert" role="alert">
-            此计划保留旧版等级筛选（{obsoleteGrades(grades).join('、')}）。请取消旧项并选择
-            A/B/C；系统不会自动换算旧等级。
-          </div>
-        )}
         <div className="outreach-choices">
-          {[...priorityGrades, ...obsoleteGrades(grades)].map((grade) => (
+          {priorityGrades.map((grade) => (
             <label
               className={`outreach-choice ${grades.includes(grade) ? 'selected' : ''}`}
               key={grade}
@@ -710,7 +698,7 @@ function CampaignEditor({
                   )
                 }
               />
-              {priorityGrades.includes(grade) ? grade : `${grade}（旧筛选，需移除）`}
+              {grade}
             </label>
           ))}
         </div>
@@ -1466,12 +1454,6 @@ export function OutreachCommunication() {
                         {campaign.lastError && (
                           <div className="outreach-alert error">{campaign.lastError}</div>
                         )}
-                        {obsoleteGrades(campaign.filters?.grades).length > 0 && (
-                          <div className="outreach-alert" role="alert">
-                            旧等级筛选需更新：{obsoleteGrades(campaign.filters?.grades).join('、')}
-                            。请编辑计划，选择 A/B/C。
-                          </div>
-                        )}
                         <div className="outreach-card-actions">
                           <button
                             className="btn secondary"
@@ -1975,13 +1957,6 @@ export function OutreachCommunication() {
                   )}
                 </div>
                 <InlineError value={shownDetail.campaign.lastError || null} />
-                {obsoleteGrades(shownDetail.campaign.filters?.grades).length > 0 && (
-                  <div className="outreach-alert" role="alert">
-                    此计划使用旧版等级筛选（
-                    {obsoleteGrades(shownDetail.campaign.filters?.grades).join('、')}
-                    ）。新评级客户会被阻断，请暂停并编辑计划，重新选择 A/B/C。
-                  </div>
-                )}
                 {shownDetail.campaign.status === 'cancelled' && (
                   <p className="outreach-hint" role="status">
                     此计划已取消

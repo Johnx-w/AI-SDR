@@ -4,7 +4,7 @@ import { dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { customerWebsite } from './customer-fields.mjs';
 import { domainKey } from './website-identity.mjs';
-import { projectCustomerGrade } from './customer-assessment.mjs';
+import { isDevelopmentCustomer } from './customer-eligibility.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const plainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -37,7 +37,7 @@ function validateLead(lead) {
     throw fail(502, '飞书客户数据不完整，已保留上次成功同步的数据');
 }
 
-function ratingSummary(lead) {
+export function ratingSummary(lead) {
   if (['A', 'B'].includes(lead.grade)) {
     const labels = (lead.assessment?.prioritySignals || []).map((signal) => signal.label);
     if (labels.length) return [...new Set(labels)].slice(0, 2).join('、') + '已核实';
@@ -111,6 +111,7 @@ export function summarizeLead(lead) {
           status: lead.companyIdentity.status || '',
         }
       : null,
+    developmentEligible: isDevelopmentCustomer(lead),
     matchLevel: text(lead.assessment?.matchLevel),
     ratingSummary: ratingSummary(lead),
     contactSummary: contactSummary(lead),
@@ -386,7 +387,7 @@ export class LeadLibrary {
           if (mirror.remoteId !== row.record_id) aliases.add(mirror.remoteId);
         }
         for (const lead of this.snapshot(true).leads)
-          if (!aliases.has(lead.id)) records.set(lead.id, projectCustomerGrade(lead));
+          if (!aliases.has(lead.id)) records.set(lead.id, lead);
         for (const [id, lead] of changes) records.set(id, lead);
         const syncedAt =
           typeof data.syncedAt === 'string' && Number.isFinite(Date.parse(data.syncedAt))

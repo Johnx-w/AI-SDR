@@ -36,19 +36,13 @@ export function calculateHandoffReadiness({
     opportunities.some((opportunity) => {
       const dimensions = opportunity.dimensions || {};
       const currentPriority =
-        ['高优先', '常规开发'].includes(opportunity.grade) &&
-        ['高优先', '常规开发'].includes(opportunity.status) &&
+        ['A', 'B', 'C'].includes(opportunity.grade) &&
         ['finished', 'materials', 'samples'].includes(opportunity.direction) &&
         Boolean(opportunity.product);
-      const legacyPriority =
-        ['A', 'B'].includes(opportunity.grade) &&
-        ['优先开发', '可开发'].includes(opportunity.status) &&
-        Number.isFinite(dimensions.P?.score) &&
-        dimensions.P.score >= 30 &&
-        Number.isFinite(dimensions.R?.score) &&
-        dimensions.R.score >= 25;
       return (
-        (currentPriority || legacyPriority) &&
+        currentPriority &&
+        dimensions.P?.score >= 30 &&
+        dimensions.R?.score !== 0 &&
         ![dimensions.P, dimensions.R, dimensions.D].some((dimension) => dimension?.conflict) &&
         !(opportunity.requirements || opportunity.facts || []).some((fact) =>
           ['identity_conflict', 'mandatory_requirement'].includes(fact.kind),

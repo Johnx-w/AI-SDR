@@ -61,7 +61,7 @@ for (const [name, assessment, handoff] of [
   ],
   [
     'C级企业',
-    { grade: 'C', score: 55, status: '暂缓开发' },
+    { grade: 'C', score: 55, status: '停止开发' },
     { ...ready, ready: false, opportunity_qualified: false },
   ],
   [
@@ -169,7 +169,7 @@ test('刷新存量企业不占新增收录目标', async () => {
 });
 
 test('宽泛收录任务不创建销售交接资格认领', async () => {
-  const { manager } = setup(output({ grade: 'C', status: '暂缓开发' }, { ...ready, ready: false }));
+  const { manager } = setup(output({ grade: 'C', status: '停止开发' }, { ...ready, ready: false }));
   try {
     const job = manager.create({ ...target, research_budget: 1 }, 'broad-capture-no-claim');
     await manager.work(job.id);

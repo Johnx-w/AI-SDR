@@ -78,17 +78,13 @@ export function decorateLeadDevelopment(
   }
   const decorate = (lead) => {
     const context = controls.get(lead.id);
-    const control = context?.development;
     let status = normalizeDevelopmentStatus(lead.status);
     const rank = progress.get(lead.id) || 0;
     const sourceRank = initialStates.has(status || '') ? 0 : progressStates.indexOf(status);
     if (sourceRank >= 0 && rank > sourceRank) status = progressStates[rank];
     if (context?.doNotContact && !['已成交', '暂不开发', '停止开发'].includes(status))
       status = '停止开发';
-    if (control?.paused) status = '暂缓开发';
-    const suffix =
-      (status !== lead.status ? `:progress:${status}` : '') +
-      (control?.version ? `:development:${control.version}` : '');
+    const suffix = status !== lead.status ? `:progress:${status}` : '';
     if (!suffix) return lead;
     return {
       ...lead,
