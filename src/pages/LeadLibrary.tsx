@@ -54,13 +54,8 @@ const safeUrl = (s: string) => {
     return undefined;
   }
 };
-const priorityOrder = (
-  a: { grade: string; createdAt?: number | null },
-  b: { grade: string; createdAt?: number | null },
-) => {
-  const rank = (grade: string) => ({ A: 0, B: 1, C: 2 })[grade] ?? 3;
-  return rank(a.grade) - rank(b.grade) || (b.createdAt ?? 0) - (a.createdAt ?? 0);
-};
+const newestFirst = (a: { createdAt?: number | null }, b: { createdAt?: number | null }) =>
+  (b.createdAt ?? 0) - (a.createdAt ?? 0);
 export function LeadLibrary() {
   const { notify } = useWorkspace();
   const [params, setParams] = useSearchParams();
@@ -148,7 +143,7 @@ export function LeadLibrary() {
         (!product || leadProductCategories(l.product).includes(product)) &&
         (!status || l.status === status),
     )
-    .sort(priorityOrder);
+    .sort(newestFirst);
   const pages = Math.max(1, Math.ceil(filtered.length / 8));
   const current = Math.min(page, pages);
   const rows = filtered.slice((current - 1) * 8, current * 8);
@@ -184,7 +179,7 @@ export function LeadLibrary() {
     const selectedIds = new Set(filtered.map((lead) => lead.id));
     try {
       const full = await leadLibrary.exportDetails();
-      const exported = full.filter((lead) => selectedIds.has(lead.id)).sort(priorityOrder);
+      const exported = full.filter((lead) => selectedIds.has(lead.id)).sort(newestFirst);
       if (exported.length !== selectedIds.size)
         throw new Error('客户列表已发生变化，请刷新后重新导出');
       exportCsv(
@@ -386,7 +381,7 @@ export function LeadLibrary() {
           >
             清空筛选
           </button>
-          <span>共 {filtered.length} 条线索 · A 级先显示</span>
+          <span>共 {filtered.length} 条线索</span>
         </div>
         {!remote && !error ? (
           <div className="library-loading">

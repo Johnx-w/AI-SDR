@@ -165,17 +165,18 @@ test('客户列表为空时全部市场下仍提供待核实选项', () => {
   );
 });
 
-test('同优先级客户在分页前按首次录入时间倒序，研究更新不置顶', () => {
+test('客户在分页前按首次录入时间倒序，评级和研究更新不置顶', () => {
   const customers = [
     { ...lead, id: 'unknown-1', name: 'Unknown First', createdAt: null, updatedAt: 9999999999999 },
     ...Array.from({ length: 8 }, (_, index) => ({
       ...lead,
       id: `old-${index}`,
       name: `Old Customer ${index}`,
+      grade: 'A',
       createdAt: 1000,
     })),
     { ...lead, id: 'unknown-2', name: 'Unknown Second' },
-    { ...lead, id: 'new', name: 'Newest Customer', createdAt: 2000 },
+    { ...lead, id: 'new', name: 'Newest Customer', grade: 'C', createdAt: 2000 },
   ];
   const originalOrder = customers.map((customer) => customer.id);
   const html = renderLibrary('客户画像', customers, { pending: true });
@@ -193,10 +194,11 @@ test('同优先级客户在分页前按首次录入时间倒序，研究更新�
   });
   assert.ok(smallTable.indexOf('Newest Customer') < smallTable.indexOf('Unknown First'));
   assert.ok(smallTable.indexOf('Unknown First') < smallTable.indexOf('Unknown Second'));
-  assert.match(html, /A 级先显示/);
+  assert.match(html, /<span>共 11 条线索<\/span>/);
+  assert.doesNotMatch(html, /A 级先显示/);
 });
 
-test('A/B/C 在分页前按等级排序，历史分数不冒充当前评级', () => {
+test('不同评级客户按入库时间排序，评级筛选仍可用', () => {
   const customers = [
     { ...lead, id: 'low', name: 'Low Lead', grade: 'C', score: 70, createdAt: 3000 },
     { ...lead, id: 'regular', name: 'Regular Lead', grade: 'B', score: 70, createdAt: 2000 },
@@ -206,8 +208,8 @@ test('A/B/C 在分页前按等级排序，历史分数不冒充当前评级', ()
   const html = renderLibrary('客户画像', customers, { pending: true });
   const table = html.match(/<table\b[^>]*>([\s\S]*?)<\/table>/)?.[1];
   assert.ok(table);
-  assert.ok(table.indexOf('High Lead') < table.indexOf('Regular Lead'));
-  assert.ok(table.indexOf('Regular Lead') < table.indexOf('Low Lead'));
+  assert.ok(table.indexOf('Low Lead') < table.indexOf('Regular Lead'));
+  assert.ok(table.indexOf('Regular Lead') < table.indexOf('High Lead'));
   assert.doesNotMatch(table, /旧版|旧规则70分/);
   assert.deepEqual(
     customers.map((item) => item.id),
