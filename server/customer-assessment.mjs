@@ -1,53 +1,13 @@
 import { createHash } from 'node:crypto';
 import { domainKey } from './website-identity.mjs';
-import { customerWebsite, fieldValue } from './customer-fields.mjs';
+import { customerWebsite } from './customer-fields.mjs';
 import { businessProductRelation, windowProductDirections } from './relevance.mjs';
 
 export const ASSESSMENT_RULE_VERSION = 'acquisition-v5.0';
 export const directionNames = { finished: '成品', materials: '材料配件', samples: '样本展示' };
 export const ASSESSMENT_HISTORY_FORMAT = 'evidence-v1';
 export function assessmentRating(snapshot) {
-  return (
-    snapshot.grade ||
-    (['待核实', '待补全', '暂不开发'].includes(snapshot.status) ? snapshot.status : '待核实')
-  );
-}
-export function customerGrade(snapshot) {
-  if (!snapshot || snapshot.status === '暂不开发') return null;
-  if (['A', 'B', 'C'].includes(snapshot.grade)) return snapshot.grade;
-  if (snapshot.ruleVersion !== 'acquisition-v4.0') return null;
-  if (snapshot.status === '待核实') return 'C';
-  const product = snapshot.dimensions?.P?.score;
-  const role = snapshot.dimensions?.R?.score;
-  if (snapshot.grade === '高优先' && product === 40 && role >= 25) return 'A';
-  if (snapshot.grade === '常规开发') return product >= 30 && role !== 10 ? 'B' : 'C';
-  return null;
-}
-
-export function projectCustomerGrade(lead) {
-  const assessment = lead.assessment;
-  if (
-    assessment?.ruleVersion !== 'acquisition-v4.0' ||
-    assessment.manualOverride ||
-    fieldValue(lead.fields, '用户评级') !== assessmentRating(assessment)
-  )
-    return lead;
-  const grade = customerGrade(assessment);
-  if (!grade) return lead;
-  return {
-    ...lead,
-    grade,
-    assessment: {
-      ...assessment,
-      grade,
-      opportunities: assessment.opportunities?.map((opportunity) => ({
-        ...opportunity,
-        grade:
-          customerGrade({ ...opportunity, ruleVersion: assessment.ruleVersion }) ||
-          opportunity.grade,
-      })),
-    },
-  };
+  return ['A', 'B', 'C'].includes(snapshot?.grade) ? snapshot.grade : '';
 }
 const maximums = { P: 40, R: 30, D: 20, V: 10 };
 const prioritySignalLabels = {
@@ -482,7 +442,7 @@ export function readAssessmentSummary(value) {
   const ruleVersion = reason.match(/(?:^|\n)规则版本：([^\n]+)/)?.[1];
   const evaluatedAt = reason.match(/(?:^|\n)评估时间：([^\n]+)/)?.[1];
   if (!ruleVersion) return null;
-  if (!['acquisition-v4.0', ASSESSMENT_RULE_VERSION].includes(ruleVersion)) return null;
+  if (ruleVersion !== ASSESSMENT_RULE_VERSION) return null;
   const priority = reason.match(/(?:^|\n)开发优先级：([^\n]+)/)?.[1];
   const matchLevel = reason.match(/(?:^|\n)匹配等级：([^\n]+)/)?.[1];
   if (!priority || !matchLevel) return null;

@@ -163,9 +163,11 @@ test('同步期间再次编辑，旧同步完成不能清掉新修改，后续�
   });
   remote.release = finish;
   const record = await archive.write('insert', fields, undefined, 'operation-race');
+  const syncing = archive.sync();
+  while (!remote.writes) await new Promise((resolve) => setImmediate(resolve));
   await archive.write('update', { 邮箱: 'latest@shadeco.com' }, record.record_id);
   finish();
-  await archive.sync();
+  await syncing;
   assert.equal((await library.detail(record.record_id)).lead.email, 'latest@shadeco.com');
   assert.equal(library.metadata().sync.pendingWrites, 1);
   await archive.sync();

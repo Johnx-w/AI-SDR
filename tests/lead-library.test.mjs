@@ -441,45 +441,6 @@ test('remote edits and removals preserve local dossiers, and ordering never chan
   }
 });
 
-test('refresh repairs old C projections from retained v4 evidence without replacing local dossiers', async () => {
-  const cases = [
-    ['高优先', 40, 30, 'A'],
-    ['常规开发', 40, null, 'B'],
-    ['常规开发', null, null, 'C'],
-  ];
-  const leads = cases.map(([oldGrade, product, role], index) =>
-    lead({
-      id: `rec-${index}`,
-      grade: oldGrade,
-      fields: { 初评结果: oldGrade },
-      assessment: {
-        ruleVersion: 'acquisition-v4.0',
-        grade: oldGrade,
-        status: oldGrade,
-        manualOverride: false,
-        dimensions: { P: { score: product }, R: { score: role } },
-      },
-    }),
-  );
-  const library = new LeadLibrary({ readLeads: async () => response(leads) });
-  try {
-    await library.list();
-    for (const item of leads) library.upsert({ id: item.id, grade: 'C' });
-    assert.deepEqual(
-      (await library.list()).leads.map((item) => item.grade),
-      ['C', 'C', 'C'],
-    );
-    const result = await library.refresh();
-    assert.deepEqual(
-      result.leads.map((item) => item.grade),
-      ['A', 'B', 'C'],
-    );
-    assert.equal((await library.detail('rec-0')).lead.facts[0].quote, 'FULL_DOSSIER');
-  } finally {
-    library.close();
-  }
-});
-
 test('refresh rebuilds an outdated list summary even when dossier content is unchanged', async () => {
   const library = new LeadLibrary({
     readLeads: async () => response([lead({ grade: 'C', assessment: { matchLevel: '待核实' } })]),

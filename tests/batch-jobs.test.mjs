@@ -261,7 +261,7 @@ test('每条实际搜索词记录发现、去重、待核实和评级产出', as
       return {
         新增: 1,
         明细: [{ source_url: item.source_url, result: 'inserted', record_id: 'rec-accepted' }],
-        assessment: { grade: '高优先', score: 80, status: '优先开发' },
+        assessment: { grade: 'A', score: 80, status: '优先开发' },
         handoff: readyHandoff(item.source_url),
       };
     },
@@ -295,7 +295,7 @@ test('每条实际搜索词记录发现、去重、待核实和评级产出', as
         researched: 2,
         inserted: 1,
         review: 1,
-        ratings: { A: 0, B: 0, C: 0, unrated: 0, 高优先: 1 },
+        ratings: { A: 0, B: 0, C: 0, unrated: 0, A: 1 },
       },
     );
     assert.ok(job.rows.every((row) => row.search_id === job.searchStats[0].id));

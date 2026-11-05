@@ -9,8 +9,9 @@ import {
 } from './customer-fields.mjs';
 import { PRODUCT_KNOWLEDGE_FEISHU_FIELDS } from './product-knowledge-feishu.mjs';
 import { domainKey, thirdPartyCompanySource } from './website-identity.mjs';
+import { ASSESSMENT_RULE_VERSION } from './customer-assessment.mjs';
 
-const currentVersion = 'acquisition-v3.2';
+const currentVersion = ASSESSMENT_RULE_VERSION;
 const quarantineId = 'reczz28R6bOYYebh';
 const t5Name = 'T5 产品资料库';
 const addedFields = [

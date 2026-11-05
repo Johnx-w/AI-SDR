@@ -98,18 +98,6 @@ test('首封按有来源的经营产品及当前审核版本匹配，不把评�
   assert.equal(chosen.leadSnapshot.status, '待开发');
 });
 
-test('旧高优先筛选遇到 A/B/C 显式阻断，新筛选可继续生成首封候选', () => {
-  const input = fixture();
-  input.leads[0].grade = 'A';
-  input.campaign.filters.grades = ['高优先'];
-  const legacy = selectOutreachCandidates(input);
-  assert.equal(legacy.eligible.length, 0);
-  assert.equal(legacy.blocked[0].reasonCode, 'legacy_grade_filter');
-  assert.match(legacy.blocked[0].reason, /更新为 A\/B\/C/);
-  input.campaign.filters.grades = ['A'];
-  assert.equal(selectOutreachCandidates(input).eligible.length, 1);
-});
-
 test('C 级资料缺项可进入首封候选，事实冲突仍单独阻断', () => {
   const input = fixture();
   input.leads[0].grade = 'C';
@@ -119,13 +107,13 @@ test('C 级资料缺项可进入首封候选，事实冲突仍单独阻断', () 
   assert.equal(result.blocked.length, 0);
 });
 
-test('高优先客户的其他产品仍有事实冲突时暂停自动首封', () => {
+test('A客户的其他产品仍有事实冲突时暂停自动首封', () => {
   const input = fixture();
   input.leads[0].grade = 'A';
   input.leads[0].assessment = {
     matchLevel: '明确匹配',
     opportunities: [
-      { direction: 'finished', product: 'PVC shutters', status: '高优先' },
+      { direction: 'finished', product: 'PVC shutters', status: 'A' },
       {
         direction: 'finished',
         product: 'Other shades',
@@ -237,7 +225,7 @@ test('客户库邮箱无需附带证据，仍排除格式错误、已明确无�
 });
 
 test('已联系、历史未知、暂停、抑制和个人消费者都不会自动首发', () => {
-  for (const status of ['跟进中', '已回复', '暂缓开发', '未记录', '']) {
+  for (const status of ['跟进中', '已回复', '停止开发', '未记录', '']) {
     const input = fixture();
     input.leads[0].status = status;
     assert.equal(selectOutreachCandidates(input).eligible.length, 0);

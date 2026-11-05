@@ -5,6 +5,7 @@ import { ProductKnowledgeFeishu } from './product-knowledge-feishu.mjs';
 import { FeishuClient } from './feishu-direct.mjs';
 import { fieldText } from './feishu.mjs';
 import { decorateLeadDevelopment } from './lead-development.mjs';
+import { customerMirrorFields } from './customer-mirror.mjs';
 
 export const CUSTOMER_BUSINESS_VERSION = 't1-t3-t4-v1';
 const kinds = new Set(['conversations', 'messages', 'demands', 'tasks']);
@@ -15,6 +16,8 @@ const methods = {
   tasks: 'saveTask',
 };
 const fail = (status, message) => Object.assign(new Error(message), { status });
+const mirrorHash = (workspace, products) =>
+  createHash('sha256').update(JSON.stringify({ workspace, products })).digest('hex');
 
 // The HTTP entry point owns graph persistence and its collaboration mirror.
 // A saved business record remains readable when the mirror needs reconciliation.
@@ -28,6 +31,7 @@ export class CustomerBusinessApi {
     customerRemoteId,
     syncCustomers,
     mailBodies = () => ({}),
+    saveCustomerFields,
   }) {
     this.getEnv = getEnv;
     this.fetch = fetchImpl;
@@ -37,6 +41,7 @@ export class CustomerBusinessApi {
     this.customerRemoteId = customerRemoteId;
     this.syncCustomers = syncCustomers;
     this.mailBodies = mailBodies;
+    this.saveCustomerFields = saveCustomerFields;
     this.active = 0;
     this.current = null;
     this.syncTail = Promise.resolve();
@@ -72,42 +77,77 @@ export class CustomerBusinessApi {
     this.current = null;
   }
   close() {
+    clearInterval(this.timer);
+    if (this.syncing) return this.syncTail.catch(() => {}).finally(() => this.reset());
     this.reset();
   }
-  async synchronize() {
+  start() {
+    if (this.timer) return;
+    this.timer = setInterval(() => {
+      if (!this.syncing) void this.synchronize({ force: false }).catch(() => {});
+    }, 60000);
+    this.timer.unref();
+  }
+  async synchronize({ force = true } = {}) {
     const state = this.state();
+    this.syncing = (this.syncing || 0) + 1;
     const operation = this.syncTail
       .catch(() => {})
       .then(async () => {
         try {
           const workspace = state.store.view();
+          const customers = await this.loadCustomers();
+          if (this.saveCustomerFields) {
+            const byId = new Map(customers.map((lead) => [lead.id, lead]));
+            for (const { id, fields } of customerMirrorFields(customers, workspace)) {
+              const changed = Object.fromEntries(
+                Object.entries(fields).filter(
+                  ([key, value]) => fieldText(byId.get(id).fields?.[key]) !== fieldText(value),
+                ),
+              );
+              if (Object.keys(changed).length) await this.saveCustomerFields(id, changed);
+            }
+          }
           await this.syncCustomers?.();
-          const productIds = new Set([
-            ...workspace.demands.flatMap((row) => row.productIds || []),
-            ...workspace.tasks.flatMap((row) => row.productIds || []),
-          ]);
+          const products = this.knowledge().list();
+          const hash = mirrorHash(workspace, products);
+          const prior = state.store.db
+            .prepare('SELECT hash,error FROM customer_business_sync WHERE scope=?')
+            .get(state.store.scope);
+          if (!force && prior?.hash === hash && !prior.error) return { status: 'synced' };
+          const productIds = new Set(products.map((product) => product.id));
           const productMirror = new ProductKnowledgeFeishu({
             env: state.env,
             fetchImpl: this.fetch,
           });
           for (const id of productIds) {
             const product = this.knowledge().get(id);
-            if (!product)
-              return { status: 'pending', error: '关联产品资料不存在，请核对后重新同步' };
+            if (!product) throw new Error('关联产品资料不存在，请核对后重新同步');
             const result = await productMirror.sync(product);
             if (result.status !== 'synced')
-              return {
-                status: 'pending',
-                error: '关联的 T5 产品资料尚未核对同步，请先处理产品资料',
-              };
+              throw new Error('T5 产品资料尚未核对同步，请先处理产品资料');
           }
-          return await state.mirror.sync(workspace, { products: this.knowledge().list() });
-        } catch {
+          const result = await state.mirror.sync(workspace, { products });
+          state.store.db
+            .prepare('INSERT OR REPLACE INTO customer_business_sync VALUES(?,?,?)')
+            .run(
+              state.store.scope,
+              result.status === 'synced' ? hash : prior?.hash || '',
+              result.error || (result.status === 'synced' ? '' : '飞书同步未完成'),
+            );
+          return result;
+        } catch (error) {
+          state.store.db
+            .prepare('INSERT OR REPLACE INTO customer_business_sync VALUES(?,?,?)')
+            .run(state.store.scope, '', error.message);
           return {
             status: 'pending',
-            error: '业务记录已保存在后台，飞书同步待核对，请刷新后重新同步',
+            error: '业务记录已保存在后台，飞书同步未完成，稍后自动重试',
           };
         }
+      })
+      .finally(() => {
+        this.syncing--;
       });
     this.syncTail = operation;
     return operation;
@@ -134,13 +174,22 @@ export class CustomerBusinessApi {
     } catch {
       customerError = 'T2 企业资料暂时无法读取；已保存的业务记录仍可查看';
     }
+    const sync = store.db
+      .prepare('SELECT hash,error FROM customer_business_sync WHERE scope=?')
+      .get(store.scope);
+    const products = this.knowledge().list();
+    const pending = sync?.hash !== mirrorHash(store.view(), products);
+    const feishu = await mirror.info();
     return {
       schemaVersion: CUSTOMER_BUSINESS_VERSION,
       ...data,
       customers,
-      products: this.knowledge().list(),
+      products,
       customerError,
-      feishu: await mirror.info(),
+      feishu:
+        pending || sync?.error
+          ? { ...feishu, status: 'pending', error: sync?.error || '' }
+          : feishu,
     };
   }
   async handle(request, url, readJson) {
@@ -160,35 +209,6 @@ export class CustomerBusinessApi {
       if (suffix.length === 1 && suffix[0] === 'sync' && request.method === 'POST')
         return { status: 200, body: { feishu: await this.synchronize() } };
       const [kind, id, action] = suffix;
-      if (kind === 'customers' && suffix.length === 3 && action === 'development') {
-        if (!id || !/^[\w-]{1,100}$/u.test(id)) throw fail(400, '客户编号无效');
-        const store = this.state().store;
-        let customer;
-        if (request.method === 'GET') customer = await store.actualCustomer(id);
-        else if (request.method === 'POST') {
-          const body = await readJson(request);
-          if (!body || typeof body !== 'object' || Array.isArray(body))
-            throw fail(400, '开发操作格式不正确');
-          customer = await store.actualCustomer(id);
-          await store.actDevelopment(id, body, customer);
-        } else throw fail(405, '不支持的开发控制操作');
-        return {
-          status: 200,
-          body: {
-            ...store.developmentView(id),
-            sourceStatus: fieldText(customer.fields?.['开发状态']),
-            status: decorateLeadDevelopment(
-              {
-                lead: {
-                  id,
-                  status: fieldText(customer.fields?.['开发状态']),
-                },
-              },
-              store.view({ customerId: id }),
-            ).lead.status,
-          },
-        };
-      }
       if (!kinds.has(kind) || suffix.length > 3) throw fail(404, '业务记录入口不存在');
       if (id && !/^[\w-]{1,100}$/.test(id)) throw fail(400, '业务记录编号无效');
       const store = this.state().store;
@@ -219,7 +239,7 @@ export class CustomerBusinessApi {
         if (!body || typeof body !== 'object' || Array.isArray(body))
           throw fail(400, '任务操作格式不正确');
         const record = await store.actTask(id, body);
-        return { status: 200, body: { record, feishu: await this.synchronize() } };
+        return { status: 200, body: { record, feishu: { status: 'pending' } } };
       }
       if (suffix.length !== 1 || !['POST', 'PUT'].includes(request.method))
         throw fail(405, '不支持的业务记录操作');
@@ -235,7 +255,7 @@ export class CustomerBusinessApi {
       const record = await store[methods[kind]](value, { expectedVersion, idempotencyKey: key });
       return {
         status: request.method === 'POST' ? 201 : 200,
-        body: { record, feishu: await this.synchronize() },
+        body: { record, feishu: { status: 'pending' } },
       };
     } finally {
       this.active--;

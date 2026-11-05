@@ -10,3 +10,18 @@ export function customerEligibility({ entity_type }) {
   // Local suppliers and factories remain eligible business entities.
   return decision('eligible', 'eligible_business', null);
 }
+
+// A failed market/search condition does not disqualify the whole company.
+export function isDevelopmentCustomer(lead) {
+  if (typeof lead.developmentEligible === 'boolean') return lead.developmentEligible;
+  const assessment = lead.assessment;
+  if (assessment?.entityType === 'individual') return false;
+  const opportunities = assessment?.opportunities || [];
+  return (
+    !opportunities.length ||
+    !opportunities.every((opportunity) => {
+      const { P, R } = opportunity.dimensions || {};
+      return !P?.conflict && !R?.conflict && (P?.score === 0 || R?.score === 0);
+    })
+  );
+}

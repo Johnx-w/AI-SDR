@@ -104,7 +104,6 @@ function remoteFixture() {
       fields: structuredClone(body.fields),
       token: endpoint.searchParams.get('client_token'),
     });
-    assert.notEqual(tableId, 't2', 'Business flow must not modify enterprise records');
     if (method === 'POST') {
       const record = {
         record_id: tableId + '-remote-' + records.get(tableId).length,
@@ -268,6 +267,11 @@ test('业务HTTP串联一封真实来信、两个需求和一个任务，关联T
     const task = (
       await create(server, 'tasks', taskInput(graph.conversation, graph.demands), 'graph-task-001')
     ).record;
+    assert.equal(remote.records.get('t3').length, 0, '保存只写数据库');
+    assert.equal(
+      (await server.call('/api/v1/business/sync', { method: 'POST' })).body.feishu.status,
+      'synced',
+    );
     const state = (await server.call()).body;
     assert.equal(state.conversations.length, 1);
     assert.equal(state.messages.length, 1);
@@ -283,7 +287,8 @@ test('业务HTTP串联一封真实来信、两个需求和一个任务，关联T
     assert.equal(remote.records.get('t1').length, 2);
     assert.equal(remote.records.get('t3').length, 1);
     assert.equal(remote.records.get('t4').length, 1);
-    assert.deepEqual(remote.records.get('t2'), t2);
+    assert.equal(remote.records.get('t2')[0].fields['开发状态'], '已回复');
+    assert.equal(remote.records.get('t2')[0].fields['公司名称'], t2[0].fields['公司名称']);
     const productFilter = await server.call('/api/v1/business?productId=' + product.id);
     assert.equal(productFilter.body.demands.length, 1);
     assert.equal(productFilter.body.tasks.length, 1);
@@ -400,7 +405,11 @@ test('新增回复暂停原跟进，完成任务必须关联同会话及全部�
     assert.equal(completed.status, 200, JSON.stringify(completed.body));
     assert.equal(completed.body.record.status, 'completed');
     assert.equal(completed.body.record.resultMessageId, sent.id);
-    assert.equal(completed.body.feishu.status, 'synced', JSON.stringify(completed.body.feishu));
+    assert.equal(completed.body.feishu.status, 'pending');
+    assert.equal(
+      (await server.call('/api/v1/business/sync', { method: 'POST' })).body.feishu.status,
+      'synced',
+    );
     assert(remote.records.get('t4')[0].fields['执行结果沟通'].length === 1);
     assert.match(remote.records.get('t4')[0].fields['实际执行记录'], /已实际发出统一回复/);
   } finally {
@@ -485,6 +494,10 @@ test('新增幂等键在HTTP重放和服务重启后保持相同业务编号，�
     assert.equal(after.record.id, message.record.id);
     assert.equal(after.record.createdAt, message.record.createdAt);
     assert.equal((await server.call()).body.messages.length, 1);
+    assert.equal(
+      (await server.call('/api/v1/business/sync', { method: 'POST' })).body.feishu.status,
+      'synced',
+    );
     assert.equal(remote.records.get('t3').length, 1);
     assert.equal(
       remote.writes.filter((write) => write.tableId === 't3' && write.method === 'POST').length,

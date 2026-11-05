@@ -71,7 +71,7 @@ function fixture() {
               ? 'https://importkey.com/buyer/quarantine'
               : 'https://buyer' + index + '.example.org/',
           用户评级: index === 15 ? '暂不开发' : 'A',
-          开发状态: index === 15 ? '暂缓开发' : '人工跟进中',
+          开发状态: index === 15 ? '停止开发' : '人工跟进中',
           需求产品: index === 0 ? '具有来源的真实求购信息' : '',
           邮箱: 'buyer' + index + '@example.org',
         },
@@ -81,7 +81,7 @@ function fixture() {
       't12',
       Array.from({ length: 15 }, (_, index) => ({
         record_id: 'history' + index,
-        fields: { 规则版本: 'acquisition-v3.2' },
+        fields: { 规则版本: 'acquisition-v5.0' },
       })),
     ],
   ]);
@@ -89,7 +89,7 @@ function fixture() {
     recordId: 'rec' + index,
     snapshot: {
       id: 'assessment' + index,
-      ruleVersion: 'acquisition-v3.2',
+      ruleVersion: 'acquisition-v5.0',
       website: 'https://buyer' + index + '.example.org/',
       score: 75,
       dimensions: { P: { score: 40 }, R: { score: 30 }, D: { score: 5 }, V: { score: 0 } },

@@ -25,15 +25,6 @@ export interface OverviewData {
     dueTasks: number | null;
   };
   work: { overdue: number | null; today: number | null; paused: number | null };
-  developmentReviews?:
-    | {
-        customerId: string;
-        name: string;
-        reason: string;
-        reviewDate: string;
-        to: string;
-      }[]
-    | null;
   links: {
     companies: string;
     newCompanies: string;

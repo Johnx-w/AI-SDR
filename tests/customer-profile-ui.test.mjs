@@ -30,8 +30,8 @@ const materialFact = {
 const primary = {
   direction: 'finished',
   product: 'Zip screens',
-  grade: '高优先',
-  status: '高优先',
+  grade: 'A',
+  status: 'A',
   matchLevel: '明确匹配',
   relationship: 'direct_supply',
   prioritySignals: [
@@ -52,8 +52,8 @@ const materials = {
   product: 'Roller blinds',
   targetProduct: 'Roller fabric',
   basisProduct: 'Roller blinds',
-  grade: '常规开发',
-  status: '常规开发',
+  grade: 'B',
+  status: 'B',
   matchLevel: '潜在匹配',
   relationship: 'potential_input',
   prioritySignals: [],
@@ -66,7 +66,7 @@ const materials = {
 };
 const rawReason = [
   '[自动评估 ev_fixture_123]',
-  '规则版本：acquisition-v4.0',
+  '规则版本：acquisition-v5.0',
   `评估时间：${evaluatedAt}`,
   '经营证据方向：成品 · Zip screens',
   '主营产品：户外防风帘',
@@ -78,14 +78,14 @@ const assessment = {
   id: 'ev_fixture_123',
   score: 70,
   complete: true,
-  ruleVersion: 'acquisition-v4.0',
+  ruleVersion: 'acquisition-v5.0',
   evaluatedAt,
   evidenceReason: rawReason,
   opportunities: [primary, materials],
 };
 const lead = {
   name: 'Acme Screens',
-  grade: '高优先',
+  grade: 'A',
   score: 70,
   type: 'retailer',
   product: '防风帘\n卷帘\n遮阳篷\n百叶窗\n纱窗\n布艺帘\n天窗帘',
@@ -160,7 +160,7 @@ test('画像集中展示具体开发理由与供货分析，主方向展开，�
   assert.match(visible, /经营户外防风帘与室内窗饰/);
   assert.match(visible, /零售商、安装服务商|企业与个人客户/);
   assert.match(visible, /Zip screens/);
-  assert.match(visible, /常规开发 · 潜在匹配/);
+  assert.match(visible, /B · 潜在匹配/);
   assert.match(visible, /防风帘属于稳定主营产品线/);
   assert.match(visible, /向贸易客户供货的专业窗饰供应商/);
   assert.match(visible, /供货分析/);
@@ -177,7 +177,7 @@ test('各方向经营事实保持独立，材料机会分析不冒充已确认�
   assert.doesNotMatch(finished, /卷帘生产使用遮阳面料/);
   assert.match(material, /卷帘生产使用遮阳面料/);
   assert.doesNotMatch(material, /向贸易客户供货的专业窗饰供应商/);
-  assert.match(initialView(html), /常规开发 · 潜在匹配/);
+  assert.match(initialView(html), /B · 潜在匹配/);
   assert.match(material, /面料|材料/);
   assert.match(initialView(material), /客户已经营Roller blinds.*询问是否需要Roller fabric/);
   assert.doesNotMatch(initialView(material), /已确认采购需求|已确认采购|确定采购/);
@@ -339,9 +339,9 @@ test('公开与人工确认的采购需求单独显示，不由供货分析生�
 
 test('人工改级标记贴近当前客户等级，资料时间保持北京时间', () => {
   const visible = initialView(
-    renderProfile({ grade: '常规开发', assessment: { ...assessment, manualOverride: true } }),
+    renderProfile({ grade: 'B', assessment: { ...assessment, manualOverride: true } }),
   );
-  assert.match(visible, /常规开发/);
+  assert.match(visible, /B/);
   assert.match(visible, /人工调整|人工修改/);
   assert.match(visible, /官网取证：2026年10月22日 14:05（北京时间）/);
   assert.match(visible, /评估更新：2026年10月24日 18:42（北京时间）/);
@@ -351,7 +351,7 @@ test('人工改级标记贴近当前客户等级，资料时间保持北京时�
 test('机会卡片移除重复评级组件，旧规则记录不展示', () => {
   const current = renderProfile({ grade: 'A' });
   assert.doesNotMatch(current, /profile-priority|匹配等级：/);
-  assert.match(current, /常规开发 · 潜在匹配/);
+  assert.match(current, /B · 潜在匹配/);
   const old = renderProfile({
     grade: 'A',
     assessment: { ...assessment, ruleVersion: 'acquisition-v3.2' },

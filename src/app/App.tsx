@@ -112,12 +112,10 @@ export function App() {
     };
     const timer = window.setInterval(refresh, 60000);
     window.addEventListener('focus', refresh);
-    window.addEventListener('customer-development-changed', refresh);
     document.addEventListener('visibilitychange', refresh);
     return () => {
       window.clearInterval(timer);
       window.removeEventListener('focus', refresh);
-      window.removeEventListener('customer-development-changed', refresh);
       document.removeEventListener('visibilitychange', refresh);
     };
   }, []);
@@ -125,8 +123,7 @@ export function App() {
   const reminderCount =
     (reminders?.metrics.dueTasks || 0) +
     (reminders?.work.paused || 0) +
-    (reminders?.products.draft || 0) +
-    (reminders?.developmentReviews?.length || 0);
+    (reminders?.products.draft || 0);
   return (
     <div className="app-shell">
       {mobile && (

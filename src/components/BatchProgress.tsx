@@ -245,10 +245,7 @@ function DetailRows({
                   ? '已在客户库'
                   : resultNames[row.result] || row.result}
               {row.assessment && (
-                <small>
-                  {['高优先', '常规开发'].includes(row.assessment.grade || '') && '旧版 '}
-                  {row.assessment.grade || row.assessment.status || '未定级'}
-                </small>
+                <small>{row.assessment.grade || row.assessment.status || '未定级'}</small>
               )}
             </td>
           </tr>
@@ -429,12 +426,6 @@ export function BatchProgress({
                     <td>
                       A {metric.ratings.A || 0} · B {metric.ratings.B || 0} · C{' '}
                       {metric.ratings.C || 0}
-                      {!!(metric.ratings['高优先'] || metric.ratings['常规开发']) && (
-                        <small>
-                          旧记录 高优先 {metric.ratings['高优先'] || 0} · 常规开发{' '}
-                          {metric.ratings['常规开发'] || 0}
-                        </small>
-                      )}
                       <small>未定级 {metric.ratings.unrated || 0}</small>
                     </td>
                   </tr>

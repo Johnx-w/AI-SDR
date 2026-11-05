@@ -108,7 +108,7 @@ test('面料目标保留真实成品经营初评，材料采购标为待沟通�
   assert.match(result.reason, /材料或配件采购方式、规格、数量与负责人待沟通/);
 });
 
-test('只有已核实卷帘产品线时仍可常规开发，错误材料标签不成为材料采购事实', () => {
+test('只有已核实卷帘产品线时仍可B，错误材料标签不成为材料采购事实', () => {
   const quote = 'We sell finished roller blinds to homeowners.';
   const result = assessCompany({
     research: {

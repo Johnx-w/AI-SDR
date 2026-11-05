@@ -252,18 +252,6 @@ test('运行中的获客自动首发保留在当前计划，按收录客户展�
   assert.deepEqual(h.writes(), []);
 });
 
-test('旧等级计划在列表和详情都提示需更新筛选，保留原筛选值可核对', async () => {
-  const h = setup('ready', { generationMode: 'simple', grades: ['高优先'] });
-  await h.ready();
-  assert.match(h.html(), /旧等级筛选需更新：高优先/);
-  h.click('执行详情');
-  h.render();
-  await flush();
-  assert.match(h.html(), /此计划使用旧版等级筛选（高优先）/);
-  assert.match(h.html(), /新评级客户会被阻断/);
-  assert.match(h.html(), /<dt>客户评级<\/dt>/);
-});
-
 test('活跃计划里的恢复后草稿保留明确审核入口，查看详情不会直接发送', async () => {
   const h = setup('active', { deliveryStatus: 'draft' });
   await h.ready();

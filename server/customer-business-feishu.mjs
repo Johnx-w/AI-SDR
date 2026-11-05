@@ -202,7 +202,7 @@ function sameFields(record, expected, definitions) {
   });
 }
 
-async function safeWrite({ journal, checkpoint }, key, write, confirm) {
+async function safeWrite({ journal, checkpoint, retry = false }, key, write, confirm) {
   const previous = journal.filter((event) => event.key === key).at(-1);
   const save = async (state) => {
     journal.push({ at: new Date().toISOString(), key, state });
@@ -212,7 +212,7 @@ async function safeWrite({ journal, checkpoint }, key, write, confirm) {
     if (previous && ['pending', 'uncertain'].includes(previous.state)) await save('done');
     return;
   }
-  if (previous && ['pending', 'uncertain'].includes(previous.state))
+  if (!retry && previous && ['pending', 'uncertain'].includes(previous.state))
     throw new Error('上次写入仍待核对，未重复执行：' + key);
   await save('pending');
   try {
@@ -565,7 +565,8 @@ export class CustomerBusinessFeishu {
           assert(Number.isInteger(entry.version) && entry.version >= 1, '业务记录版本无效');
           if (key === 'messages')
             assert(
-              entry.actualConfirmed === true && entry.origin === 'manual',
+              entry.actualConfirmed === true &&
+                ['manual', 'outreach', 'mailbox'].includes(entry.origin),
               '沟通记录尚未确认实际发生，不能同步为真实沟通',
             );
           const common = {
@@ -627,7 +628,12 @@ export class CustomerBusinessFeishu {
                   .map((item) => (typeof item === 'string' ? item : item.url))
                   .filter(Boolean)
                   .join('\n') || null,
-              记录来源: '人工补录',
+              记录来源:
+                entry.origin === 'outreach'
+                  ? '发信记录'
+                  : entry.origin === 'mailbox' || entry.mailboxMessageId
+                    ? '邮箱同步'
+                    : '人工补录',
             };
           if (key === 'tasks')
             fields = {
@@ -735,9 +741,9 @@ export class CustomerBusinessFeishu {
           }
           return record;
         };
-        let existing = await find();
+        let existing = cached;
         const confirm = async () => {
-          const record = await find();
+          const record = existing || (await find());
           if (!record) return false;
           const readback = await this.client.record(record.record_id, tableIds[key]);
           if (!sameFields(readback, expected, definitions[key])) return false;
@@ -752,16 +758,17 @@ export class CustomerBusinessFeishu {
           ? expected
           : Object.fromEntries(Object.entries(expected).filter(([, value]) => value !== null));
         await safeWrite(
-          { journal: this.journal, checkpoint: () => this.persistJournal() },
+          { journal: this.journal, checkpoint: () => this.persistJournal(), retry: true },
           operationKey,
-          () =>
-            this.client.write(
+          async () => {
+            existing = await this.client.write(
               existing ? 'update' : 'insert',
               values,
               existing?.record_id,
               uuid,
               tableIds[key],
-            ),
+            );
+          },
           confirm,
         );
       };

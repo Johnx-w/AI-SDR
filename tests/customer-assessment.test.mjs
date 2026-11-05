@@ -6,7 +6,6 @@ import {
   formatAssessmentReason,
   formatAssessmentEvidence,
   readAssessmentSummary,
-  projectCustomerGrade,
 } from '../server/customer-assessment.mjs';
 import { mapFeishuRecord } from '../server/feishu.mjs';
 
@@ -15,17 +14,6 @@ const target = { product: 'roller blinds', country: 'Australia' };
 const fact = (kind, value = kind) => ({ kind, value, quote: value, source_url: source });
 const baseline = ['core_product', 'specialist_supply', 'current_supply_process'];
 const opportunity = (facts) => ({ direction: 'finished', product: 'roller blinds', facts });
-test('v4 待核实记录以原始评级核对后展示 C，保留原始字段', () => {
-  const lead = {
-    grade: '待核实',
-    fields: { 初评结果: '待核实' },
-    assessment: { ruleVersion: 'acquisition-v4.0', grade: null, status: '待核实' },
-  };
-  const projected = projectCustomerGrade(lead);
-  assert.equal(projected.grade, 'C');
-  assert.equal(projected.assessment.grade, 'C');
-  assert.equal(projected.fields['初评结果'], '待核实');
-});
 function evaluate(facts, overrides = {}) {
   return assessCompany({
     research: {
@@ -97,7 +85,7 @@ test('同一网点重复出现不触发20分档', () => {
   assert.equal(result.score, 75);
 });
 
-test('主营和供货角色可在 D/V 全未知时高优先，副线仍为常规', () => {
+test('主营和供货角色可在 D/V 全未知时A，副线仍为常规', () => {
   for (const role of ['specialist_supply', 'general_supply']) {
     const high = evaluate(['core_product', role].map((kind) => fact(kind)));
     assert.equal(high.grade, 'A');
@@ -110,7 +98,7 @@ test('主营和供货角色可在 D/V 全未知时高优先，副线仍为常规
   assert.equal(regular.matchLevel, '明确匹配');
 });
 
-test('缺持续经营依据仍高优先，海关不参与初评', () => {
+test('缺持续经营依据仍A，海关不参与初评', () => {
   const facts = ['core_product', 'specialist_supply', 'custom_made', 'motorized_system'].map((k) =>
     fact(k),
   );
@@ -122,7 +110,7 @@ test('缺持续经营依据仍高优先，海关不参与初评', () => {
   assert.deepEqual(result, evaluate(facts));
 });
 
-test('已核实卷帘业务但经营角色未知时常规开发，最佳成品证据保留面料潜在机会', () => {
+test('已核实卷帘业务但经营角色未知时B，最佳成品证据保留面料潜在机会', () => {
   const result = assessCompany({
     research: {
       source_url: source,
@@ -175,7 +163,7 @@ test('邻近产品、仅安装、身份冲突与明确无关仍限制初评', ()
   }
 });
 
-test('明确市场不匹配不能因主营和供货角色被评为高优先', () => {
+test('明确市场不匹配不能因主营和供货角色被评为A', () => {
   const result = evaluate(
     ['core_product', 'specialist_supply'].map((kind) => fact(kind)),
     {

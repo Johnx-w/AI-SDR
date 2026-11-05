@@ -1248,25 +1248,15 @@ test('资料重做失败保留原产品与邮箱，等待后重试不会结束�
   assert.equal(fresh.candidate.productId, h.original.candidate.productId);
 });
 
-test('已审核恢复客户在就绪计划重做资料时保留已授予的计划授权', async (t) => {
+test('已审核客户在就绪计划重做资料时保留已授予的计划授权', async (t) => {
   const h = await materialHarness(t);
-  h.state.business = {
-    customerContexts: [
-      { customerId: h.original.customerId, development: { version: 2, paused: false } },
-    ],
-  };
-  h.service.putDelivery({
-    ...h.service.delivery(h.original.id),
-    developmentVersion: 2,
-    developmentReviewedVersion: 2,
-  });
   h.service.putCampaign({ ...h.service.campaign(h.campaign.id), status: 'ready' });
   h.product.version++;
   h.service.refreshProductMaterials();
   await h.service.preparing.get(h.campaign.id);
   assert.equal(h.service.campaign(h.campaign.id).approvedRevision, h.campaign.revision);
   const fresh = h.service.deliveries(h.campaign.id).find((row) => row.status === 'draft');
-  assert.equal(fresh.developmentReviewedVersion, 2);
+  assert.equal(fresh.status, 'draft');
 });
 
 test('首次生成失败时发生资料变化，仍保留待重做状态与原分配', async (t) => {

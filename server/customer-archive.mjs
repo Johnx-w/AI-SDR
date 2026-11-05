@@ -122,7 +122,6 @@ export class CustomerArchive {
     };
     const lead = this.decorate({ leads: [mapFeishuRecord(record)] }).leads[0];
     this.library.upsert(lead, { mirror: entry });
-    void this.sync().catch(() => {});
     return record;
   }
   remoteId(id) {

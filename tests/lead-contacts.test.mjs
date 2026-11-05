@@ -94,14 +94,21 @@ async function withApp(
     return { contact: lead.contact, email: lead.email, phone: lead.phone };
   };
   try {
-    await callback({ base, edit, current, record: () => record, writes: () => writes });
+    await callback({
+      base,
+      edit,
+      current,
+      record: () => record,
+      writes: () => writes,
+      sync: () => fetch(base + '/api/v1/business/sync', { method: 'POST' }),
+    });
   } finally {
     await new Promise((resolve) => app.close(resolve));
   }
 }
 
 test('网页修改并读回联系方式，规范去重；保留研究证据和业务状态', async () => {
-  await withApp(async ({ edit, record, writes, base }) => {
+  await withApp(async ({ edit, record, writes, base, sync }) => {
     const response = await edit({
       contact: '采购部',
       email: 'Sales@buyer.example.org\nsales@buyer.example.org',
@@ -114,11 +121,13 @@ test('网页修改并读回联系方式，规范去重；保留研究证据和�
       email: 'sales@buyer.example.org',
       phone: '+1 9726960181',
     });
+    assert.equal(writes(), 0);
+    await sync();
     assert.equal(writes(), 1);
     const profile = JSON.parse(record().fields.画像JSON);
     assert.deepEqual(profile.latest_research.contact_evidence, evidence);
     assert.equal(profile.manual_contacts.contact.value, '采购部');
-    assert.equal(record().fields.开发状态, '未记录');
+    assert.equal(record().fields.开发状态, '待开发');
     assert.deepEqual(profile.facts, [{ field: 'product', value: 'blinds' }]);
     const refreshed = await (await fetch(base + '/api/v1/leads/real')).json();
     assert.equal(refreshed.leads[0].email, data.contacts.email);
@@ -126,11 +135,12 @@ test('网页修改并读回联系方式，规范去重；保留研究证据和�
 });
 
 test('清空错误联系方式后，刷新和重新研究都不恢复旧值', async () => {
-  await withApp(async ({ edit, record, base }) => {
+  await withApp(async ({ edit, record, base, sync }) => {
     assert.equal((await edit({ email: '', phone: '' })).status, 200);
     const refreshed = await (await fetch(base + '/api/v1/leads/real')).json();
     assert.equal(refreshed.leads[0].email, '');
     assert.equal(refreshed.leads[0].phone, '');
+    await sync();
     const updated = mergeResearchFields(record().fields, {
       邮箱: 'old@buyer.example.org',
       电话: '+1 9726960181',
@@ -187,8 +197,10 @@ test('无效内容、过期修改和跨站请求不写入飞书', async () => {
 
 test('写入响应丢失时通过读回确认成功，不重复写入', async () => {
   await withApp(
-    async ({ edit, writes }) => {
+    async ({ edit, writes, sync }) => {
       assert.equal((await edit({ contact: '采购部' })).status, 200);
+      await sync();
+      await sync();
       assert.equal(writes(), 1);
     },
     { uncertainWrite: true },
@@ -197,11 +209,12 @@ test('写入响应丢失时通过读回确认成功，不重复写入', async ()
 
 test('飞书写入失败时本地仍保存联系方式，明确保留待同步状态', async () => {
   await withApp(
-    async ({ edit, current, writes, base }) => {
+    async ({ edit, current, writes, base, sync }) => {
       const before = current();
       const response = await edit({ email: 'new@buyer.example.org' });
       assert.equal(response.status, 200);
       assert.equal((await response.json()).contacts.email, 'new@buyer.example.org');
+      await sync();
       const local = await (await fetch(base + '/api/v1/leads/real')).json();
       assert.equal(local.leads[0].email, 'new@buyer.example.org');
       assert.equal(local.sync.pendingWrites, 1);
@@ -215,11 +228,12 @@ test('飞书写入失败时本地仍保存联系方式，明确保留待同步�
 
 test('兼容当前精简T2：联系人保存在后台，邮箱电话同步现有列，无需新增字段', async () => {
   await withApp(
-    async ({ edit, base, record }) => {
+    async ({ edit, base, record, sync }) => {
       const first = await edit({ contact: '采购部', email: 'new@buyer.example.org', phone: '' });
       assert.equal(first.status, 200);
       const data = await first.json();
       assert.equal(data.contacts.contact, '采购部');
+      await sync();
       assert.equal(record().fields.邮箱, 'new@buyer.example.org');
       assert.equal(record().fields.电话, '');
       assert.equal(record().fields.画像JSON, undefined);

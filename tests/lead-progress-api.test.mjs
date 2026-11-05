@@ -76,17 +76,14 @@ test('已有真实发送、来信和需求推进即时联动列表、详情、�
         },
       });
       const assertViews = async (expected) => {
-        const [list, detail, exported, business, control] = await Promise.all([
+        const [list, detail, exported, business] = await Promise.all([
           get(library + '/list'),
           get(library + '/customer-1'),
           get(library),
           get('/api/v1/business'),
-          get('/api/v1/business/customers/customer-1/development'),
         ]);
         for (const lead of [list.leads[0], detail.lead, exported.leads[0], business.customers[0]])
           assert.equal(lead.status, expected);
-        assert.equal(control.status, expected);
-        assert.equal(control.sourceStatus, '待开发');
         assert.equal(list.leads[0].version, detail.version);
         assert.equal(exported.leads[0].version, undefined);
         assert.equal(list.sync.revision, initial.sync.revision, '业务状态无需飞书快照变化即可生效');
@@ -128,31 +125,6 @@ test('已有真实发送、来信和需求推进即时联动列表、详情、�
       await store.saveDemand({ ...demand, stage: 'quoting' }, { expectedVersion: demand.version });
       const followingVersion = await assertViews('跟进中');
       assert.notEqual(followingVersion, repliedVersion);
-      const controlPath = '/api/v1/business/customers/customer-1/development';
-      const act = async (body) => {
-        const response = await fetch(root + controlPath, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        assert.equal(response.status, 200, await response.clone().text());
-        return response.json();
-      };
-      let control = await get(controlPath);
-      control = await act({
-        action: 'pause',
-        expectedVersion: control.development.version,
-        reason: '我方暂缓',
-      });
-      await assertViews('暂缓开发');
-      await act({
-        action: 'resume',
-        expectedVersion: control.development.version,
-        reviewed: true,
-        reviewToken: control.reviewToken,
-        resumeNotes: '继续报价沟通',
-      });
-      await assertViews('跟进中');
     },
   );
 });

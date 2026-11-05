@@ -38,7 +38,6 @@ import {
   assessmentId,
   assessmentRating,
   formatAssessmentEvidence,
-  projectCustomerGrade,
   ASSESSMENT_RULE_VERSION,
 } from './customer-assessment.mjs';
 import { AssessmentService } from './assessment-service.mjs';
@@ -296,65 +295,56 @@ export class NativeAcquisition {
         ]
           .filter((fact) => fact.origin !== 'manual')
           .map(readable);
-        const recordedGrade = fieldText(fieldValue(lead.fields, '用户评级')) || lead.grade;
-        const manualOverride = assessmentRating(stored) !== recordedGrade;
         const summaries = assessmentSummaryFields(stored);
-        return projectCustomerGrade(
-          decorateDossierConfirmations(
-            {
-              ...lead,
-              supplyOpportunity: summaries['主要供货机会'],
-              pendingQuestions: summaries['待确认事项'],
+        return decorateDossierConfirmations(
+          {
+            ...lead,
+            supplyOpportunity: summaries['主要供货机会'],
+            pendingQuestions: summaries['待确认事项'],
+            score: stored.score,
+            grade: stored.grade || '未评级',
+            ratingReason: lead.ratingReason || stored.reason,
+            facts,
+            assessment: {
+              id: stored.id,
+              entityType: stored.entityType,
+              ruleVersion: stored.ruleVersion,
+              evaluatedAt: stored.evaluatedAt,
               score: stored.score,
-              ratingReason: lead.ratingReason || stored.reason,
-              facts,
-              assessment: {
-                id: stored.id,
-                ruleVersion: stored.ruleVersion,
-                evaluatedAt: stored.evaluatedAt,
-                score: stored.score,
-                grade: manualOverride
-                  ? lead.grade === '未评级'
-                    ? null
-                    : lead.grade
-                  : stored.grade,
-                status: manualOverride
-                  ? '主表评级已修改；后台保留最新自动评估供核对'
-                  : stored.status,
-                complete: stored.complete,
-                manualOverride,
-                matchLevel: stored.matchLevel,
-                prioritySignals: stored.prioritySignals,
-                product: stored.product,
-                direction: stored.direction,
-                supplyOpportunity: stored.supplyOpportunity,
-                opportunities: stored.opportunities.map((o) => ({
-                  direction: o.direction,
-                  product: o.product,
-                  relationship: o.relationship,
-                  ...(o.relationship === 'potential_input'
-                    ? {
-                        basisProduct: o.product,
-                        targetProduct:
-                          stored.target?.product || stored.supplyOpportunity?.targetProduct,
-                      }
-                    : {}),
-                  grade: o.grade,
-                  status: o.status,
-                  matchLevel: o.matchLevel,
-                  prioritySignals: o.prioritySignals,
-                  facts: (o.facts || []).map(factSummary),
-                  dimensions: dimensionSummary(o.dimensions),
-                  missing: o.missing || [],
-                })),
-                evidenceReason: formatAssessmentEvidence(stored),
-                incompleteReason: stored.incompleteReason,
-                missing: stored.missing,
-                dimensions: dimensionSummary(stored.dimensions),
-              },
+              grade: stored.grade,
+              status: stored.status,
+              complete: stored.complete,
+              matchLevel: stored.matchLevel,
+              prioritySignals: stored.prioritySignals,
+              product: stored.product,
+              direction: stored.direction,
+              supplyOpportunity: stored.supplyOpportunity,
+              opportunities: stored.opportunities.map((o) => ({
+                direction: o.direction,
+                product: o.product,
+                relationship: o.relationship,
+                ...(o.relationship === 'potential_input'
+                  ? {
+                      basisProduct: o.product,
+                      targetProduct:
+                        stored.target?.product || stored.supplyOpportunity?.targetProduct,
+                    }
+                  : {}),
+                grade: o.grade,
+                status: o.status,
+                matchLevel: o.matchLevel,
+                prioritySignals: o.prioritySignals,
+                facts: (o.facts || []).map(factSummary),
+                dimensions: dimensionSummary(o.dimensions),
+                missing: o.missing || [],
+              })),
+              evidenceReason: formatAssessmentEvidence(stored),
+              incompleteReason: stored.incompleteReason,
+              missing: stored.missing,
+              dimensions: dimensionSummary(stored.dimensions),
             },
-            this.supplements.confirmations(lead.id, lead.website),
-          ),
+          },
+          this.supplements.confirmations(lead.id, lead.website),
         );
       }),
     };

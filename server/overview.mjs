@@ -1,5 +1,7 @@
 import { overviewRange, taskBucket, activeDemand } from '../src/domain/overview-rules.mjs';
 
+import { isDevelopmentCustomer } from './customer-eligibility.mjs';
+
 const dayMs = 86400000;
 const stages = {
   new: '新需求',
@@ -127,7 +129,7 @@ export class OverviewService {
       throw Object.assign(new Error('客户表已切换，请刷新总览'), { status: 409 });
     const results = Object.fromEntries(entries);
     const sources = Object.fromEntries(entries.map(([key, value]) => [key, value.status]));
-    const customers = results.customers.data?.leads || [];
+    const customers = (results.customers.data?.leads || []).filter(isDevelopmentCustomer);
     const customerMap = new Map(customers.map((customer) => [customer.id, customer]));
     const graph = results.business.data;
     const acquisition = results.acquisition.data;
@@ -153,44 +155,19 @@ export class OverviewService {
         if (bucket) work[bucket]++;
       }
     const activeDemands = graph?.demands.filter(activeDemand) || [];
-    const reviewDay = new Date(Date.parse(range.asOf) + 8 * 3600000).toISOString().slice(0, 10);
-    const developmentReviews = graph
-      ? (graph.customerContexts || [])
-          .filter(
-            (context) =>
-              context.development?.paused &&
-              context.development.reviewDate &&
-              context.development.reviewDate <= reviewDay,
-          )
-          .sort(
-            (a, b) =>
-              a.development.reviewDate.localeCompare(b.development.reviewDate) ||
-              a.customerId.localeCompare(b.customerId),
-          )
-          .map((context) => ({
-            customerId: context.customerId,
-            name:
-              customerMap.get(context.customerId)?.name ||
-              `${context.customerId}（企业资料暂不可用）`,
-            reason: context.development.reason,
-            reviewDate: context.development.reviewDate,
-            to: link('/leads', { lead: context.customerId }),
-          }))
-      : null;
     const priority = [];
     const selected = new Set();
     const suppressed = new Set([
       ...(graph?.customerContexts || [])
-        .filter((context) => context.doNotContact || context.development?.paused)
+        .filter((context) => context.doNotContact)
         .map((context) => context.customerId),
       ...customers
-        .filter((customer) =>
-          /暂不开发|暂缓开发|暂停开发|停止开发|拒绝联系|已退订/u.test(customer.status || ''),
-        )
+        .filter((customer) => /暂不开发|停止开发|拒绝联系|已退订/u.test(customer.status || ''))
         .map((customer) => customer.id),
     ]);
     const addPriority = (customerId, value) => {
-      if (selected.has(customerId)) return;
+      if (selected.has(customerId) || (results.customers.data && !customerMap.has(customerId)))
+        return;
       selected.add(customerId);
       const customer = customerMap.get(customerId);
       priority.push({
@@ -338,7 +315,6 @@ export class OverviewService {
         dueTasks: graph ? work.overdue + work.today : null,
       },
       work,
-      developmentReviews,
       links: {
         companies: '/leads',
         newCompanies: link('/automation', {

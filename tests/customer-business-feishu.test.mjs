@@ -394,8 +394,13 @@ test('循环关联写入失败时保留基础记录，返回pending而非部分�
   assert.equal(f.records.get('t1').length, 2);
   assert.equal(f.records.get('t4').length, 1);
   const count = f.writes.length;
-  await f.bridge.sync(workspace(), { products: [{ id: 'product-1', version: 2 }] });
-  assert.equal(f.writes.length, count);
+  f.state.failWrite = undefined;
+  assert.equal(
+    (await f.bridge.sync(workspace(), { products: [{ id: 'product-1', version: 2 }] })).status,
+    'synced',
+  );
+  assert(f.writes.length > count);
+  assert.equal(f.records.get('t3').length, 1);
 });
 
 test('插入已提交但响应丢失时只读回核对，稳定编号不产生重复记录', async () => {
@@ -412,7 +417,7 @@ test('插入已提交但响应丢失时只读回核对，稳定编号不产生�
   );
 });
 
-test('重启后持久化未知写入日志阻止再次插入', async () => {
+test('重启后先核对未知写入，未成功时以稳定编号重试', async () => {
   const root = mkdtempSync(join(tmpdir(), 'business-mirror-'));
   const path = join(root, 'journal.json');
   try {
@@ -425,9 +430,10 @@ test('重启后持久化未知写入日志阻止再次插入', async () => {
     f.state.failWrite = undefined;
     assert.equal(
       (await restarted.sync(workspace(), { products: [{ id: 'product-1', version: 2 }] })).status,
-      'pending',
+      'synced',
     );
-    assert.equal(f.writes.length, count);
+    assert(f.writes.length > count);
+    assert.equal(f.records.get('t3').length, 1);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

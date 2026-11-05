@@ -612,11 +612,11 @@ test('执行前核对 T5 审核、版本、生效日期及 T2 人工开发状态
       ),
     );
     f.products.get('product-a').effectiveDate = '';
-    f.customers.get('customer-a').fields['开发状态'] = '暂缓开发';
+    f.customers.get('customer-a').fields['开发状态'] = '停止开发';
     assert(
       (await f.business.preflightTask(task.id)).reasons.some((reason) => reason.includes('T2')),
     );
-    assert.equal(f.customers.get('customer-a').fields['开发状态'], '暂缓开发');
+    assert.equal(f.customers.get('customer-a').fields['开发状态'], '停止开发');
     f.customers.get('customer-a').fields['开发状态'] = '待开发';
     demand = await f.business.saveDemand({ ...demand, ownership: 'human' });
     task = f.business.get('tasks', task.id);
