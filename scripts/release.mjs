@@ -6,13 +6,14 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validateArchiveEntries } from './release-server.mjs';
+import { waitForCI } from './release-ci.mjs';
 
 const project = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const host = 'ai-sdr';
 // Windows bsdtar otherwise decodes Git's UTF-8 filenames using the system code page.
 const tarOptions = process.platform === 'win32' ? ['--options', 'hdrcharset=UTF-8'] : [];
 
-function run(command, args, { cwd = project, input, capture = false } = {}) {
+function runCommand(command, args, { cwd = project, input, capture = false } = {}) {
   const result = spawnSync(command, args, {
     cwd,
     input,
@@ -25,17 +26,15 @@ function run(command, args, { cwd = project, input, capture = false } = {}) {
   return capture ? result.stdout.trim() : '';
 }
 
-function remote(
-  args,
-  script = readFileSync(join(project, 'scripts', 'release-server.mjs'), 'utf8'),
-) {
-  return run('ssh', ['-o', 'BatchMode=yes', host, 'node --input-type=module - ' + args.join(' ')], {
-    input: script,
-  });
-}
-
-async function main() {
-  const [mode = 'deploy', ...extra] = process.argv.slice(2);
+export async function release(args = process.argv.slice(2), run = runCommand) {
+  const remote = (
+    args,
+    script = readFileSync(join(project, 'scripts', 'release-server.mjs'), 'utf8'),
+  ) =>
+    run('ssh', ['-o', 'BatchMode=yes', host, 'node --input-type=module - ' + args.join(' ')], {
+      input: script,
+    });
+  const [mode = 'deploy', ...extra] = args;
   assert(
     ['deploy', 'check', 'rollback'].includes(mode) && !extra.length,
     '用法：npm run release / release:check / release:rollback',
@@ -71,6 +70,12 @@ async function main() {
     run('tar', [...tarOptions, '-rf', archive, '-C', source, 'dist']);
     assert.equal(git('rev-parse', 'HEAD'), revision, '检查期间分支已产生新提交，请重新发布');
     run('git', ['push', 'origin', `${revision}:refs/heads/${branch}`]);
+    console.log(`等待 GitHub CI 通过：${revision}`);
+    const ci = await waitForCI(revision, (endpoint) =>
+      JSON.parse(run('gh', ['api', '--hostname', 'github.com', endpoint], { capture: true })),
+    );
+    console.log(`CI 已通过：${ci.html_url}`);
+    assert.equal(git('rev-parse', 'HEAD'), revision, '等待CI期间分支已产生新提交，请重新发布');
     const upload = randomUUID() + '.tar';
     const digest = createHash('sha256').update(readFileSync(archive)).digest('hex');
     run('ssh', ['-o', 'BatchMode=yes', host, 'install -d -m 700 /srv/shadeflow/incoming']);
@@ -88,7 +93,9 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error.message);
-  process.exitCode = 1;
-});
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  release().catch((error) => {
+    console.error(error.message);
+    process.exitCode = 1;
+  });
+}
