@@ -176,6 +176,13 @@ test('迁移先预演再原位改写，清除旧值及控制数据，保留证�
     'plan-one',
     JSON.stringify({ status: 'active', filters: { grades: ['obsolete'] }, approvedRevision: 1 }),
   );
+  const originalBody = '{ "grade": "obsolete", "note": "original message" }';
+  db.prepare('INSERT INTO customer_business_entities VALUES(?,?,?,?)').run(
+    'scope',
+    'messages',
+    'message-one',
+    JSON.stringify({ customerId: lead.id, body: originalBody }),
+  );
   const env = { BATCH_DB_PATH: path, LEAD_LIBRARY_DB_PATH: path, OUTREACH_DB_PATH: path };
   try {
     assert.equal(migrateMirrorData(env).applied, false);
@@ -188,6 +195,10 @@ test('迁移先预演再原位改写，清除旧值及控制数据，保留证�
     assert.equal(saved.grade, 'B');
     assert.equal(JSON.parse(saved.fields.画像JSON).grade, 'B');
     assert.equal(JSON.parse(saved.fields.画像JSON).facts[0].quote, 'original evidence');
+    assert.equal(
+      JSON.parse(db.prepare('SELECT data FROM customer_business_entities').get().data).body,
+      originalBody,
+    );
     const context = JSON.parse(
       db.prepare('SELECT data FROM customer_business_contexts').get().data,
     );

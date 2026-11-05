@@ -90,15 +90,6 @@ export function migrateMirrorData(env, { apply = false } = {}) {
     }
     const rewrite = (value, assessment) => {
       if (Array.isArray(value)) return value.map((item) => rewrite(item, assessment));
-      if (typeof value === 'string' && /^[{[]/.test(value)) {
-        let parsed;
-        try {
-          parsed = JSON.parse(value);
-        } catch {
-          return value;
-        }
-        return JSON.stringify(rewrite(parsed, assessment));
-      }
       if (!value || typeof value !== 'object') return value;
       const current =
         byCustomer.get(value.customerId || value.recordId || value.record_id || value.id) ||
@@ -113,6 +104,17 @@ export function migrateMirrorData(env, { apply = false } = {}) {
       }
       const result = {};
       for (const [key, item] of Object.entries(value)) {
+        if (key === '画像JSON' && typeof item === 'string') {
+          let parsed;
+          try {
+            parsed = JSON.parse(item);
+          } catch {
+            result[key] = item;
+            continue;
+          }
+          result[key] = JSON.stringify(rewrite(parsed, current));
+          continue;
+        }
         if (['development', 'developmentVersion', 'developmentReviewedVersion'].includes(key))
           continue;
         if (
