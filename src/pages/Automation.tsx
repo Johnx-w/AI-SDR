@@ -48,6 +48,7 @@ const submissionStorage = 'shadeflow:pending-acquisition-v2';
 const dateInBeijing = () => new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
 const initialInput: WorkflowInput = {
   query_mode: 'auto',
+  auto_first_touch: false,
   audience: 'BC',
   customer_types: [],
   preferred_requirements: '',
@@ -785,6 +786,15 @@ export function Automation() {
                       <h2>执行安排</h2>
                       <p>确定每轮数量，以及何时开始运行</p>
                     </div>
+                    <label className="acq-first-touch-toggle">
+                      <input
+                        type="checkbox"
+                        checked={input.auto_first_touch === true}
+                        disabled={locked}
+                        onChange={(event) => patch({ auto_first_touch: event.target.checked })}
+                      />
+                      获客后自动首发
+                    </label>
                   </header>
                   <label className="acq-block-label">
                     每轮新增收录企业目标

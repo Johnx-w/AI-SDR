@@ -63,6 +63,7 @@ export class OutreachService {
     generator,
     now = Date.now,
     tickMs = 2000,
+    acquisitionSources = () => [],
   } = {}) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
@@ -89,6 +90,7 @@ export class OutreachService {
       generator,
       now,
       tickMs,
+      acquisitionSources,
     });
     this.preparing = new Map();
     this.conversations = new MailConversations({
@@ -334,6 +336,7 @@ export class OutreachService {
   }
   saveCampaign(input, id) {
     const prior = id ? this.campaign(id) : null;
+    if (prior?.acquisitionSource) throw fail(409, '请在获客任务中管理自动首发');
     if (['cancelled', 'completed'].includes(prior?.status))
       throw fail(409, '计划已结束，请新建触达计划');
     if (prior?.mode === 'internal_test') throw fail(400, '内部测试计划不能改为正式计划');
@@ -417,6 +420,112 @@ export class OutreachService {
         }
       return this.putCampaign(c);
     });
+  }
+  syncAcquisition() {
+    if (this.closed) return;
+    const sources = this.acquisitionSources();
+    if (!sources.length) return;
+    const campaigns = new Map(this.campaigns().map((campaign) => [campaign.id, campaign]));
+    for (const source of sources) {
+      if (source.scope !== this.getScope()) continue;
+      const id = `acquisition-${source.jobId}`;
+      const prior = campaigns.get(id);
+      const refresh = !prior || prior.acquisitionSource.roundId !== source.roundId;
+      let campaign = prior || {
+        id,
+        name: source.name,
+        mode: 'production',
+        generationMode: 'simple',
+        status: source.status,
+        revision: 1,
+        approvedRevision: 1,
+        targetCount: null,
+        intervalSeconds: 5,
+        includeExisting: true,
+        continuous: true,
+        customerIds: [],
+        filters: { markets: [], grades: [], products: [], categories: [] },
+        outreachClaims: [],
+        baselineCustomerIds: [],
+        scope: source.scope,
+        createdAt: iso(this.now),
+        approvedAt: iso(this.now),
+        lastError: '',
+        sendWindow: null,
+      };
+      const changed =
+        refresh ||
+        !prior?.acquisitionSource.senderVersions ||
+        campaign.status !== source.status ||
+        JSON.stringify(campaign.customerIds) !== JSON.stringify(source.customerIds);
+      if (!changed) continue;
+      if (refresh) {
+        const boxes = this.mailboxes
+          .list()
+          .filter(
+            (box) =>
+              box.configured &&
+              !box.paused &&
+              box.smtpStatus === 'connected' &&
+              box.signature?.trim() &&
+              box.displayName?.trim(),
+          );
+        const products = this.products().filter(
+          (product) =>
+            product.status === 'approved' &&
+            boxes.some((box) => box.productIds?.includes(product.id)),
+        );
+        campaign = {
+          ...campaign,
+          mailboxIds: boxes.map((box) => box.id),
+          filters: { ...campaign.filters, products: products.map((product) => product.id) },
+          productScopes: products.map(outreachProductScope),
+        };
+      }
+      this.putCampaign({
+        ...campaign,
+        status: source.status,
+        customerIds: source.customerIds,
+        acquisitionSource: {
+          jobId: source.jobId,
+          scheduleId: source.scheduleId,
+          roundId: source.roundId,
+          senderVersions:
+            (!refresh && prior.acquisitionSource.senderVersions) ||
+            Object.fromEntries(
+              this.mailboxes
+                .list()
+                .map((box) => [
+                  box.id,
+                  (!refresh &&
+                    this.deliveries(id).find(
+                      (delivery) => delivery.mailboxId === box.id && delivery.senderVersion,
+                    )?.senderVersion) ||
+                    senderVersion(box),
+                ]),
+            ),
+        },
+        updatedAt: iso(this.now),
+        lastRefreshAt: null,
+      });
+      if (source.status === 'cancelled') {
+        for (const delivery of this.deliveries(id, ['draft', 'queued', 'blocked'])) {
+          this.putDelivery({ ...delivery, status: 'cancelled', reason: '获客计划已关闭' });
+          this.release(delivery.id);
+        }
+      }
+    }
+  }
+  acquisitionAllowed(campaign) {
+    return (
+      !campaign.acquisitionSource ||
+      this.acquisitionSources().some(
+        (source) =>
+          source.jobId === campaign.acquisitionSource.jobId &&
+          source.scope === this.getScope() &&
+          source.status === 'active',
+      )
+    );
   }
   identities(candidate) {
     return [
@@ -535,9 +644,13 @@ export class OutreachService {
       c.baselineCustomerIds = latest.baselineCustomerIds || leads.map((l) => l.id);
       this.putCampaign({ ...latest, baselineCustomerIds: c.baselineCustomerIds });
     }
-    const eligibleLeads = c.includeExisting
+    let eligibleLeads = c.includeExisting
       ? leads
       : leads.filter((l) => !c.baselineCustomerIds.includes(l.id));
+    if (c.acquisitionSource) {
+      const members = new Set(c.customerIds);
+      eligibleLeads = eligibleLeads.filter((lead) => members.has(lead.id));
+    }
     const existing = ignoreDelivery ? this.delivery(ignoreDelivery) : null;
     const history = this.deliveries().filter((d) => d.id !== ignoreDelivery);
     const { identities, blocked: stopped } = this.contactState(ignoreDelivery);
@@ -553,14 +666,37 @@ export class OutreachService {
               day(d.sentAt || d.attemptedAt || d.createdAt) === day(this.now()))),
       ).length,
     }));
+    const automaticSenders = c.acquisitionSource
+      ? mailboxes.filter(
+          (box) =>
+            c.mailboxIds.includes(box.id) &&
+            c.acquisitionSource.senderVersions?.[box.id] === senderVersion(box) &&
+            box.configured &&
+            !box.paused &&
+            box.smtpStatus === 'connected' &&
+            box.signature?.trim() &&
+            box.displayName?.trim(),
+        )
+      : mailboxes;
     const result = selectOutreachCandidates({
       leads: eligibleLeads,
-      mailboxes,
-      products: this.products(),
+      mailboxes: automaticSenders,
+      products: c.acquisitionSource
+        ? this.products().filter(
+            (product) =>
+              c.filters.products.includes(product.id) &&
+              (existing || automaticSenders.some((box) => box.productIds?.includes(product.id))),
+          )
+        : this.products(),
       // Once a draft is reviewed its sender stays fixed. Workload only allocates
       // new customers; it must not move a queued email between accounts.
       campaign: existing
-        ? { ...c, customerIds: [existing.customerId], mailboxIds: [existing.mailboxId] }
+        ? {
+            ...c,
+            customerIds: [existing.customerId],
+            mailboxIds: [existing.mailboxId],
+            filters: { ...c.filters, products: [existing.candidate.productId] },
+          }
         : {
             ...c,
             senderAssignments: this.deliveries(c.id)
@@ -593,7 +729,8 @@ export class OutreachService {
       throw fail(409, '计划已结束，不能重新准备样稿');
     if (this.preparing.has(id)) return this.detail(id);
     if (c.mode !== 'production') throw fail(400, '测试计划使用固定测试内容');
-    if (!c.mailboxIds.length) throw fail(400, '请先选择发件邮箱');
+    if (!c.mailboxIds.length && !c.acquisitionSource) throw fail(400, '请先选择发件邮箱');
+    if (!this.acquisitionAllowed(c)) throw fail(409, '获客自动首发已暂停或关闭');
     if (!this.generatorClient().configured) throw fail(503, '请先在API连接中配置模型');
     const wasActive = c.status === 'active';
     this.putCampaign({ ...c, status: wasActive ? 'active' : 'preparing', lastError: '' });
@@ -607,7 +744,14 @@ export class OutreachService {
         if (current.revision === c.revision)
           this.putCampaign({
             ...current,
-            status: current.status === 'paused' ? 'paused' : wasActive ? 'paused' : 'draft',
+            status:
+              current.status === 'paused'
+                ? 'paused'
+                : wasActive
+                  ? c.acquisitionSource
+                    ? 'active'
+                    : 'paused'
+                  : 'draft',
             lastError: safeError(error),
           });
       })
@@ -618,7 +762,8 @@ export class OutreachService {
   }
   async prepareDrafts(id, revision, wasActive) {
     const c = this.campaign(id);
-    if (this.closed || c.revision !== revision || c.status === 'paused') return;
+    if (this.closed || c.revision !== revision || ['paused', 'cancelled'].includes(c.status))
+      return;
     for (const draft of this.deliveries().filter(
       (row) => row.mode === 'production' && ['draft', 'queued'].includes(row.status),
     )) {
@@ -637,9 +782,15 @@ export class OutreachService {
     )
       return;
     let slots =
-      c.targetCount -
+      (c.acquisitionSource ? Infinity : c.targetCount) -
       this.deliveries(id).filter((d) => !['blocked', 'cancelled'].includes(d.status)).length;
-    for (const candidate of result.blocked.slice(0, 200)) {
+    for (const candidate of result.blocked.slice(0, c.acquisitionSource ? undefined : 200)) {
+      const priorBlocked = this.deliveries(id).find(
+        (d) =>
+          d.customerId === candidate.customerId && d.status === 'blocked' && !d.materialRefresh,
+      );
+      if (c.acquisitionSource && priorBlocked && priorBlocked.reason !== candidate.reason)
+        this.putDelivery({ ...priorBlocked, reason: candidate.reason || candidate.reasonCode });
       if (
         this.deliveries(id).some(
           (d) => d.customerId === candidate.customerId && d.status !== 'cancelled',
@@ -668,7 +819,10 @@ export class OutreachService {
     const generate = async () => {
       while (cursor < selected.length && !this.closed) {
         const candidate = selected[cursor++];
-        if (this.campaign(id).revision !== revision || this.campaign(id).status === 'paused')
+        if (
+          this.campaign(id).revision !== revision ||
+          ['paused', 'cancelled'].includes(this.campaign(id).status)
+        )
           return;
         const mailbox = this.mailboxes.get(candidate.mailboxId),
           product = this.products().find((p) => p.id === candidate.productId);
@@ -834,7 +988,7 @@ export class OutreachService {
     await Promise.all([generate(), generate(), generate()]);
     if (this.closed) return;
     const current = this.campaign(id);
-    if (current.revision === revision && current.status !== 'paused') {
+    if (current.revision === revision && !['paused', 'cancelled'].includes(current.status)) {
       const deliveries = this.deliveries(id);
       const pending = deliveries.some((d) => ['draft', 'queued', 'sending'].includes(d.status));
       const reasons = new Map();
@@ -1098,6 +1252,7 @@ export class OutreachService {
       : current >= w.start || current < w.end;
   }
   canDispatch(c, d, m) {
+    if (!this.acquisitionAllowed(c)) return false;
     if (!m || m.paused || m.smtpStatus !== 'connected' || !m.configured) return false;
     if (c.mode === 'internal_test') return true;
     if (
@@ -1136,6 +1291,7 @@ export class OutreachService {
     return this.running;
   }
   async runTick() {
+    this.syncAcquisition();
     this.refreshProductMaterials();
     const campaigns = this.campaigns().filter((c) => c.status === 'active');
     const used = new Set();
@@ -1177,6 +1333,7 @@ export class OutreachService {
           status: rows.every((d) => d.status === 'accepted') ? 'completed' : 'paused',
         });
       else if (
+        !c.acquisitionSource &&
         consumed >= c.targetCount &&
         !rows.some((d) => ['queued', 'sending'].includes(d.status))
       )
@@ -1188,7 +1345,12 @@ export class OutreachService {
         (!current.lastRefreshAt || this.now() - Date.parse(current.lastRefreshAt) > 60000)
       ) {
         this.putCampaign({ ...current, lastRefreshAt: iso(this.now) });
-        this.prepare(c.id);
+        try {
+          this.prepare(c.id);
+        } catch (error) {
+          if (!c.acquisitionSource) throw error;
+          this.putCampaign({ ...this.campaign(c.id), lastError: safeError(error) });
+        }
       } else if (
         c.mode === 'production' &&
         !c.continuous &&

@@ -45,7 +45,9 @@ export interface OutreachCampaign {
   mode: 'internal_test' | 'production';
   status: 'draft' | 'preparing' | 'ready' | 'active' | 'paused' | 'completed' | 'cancelled';
   revision: number;
-  targetCount: number;
+  targetCount: number | null;
+  acquisitionSource?: { jobId: string; scheduleId?: string; roundId: string };
+  customerIds?: string[];
   filters?: { markets: string[]; grades: string[]; products: string[]; categories?: string[] };
   mailboxIds: string[];
   includeExisting: boolean;

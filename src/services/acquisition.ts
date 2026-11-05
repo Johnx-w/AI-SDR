@@ -38,6 +38,15 @@ export const acquisitionApi = {
       signal,
     }),
   schedules: () => request<{ schedules: AcquisitionSchedule[] }>('/schedules'),
+  setAutomaticFirstTouch: (kind: 'schedules' | 'jobs', id: string, enabled: boolean) =>
+    request<AcquisitionSchedule | AcquisitionJob>(
+      `/${kind}/${encodeURIComponent(id)}/auto-first-touch`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      },
+    ),
   createSchedule: (
     name: string,
     input: WorkflowInput,

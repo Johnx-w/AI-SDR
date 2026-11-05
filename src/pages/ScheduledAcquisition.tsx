@@ -94,6 +94,24 @@ export function ScheduledAcquisition() {
       setBusy('');
     }
   }
+  async function toggleFirstTouch(plan: AcquisitionSchedule) {
+    setBusy(plan.id);
+    setError('');
+    try {
+      const updated = (await acquisitionApi.setAutomaticFirstTouch(
+        'schedules',
+        plan.id,
+        !plan.input.auto_first_touch,
+      )) as AcquisitionSchedule;
+      readVersion.current++;
+      reading.current = false;
+      setPlans((current) => current.map((item) => (item.id === plan.id ? updated : item)));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '自动首发设置失败');
+    } finally {
+      setBusy('');
+    }
+  }
   const visible = plans.filter(
     (plan) =>
       filter === 'all' ||
@@ -109,7 +127,7 @@ export function ScheduledAcquisition() {
         </Link>
       </div>
       <p className="muted schedule-help">
-        按北京时间执行，每个时间点各运行一次；上一轮未完成时按时间顺序排队。本机后端服务需保持启动。暂停或关闭计划会停止后续触发，本轮在当前企业处理结束后停止。
+        按北京时间执行，每个时间点各运行一次；上一轮未完成时按时间顺序排队。本机后端服务需保持启动。暂停或关闭计划会停止后续触发和待发首封，本轮在当前企业处理结束后停止。
       </p>
       <div className="filter-chips">
         {[
@@ -199,6 +217,18 @@ export function ScheduledAcquisition() {
                 <dd>{plan.runs}</dd>
               </div>
             </dl>
+            <label>
+              <input
+                type="checkbox"
+                checked={plan.input.auto_first_touch === true}
+                disabled={Boolean(busy) || plan.status === 'closed'}
+                onChange={() => void toggleFirstTouch(plan)}
+              />
+              获客后自动首发
+            </label>
+            <p className="muted">
+              开启后续轮次的自动首发；按最新已审核产品和可用邮箱匹配，缺项客户保留原因。关闭开关同时停止待发邮件。
+            </p>
             {plan.lastError && (
               <p className="schedule-wait" role="status">
                 {plan.lastError}

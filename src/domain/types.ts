@@ -1,4 +1,5 @@
 export interface WorkflowInput {
+  auto_first_touch?: boolean;
   query_mode?: 'auto';
   product_scope?: 'all' | 'specific';
   environment_preference?: 'all' | 'indoor' | 'outdoor';
@@ -87,6 +88,8 @@ export interface WorkflowRun {
 }
 
 export interface AcquisitionJob {
+  scheduleId?: string;
+  autoFirstTouchPaused?: boolean;
   input: WorkflowInput & { target_count: number };
   id: string;
   status: 'running' | 'stopping' | 'paused' | 'completed' | 'partial';

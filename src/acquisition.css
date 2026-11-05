@@ -78,6 +78,19 @@
   font-size: 12px;
   font-weight: 700;
 }
+.acq-first-touch-toggle {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 8px;
+  margin: 2px 0 0 auto;
+  flex-shrink: 0;
+  font-size: 12px;
+  cursor: pointer;
+}
+.acq-first-touch-toggle input {
+  margin: 0;
+}
 .acq-config-section h2,
 .acq-summary h2 {
   font-size: 16px;

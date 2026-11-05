@@ -6,7 +6,13 @@ import { decorateLeadDevelopment } from './lead-development.mjs';
 import { BrandingCache } from './branding-cache.mjs';
 import { summarizeRunOutput } from './run-outcome.mjs';
 import { validateTarget, locationOptions } from './search-target.mjs';
-import { BatchJobs, validateCount, validateResearchBudget } from './batch-jobs.mjs';
+import {
+  BatchJobs,
+  validateCount,
+  validateResearchBudget,
+  validateAutoFirstTouch,
+} from './batch-jobs.mjs';
+import { acquisitionOutreachSources } from './acquisition-outreach.mjs';
 import { AcquisitionReviews } from './acquisition-reviews.mjs';
 import { createAcquisitionProvider } from './acquisition-provider.mjs';
 import { ApiConnections } from './api-connections.mjs';
@@ -45,6 +51,8 @@ const types = {
 const maxJsonBytes = 32768;
 export function validateInput(input) {
   const target = validateTarget(input);
+  if (input.auto_first_touch !== undefined)
+    target.auto_first_touch = validateAutoFirstTouch(input.auto_first_touch);
   if (input.research_budget !== undefined)
     target.research_budget = validateResearchBudget(input.research_budget);
   if (target.query_mode === 'auto') return { ...target, search_query: searchPlan(target)[0].query };
@@ -161,6 +169,7 @@ export function createApp({
       research: (...args) => provider.research(...args),
       status: (id) => provider.status(id),
       readLeads: verifiedLeads,
+      onOutreachChange: () => wakeAutomaticOutreach(),
     }));
   let acquisitionReviews;
   const reviews = () =>
@@ -218,6 +227,7 @@ export function createApp({
           products: () => knowledge().list(),
           getEnv: () => connections.environment(),
           getScope: acquisitionScope,
+          acquisitionSources: () => acquisitionOutreachSources(jobs(), plans()),
           businessState: () => business.state().store.view(),
           customers: () => library().snapshot(true).leads,
           recordAccepted: (delivery) =>
@@ -225,6 +235,12 @@ export function createApp({
           recordCommunication: (detail) =>
             recordMailConversation({ store: business.state().store, ...detail }),
         }));
+  const wakeAutomaticOutreach = () => {
+    const service = outreach();
+    service.syncAcquisition();
+    service.start();
+    void service.tick();
+  };
   const plans = () =>
     (schedules ??= new AcquisitionSchedules({
       path: env.SCHEDULE_DB_PATH || ':memory:',
@@ -233,6 +249,9 @@ export function createApp({
       available: () => running === 0 && ![...runs.values()].some((run) => run.status === 'unknown'),
       checkInput: (input) => validateInput(input),
       scope: acquisitionScope,
+      onOutreachChange: () => {
+        if (outbound || jobs().outreachJobs().length) wakeAutomaticOutreach();
+      },
     }));
   const overview = new OverviewService({
     customers: async () =>
@@ -497,6 +516,12 @@ export function createApp({
             );
             return json(response, 201, reviewPlan(plan));
           }
+          if (suffix.length === 2 && suffix[1] === 'auto-first-touch' && request.method === 'POST')
+            return json(
+              response,
+              200,
+              reviewPlan(manager.controlOutreach(suffix[0], (await readJson(request)).enabled)),
+            );
           if (suffix.length === 2 && request.method === 'POST')
             return json(response, 200, reviewPlan(manager.control(suffix[0], suffix[1])));
           throw new ApiError(404, '定时计划接口不存在');
@@ -680,6 +705,12 @@ export function createApp({
           }
           if (suffix.length === 1 && request.method === 'GET')
             return json(response, 200, reviewJob(manager.get(suffix[0])));
+          if (suffix.length === 2 && suffix[1] === 'auto-first-touch' && request.method === 'POST')
+            return json(
+              response,
+              200,
+              reviewJob(manager.controlOutreach(suffix[0], (await readJson(request)).enabled)),
+            );
           if (suffix.length === 3 && suffix[1] === 'reviews') {
             const job = manager.get(suffix[0]);
             if (job.scope !== manager.scope) throw new ApiError(409, '执行记录所属客户库已变化');
@@ -840,7 +871,7 @@ export function createApp({
   });
   server.on('listening', () => {
     plans().start();
-    if (env.OUTREACH_DB_PATH) outreach().start();
+    if (env.OUTREACH_DB_PATH || jobs().outreachJobs().length) outreach().start();
   });
   server.on('close', () => {
     void brandingCache.close();

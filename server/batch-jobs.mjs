@@ -27,6 +27,10 @@ export function validateCount(value = 20) {
     throw fail(400, '本次新增客户目标必须是 1–200 的整数');
   return value;
 }
+export function validateAutoFirstTouch(value = false) {
+  if (typeof value !== 'boolean') throw fail(400, '自动首发开关须为布尔值');
+  return value;
+}
 export function validateResearchBudget(value, targetCount = 20) {
   if (value === undefined) return Math.min(1600, Math.max(12, validateCount(targetCount) * 8));
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 1600)
@@ -55,6 +59,7 @@ export class BatchJobs {
     schedule = true,
     provider = 'native',
     scope = '',
+    onOutreachChange = () => {},
   }) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
@@ -73,6 +78,7 @@ export class BatchJobs {
     this.schedule = schedule;
     this.provider = provider;
     this.scope = scope || provider;
+    this.onOutreachChange = onOutreachChange;
     this.busy = false;
     for (const job of this.list())
       if (['running', 'stopping'].includes(job.status)) {
@@ -89,7 +95,17 @@ export class BatchJobs {
     if (this.schedule && this.provider === 'native')
       setImmediate(() => this.resumeInterrupted().catch(() => {}));
   }
-  save(job) {
+  save(job, { outreachControl = false } = {}) {
+    this.outreachSnapshot = null;
+    // Research checkpoints must not overwrite a newer pause from the user.
+    if (job.input.auto_first_touch && !outreachControl) {
+      const current = this.db
+        .prepare(
+          "SELECT json_extract(data,'$.autoFirstTouchPaused') AS paused FROM jobs WHERE id=?",
+        )
+        .get(job.id);
+      if (current) job.autoFirstTouchPaused = current.paused === 1;
+    }
     job.updatedAt = new Date(this.now()).toISOString();
     this.db.prepare('UPDATE jobs SET data=? WHERE id=?').run(JSON.stringify(job), job.id);
     return job;
@@ -155,11 +171,30 @@ export class BatchJobs {
     const row = this.db.prepare('SELECT data FROM jobs WHERE idem=?').get(key);
     return row ? JSON.parse(row.data) : null;
   }
-  create(input, key) {
+  outreachJobs() {
+    return (this.outreachSnapshot ??= this.db
+      .prepare(
+        "SELECT data FROM jobs WHERE json_extract(data,'$.input.auto_first_touch')=1 ORDER BY rowid",
+      )
+      .all()
+      .map((row) => JSON.parse(row.data)));
+  }
+  controlOutreach(id, enabled) {
+    if (typeof enabled !== 'boolean') throw fail(400, '请明确选择开启或暂停自动首发');
+    const job = this.get(id);
+    if (!job.input.auto_first_touch || job.scheduleId)
+      throw fail(409, '请在所属获客计划中管理自动首发');
+    job.autoFirstTouchPaused = !validateAutoFirstTouch(enabled);
+    this.save(job, { outreachControl: true });
+    this.onOutreachChange();
+    return job;
+  }
+  create(input, key, { scheduleId } = {}) {
     locationOptions(input.country, input.region);
     if (!['web', 'tavily_web', undefined].includes(input.acquisition_channel))
       throw fail(400, '该获客渠道已停用');
     input = { ...input, target_count: validateCount(input.target_count) };
+    validateAutoFirstTouch(input.auto_first_touch);
     const researchBudget = validateResearchBudget(input.research_budget, input.target_count);
     if (typeof key !== 'string' || !/^[\w-]{8,100}$/.test(key))
       throw fail(400, '无效的 Idempotency-Key');
@@ -174,6 +209,7 @@ export class BatchJobs {
       id: randomUUID(),
       provider: this.provider,
       scope: this.scope,
+      ...(scheduleId ? { scheduleId } : {}),
       input,
       status: 'running',
       reason: '',
@@ -205,7 +241,9 @@ export class BatchJobs {
       },
     };
     this.db.prepare('INSERT INTO jobs VALUES(?,?,?,?)').run(job.id, key, hash, JSON.stringify(job));
+    this.outreachSnapshot = null;
     this.kick(job.id);
+    if (input.auto_first_touch) this.onOutreachChange();
     return job;
   }
   kick(id) {
@@ -369,6 +407,7 @@ export class BatchJobs {
       job.status = 'running';
       job.reason = '';
       this.save(job);
+      if (job.input.auto_first_touch) this.onOutreachChange();
       this.kick(id);
       return job;
     } finally {
@@ -414,10 +453,15 @@ export class BatchJobs {
   stop(id) {
     const j = this.get(id);
     if (j.status === 'paused' && j.current) throw fail(409, '当前写入待确认，请先核对后再停止');
+    if (j.input.auto_first_touch && !j.scheduleId) {
+      j.autoFirstTouchPaused = true;
+      this.save(j, { outreachControl: true });
+    }
     if (['running', 'stopping'].includes(j.status)) {
       j.status = 'stopping';
       this.save(j);
     } else if (j.status === 'paused') this.finish(j, 'stopped');
+    if (j.input.auto_first_touch) this.onOutreachChange();
     return this.get(id);
   }
   async accept(job, output) {
@@ -519,6 +563,7 @@ export class BatchJobs {
         throw new Error('写入结果无法确认');
       }
       const acceptedRow = job.rows.at(-1);
+      if (written) acceptedRow.stored = true;
       const metric = job.searchStats?.find((entry) => entry.id === item.search_id);
       if (metric) {
         metric.researched++;
@@ -553,6 +598,7 @@ export class BatchJobs {
       this.db.exec('ROLLBACK');
       throw error;
     }
+    if (job.input.auto_first_touch) this.onOutreachChange();
   }
   async work(id) {
     if (this.busy) return;

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   ArrowRight,
   Check,
@@ -141,7 +141,7 @@ const tone = (status: string) =>
 const pathFor = (kind: string, id: string, action?: string) =>
   `/${kind}/${encodeURIComponent(id)}${action ? `/${action}` : ''}`;
 const canCancelCampaign = (campaign: OutreachCampaign) =>
-  !['completed', 'cancelled'].includes(campaign.status);
+  !campaign.acquisitionSource && !['completed', 'cancelled'].includes(campaign.status);
 
 function InlineError({ value }: { value: string | null }) {
   return value ? (
@@ -1013,7 +1013,7 @@ export function OutreachCommunication() {
   const [testMailboxes, setTestMailboxes] = useState<OutreachMailbox[]>([]);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewChecked, setReviewChecked] = useState(false);
-  const [detailId, setDetailId] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(searchParams.get('campaignId'));
   const [detail, setDetail] = useState<OutreachCampaignDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [sampleId, setSampleId] = useState<string | null>(null);
@@ -1416,14 +1416,24 @@ export function OutreachCommunication() {
                           <div>
                             <strong>
                               {campaign.stats?.accepted || 0}
-                              <small> / {campaign.targetCount}</small>
+                              <small>
+                                {' '}
+                                /{' '}
+                                {campaign.acquisitionSource
+                                  ? campaign.customerIds?.length || 0
+                                  : campaign.targetCount}
+                              </small>
                             </strong>
-                            <span>服务商已接受 / 目标</span>
+                            <span>
+                              {campaign.acquisitionSource
+                                ? '服务商已接受 / 本轮收录客户'
+                                : '服务商已接受 / 目标'}
+                            </span>
                           </div>
                           <div className="outreach-progress-track">
                             <span
                               style={{
-                                width: `${Math.min(100, ((campaign.stats?.accepted || 0) / Math.max(1, campaign.targetCount)) * 100)}%`,
+                                width: `${Math.min(100, ((campaign.stats?.accepted || 0) / Math.max(1, campaign.acquisitionSource ? campaign.customerIds?.length || 0 : campaign.targetCount || 0)) * 100)}%`,
                               }}
                             />
                           </div>
@@ -1435,14 +1445,20 @@ export function OutreachCommunication() {
                           </span>
                           <span>
                             <Clock3 size={14} />
-                            {campaign.continuous ? '持续加入新客户' : '固定客户批次'}
+                            {campaign.acquisitionSource
+                              ? '获客后自动首发'
+                              : campaign.continuous
+                                ? '持续加入新客户'
+                                : '固定客户批次'}
                           </span>
                           <span>
-                            {campaign.mode === 'internal_test'
-                              ? '仅公司自有邮箱'
-                              : campaign.includeExisting
-                                ? '含现有未开发客户'
-                                : '仅新增客户'}
+                            {campaign.acquisitionSource
+                              ? '仅本轮新增和更新客户'
+                              : campaign.mode === 'internal_test'
+                                ? '仅公司自有邮箱'
+                                : campaign.includeExisting
+                                  ? '含现有未开发客户'
+                                  : '仅新增客户'}
                           </span>
                         </div>
                         <div className="outreach-campaign-stats">
@@ -1494,7 +1510,19 @@ export function OutreachCommunication() {
                                 编辑
                               </button>
                             )}
-                          {campaign.status === 'active' && (
+                          {campaign.acquisitionSource && (
+                            <Link
+                              className="btn secondary"
+                              to={
+                                campaign.acquisitionSource.scheduleId
+                                  ? '/automation?tab=schedules'
+                                  : `/automation?tab=runs&job=${campaign.acquisitionSource.jobId}`
+                              }
+                            >
+                              管理获客与自动首发
+                            </Link>
+                          )}
+                          {!campaign.acquisitionSource && campaign.status === 'active' && (
                             <button
                               className="btn secondary"
                               disabled={!!busy}
@@ -1957,7 +1985,11 @@ export function OutreachCommunication() {
                   <Badge tone={tone(shownDetail.campaign.status)}>
                     {statusLabel(shownDetail.campaign.status)}
                   </Badge>
-                  <span>目标 {shownDetail.campaign.targetCount} 封</span>
+                  <span>
+                    {shownDetail.campaign.acquisitionSource
+                      ? `本轮收录 ${shownDetail.campaign.customerIds?.length || 0} 家 · 持续检查缺项`
+                      : `目标 ${shownDetail.campaign.targetCount} 封`}
+                  </span>
                   <span>版本 {shownDetail.campaign.revision}</span>
                   {shownDetail.campaign.generationMode === 'simple' ? (
                     <span>LLM 自动生成 · 固定签名</span>
@@ -2031,12 +2063,16 @@ export function OutreachCommunication() {
                         <div>
                           <dt>客户来源</dt>
                           <dd>
-                            {shownDetail.campaign.includeExisting
-                              ? '包含现有未开发客户'
-                              : '仅计划创建后新增客户'}
-                            {shownDetail.campaign.continuous
-                              ? '；持续加入符合条件的新客户'
-                              : '；固定批次'}
+                            {shownDetail.campaign.acquisitionSource
+                              ? '仅本轮新增和更新的未首发客户'
+                              : shownDetail.campaign.includeExisting
+                                ? '包含现有未开发客户'
+                                : '仅计划创建后新增客户'}
+                            {shownDetail.campaign.acquisitionSource
+                              ? '；缺项补齐后自动重新检查'
+                              : shownDetail.campaign.continuous
+                                ? '；持续加入符合条件的新客户'
+                                : '；固定批次'}
                           </dd>
                         </div>
                         <div>
@@ -2134,6 +2170,18 @@ export function OutreachCommunication() {
                   />
                 )}
                 <div className="outreach-detail-actions">
+                  {shownDetail.campaign.acquisitionSource && (
+                    <Link
+                      className="btn secondary"
+                      to={
+                        shownDetail.campaign.acquisitionSource.scheduleId
+                          ? '/automation?tab=schedules'
+                          : `/automation?tab=runs&job=${shownDetail.campaign.acquisitionSource.jobId}`
+                      }
+                    >
+                      管理获客与自动首发
+                    </Link>
+                  )}
                   {shownDetail.campaign.mode === 'production' &&
                     canCancelCampaign(shownDetail.campaign) && (
                       <>

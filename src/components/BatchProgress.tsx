@@ -257,6 +257,47 @@ function DetailRows({
     </table>
   );
 }
+function AutomaticFirstTouchProgress({ job }: { job: AcquisitionJob }) {
+  const [paused, setPaused] = useState(job.autoFirstTouchPaused === true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => setPaused(job.autoFirstTouchPaused === true), [job.id, job.autoFirstTouchPaused]);
+  async function toggle() {
+    setBusy(true);
+    setError('');
+    try {
+      const updated = (await acquisitionApi.setAutomaticFirstTouch(
+        'jobs',
+        job.id,
+        paused,
+      )) as AcquisitionJob;
+      setPaused(updated.autoFirstTouchPaused === true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '自动首发设置失败');
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="result-actions">
+      <span>获客后自动首发{!job.scheduleId && paused ? ' · 已暂停' : ''}</span>
+      <Link to={`/inbox?tab=campaigns&campaignId=acquisition-${job.id}`}>查看首发进度与缺项</Link>
+      {job.scheduleId ? (
+        <Link to="/automation?tab=schedules">管理获客计划</Link>
+      ) : (
+        <button className="btn secondary" disabled={busy} onClick={() => void toggle()}>
+          {paused ? '恢复自动首发' : '暂停自动首发'}
+        </button>
+      )}
+      {error && (
+        <p role="alert" className="error-message">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function BatchProgress({
   job,
   control,
@@ -279,6 +320,7 @@ export function BatchProgress({
         <progress max={job.target} value={job.inserted} aria-label="去重后新增收录进度" />
       </div>
       <p>{job.message}</p>
+      {job.input.auto_first_touch && <AutomaticFirstTouchProgress job={job} />}
       {job.countPolicy === 'sales-handoff-v1' && (
         <p className="muted">
           历史任务按原交接口径结束；此处保留实际新增档案数，企业最新初评级见客户库。

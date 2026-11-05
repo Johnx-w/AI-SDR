@@ -58,6 +58,8 @@ export async function handleOutreach({ request, url, service, readJson, idempote
   if (campaign) {
     const [, id, action] = campaign;
     if (!action && method === 'GET') return service.detail(id);
+    if (service.campaign(id).acquisitionSource && ['PUT', 'POST'].includes(method))
+      throw fail(409, '请在获客任务中管理自动首发');
     if (!action && method === 'PUT') return service.saveCampaign(await readJson(request), id);
     if (method === 'POST') {
       const body = await readJson(request);

@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import { validateAutoFirstTouch } from './batch-jobs.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const day = 86400000;
@@ -67,6 +68,7 @@ export class AcquisitionSchedules {
     checkInput = () => {},
     now = Date.now,
     scope = '',
+    onOutreachChange = () => {},
   }) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
@@ -79,6 +81,7 @@ export class AcquisitionSchedules {
     this.checkInput = checkInput;
     this.now = now;
     this.scope = scope;
+    this.onOutreachChange = onOutreachChange;
   }
   list() {
     return this.db
@@ -110,6 +113,7 @@ export class AcquisitionSchedules {
   }
   create({ name, input, timing }, key) {
     this.checkInput(input);
+    validateAutoFirstTouch(input.auto_first_touch);
     if (typeof key !== 'string' || !/^[\w-]{8,100}$/.test(key))
       throw fail(400, '无效的 Idempotency-Key');
     if (typeof name !== 'string' || !name.trim() || name.length > 80)
@@ -169,6 +173,16 @@ export class AcquisitionSchedules {
         if (error.status !== 404) throw error;
       }
     }
+    this.onOutreachChange();
+    return plan;
+  }
+  controlOutreach(id, enabled) {
+    if (typeof enabled !== 'boolean') throw fail(400, '请明确选择开启或关闭自动首发');
+    const plan = this.get(id);
+    if (plan.status === 'closed') throw fail(409, '该计划已关闭');
+    plan.input.auto_first_touch = validateAutoFirstTouch(enabled);
+    this.save(plan);
+    this.onOutreachChange();
     return plan;
   }
   tick() {
@@ -198,7 +212,7 @@ export class AcquisitionSchedules {
           // The connection may have changed since this plan was saved. Never
           // dispatch a preserved scope to an engine that cannot honor it.
           this.checkInput(plan.input);
-          job = manager.create(plan.input, key);
+          job = manager.create(plan.input, key, { scheduleId: plan.id });
         } catch (error) {
           const reason = error.status ? error.message : '计划启动失败，请检查本机服务';
           if (plan.lastError !== reason) this.save({ ...plan, lastError: reason });
@@ -215,6 +229,7 @@ export class AcquisitionSchedules {
       plan.nextRunAt = nextOccurrence(plan.timing, Date.parse(plan.nextRunAt));
       if (!plan.nextRunAt) plan.status = 'completed';
       this.save(plan);
+      if (plan.input.auto_first_touch) this.onOutreachChange();
     }
   }
   start() {
