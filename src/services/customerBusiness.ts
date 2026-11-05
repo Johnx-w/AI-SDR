@@ -1,3 +1,15 @@
+import type { MailMessage } from './mailConversations';
+
+export type BusinessMailBody = Pick<
+  MailMessage,
+  | 'subject'
+  | 'bodyText'
+  | 'bodyHtml'
+  | 'bodyFormatVersion'
+  | 'inlineImages'
+  | 'bodyUnavailable'
+  | 'source'
+>;
 export type BusinessChannel = 'email' | 'whatsapp' | 'form' | 'phone' | 'other';
 export type BusinessEntity = 'conversations' | 'messages' | 'demands' | 'tasks';
 export interface BusinessCustomer {
@@ -143,6 +155,11 @@ const json = (body: object, key?: string): RequestInit => ({
   body: JSON.stringify(body),
 });
 export const customerBusinessApi = {
+  mailBodies: (id: string, signal?: AbortSignal) =>
+    request<{ originals: Record<string, BusinessMailBody> }>(
+      `/conversations/${encodeURIComponent(id)}/mail-bodies`,
+      { signal },
+    ),
   workspace: (filter: { customerId?: string; productId?: string } = {}, signal?: AbortSignal) => {
     const query = new URLSearchParams();
     if (filter.customerId) query.set('customerId', filter.customerId);

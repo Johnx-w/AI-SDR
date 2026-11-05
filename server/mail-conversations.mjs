@@ -412,6 +412,44 @@ export class MailConversations {
     };
   }
 
+  businessMailBodies(records) {
+    this.importDeliveries();
+    const accounts = new Map(
+      this.mailboxes.list().map((mailbox) => [address(mailbox.email), keyFor(mailbox)]),
+    );
+    const originals = {};
+    for (const record of records) {
+      const accountKey = accounts.get(address(record.account));
+      if (!accountKey || (!record.mailboxMessageId && !record.externalId)) continue;
+      const rows = this.db
+        .prepare(
+          `SELECT data FROM mailbox_thread_messages
+        WHERE account_key=? AND (id=? OR json_extract(data, '$.messageId')=?)`,
+        )
+        .all(accountKey, record.mailboxMessageId || '', record.externalId || '');
+      if (rows.length !== 1) continue;
+      const mail = JSON.parse(rows[0].data);
+      // Display formatting only when the cached mail still matches the recorded fact.
+      if (
+        (mail.bodyText || '（邮件正文为空）') !== record.body ||
+        address(mail.from) !== address(record.from)
+      )
+        continue;
+      originals[record.id] = Object.fromEntries(
+        [
+          'subject',
+          'bodyText',
+          'bodyHtml',
+          'bodyFormatVersion',
+          'inlineImages',
+          'bodyUnavailable',
+          'source',
+        ].map((key) => [key, mail[key]]),
+      );
+    }
+    return originals;
+  }
+
   markRead(id, unread) {
     if (unread !== false) throw fail(400, '只支持标记本地会话已读');
     const { conversation } = this.detail(id);

@@ -1,15 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import {
-  CheckCircle2,
-  ClipboardList,
-  ExternalLink,
-  MessageSquare,
-  Plus,
-  RefreshCw,
-  Search,
-} from 'lucide-react';
+import { CheckCircle2, ExternalLink, Plus, RefreshCw, Search } from 'lucide-react';
+import { BusinessConversations, buildConversationRows } from '../components/BusinessConversations';
 import { PageHeading } from '../components/PageHeading';
 import { Badge, Empty, Modal } from '../components/ui';
 import { BusinessRequestError, customerBusinessApi } from '../services/customerBusiness';
@@ -106,9 +99,9 @@ const actionLabels: Record<Action, string> = {
   cancel: '取消任务',
 };
 const tabLabels: Record<Tab, string> = {
-  demands: '采购需求 T1',
-  messages: '沟通记录 T3',
-  tasks: '跟进任务 T4',
+  demands: '采购需求',
+  messages: '沟通记录',
+  tasks: '跟进任务',
 };
 const emptyWorkspace: BusinessWorkspace = {
   customers: [],
@@ -255,7 +248,7 @@ export function CustomerBusiness() {
     return () => controller.abort();
   }, [load]);
   useEffect(() => {
-    if (loading || !focusedId) return;
+    if (loading || !focusedId || tab === 'messages') return;
     const row = document.getElementById(`business-record-${focusedId}`);
     row?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     row?.focus({ preventScroll: true });
@@ -292,19 +285,14 @@ export function CustomerBusiness() {
         customerName(demand.customerId),
       ]),
   );
-  const messages = data.messages
-    .filter(
-      (message) =>
-        (state === 'all' || message.direction === state) &&
-        matches([
-          message.subject,
-          message.body,
-          message.from,
-          message.to,
-          customerName(message.customerId),
-        ]),
-    )
-    .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+  const conversationRows = useMemo(
+    () => buildConversationRows(data, query, tab === 'messages' ? state : 'all'),
+    [data, query, tab, state],
+  );
+  const selectedConversation =
+    conversationRows.find((row) => row.messages.some((message) => message.id === focusedId)) ||
+    conversationRows.find((row) => row.conversation.id === params.get('conversation')) ||
+    conversationRows[0];
   const tasks = data.tasks
     .filter(
       (task) =>
@@ -676,6 +664,22 @@ export function CustomerBusiness() {
         });
       }
       saved(result);
+      if (editor.entity === 'conversations' || editor.entity === 'messages') {
+        setParams((current) => {
+          const next = new URLSearchParams(current);
+          next.set('tab', 'messages');
+          next.set(
+            'conversation',
+            editor.entity === 'conversations' ? result.record.id : text(value, 'conversationId'),
+          );
+          if (editor.entity === 'messages') next.set('message', result.record.id);
+          else next.delete('message');
+          for (const key of ['q', 'state', 'bucket', 'asOf']) next.delete(key);
+          if (editor.entity === 'conversations' && !editor.id) next.delete('productId');
+          if (customerId) next.set('customerId', result.record.customerId);
+          return next;
+        });
+      }
       setEditor(null);
       await load();
     } catch (cause) {
@@ -852,19 +856,11 @@ export function CustomerBusiness() {
           核对飞书同步
         </button>
       </PageHeading>
-      <div className="business-overview panel">
-        <ClipboardList size={23} />
-        <div>
-          <strong>客户档案、沟通和需求相互关联</strong>
-          <p>先建立会话，录入实际沟通，再依据客户原文整理采购需求并安排跟进。</p>
-          <small>
-            {data.feishu?.error ||
-              (data.feishu?.configured
-                ? '业务记录在本页维护，飞书同步供团队查看。'
-                : '业务记录保存在后台，飞书业务表同步待配置。')}
-          </small>
+      {data.feishu?.error && (
+        <div className="business-alert error" role="alert">
+          {data.feishu.error}
         </div>
-      </div>
+      )}
       {error && (
         <div className="business-alert error" role="alert">
           {error}
@@ -888,51 +884,6 @@ export function CustomerBusiness() {
           {notice}
         </div>
       )}
-      <div className="business-filters panel">
-        <label>
-          客户
-          <select
-            aria-label="选择业务客户"
-            value={customerId}
-            onChange={(event) => filter('customerId', event.target.value)}
-          >
-            <option value="">全部客户</option>
-            {data.customers.map((customer) => (
-              <option key={customer.id} value={customer.id}>
-                {customer.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          产品资料
-          <select
-            aria-label="按产品资料筛选"
-            value={productId}
-            onChange={(event) => filter('productId', event.target.value)}
-          >
-            <option value="">全部产品</option>
-            {data.products.map((product) => (
-              <option key={product.id} value={product.id}>
-                {product.name}
-                {product.status !== 'approved' ? '（待审核或已归档）' : ''}
-              </option>
-            ))}
-          </select>
-        </label>
-        {selectedCustomer && (
-          <Link className="text-link" to={linkToCustomer(selectedCustomer.id)}>
-            查看企业档案
-            <ExternalLink size={13} />
-          </Link>
-        )}
-        {productId && (
-          <Link className="text-link" to={`/materials?product=${encodeURIComponent(productId)}`}>
-            查看产品资料
-            <ExternalLink size={13} />
-          </Link>
-        )}
-      </div>
       <section className="panel business-content">
         <div className="business-tabs" role="tablist" aria-label="客户业务表">
           {(['demands', 'messages', 'tasks'] as Tab[]).map((name) => (
@@ -949,21 +900,67 @@ export function CustomerBusiness() {
           ))}
         </div>
         <div className="business-toolbar">
+          <label>
+            客户
+            <select
+              aria-label="选择业务客户"
+              value={customerId}
+              onChange={(event) => filter('customerId', event.target.value)}
+            >
+              <option value="">全部客户</option>
+              {data.customers.map((customer) => (
+                <option key={customer.id} value={customer.id}>
+                  {customer.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            产品资料
+            <select
+              aria-label="按产品资料筛选"
+              value={productId}
+              onChange={(event) => filter('productId', event.target.value)}
+            >
+              <option value="">全部产品</option>
+              {data.products.map((product) => (
+                <option key={product.id} value={product.id}>
+                  {product.name}
+                  {product.status !== 'approved' ? '（待审核或已归档）' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          {selectedCustomer && tab !== 'messages' && (
+            <Link className="text-link" to={linkToCustomer(selectedCustomer.id)}>
+              查看企业档案
+              <ExternalLink size={13} />
+            </Link>
+          )}
+          {productId && (
+            <Link className="text-link" to={`/materials?product=${encodeURIComponent(productId)}`}>
+              查看产品资料
+              <ExternalLink size={13} />
+            </Link>
+          )}
+
           <div className="search-field">
             <Search size={15} />
             <input
               aria-label="搜索客户业务记录"
               value={query}
               onChange={(event) => filter('q', event.target.value)}
-              placeholder="搜索标题、正文、客户或负责人"
+              placeholder={
+                tab === 'messages' ? '搜索客户、会话或消息内容' : '搜索标题、正文、客户或负责人'
+              }
             />
           </div>
           <select
-            aria-label="业务记录状态"
+            aria-label={tab === 'messages' ? '沟通方向' : '业务记录状态'}
             value={state}
             onChange={(event) => filter('state', event.target.value)}
           >
-            <option value="all">全部状态</option>
+            <option value="all">{tab === 'messages' ? '全部方向' : '全部状态'}</option>
             {Object.entries(stateOptions).map(([key, label]) => (
               <option key={key} value={key}>
                 {label}
@@ -998,7 +995,22 @@ export function CustomerBusiness() {
             disabled={
               loading || saving || !!error || !!data.customerError || !data.customers.length
             }
-            onClick={() => newEditor(tab)}
+            onClick={() =>
+              newEditor(
+                tab,
+                undefined,
+                tab === 'messages' && selectedConversation
+                  ? {
+                      customerId: selectedConversation.conversation.customerId,
+                      conversationId: selectedConversation.conversation.id,
+                      channel: selectedConversation.conversation.channel,
+                      account: selectedConversation.conversation.account,
+                      from: selectedConversation.conversation.participant,
+                      to: selectedConversation.conversation.account,
+                    }
+                  : {},
+              )
+            }
           >
             <Plus size={15} />
             {tab === 'demands'
@@ -1008,7 +1020,7 @@ export function CustomerBusiness() {
                 : '创建跟进任务'}
           </button>
         </div>
-        {(state !== 'all' || bucket || focusedId) && (
+        {tab !== 'messages' && (state !== 'all' || bucket || focusedId) && (
           <div className="business-filter-summary" role="status">
             <span>
               当前筛选：
@@ -1027,7 +1039,7 @@ export function CustomerBusiness() {
                 navigation.frozen &&
                 ` · 按 ${dateText(navigation.range.asOf)} 分组（北京时间）`}
               {!loading &&
-                ` · 共 ${tab === 'tasks' ? tasks.length : tab === 'demands' ? demands.length : messages.length} 条`}
+                ` · 共 ${tab === 'tasks' ? tasks.length : tab === 'demands' ? demands.length : conversationRows.reduce((count, row) => count + row.matches.length, 0)} 条`}
             </span>
             <button
               className="text-link"
@@ -1050,36 +1062,6 @@ export function CustomerBusiness() {
           </p>
         ) : (
           <>
-            {tab === 'messages' && (
-              <div className="business-conversations">
-                <strong>会话</strong>
-                {data.conversations.length ? (
-                  data.conversations.map((conversation) => (
-                    <button
-                      key={conversation.id}
-                      className="business-conversation"
-                      onClick={() => newEditor('conversations', conversation)}
-                    >
-                      <MessageSquare size={15} />
-                      <span>
-                        {conversation.title}
-                        <small>
-                          {customerName(conversation.customerId)} · {channels[conversation.channel]}{' '}
-                          · {conversation.account || '账号待补充'}
-                        </small>
-                      </span>
-                      <Badge>
-                        {conversation.status === 'closed'
-                          ? '已关闭'
-                          : ownership[conversation.ownership]}
-                      </Badge>
-                    </button>
-                  ))
-                ) : (
-                  <p>尚未建立会话。请先选择客户并新建一个会话。</p>
-                )}
-              </div>
-            )}
             {tab === 'demands' &&
               (demands.length ? (
                 <div className="table-scroll">
@@ -1180,87 +1162,93 @@ export function CustomerBusiness() {
                   }
                 />
               ))}
-            {tab === 'messages' &&
-              (messages.length ? (
-                <div className="business-message-list">
-                  {messages.map((message) => (
-                    <article className="business-message" key={message.id}>
-                      <header>
-                        <div>
-                          <Badge tone={message.direction === 'inbound' ? 'success' : 'neutral'}>
-                            {{ inbound: '收到', outbound: '发出', note: '纪要' }[message.direction]}
-                          </Badge>
-                          <Badge>{channels[message.channel]}</Badge>
-                          <Badge>{delivery[message.deliveryStatus]}</Badge>
-                          {message.classification !== 'normal' && (
-                            <Badge>{classifications[message.classification]}</Badge>
-                          )}
-                        </div>
-                        <time>{dateText(message.occurredAt)}</time>
-                      </header>
-                      <h3>{message.subject || '无主题沟通'}</h3>
-                      <p className="business-message-meta">
-                        <Link to={linkToCustomer(message.customerId)}>
-                          {customerName(message.customerId)}
-                        </Link>{' '}
-                        · {conversationName(message.conversationId)}
-                        <br />
-                        {message.from || '未记录发起方'} → {message.to || '未记录接收方'} ·
-                        我方账号：{message.account || '未记录'}
-                      </p>
-                      <pre>{message.body}</pre>
-                      {message.notes && (
-                        <p className="business-message-meta">补充备注：{message.notes}</p>
-                      )}
-                      {message.attachments?.filter(safeHref).map((url, index) => (
-                        <a
-                          key={url}
-                          className="text-link business-attachment"
-                          href={safeHref(url)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          附件 {index + 1}
-                          <ExternalLink size={12} />
-                        </a>
-                      ))}
-                      <footer>
-                        <span>
-                          {data.demands
-                            .filter(
-                              (demand) =>
-                                demand.sourceMessageId === message.id ||
-                                message.demandIds?.includes(demand.id),
-                            )
-                            .map((demand) => demand.title)
-                            .join('；') || '尚未关联采购需求'}
-                        </span>
+            {tab === 'messages' && (
+              <BusinessConversations
+                rows={conversationRows}
+                selected={selectedConversation}
+                query={query}
+                direction={state}
+                focusedId={focusedId}
+                saving={saving}
+                channelLabel={(conversation) => channels[conversation.channel]}
+                onSelect={(id, messageId) =>
+                  setParams((current) => {
+                    const next = new URLSearchParams(current);
+                    next.set('conversation', id);
+                    if (messageId) next.set('message', messageId);
+                    else next.delete('message');
+                    return next;
+                  })
+                }
+                onEdit={(conversation) => newEditor('conversations', conversation)}
+                renderMessage={(message, body) => (
+                  <>
+                    <header>
+                      <div>
+                        <Badge tone={message.direction === 'inbound' ? 'success' : 'neutral'}>
+                          {{ inbound: '收到', outbound: '发出', note: '纪要' }[message.direction]}
+                        </Badge>
+                        <Badge>{channels[message.channel]}</Badge>
+                        <Badge>{delivery[message.deliveryStatus]}</Badge>
+                        {message.classification !== 'normal' && (
+                          <Badge>{classifications[message.classification]}</Badge>
+                        )}
+                      </div>
+                      <time dateTime={message.occurredAt}>{dateText(message.occurredAt)}</time>
+                    </header>
+                    <h3>{message.subject || '无主题沟通'}</h3>
+                    <p className="business-message-meta">
+                      {message.from || '未记录发起方'} → {message.to || '未记录接收方'} · 我方账号：
+                      {message.account || '未记录'}
+                    </p>
+                    {body}
+                    {message.notes && (
+                      <p className="business-message-meta">补充备注：{message.notes}</p>
+                    )}
+                    {message.attachments?.filter(safeHref).map((url, index) => (
+                      <a
+                        key={url}
+                        className="text-link business-attachment"
+                        href={safeHref(url)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        附件 {index + 1}
+                        <ExternalLink size={12} />
+                      </a>
+                    ))}
+                    <footer>
+                      <span>
+                        {data.demands
+                          .filter(
+                            (demand) =>
+                              demand.sourceMessageId === message.id ||
+                              message.demandIds?.includes(demand.id),
+                          )
+                          .map((demand) => demand.title)
+                          .join('；') || '尚未关联采购需求'}
+                      </span>
+                      <button
+                        className="btn secondary small"
+                        disabled={saving}
+                        onClick={() => editMessageLinks(message)}
+                      >
+                        补充需求关联与备注
+                      </button>
+                      {demandSource(message) && (
                         <button
                           className="btn secondary small"
                           disabled={saving}
-                          onClick={() => editMessageLinks(message)}
+                          onClick={() => fromMessage(message)}
                         >
-                          补充需求关联与备注
+                          根据本条记录整理需求
                         </button>
-                        {demandSource(message) && (
-                          <button
-                            className="btn secondary small"
-                            disabled={saving}
-                            onClick={() => fromMessage(message)}
-                          >
-                            根据本条记录整理需求
-                          </button>
-                        )}
-                      </footer>
-                    </article>
-                  ))}
-                </div>
-              ) : (
-                <Empty
-                  title="暂无实际沟通记录"
-                  detail="这里记录已发生的邮件、WhatsApp、网站留言和通话纪要，保存后保留原文及实际收发状态。"
-                />
-              ))}
+                      )}
+                    </footer>
+                  </>
+                )}
+              />
+            )}
             {tab === 'tasks' &&
               (tasks.length ? (
                 <div className="table-scroll">

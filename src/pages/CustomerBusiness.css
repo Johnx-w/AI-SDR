@@ -1,26 +1,3 @@
-.business-overview {
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
-  padding: 20px 22px;
-  margin-bottom: 18px;
-}
-.business-overview > svg {
-  color: var(--color-primary);
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-.business-overview strong {
-  font-size: 14px;
-}
-.business-overview p {
-  margin: 8px 0;
-  color: var(--color-text-secondary);
-  line-height: 1.7;
-}
-.business-overview small {
-  color: var(--color-text-muted);
-}
 .business-alert {
   padding: 13px 16px;
   margin: 14px 0;
@@ -53,26 +30,6 @@
   outline-offset: -2px;
   scroll-margin: 100px;
 }
-.business-filters {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 18px;
-  padding: 18px 22px;
-  margin-bottom: 20px;
-}
-.business-filters > label {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  color: var(--color-text-muted);
-}
-.business-filters select {
-  padding: 9px 12px;
-  min-width: 200px;
-  max-width: 340px;
-  background: var(--color-surface);
-}
 .business-tabs {
   display: flex;
   gap: 20px;
@@ -104,13 +61,13 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 12px;
-  padding: 18px 20px;
+  gap: 8px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--color-border);
 }
 .business-toolbar .search-field {
   flex: 1;
-  min-width: 210px;
+  min-width: 175px;
 }
 .business-toolbar > select {
   padding: 9px 12px;
@@ -165,97 +122,303 @@
 .business-row-actions .btn {
   white-space: nowrap;
 }
-.business-conversations {
-  border-bottom: 1px solid var(--color-border);
-  padding: 18px 20px;
+.business-toolbar > label {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
   align-items: center;
-}
-.business-conversations > strong {
-  width: 100%;
-  font-size: 13px;
-}
-.business-conversations > p {
+  gap: 7px;
   color: var(--color-text-muted);
-  line-height: 1.7;
+  font-size: 12px;
+}
+.business-toolbar > label select {
+  width: 138px;
+  padding: 9px 10px;
+  background: var(--color-surface);
+}
+.business-toolbar > label:nth-child(2) select {
+  width: 116px;
+}
+.business-toolbar > .btn {
+  padding-inline: 11px;
+  white-space: nowrap;
+}
+.business-content {
+  overflow: hidden;
+}
+.business-conversation-browser {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  height: calc(100dvh - 315px);
+  min-height: 360px;
+}
+.business-conversation-sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--color-border);
+}
+.business-list-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  min-height: 43px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 12px;
+}
+.business-list-heading > span {
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+.business-conversation-items {
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
 }
 .business-conversation {
-  background: var(--color-surface-hover);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  display: flex;
+  display: block;
+  width: 100%;
+  border: 0;
+  border-left: 3px solid transparent;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+  padding: 13px 14px 12px 13px;
   text-align: left;
-  align-items: center;
-  gap: 10px;
-  padding: 12px;
-  max-width: 100%;
+  background: var(--color-surface);
 }
-.business-conversation > svg {
+.business-conversation:hover {
+  background: var(--color-surface-hover);
+}
+.business-conversation.active {
+  background: var(--color-primary-soft);
+  border-left-color: var(--color-primary);
+}
+.business-conversation:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -3px;
+}
+.business-conversation-top {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+.business-conversation-top strong {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.business-conversation-top time {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+.business-conversation-subject,
+.business-conversation-preview {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.business-conversation-subject {
+  margin-top: 7px;
+  font-size: 12px;
   color: var(--color-text-secondary);
+}
+.business-conversation-preview {
+  margin-top: 5px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+.business-conversation-tags {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 9px;
+}
+.business-conversation-tags .badge {
+  font-size: 10px;
+  padding: 2px 5px;
+}
+.business-conversation-tags small {
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+.business-conversation-detail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--color-surface-muted);
+}
+.business-conversation-heading {
+  flex-shrink: 0;
+  padding: 15px 20px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+.business-conversation-heading-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.business-conversation-heading-top > a {
+  color: var(--color-primary-text);
+  font-size: 12px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.business-conversation-heading-top > .btn {
   flex-shrink: 0;
 }
-.business-conversation small {
-  display: block;
-  margin-top: 6px;
+.business-conversation-heading h2 {
+  margin: 8px 0 10px;
+  font-size: 16px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.business-conversation-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
   font-size: 11px;
   color: var(--color-text-muted);
   overflow-wrap: anywhere;
 }
-.business-message-list {
-  padding: 20px;
+.business-conversation-heading .business-conversation-back {
+  display: none;
+}
+.business-match-navigation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-primary-text);
+  background: var(--color-primary-soft);
+  font-size: 11px;
+}
+.business-match-navigation > span {
+  overflow-wrap: anywhere;
+}
+.business-match-navigation > div {
+  display: flex;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.business-match-navigation button {
   display: grid;
-  gap: 17px;
+  place-items: center;
+  padding: 4px;
+  border-radius: 4px;
+  background: var(--color-surface);
+}
+.business-match-navigation button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.business-message-list {
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .business-message {
+  flex-shrink: 0;
   border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-border);
   border-radius: 8px;
-  padding: 20px;
+  padding: 16px 18px;
+  background: var(--color-surface);
+}
+.business-message.inbound {
+  border-left-color: var(--color-primary);
 }
 .business-message header {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
 }
 .business-message header > div {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 .business-message time {
   color: var(--color-text-muted);
   font-size: 11px;
 }
 .business-message h3 {
-  margin: 17px 0 9px;
-  font-size: 15px;
+  margin: 14px 0 7px;
+  font-size: 14px;
 }
 .business-message-meta {
   color: var(--color-text-muted);
-  font-size: 12px;
-  line-height: 1.9;
+  font-size: 11px;
+  line-height: 1.8;
   overflow-wrap: anywhere;
 }
-.business-message-meta a {
+.business-message-match {
+  display: inline-block;
+  margin-bottom: 10px;
+  font-size: 11px;
   color: var(--color-primary-text);
-  text-decoration: underline;
-  text-underline-offset: 3px;
 }
-.business-message pre {
-  font-family: inherit;
+.business-message .mail-body-viewer {
+  margin-top: 12px;
+}
+.business-message .mail-conversation-body {
   font-size: 13px;
   line-height: 1.8;
+}
+.business-long-message {
+  margin: 15px 0;
+}
+.business-long-message > summary {
+  color: var(--color-primary-text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.business-long-message > summary > span {
+  display: block;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  margin: 15px 0;
-  max-height: 420px;
-  overflow: auto;
-  padding: 15px;
-  background: var(--color-surface-muted);
-  border-radius: 6px;
+  color: var(--color-text-secondary);
+  line-height: 1.8;
+  margin-top: 10px;
+}
+.business-long-message[open] > summary > span {
+  display: none;
+}
+.mail-quoted-text {
+  margin-top: 12px;
+  color: var(--color-text-secondary);
+}
+.mail-quoted-text > summary {
+  cursor: pointer;
+  color: var(--color-primary-text);
+  font-size: 12px;
+}
+.mail-quoted-text > div {
+  padding: 10px 0 0 12px;
+  border-left: 2px solid var(--color-border);
+}
+.business-mail-error {
+  margin: 0;
+  padding: 8px 20px;
+  font-size: 11px;
+  color: var(--color-text-muted);
 }
 .business-attachment {
   margin: 5px 18px 8px 0;
@@ -263,13 +426,28 @@
 .business-message footer {
   display: flex;
   flex-wrap: wrap;
-  gap: 14px;
-  justify-content: space-between;
+  gap: 8px;
   align-items: center;
   border-top: 1px solid var(--color-border);
-  padding-top: 14px;
+  padding-top: 12px;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: 11px;
+}
+.business-message footer > span {
+  width: 100%;
+  margin-bottom: 3px;
+}
+.business-message footer .btn {
+  font-size: 11px;
+}
+.business-timeline-footer {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 20px;
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+  font-size: 10px;
+  color: var(--color-text-muted);
 }
 .business-form fieldset {
   margin: 20px 0;
@@ -417,15 +595,6 @@
   margin-top: 20px;
 }
 @media (max-width: 760px) {
-  .business-filters > label {
-    width: 100%;
-    justify-content: space-between;
-  }
-  .business-filters select {
-    min-width: 0;
-    max-width: none;
-    flex: 1;
-  }
   .business-tabs {
     gap: 10px;
     padding: 0 14px;
@@ -436,6 +605,11 @@
   }
   .business-toolbar .search-field {
     min-width: 100%;
+  }
+  .business-toolbar > .btn,
+  .business-toolbar > select {
+    padding-inline: 8px;
+    font-size: 12px;
   }
   .business-fields,
   .business-choices {
@@ -451,7 +625,42 @@
     width: 100%;
     justify-content: center;
   }
-  .business-conversation {
-    width: 100%;
+  .business-toolbar > label {
+    flex: 1;
+  }
+  .business-toolbar > label select,
+  .business-toolbar > label:nth-child(2) select {
+    flex: 1;
+    width: 0;
+    min-width: 85px;
+  }
+  .business-conversation-browser {
+    display: block;
+    height: 68dvh;
+    min-height: 420px;
+  }
+  .business-conversation-sidebar {
+    height: 100%;
+    border-right: 0;
+  }
+  .business-conversation-detail {
+    display: none;
+    height: 100%;
+  }
+  .business-conversation-browser.showing-detail .business-conversation-sidebar {
+    display: none;
+  }
+  .business-conversation-browser.showing-detail .business-conversation-detail {
+    display: flex;
+  }
+  .business-conversation-heading .business-conversation-back {
+    display: inline-flex;
+    margin-bottom: 10px;
+  }
+  .business-conversation-heading {
+    padding: 12px 14px;
+  }
+  .business-conversation-heading h2 {
+    font-size: 14px;
   }
 }

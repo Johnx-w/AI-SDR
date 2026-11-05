@@ -57,10 +57,20 @@ export function matchesTaskNavigation(task, navigation) {
 export function updateBusinessNavigation(params, key, value) {
   const next = new URLSearchParams(params);
   if (key === 'tab') {
-    for (const name of ['state', 'bucket', 'asOf', 'task', 'demand', 'message', 'q'])
+    for (const name of [
+      'state',
+      'bucket',
+      'asOf',
+      'task',
+      'demand',
+      'message',
+      'conversation',
+      'q',
+    ])
       next.delete(name);
   } else if (['customerId', 'productId', 'state', 'bucket', 'q'].includes(key)) {
     for (const name of ['task', 'demand', 'message']) next.delete(name);
+    if (['customerId', 'productId', 'q'].includes(key)) next.delete('conversation');
     if (key === 'state') {
       next.delete('bucket');
       next.delete('asOf');

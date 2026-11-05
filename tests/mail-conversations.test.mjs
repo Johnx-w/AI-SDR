@@ -91,6 +91,36 @@ function harness(t, extra = {}) {
   };
 }
 
+test('business original bodies match the account and recorded text without connecting or exposing other mail', async (t) => {
+  const h = harness(t);
+  h.respond(
+    batch([
+      received('formatted', { bodyHtml: '<p>Original <b>format</b></p>', bodyFormatVersion: 2 }),
+    ]),
+  );
+  await h.inbox.sync({ mailboxId: 'one' });
+  const mail = h.inbox.detail(h.inbox.list().items[0].id).messages[0];
+  const record = {
+    id: 'business-message',
+    mailboxMessageId: mail.id,
+    externalId: mail.messageId,
+    account: h.boxes[0].email,
+    from: mail.from,
+    body: mail.bodyText,
+  };
+  h.calls.length = 0;
+  const original = h.inbox.businessMailBodies([record]);
+  assert.equal(original[record.id].bodyHtml, '<p>Original <b>format</b></p>');
+  assert.equal(original[record.id].id, undefined);
+  assert.deepEqual(h.inbox.businessMailBodies([{ ...record, account: h.boxes[1].email }]), {});
+  assert.deepEqual(h.inbox.businessMailBodies([{ ...record, body: 'Different record' }]), {});
+  assert.equal(
+    h.inbox.businessMailBodies([{ ...record, mailboxMessageId: undefined }])[record.id].bodyText,
+    record.body,
+  );
+  assert.deepEqual(h.calls, []);
+});
+
 test('mailbox classification reaches business recording and resync preserves previously recorded classifications', async (t) => {
   const recorded = [];
   const h = harness(t, { recordCommunication: async (detail) => recorded.push(detail) });

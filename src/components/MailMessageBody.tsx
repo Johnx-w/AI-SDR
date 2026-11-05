@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Code2, Image, LayoutTemplate } from 'lucide-react';
 import type { MailMessage } from '../services/mailConversations';
-import { makeMailFrame } from '../services/mailHtml';
+import { makeMailFrame, splitMailQuote } from '../services/mailHtml';
 
 export function MailMessageBody({
   message,
+  collapseQuotes = false,
 }: {
+  collapseQuotes?: boolean;
   message: Pick<
     MailMessage,
     | 'subject'
@@ -25,10 +27,13 @@ export function MailMessageBody({
   const content = useMemo(
     () =>
       message.bodyHtml
-        ? makeMailFrame(message.bodyHtml, message.inlineImages, externalImages)
+        ? makeMailFrame(message.bodyHtml, message.inlineImages, externalImages, collapseQuotes)
         : null,
-    [message.bodyHtml, message.inlineImages, externalImages],
+    [message.bodyHtml, message.inlineImages, externalImages, collapseQuotes],
   );
+  const text = collapseQuotes
+    ? splitMailQuote(message.bodyText || '')
+    : { body: message.bodyText, quote: '' };
   function measure() {
     const frame = frameRef.current;
     if (!frame?.contentDocument) return;
@@ -58,6 +63,7 @@ export function MailMessageBody({
     if (!doc) return;
     measure();
     observer.current = new ResizeObserver(measure);
+    doc.addEventListener('toggle', measure, true);
     if (doc.body) observer.current.observe(doc.body);
     if (frameRef.current) observer.current.observe(frameRef.current);
     doc
@@ -107,7 +113,13 @@ export function MailMessageBody({
         <div className="mail-conversation-body">
           {message.bodyUnavailable === 'too_large'
             ? '正文超过读取大小限制，请在原邮箱查看完整内容。'
-            : message.bodyText || '此邮件没有可显示的文本正文。'}
+            : text.body || (text.quote ? '' : '此邮件没有可显示的文本正文。')}
+          {text.quote && !message.bodyUnavailable && (
+            <details className="mail-quoted-text">
+              <summary>展开历史引用</summary>
+              <div>{text.quote}</div>
+            </details>
+          )}
         </div>
       )}
       {!message.bodyHtml && !message.bodyFormatVersion && message.source === 'imap' && (

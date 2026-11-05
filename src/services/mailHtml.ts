@@ -15,6 +15,17 @@ export const escapeMailText = (value: string) =>
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!,
   );
 export const plainTextHtml = (value: string) => escapeMailText(value).replace(/\r?\n/g, '<br>');
+export function splitMailQuote(value: string) {
+  const marker =
+    /^(?:On .+wrote:|在.+写道[：:]|\s*-{2,}\s*(?:Original Message|原始邮件)\s*-{2,})\s*$/im.exec(
+      value,
+    );
+  const quotedTail = /(?:^|\n)([ \t]*>[^\n]*(?:\n[ \t]*>[^\n]*)*)\s*$/.exec(value);
+  const start = marker?.index ?? (quotedTail ? quotedTail.index : -1);
+  return start < 0
+    ? { body: value, quote: '' }
+    : { body: value.slice(0, start), quote: value.slice(start) };
+}
 export const mailFramePolicy = (externalImages: boolean) =>
   `default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data:${externalImages ? ' https: http:' : ''}; font-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; child-src 'none'; form-action 'none'; base-uri 'none'; navigate-to 'none'`;
 const cidKey = (value: string) => {
@@ -49,6 +60,7 @@ export function makeMailFrame(
   bodyHtml: string,
   images: MailInlineImage[] = [],
   externalImages = false,
+  collapseQuotes = false,
 ) {
   if (typeof window === 'undefined' || !DOMPurify.isSupported) return null;
   const root = DOMPurify.sanitize(bodyHtml, {
@@ -146,6 +158,21 @@ export function makeMailFrame(
       element.setAttribute('rel', 'noopener noreferrer');
     }
   });
+  if (collapseQuotes) {
+    const quotes = root.querySelectorAll('blockquote, .gmail_quote, .yahoo_quoted, #divRplyFwdMsg');
+    quotes.forEach((quote) => {
+      if (quote.closest('details[data-mail-quote]')) return;
+      const details = root.ownerDocument.createElement('details');
+      details.setAttribute('data-mail-quote', '');
+      const summary = root.ownerDocument.createElement('summary');
+      summary.textContent = '展开历史引用';
+      details.append(summary);
+      quote.before(details);
+      if (quote.id === 'divRplyFwdMsg') {
+        while (details.nextSibling) details.append(details.nextSibling);
+      } else details.append(quote);
+    });
+  }
   // Keep the sender's document styles and body attributes inside this isolated document.
   // A viewport-relative body height would otherwise grow with the parent resize observer.
   const body = root.querySelector('body');

@@ -27,6 +27,7 @@ export class CustomerBusinessApi {
     customerRecord,
     customerRemoteId,
     syncCustomers,
+    mailBodies = () => ({}),
   }) {
     this.getEnv = getEnv;
     this.fetch = fetchImpl;
@@ -35,6 +36,7 @@ export class CustomerBusinessApi {
     this.customerRecord = customerRecord;
     this.customerRemoteId = customerRemoteId;
     this.syncCustomers = syncCustomers;
+    this.mailBodies = mailBodies;
     this.active = 0;
     this.current = null;
     this.syncTail = Promise.resolve();
@@ -191,6 +193,19 @@ export class CustomerBusinessApi {
       if (id && !/^[\w-]{1,100}$/.test(id)) throw fail(400, '业务记录编号无效');
       const store = this.state().store;
       if (request.method === 'GET') {
+        if (kind === 'conversations' && id && action === 'mail-bodies') {
+          if (!store.get(kind, id)) throw fail(404, '业务会话不存在，请刷新列表');
+          return {
+            status: 200,
+            body: {
+              originals: await this.mailBodies(
+                store
+                  .all('messages')
+                  .filter((row) => row.conversationId === id && row.channel === 'email'),
+              ),
+            },
+          };
+        }
         if (action) throw fail(405, '不支持的业务记录读取操作');
         if (!id) return { status: 200, body: { records: (await this.workspace(url))[kind] } };
         const record = store.get(kind, id);

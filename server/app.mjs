@@ -204,6 +204,7 @@ export function createApp({
     customerRecord: (id) => provider.customerRecord?.(id),
     customerRemoteId: (id) => (provider.customerRemoteId ? provider.customerRemoteId(id) : id),
     syncCustomers: () => provider.syncCustomers?.(),
+    mailBodies: (records) => outreach().conversations.businessMailBodies(records),
   });
   let outbound;
   const outreach = () =>
