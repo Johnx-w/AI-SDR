@@ -357,6 +357,7 @@ export function createApp({
             if (
               running ||
               business.active ||
+              business.syncing ||
               readingLeads ||
               leadLibrary?.refreshing ||
               provider.syncing ||
