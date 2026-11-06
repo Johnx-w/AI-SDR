@@ -6,6 +6,11 @@ export async function handleOutreach({ request, url, service, readJson, idempote
   if (path === '/state' && method === 'GET') return service.state();
   if (path === '/deliveries' && method === 'GET')
     return service.listDeliveries(Object.fromEntries(url.searchParams));
+  const delivery = path.match(/^\/deliveries\/([\w-]+)$/);
+  if (delivery && method === 'GET') {
+    const { candidate, ...result } = service.delivery(delivery[1]);
+    return result;
+  }
   if (path === '/conversations' && method === 'GET')
     return service.conversations.list({
       mailboxId: url.searchParams.get('mailboxId') || 'all',
@@ -57,7 +62,14 @@ export async function handleOutreach({ request, url, service, readJson, idempote
   const campaign = path.match(/^\/campaigns\/([\w-]+)(?:\/(prepare|approve|start|pause|cancel))?$/);
   if (campaign) {
     const [, id, action] = campaign;
-    if (!action && method === 'GET') return service.detail(id);
+    if (!action && method === 'GET') {
+      const detail = service.detail(id);
+      if (url.searchParams.get('summary') !== '1') return detail;
+      return {
+        ...detail,
+        deliveries: detail.deliveries.map(({ bodyHtml, candidate, ...item }) => item),
+      };
+    }
     if (service.campaign(id).acquisitionSource && ['PUT', 'POST'].includes(method))
       throw fail(409, '请在获客任务中管理自动首发');
     if (!action && method === 'PUT') return service.saveCampaign(await readJson(request), id);
