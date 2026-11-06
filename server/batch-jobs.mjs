@@ -629,15 +629,15 @@ export class BatchJobs {
           this.finish(j, 'time_limit');
           return;
         }
-        if (j.searches >= j.limits.searches) {
-          this.finish(j, 'search_limit');
-          return;
-        }
         if (j.researched >= j.limits.research) {
           this.finish(j, 'research_limit');
           return;
         }
         if (!j.queue.length) {
+          if (j.searches >= j.limits.searches) {
+            this.finish(j, 'search_limit');
+            return;
+          }
           const plan = j.queryPlan || searchPlan(j.input);
           j.searchSignatures ||= [];
           let search = j.pendingSearch;

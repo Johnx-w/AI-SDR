@@ -354,6 +354,44 @@ test('已知抓取失败占研究次数，不计新增，达到有界研究预�
     manager.close();
   }
 });
+test('最后一次搜索的候选继续处理，仍遵守新增目标和研究预算且不追加搜索', async () => {
+  for (const [target, budget, inserted, reason] of [
+    [1, 3, 1, 'target_reached'],
+    [3, 3, 2, 'search_limit'],
+    [3, 1, 1, 'research_limit'],
+  ]) {
+    let searches = 0;
+    const { manager } = harness({
+      discover: async () => ({
+        candidates:
+          ++searches === 2
+            ? [
+                { source_url: 'https://last-one.example.org/' },
+                { source_url: 'https://last-two.example.org/' },
+              ]
+            : [],
+      }),
+    });
+    try {
+      const job = manager.create(
+        { ...input, target_count: target, research_budget: budget },
+        'last-search-candidates',
+      );
+      job.limits.searches = 2;
+      manager.save(job);
+      await manager.work(job.id);
+      const result = manager.get(job.id);
+      assert.equal(result.inserted, inserted);
+      assert.equal(result.researched, inserted);
+      assert.equal(result.searchStats.at(-1).researched, inserted);
+      assert.equal(result.reason, reason);
+      assert.equal(searches, 2);
+    } finally {
+      manager.close();
+    }
+  }
+});
+
 test('候选耗尽和搜索上限明确结束', async () => {
   const { manager } = harness({ discover: async () => ({ candidates: [] }) });
   try {
