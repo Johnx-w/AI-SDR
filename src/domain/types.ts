@@ -39,7 +39,6 @@ export interface SearchMetric {
   queued: number;
   researched: number;
   inserted: number;
-  qualified?: number;
   updated: number;
   rejected: number;
   review: number;
@@ -96,7 +95,6 @@ export interface AcquisitionJob {
   target: number;
   countPolicy?: string;
   inserted: number;
-  qualified?: number;
   updated: number;
   skipped: number;
   rejected: number;
@@ -123,8 +121,6 @@ export interface AcquisitionJob {
     search_id?: string;
     search_query?: string;
     assessment?: { grade?: string | null; score: number; status: string } | null;
-    qualified?: boolean;
-    qualification_retraction?: { reason: string; at: string };
     handoff?: {
       ready: boolean;
       reasons: string[];

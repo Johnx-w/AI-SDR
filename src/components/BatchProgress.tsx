@@ -188,16 +188,12 @@ function DetailRows({
                 <span>{row.name || row.domain || '待核实企业'}</span>
               )}
               {row.reason && <small>{row.reason}</small>}
-              {row.qualification_retraction ? (
-                <small>交接已撤销：{row.qualification_retraction.reason}</small>
-              ) : (
-                row.handoff && (
-                  <small>
-                    {row.handoff.contact_verified
-                      ? '已找到有来源的公司级联系入口'
-                      : '本轮未找到官网公司级联系入口，暂不能邮件联系'}
-                  </small>
-                )
+              {row.handoff && (
+                <small>
+                  {row.handoff.contact_verified
+                    ? '已找到有来源的公司级联系入口'
+                    : '本轮未找到官网公司级联系入口，暂不能邮件联系'}
+                </small>
               )}
               {row.search_query && <small>发现词：{row.search_query}</small>}
               {row.handoff?.contacts?.map(

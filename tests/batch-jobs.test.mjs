@@ -528,6 +528,59 @@ test('SQLite保存队列与当前操作，重启暂停核对而非自动重放',
   }
 });
 
+for (const hasCurrent of [false, true])
+  test(`切换客户库后禁止自动和手动恢复${hasCurrent ? '有' : '无'}待确认企业的任务，切回原库可继续`, async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'shade-batch-scope-'));
+    const path = join(dir, 'jobs.sqlite');
+    let manager;
+    try {
+      manager = harness({ path, scope: 'table-a' }).manager;
+      const job = manager.create({ ...input, target_count: 1 }, 'scope-recovery');
+      if (hasCurrent) {
+        job.current = {
+          domain: 'interrupted.example.com',
+          source_url: 'https://interrupted.example.com/',
+          operation_id: `${job.id}-1`,
+        };
+        job.researched = 1;
+        manager.save(job);
+      }
+      manager.close();
+      let calls = 0;
+      const unexpected = async () => {
+        calls++;
+        return { settled: false };
+      };
+      manager = harness({
+        path,
+        scope: 'table-b',
+        status: unexpected,
+        discover: unexpected,
+        research: unexpected,
+        readLeads: unexpected,
+      }).manager;
+      const paused = manager.get(job.id);
+      await manager.resumeInterrupted();
+      assert.deepEqual(manager.get(job.id), paused);
+      await assert.rejects(manager.resume(job.id), { status: 409, message: /客户库/ });
+      assert.equal(calls, 0);
+      assert.deepEqual(manager.get(job.id), paused);
+      manager.close();
+      manager = harness({
+        path,
+        scope: 'table-a',
+        status: async () => ({ settled: true, output: { outcome: 'failed', stage: 'select' } }),
+      }).manager;
+      await manager.resumeInterrupted();
+      await manager.work(job.id);
+      assert.equal(manager.get(job.id).status, 'completed');
+      assert.equal(manager.get(job.id).inserted, 1);
+    } finally {
+      manager?.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
 test('读阶段服务中断经核对后自动重试一次并继续下一候选', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'shade-batch-recovery-'));
   const path = join(dir, 'jobs.sqlite');

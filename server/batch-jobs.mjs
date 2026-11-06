@@ -46,7 +46,6 @@ const labels = {
   stopped: '已停止，已入库客户保留',
   interrupted: '服务中断，继续前需核对当前企业',
   uncertain: '执行结果待确认，已暂停，未自动重复写入',
-  qualification_retracted: '交接结果经复核撤销，企业档案与原始评估已保留',
 };
 export class BatchJobs {
   constructor({
@@ -128,14 +127,11 @@ export class BatchJobs {
       .prepare('SELECT record_id,domain,data FROM handoff_entities WHERE scope=?')
       .all(this.scope)
       .map((row) => ({ ...row, data: JSON.parse(row.data) }));
-    const relatedJobs = new Set(
-      entities.flatMap((row) => [row.data.created_job, row.data.qualified_job]).filter(Boolean),
-    );
     const jobs = this.db
       .prepare('SELECT data FROM jobs ORDER BY rowid DESC')
       .all()
       .map((row) => JSON.parse(row.data))
-      .filter((job) => job.scope === this.scope || (!job.scope && relatedJobs.has(job.id)))
+      .filter((job) => job.scope === this.scope)
       .map((job) => ({
         id: job.id,
         input: job.input,
@@ -298,8 +294,7 @@ export class BatchJobs {
     }
   }
   claimCapture(job, item, row) {
-    // Reuse the existing persistent identity ledger. Legacy readiness claims
-    // remain auditable, but a new target can only count a new company once.
+    // Count a company only once across all jobs in the customer library.
     const existing = this.db
       .prepare('SELECT * FROM handoff_entities WHERE scope=? AND (record_id=? OR domain=?)')
       .all(this.scope, row.record_id, item.domain);
@@ -317,85 +312,13 @@ export class BatchJobs {
     );
     return { newRecord: true, reason: 'new_business_record' };
   }
-  // Deliberately local-only: there is no HTTP route for invalidating a business
-  // result. The operator must archive the job before calling this method.
-  retractQualification(jobId, operationId, reason) {
-    if (typeof reason !== 'string' || !reason.trim() || reason.length > 2000)
-      throw fail(400, '撤销交接认领必须填写1–2000字的复核原因');
-    this.db.exec('BEGIN IMMEDIATE');
-    try {
-      const job = this.get(jobId);
-      const rows = job.rows.filter((row) => row.operation_id === operationId);
-      if (rows.length !== 1) throw fail(409, '未找到唯一的原始交接认领明细');
-      const row = rows[0];
-      if (row.qualification_retraction && row.qualified_new === false) {
-        this.db.exec('COMMIT');
-        return job;
-      }
-      if (this.busy || this.resuming || this.active())
-        throw fail(409, '仍有未结束任务，停止或核对后才能撤销交接认领');
-      if (!['completed', 'partial'].includes(job.status) || job.current)
-        throw fail(409, '只能复核已结束且没有待确认写入的任务');
-      if (row.qualified_new !== true || !Number.isSafeInteger(job.qualified) || job.qualified < 1)
-        throw fail(409, '该明细没有可撤销的交接认领');
-      const entry = this.db
-        .prepare('SELECT data FROM handoff_entities WHERE scope=? AND record_id=? AND domain=?')
-        .get(this.scope, row.record_id, row.domain);
-      const state = entry && JSON.parse(entry.data);
-      if (!state || state.qualified_job !== jobId || state.qualified_operation !== operationId)
-        throw fail(409, '当前认领所属任务或表格不一致，未撤销其他任务的认领');
-      const metric = job.searchStats?.find((item) => item.id === row.search_id);
-      if (metric && (!Number.isSafeInteger(metric.qualified) || metric.qualified < 1))
-        throw fail(409, '搜索统计与原始交接认领不一致，未自动扣减');
-      const audit = {
-        at: new Date(this.now()).toISOString(),
-        reason: reason.trim(),
-        previous_qualified_new: row.qualified_new,
-        previous_qualification_reason: row.qualification_reason,
-        claim: {
-          qualified_job: state.qualified_job,
-          qualified_operation: state.qualified_operation,
-          qualified_at: state.qualified_at,
-        },
-      };
-      state.qualification_retractions ||= [];
-      state.qualification_retractions.push(audit);
-      delete state.qualified_job;
-      delete state.qualified_operation;
-      delete state.qualified_at;
-      this.db
-        .prepare('UPDATE handoff_entities SET data=? WHERE scope=? AND record_id=? AND domain=?')
-        .run(JSON.stringify(state), this.scope, row.record_id, row.domain);
-      job.qualified--;
-      if (metric) metric.qualified--;
-      row.qualified_new = false;
-      row.qualification_reason = 'qualification_retracted';
-      row.qualification_retraction = audit;
-      job.qualificationRetractions ||= [];
-      job.qualificationRetractions.push({
-        operation_id: operationId,
-        record_id: row.record_id,
-        reason: audit.reason,
-        at: audit.at,
-      });
-      if (job.qualified < job.target) {
-        job.status = 'partial';
-        job.reason = 'qualification_retracted';
-      }
-      this.save(job);
-      this.db.exec('COMMIT');
-      return job;
-    } catch (error) {
-      this.db.exec('ROLLBACK');
-      throw error;
-    }
-  }
   async resume(id) {
     if (this.busy || this.resuming) throw fail(409, '当前企业仍在处理中');
     this.resuming = true;
     try {
       let job = this.get(id);
       if (job.status !== 'paused') throw fail(409, '只有暂停任务可以继续');
+      if (job.scope !== this.scope) throw fail(409, '任务所属客户库已变化，请切回原客户库再继续');
       if (!['web', 'tavily_web', undefined].includes(job.input.acquisition_channel))
         throw fail(409, '该获客渠道已停用');
       if (job.provider !== this.provider)
@@ -420,7 +343,8 @@ export class BatchJobs {
       this.provider !== 'native' ||
       job?.status !== 'paused' ||
       job.reason !== 'interrupted' ||
-      job.provider !== this.provider
+      job.provider !== this.provider ||
+      job.scope !== this.scope
     )
       return;
     if (job.current) {

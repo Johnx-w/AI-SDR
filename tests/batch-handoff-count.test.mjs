@@ -177,10 +177,6 @@ test('宽泛收录任务不创建销售交接资格认领', async () => {
     assert.equal(saved.inserted, 1);
     assert.equal(saved.rows[0].handoff.ready, false);
     assert.equal(saved.rows[0].qualification_reason, 'new_business_record');
-    assert.throws(
-      () => manager.retractQualification(job.id, saved.rows[0].operation_id, '不适用'),
-      /认领/,
-    );
   } finally {
     manager.close();
   }

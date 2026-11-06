@@ -409,7 +409,7 @@ test('旧scope的pending读超时后不能污染新scope缓存', async () => {
   assert(stale.priority.some((row) => row.customerId === 'current'));
 });
 
-test('新增账本隔离客户表、忽略存量和旧资格认领，统计不受最近100条任务限制', () => {
+test('新增账本隔离客户表、忽略存量，统计不受最近100条任务限制', () => {
   const manager = new BatchJobs({ scope: 'current', schedule: false });
   try {
     for (let n = 0; n < 105; n++)
@@ -437,12 +437,6 @@ test('新增账本隔离客户表、忽略存量和旧资格认领，统计不�
       }),
     );
     insert.run('current', 'baseline', 'base.example', JSON.stringify({ baseline: true }));
-    insert.run(
-      'current',
-      'legacy',
-      'legacy.example',
-      JSON.stringify({ qualified_job: 'old', qualified_at: asOf }),
-    );
     insert.run(
       'other',
       'other-new',
