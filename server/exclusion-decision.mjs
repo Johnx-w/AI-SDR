@@ -34,14 +34,9 @@ export function exclusionDecision(operation, output) {
   if (!modelConclusion) return 'ignore';
   const mismatch =
     research.entity_type === 'individual' ||
-    [
-      'product_match',
-      'country_match',
-      'audience_match',
-      'customer_type_match',
-      'profile_match',
-      'required_match',
-    ].some((field) => research[field] === 'not_matched') ||
+    ['product_match', 'country_match', 'customer_type_match', 'profile_match'].some(
+      (field) => research[field] === 'not_matched',
+    ) ||
     research.eligibility?.status === 'rejected';
   if (
     output?.outcome === 'rejected' &&

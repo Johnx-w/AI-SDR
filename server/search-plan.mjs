@@ -1,4 +1,4 @@
-import { groupedMarkets, audienceTerms } from './markets.mjs';
+import { groupedMarkets } from './markets.mjs';
 import { locationOptions } from './search-target.mjs';
 import acquisition from '../src/data/acquisition.json' with { type: 'json' };
 import { automaticSearchPlan } from '../src/domain/search-query.mjs';
@@ -31,7 +31,6 @@ function webSearchPlan(input) {
           country,
           query: [
             product,
-            audienceTerms[input.audience],
             acquisition.customerTypes.find((t) => t.value === input.customer_type)?.terms,
             acquisition.profiles.find((p) => p.value === input.customer_profile)?.terms,
             input.region,

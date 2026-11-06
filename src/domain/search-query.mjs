@@ -2,11 +2,6 @@ import acquisition from '../data/acquisition.json' with { type: 'json' };
 import { isAllProductScope, productTerms } from './acquisition-products.mjs';
 
 const quote = (value) => '"' + value.replace(/"/g, '') + '"';
-const audienceTerms = {
-  B: '(wholesale OR trade OR commercial)',
-  C: '(residential OR homeowners)',
-  BC: '',
-};
 export const MAX_AUTO_SEARCH_QUERIES = 600;
 
 // The default campaign covers businesses and delivery forms, rather than treating
@@ -45,7 +40,7 @@ const greatestCommonDivisor = (left, right) => {
   return left;
 };
 
-function broadSearchPlan(input, countries, roleVariants, hints) {
+function broadSearchPlan(input, countries, roleVariants) {
   const cycle =
     input.environment_preference === 'indoor'
       ? ['indoor', 'general', 'outdoor', 'semifinished', 'indoor', 'components']
@@ -78,15 +73,7 @@ function broadSearchPlan(input, countries, roleVariants, hints) {
     const role = roleVariants[index % roleVariants.length];
     index = Math.floor(index / roleVariants.length);
     const suffix = suffixes[index % suffixes.length];
-    const query = [
-      quote(term),
-      role,
-      audienceTerms[input.audience || 'BC'],
-      suffix === '' ? hints.join(' ') : '',
-      input.region,
-      country,
-      suffix,
-    ]
+    const query = [quote(term), role, input.region, country, suffix]
       .filter(Boolean)
       .join(' ')
       .slice(0, 395);
@@ -101,16 +88,7 @@ export function automaticSearchPlan(input, countries = [input.country]) {
   const roleVariants = selected.length
     ? selected.map((type) => type.terms)
     : ['supplier', 'dealer', 'manufacturer', ''];
-  const preferences = String(input.preferred_requirements || '');
-  const hints = [
-    [/电动|自动化|motori[sz]ed/i, 'motorized'],
-    [/酒店|hotel/i, 'hotel projects'],
-    [/工程|商用|commercial/i, 'commercial projects'],
-    [/定制|custom/i, 'custom made'],
-  ]
-    .filter(([pattern]) => pattern.test(preferences))
-    .map(([, term]) => term);
-  if (isAllProductScope(input)) return broadSearchPlan(input, countries, roleVariants, hints);
+  if (isAllProductScope(input)) return broadSearchPlan(input, countries, roleVariants);
   const suffixes = ['', 'company contact', 'showroom'];
   const products = productTerms(input);
   const total = suffixes.length * roleVariants.length * products.length * countries.length;
@@ -132,15 +110,7 @@ export function automaticSearchPlan(input, countries = [input.country]) {
     const suffix = suffixes[index % suffixes.length];
     queries.push({
       country,
-      query: [
-        quote(product),
-        role,
-        audienceTerms[input.audience || 'BC'],
-        suffix === '' ? hints.join(' ') : '',
-        input.region,
-        country,
-        suffix,
-      ]
+      query: [quote(product), role, input.region, country, suffix]
         .filter(Boolean)
         .join(' ')
         .slice(0, 395),
@@ -162,11 +132,6 @@ export function buildSearchQuery(input) {
     productQuery,
     acquisition.customerTypes.find((t) => t.value === input.customer_type)?.terms,
     acquisition.profiles.find((p) => p.value === input.customer_profile)?.terms,
-    input.audience === 'B'
-      ? '(wholesale OR trade OR commercial)'
-      : input.audience === 'C'
-        ? '(residential OR homeowners)'
-        : '',
     input.region,
     input.country,
   ]

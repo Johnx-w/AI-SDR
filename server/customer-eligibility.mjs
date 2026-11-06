@@ -1,4 +1,4 @@
-// Global admission policy, independent of the task's optional type/portrait/audience filters.
+// Global admission policy, independent of the task's optional type/portrait filters.
 // Values must have passed source-quote verification in parseCompanyResearch.
 export function customerEligibility({ entity_type }) {
   const decision = (status, code, reason) => ({ status, code, reason });

@@ -427,7 +427,6 @@ export class BatchJobs {
           name: record.name,
           executionId: output.execution_id,
           assessment: output.assessment || null,
-          preferenceEvidence: output.research?.preference_evidence || [],
           handoff: output.handoff || null,
           inserted_new: claim.newRecord,
           qualification_reason: claim.reason,
@@ -454,23 +453,13 @@ export class BatchJobs {
           ...item,
           result: 'review',
           reason: output.reason,
-          requirementChecks: output.research?.requirement_checks || [],
         });
       } else if (
         output?.outcome === 'rejected' ||
         (output?.research &&
           (['rejected', 'insufficient_evidence'].includes(output.research.eligibility?.status) ||
-            [
-              'product_match',
-              'country_match',
-              'audience_match',
-              'customer_type_match',
-              'profile_match',
-              'required_match',
-            ].some(
-              (key) =>
-                ['not_matched', 'unknown'].includes(output.research[key]) &&
-                (key !== 'audience_match' || output.research[key] === 'not_matched'),
+            ['product_match', 'country_match', 'customer_type_match', 'profile_match'].some((key) =>
+              ['not_matched', 'unknown'].includes(output.research[key]),
             )))
       ) {
         job.rejected++;

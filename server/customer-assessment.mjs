@@ -151,21 +151,16 @@ function gradeOpportunity(opportunity, dimensions, research) {
     research.entity_type === 'individual' ||
     P.score === 0 ||
     R.score === 0 ||
-    [
-      'product_match',
-      'country_match',
-      'audience_match',
-      'customer_type_match',
-      'profile_match',
-      'required_match',
-    ].some((key) => research[key] === 'not_matched') ||
+    ['product_match', 'country_match', 'customer_type_match', 'profile_match'].some(
+      (key) => research[key] === 'not_matched',
+    ) ||
     research.eligibility?.status === 'rejected'
   )
     status = '暂不开发';
   else if (research.entity_type !== 'business') {
     grade = 'C';
     status = '待核实';
-  } else if (research.review_required || research.required_match === 'unknown') {
+  } else if (research.review_required) {
     grade = 'C';
     status = '待核实';
   } else if (P.score === 40 && R.score >= 25) {

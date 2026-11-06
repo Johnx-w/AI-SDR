@@ -24,8 +24,7 @@ export function calculateHandoffReadiness({
     research.ok === true &&
     research.entity_type === 'business' &&
     research.eligibility?.status === 'eligible' &&
-    !research.review_required &&
-    !['not_matched', 'unknown'].includes(research.required_match);
+    !research.review_required;
   const opportunities = assessment?.opportunities?.length
     ? assessment.opportunities
     : assessment

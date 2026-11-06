@@ -27,7 +27,7 @@
 | 范围       | 入口与用途                                                                                                                          |
 | ---------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | 健康与连接 | GET /api/health；GET／PUT /api/v1/connections                                                                                       |
-| 获客       | /api/v1/acquisition 下的 status、locations、products、search-preview、jobs、schedules、runs、executions                             |
+| 获客       | /api/v1/acquisition 下的 status、locations、products、search-preview、jobs、schedules                                               |
 | 批量任务   | GET／POST /jobs，GET /jobs/:id，POST /jobs/:id/stop、resume                                                                         |
 | 定时计划   | GET／POST /schedules，POST /schedules/:id/pause、resume、close                                                                      |
 | 客户读取   | GET /api/v1/leads/real/list、/:id、/metrics；POST /api/v1/leads/real/refresh；GET /api/v1/leads/real 用于完整快照／导出兼容         |

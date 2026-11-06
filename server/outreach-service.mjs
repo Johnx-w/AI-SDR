@@ -361,7 +361,8 @@ export class OutreachService {
       mailboxIds,
       includeExisting: input.includeExisting !== false,
       continuous: input.continuous !== false,
-      customerIds: list(input.customerIds),
+      customerIds:
+        input.customerIds === undefined ? (prior?.customerIds ?? []) : list(input.customerIds),
       createdAt: prior?.createdAt || iso(this.now),
       updatedAt: iso(this.now),
       scope: this.getScope(),

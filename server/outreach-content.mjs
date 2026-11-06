@@ -409,7 +409,7 @@ export function selectOutreachCandidates({
       continue;
     }
     if (assessmentSummaryFields(raw.assessment)['待确认事项']) {
-      reject('assessment_conflict', '客户经营事实或必需条件仍有冲突，暂缓自动首封');
+      reject('assessment_conflict', '客户经营事实仍有冲突，暂缓自动首封');
       continue;
     }
     const identities = [lead.customerId, lead.companyDomain, ...lead.emails]

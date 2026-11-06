@@ -18,7 +18,6 @@ import {
 import { applySupplementsToResearch } from './lead-supplements.mjs';
 import { domainKey, thirdPartyCompanySource } from './website-identity.mjs';
 import { calculateHandoffReadiness } from './handoff-readiness.mjs';
-import { searchPlan } from './search-plan.mjs';
 import { readPublicHtml, websiteUrl } from './branding.mjs';
 import { planWebsitePages, combineWebsiteEvidence, websiteScope } from './website-metadata.mjs';
 import { researchPageText, hasUsableResearchText } from './research-pages.mjs';
@@ -397,7 +396,6 @@ export class NativeAcquisition {
       country,
       region: '',
       product,
-      audience: 'BC',
       customer_type: '',
       customer_profile: 'all',
       acquisition_channel: 'tavily_web',
@@ -639,10 +637,8 @@ export class NativeAcquisition {
           'entity_type',
           'product_match',
           'country_match',
-          'audience_match',
           'customer_type_match',
           'profile_match',
-          'required_match',
           'review_required',
           'incomplete_reason',
         ]
@@ -874,13 +870,9 @@ export class NativeAcquisition {
       if (
         page.incomplete_urls.length &&
         research.product_match === 'not_matched' &&
-        ![
-          research.country_match,
-          research.audience_match,
-          research.customer_type_match,
-          research.profile_match,
-          research.required_match,
-        ].includes('not_matched') &&
+        ![research.country_match, research.customer_type_match, research.profile_match].includes(
+          'not_matched',
+        ) &&
         research.eligibility?.status !== 'rejected'
       ) {
         research.product_match = 'unknown';
@@ -904,17 +896,14 @@ export class NativeAcquisition {
         research.entity_type === 'individual' ||
         research.product_match === 'not_matched' ||
         research.country_match === 'not_matched' ||
-        research.audience_match === 'not_matched' ||
         research.customer_type_match === 'not_matched' ||
         research.profile_match === 'not_matched' ||
-        research.required_match === 'not_matched' ||
         research.eligibility?.status === 'rejected';
       const broadAdmissionReady =
         research.entity_type === 'business' &&
         Boolean(research.company_name) &&
         Boolean(identityVerified) &&
         research.product_match === 'matched' &&
-        research.required_match !== 'not_matched' &&
         !hardMismatch;
       if (hardMismatch && cacheKey && typeof this.store.discardModelResponse === 'function') {
         try {
@@ -931,15 +920,11 @@ export class NativeAcquisition {
               ? '官网产品与本次目标不相关'
               : research.country_match === 'not_matched'
                 ? '官网所在国家与目标市场不符'
-                : research.audience_match === 'not_matched'
-                  ? '官网服务客群与本次筛选不符'
-                  : research.customer_type_match === 'not_matched'
-                    ? '官网客户类型与本次筛选不符'
-                    : research.profile_match === 'not_matched'
-                      ? '官网业务画像与本次筛选不符'
-                      : research.required_match === 'not_matched'
-                        ? '不符合本次必需条件'
-                        : '官网经营资格与本次目标不符';
+                : research.customer_type_match === 'not_matched'
+                  ? '官网客户类型与本次筛选不符'
+                  : research.profile_match === 'not_matched'
+                    ? '官网业务画像与本次筛选不符'
+                    : '官网经营资格与本次目标不符';
         return this.rejectNewCandidate(op, reason);
       }
       if (
@@ -1296,11 +1281,6 @@ export class NativeAcquisition {
     if (!op) return { settled: false, reason: '操作记录不存在，未自动重放' };
     if (op.state === 'completed') return { settled: true, output: op.output };
     if (this.active.has(id)) return { settled: false, reason: '仍在执行' };
-    if (op.child) {
-      const result = await this.status(op.child);
-      if (result.settled) this.store.complete(op, result.output);
-      return result;
-    }
     if (['persist', 'assessment'].includes(op.stage)) {
       try {
         if (op.stage === 'assessment' && op.recordVerifiedAt)
@@ -1326,40 +1306,6 @@ export class NativeAcquisition {
       output.retryable_before_write = true;
     this.store.complete(op, output);
     return { settled: true, output };
-  }
-  async run(input, id = randomUUID()) {
-    input = { ...input, ...validateTarget(input) };
-    this.ensureConfigured();
-    const { operation: op, existing } = this.store.begin(id, { input, mode: 'run' });
-    if (existing) {
-      const result = await this.status(id);
-      if (result.settled) return result.output;
-      throw conflict('该单次操作尚待核对，未重复执行');
-    }
-    this.active.add(id);
-    try {
-      const found = await this.discover(input, {
-        ...searchPlan(input)[0],
-        run_id: id,
-      });
-      if (!found.candidates.length) {
-        const output = this.output(op, {
-          outcome: found.review_candidates?.length ? 'review' : 'no_new_candidates',
-          skipped: found.skipped_existing,
-          research: { review_candidates: found.review_candidates || [] },
-          reason: '本次搜索没有新的独立企业官网',
-        });
-        this.store.complete(op, output);
-        return output;
-      }
-      op.child = id + '-research';
-      this.store.save(op);
-      const output = await this.research(input, { ...found.candidates[0], operation_id: op.child });
-      this.store.complete(op, output);
-      return output;
-    } finally {
-      this.active.delete(id);
-    }
   }
   close() {
     this.assessments.close();

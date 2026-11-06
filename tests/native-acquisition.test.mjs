@@ -24,7 +24,6 @@ const input = {
   country: 'United States',
   region: 'Florida',
   product: 'zip screens',
-  audience: 'BC',
   customer_type: '',
   customer_profile: 'all',
   search_query: 'zip screens Florida',
@@ -344,7 +343,7 @@ test('新名称字段贯通研究、飞书写入读回和持久身份资料', as
 
 for (const [scenarioIndex, scenario] of [
   {
-    name: '个人装修求购账号，即使有公司名或选择 C 端也淘汰',
+    name: '个人装修求购账号，即使有公司名也淘汰',
     text: 'I am John Smith, a homeowner looking for zip screens for my own house. This is a personal consumer account, not a trading business.',
     fields: {
       entity_type: 'individual',
@@ -352,7 +351,6 @@ for (const [scenarioIndex, scenario] of [
       operating_model: 'unknown',
       audience: 'C',
     },
-    target: { audience: 'C' },
     code: 'individual_consumer',
   },
   {
@@ -478,10 +476,10 @@ test('C 端经营企业可以入库：全国销售、进口渠道、兼营本地
     });
     const svc = f.make();
     try {
-      const output = await svc.research(
-        { ...input, audience: 'C' },
-        { source_url: site, operation_id: 'eligible-c-business' },
-      );
+      const output = await svc.research(input, {
+        source_url: site,
+        operation_id: 'eligible-c-business',
+      });
       assert.equal(output.research.eligibility.status, 'eligible');
       assert.equal(output.新增, 1);
       assert.equal(f.records[0].fields.来源链接, site);
@@ -1074,8 +1072,8 @@ test('统一获客接口以 native 引擎完成单家批量任务，仅使用官
         ['open.feishu.cn', 'api.tavily.com', 'api.deepseek.com'].includes(new URL(c.url).hostname),
       ),
     );
-    const history = await (await fetch(root + '/executions')).json();
-    assert.equal(history.data[0].status, 'completed');
+    const history = await (await fetch(root + '/jobs')).json();
+    assert.equal(history.jobs.find((job) => job.id === created.id).status, 'completed');
   } finally {
     await new Promise((resolve) => app.close(resolve));
   }

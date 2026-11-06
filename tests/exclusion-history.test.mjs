@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { AcquisitionStore } from '../server/acquisition-store.mjs';
 import { exclusionConditionsKey } from '../server/exclusion-conditions.mjs';
 
-const target = { country: 'United States', product: 'zip screens', audience: 'BC' };
+const target = { country: 'United States', product: 'zip screens' };
 const site = 'https://excluded.example.org/';
 const stamp = (day) => `2026-10-${String(day).padStart(2, '0')}T12:00:00.000Z`;
 
@@ -81,7 +81,7 @@ test('历史回填越过最近100条，识别旧预筛并按时间跳过失败�
     add(store, operation('foreign', 'scope-b', 3, 'https://foreign.example.org/'));
     add(store, {
       ...operation('wrapper', 'scope-a', 3, 'https://wrapper.example.org/'),
-      input: { mode: 'run', input: target },
+      input: { input: target },
     });
     add(store, {
       ...operation('incompatible', 'scope-a', 3, 'https://invalid.example.org/'),

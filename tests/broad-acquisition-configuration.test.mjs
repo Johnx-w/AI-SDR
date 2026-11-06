@@ -62,7 +62,8 @@ test('全范围及偏好保存在执行和定时快照，旧计划不会被改�
         name: '全范围定时获客',
         input,
         timing: {
-          repeat: 'daily',
+          repeat: 'weekly',
+          weekdays: [1, 2, 3, 4, 5, 6, 7],
           startDate: '2026-10-23',
           times: ['09:00'],
           timezone: 'Asia/Shanghai',
@@ -82,7 +83,8 @@ test('全范围及偏好保存在执行和定时快照，旧计划不会被改�
           target_count: 20,
         },
         timing: {
-          repeat: 'daily',
+          repeat: 'weekly',
+          weekdays: [1, 2, 3, 4, 5, 6, 7],
           startDate: '2026-10-23',
           times: ['10:00'],
           timezone: 'Asia/Shanghai',

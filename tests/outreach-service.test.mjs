@@ -213,6 +213,30 @@ test('旧计划保存的无效发送时段不会进入发送窗口', async (t) =
   }
 });
 
+test('网页编辑未提交客户名单时保留范围，只有显式空名单才解除限制', async (t) => {
+  const h = harness();
+  t.after(() => h.service.close());
+  h.state.leads = [buyer('first'), buyer('second')];
+  const created = h.service.saveCampaign(h.campaignInput({ customerIds: ['first'] }));
+  const edited = h.service.saveCampaign(
+    h.campaignInput({ name: 'Edited in web', revision: created.revision }),
+    created.id,
+  );
+  assert.deepEqual(edited.customerIds, ['first']);
+  assert.deepEqual(
+    (await h.service.candidates(edited)).eligible.map((row) => row.customerId),
+    ['first'],
+  );
+  const cleared = h.service.saveCampaign(
+    h.campaignInput({ revision: edited.revision, customerIds: [] }),
+    edited.id,
+  );
+  assert.deepEqual(
+    (await h.service.candidates(cleared)).eligible.map((row) => row.customerId).sort(),
+    ['first', 'second'],
+  );
+});
+
 test('编辑计划保留发送时段，只有显式 null 才清除', async (t) => {
   const h = harness();
   t.after(() => h.service.close());

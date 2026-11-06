@@ -167,7 +167,7 @@ export function ScheduledAcquisition() {
                 </h2>
                 <p>
                   {scheduleRepeatLabel(plan.timing)} · {plan.timing.startDate} 起 ·{' '}
-                  {(plan.timing.times || [plan.timing.time]).filter(Boolean).join('、')}
+                  {plan.timing.times.join('、')}
                   （北京时间，每个时间点执行一次）
                 </p>
               </div>

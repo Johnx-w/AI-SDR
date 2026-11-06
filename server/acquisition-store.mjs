@@ -99,13 +99,7 @@ export class AcquisitionStore {
           let op, key, domain;
           try {
             op = JSON.parse(row.data);
-            if (
-              op.input?.mode === 'run' ||
-              !op.input?.item ||
-              !op.input?.input ||
-              !op.id ||
-              !(op.updatedAt || op.createdAt)
-            )
+            if (!op.input?.item || !op.input?.input || !op.id || !(op.updatedAt || op.createdAt))
               continue;
             key = exclusionConditionsKey(op.input.input);
             domain = domainKey(op.input.item.source_url);
@@ -134,15 +128,7 @@ export class AcquisitionStore {
   insertExclusion(key, domain, op) {
     const research = op.research || op.output?.research || {};
     const summary = Object.fromEntries(
-      [
-        'entity_type',
-        'product_match',
-        'country_match',
-        'audience_match',
-        'customer_type_match',
-        'profile_match',
-        'required_match',
-      ]
+      ['entity_type', 'product_match', 'country_match', 'customer_type_match', 'profile_match']
         .filter((field) => research[field] !== undefined)
         .map((field) => [field, research[field]]),
     );
@@ -290,18 +276,6 @@ export class AcquisitionStore {
     operation.state = 'completed';
     operation.output = output;
     return this.save(operation);
-  }
-  history() {
-    return this.db
-      .prepare('SELECT data FROM acquisition_operations ORDER BY rowid DESC LIMIT 100')
-      .all()
-      .map((r) => JSON.parse(r.data))
-      .map((o) => ({
-        id: o.id,
-        status: o.state,
-        startedAt: o.createdAt,
-        stoppedAt: o.state === 'completed' ? o.updatedAt : null,
-      }));
   }
   byAssessment(id) {
     const row = this.db

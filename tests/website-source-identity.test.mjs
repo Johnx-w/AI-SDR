@@ -83,7 +83,7 @@ test('直接研究已知监管资料时不抓网页、不调用模型或写客�
       },
     ]) {
       const result = await service.research(
-        { country: 'United States', product: 'window coverings', audience: 'BC' },
+        { country: 'United States', product: 'window coverings' },
         item,
       );
       assert.equal(result.outcome, 'review');
@@ -134,7 +134,7 @@ test('旧队列中的未知贸易平台由正式研究入口正文识别，不�
   });
   try {
     const result = await service.research(
-      { country: 'United States', product: 'zip screens', audience: 'BC' },
+      { country: 'United States', product: 'zip screens' },
       {
         source_url: 'https://trade-data.example.org/importer/acme-screens',
         operation_id: 'unknown-third-party-profile',

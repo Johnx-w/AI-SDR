@@ -13,7 +13,6 @@ const response = await fetch(base + '/jobs', {
   body: JSON.stringify({
     country: 'United States',
     region: 'Florida',
-    audience: 'BC',
     product: 'outdoor zip screens',
     acquisition_channel: 'tavily_web',
     search_query: 'outdoor zip screens Florida United States',

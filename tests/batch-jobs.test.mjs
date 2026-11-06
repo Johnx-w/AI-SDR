@@ -10,7 +10,6 @@ const input = {
   country: 'United States',
   region: 'Florida',
   product: 'outdoor zip screens, pergolas',
-  audience: 'BC',
   search_query: 'outdoor zip screens Florida United States',
   acquisition_channel: 'tavily_web',
   target_count: 20,
@@ -155,14 +154,13 @@ test('旧市场任务禁止重新规划或恢复，已有记录不删除', async
     manager.close();
   }
 });
-test('数量仅接受1–200整数，域名规范化，客群与地域保留', () => {
+test('数量仅接受1–200整数，域名规范化并保留地域', () => {
   for (const n of [1, 20, 200]) assert.equal(validateCount(n), n);
   for (const n of [0, 201, 1.5, '20', null, NaN]) assert.throws(() => validateCount(n), /整数/);
   assert.equal(domainKey('https://WWW.Example.com/contact?x=1'), 'example.com');
   assert.equal(domainKey('http://127.0.0.1/'), '');
-  const plan = searchPlan({ ...input, audience: 'B' });
+  const plan = searchPlan(input);
   assert.ok(plan.every((p) => p.query.includes('Florida') && p.query.includes('United States')));
-  assert.ok(plan.slice(1).every((p) => p.query.includes('wholesale')));
 });
 for (const target of [1, 20, 200])
   test(`模拟新增${target}家，达到目标立即停止且无超额`, async () => {
@@ -211,7 +209,7 @@ test('同域不同网页只研究一次，重复与不匹配不占名额，自�
     research: async (_i, c) => {
       calls++;
       if (c.domain === 'same.com')
-        return { research: { audience_match: 'not_matched' }, reason: '不匹配' };
+        return { research: { product_match: 'not_matched' }, reason: '不匹配' };
       records.push({ id: 'r1', website: c.source_url, name: 'New' });
       return {
         新增: 1,
@@ -249,12 +247,10 @@ test('每条实际搜索词记录发现、去重、待核实和评级产出', as
       if (item.domain === 'review.example')
         return {
           outcome: 'review',
-          reason: '必需条件待核实',
+          reason: '客户类型待核实',
           research: {
             review_required: true,
-            requirement_checks: [
-              { condition: '必须有商用项目', verdict: 'unknown', quote: '', source_url: '' },
-            ],
+            customer_type_match: 'unknown',
           },
         };
       records.push({ id: 'rec-accepted', name: 'Accepted', website: item.source_url });

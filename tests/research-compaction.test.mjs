@@ -203,7 +203,7 @@ test('预算删节和正文精简共用原文边界，不拆Unicode，删除处�
   assert.deepEqual(forged.products, []);
 });
 
-test('精简缺口不能拼接为企业、必需条件、评级引文', async () => {
+test('精简缺口不能拼接为企业、产品、评级引文', async () => {
   const left = 'Example Blinds Ltd supplies roller blinds.';
   const right = 'We serve trade customers nationwide.';
   const result = await collect('<p>' + left + '</p><p>Accept all cookies</p><p>' + right + '</p>');
@@ -213,15 +213,10 @@ test('精简缺口不能拼接为企业、必需条件、评级引文', async ()
     const raw = {
       company_name: evidence('Example Blinds Ltd', quote),
       products: [evidence('roller blinds', quote)],
-      requirement_checks: [
-        { condition: '全国供货', verdict: 'matched', quote, source_url: source },
-      ],
     };
-    const input = { ...target, required_requirements: ['全国供货'] };
-    for (const research of [parseCompanyResearch(response(raw), result, input)]) {
+    for (const research of [parseCompanyResearch(response(raw), result, target)]) {
       assert.equal(research.company_name, null);
       assert.deepEqual(Array.from(research.products), []);
-      assert.equal(research.required_match, 'unknown');
     }
     const opportunities = verifiedAssessmentOpportunities(
       [

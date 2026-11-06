@@ -212,23 +212,6 @@ function DetailRows({
                     </small>
                   ),
               )}
-              {!!row.requirementChecks?.length && (
-                <small>
-                  必需条件：
-                  {row.requirementChecks
-                    .map(
-                      (check) =>
-                        `${check.condition}（${
-                          check.verdict === 'matched'
-                            ? '符合'
-                            : check.verdict === 'not_matched'
-                              ? '不符合'
-                              : '待核实'
-                        }）`,
-                    )
-                    .join('；')}
-                </small>
-              )}
               {row.result === 'review' && (
                 <ReviewAction jobId={jobId} index={allRows.indexOf(row)} row={row} />
               )}

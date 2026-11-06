@@ -26,12 +26,9 @@ export function exclusionConditionsKey(input) {
     product: products.length ? products.map((product) => product.value).join(', ') : target.product,
     products,
     environment_preference: target.environment_preference ?? 'all',
-    audience: target.audience,
     customer_type: target.customer_type,
     customer_types: sorted(target.customer_types || []),
     customer_profile: target.customer_profile,
-    preferred_requirements: target.preferred_requirements ?? '',
-    required_requirements: sorted(target.required_requirements || []),
     query_mode: target.query_mode ?? '',
     acquisition_channel: target.acquisition_channel,
   };

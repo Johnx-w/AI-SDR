@@ -12,7 +12,6 @@ const input = {
   country: 'United States',
   product_scope: 'all',
   product: 'window coverings',
-  audience: 'BC',
   acquisition_channel: 'web',
   query_mode: 'auto',
   target_count: 20,

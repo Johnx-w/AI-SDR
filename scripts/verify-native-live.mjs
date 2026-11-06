@@ -50,7 +50,6 @@ const input = {
   country: 'United States',
   region: 'Florida',
   product: 'outdoor zip screens',
-  audience: 'BC',
   customer_type: '',
   customer_profile: 'all',
   search_query: 'outdoor zip screens Florida',

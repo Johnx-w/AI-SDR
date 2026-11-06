@@ -8,7 +8,7 @@ import {
   planWebsitePages,
 } from '../server/website-metadata.mjs';
 import { extractContacts } from '../server/contact-extractor.mjs';
-const target = { country: 'Europe', region: '', product: 'screens', audience: 'BC' };
+const target = { country: 'Europe', region: '', product: 'screens' };
 test('加拿大省区和欧洲有效；移除的市场和分组下的州不可使用', () => {
   assert.equal(locationOptions('Canada').regions.length, 13);
   assert.ok(validateTarget(target).market_countries.length > 30);
@@ -21,7 +21,7 @@ test('加拿大省区和欧洲有效；移除的市场和分组下的州不可�
   assert.throws(() => validateTarget({ ...target, region: 'Florida' }));
   assert.throws(() => validateTarget({ ...target, audience: 'both' }));
 });
-test('AI 逐字证据校验会剔除无依据事实；BC 目标不要求企业兼营', () => {
+test('AI 剔除无依据事实，保留服务 C 端的企业及其客群事实', () => {
   const source_url = 'https://business.example.org/';
   const page = {
     source_url,
@@ -73,13 +73,14 @@ test('AI 逐字证据校验会剔除无依据事实；BC 目标不要求企业�
     status: 'completed',
     output: [{ content: [{ type: 'output_text', text: raw }] }],
   };
-  const r = parseCompanyResearch(response, page, { audience: 'BC' });
+  const r = parseCompanyResearch(response, page);
   assert.equal(r.ok, true);
-  assert.equal(r.audience_match, 'unrestricted');
+  assert.equal(r.audience, 'C');
+  assert.equal(Object.hasOwn(r, 'audience_match'), false);
   assert.equal(r.actual_country, null);
   assert.deepEqual(r.products, ['shades']);
-  assert.equal(parseCompanyResearch(response, page, { audience: 'B' }).ok, false);
   const fields = researchFields(r, { addresses: [], contacts: [], social: [], service_areas: [] });
+  assert.equal(fields['服务客群'], 'C端');
   assert.equal(fields['主营产品偏好'], '以住宅遮阳帘为主');
   assert.equal(fields['客户等级'], undefined);
   assert.equal(fields['画像JSON'], undefined);
@@ -133,11 +134,10 @@ test('未通过引文校验的公司名和分析不覆盖原值；可从已验�
       },
     ],
   };
-  const r = parseCompanyResearch(
-    response,
-    { source_url, research_pages: [{ source_url, text: 'We supply solar screens.' }] },
-    { audience: 'BC' },
-  );
+  const r = parseCompanyResearch(response, {
+    source_url,
+    research_pages: [{ source_url, text: 'We supply solar screens.' }],
+  });
   assert.equal(r.company_name, null);
   assert.match(r.main_product_preference, /solar screens/);
   assert.ok(r.facts.some((f) => f.method === 'summary_of_verified_products'));

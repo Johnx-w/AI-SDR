@@ -110,13 +110,13 @@ test('缺失或不安全的来源保持原值，空值命题的不同引文不�
   const groups = groupWebsiteEvidence([
     fact('company_name', 'Acme', 'Public name', ''),
     fact('company_name', 'Acme', 'Name on supplied page', 'javascript:alert(1)'),
-    fact('preference_evidence', '', 'Different claim A', home),
-    fact('preference_evidence', '', 'Different claim B', home),
+    fact('industry_profile', '', 'Different claim A', home),
+    fact('industry_profile', '', 'Different claim B', home),
   ]);
   assert.equal(groups.length, 3);
   assert.equal(groups[0].records[0].source_url, '');
   assert.equal(groups[0].records[1].source_url, 'javascript:alert(1)');
-  assert.equal(groups[1].category, '补充要求相关证据');
+  assert.equal(groups[1].category, '企业概况');
   assert.equal(groups[1].records[0].quote, 'Different claim A');
   assert.equal(groups[2].records[0].quote, 'Different claim B');
 });

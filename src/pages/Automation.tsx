@@ -36,7 +36,6 @@ import {
 import acquisition from '../data/acquisition.json' with { type: 'json' };
 import {
   weekdays,
-  scheduleWeekdays,
   scheduleRepeatLabel,
   validateTiming,
   nextOccurrence,
@@ -58,10 +57,7 @@ const dateInBeijing = () => new Date(Date.now() + 8 * 3600000).toISOString().sli
 const initialInput: WorkflowInput = {
   query_mode: 'auto',
   auto_first_touch: false,
-  audience: 'BC',
   customer_types: [],
-  preferred_requirements: '',
-  required_requirements: [],
   country: 'United States',
   region: '',
   product_scope: 'all',
@@ -104,9 +100,6 @@ export function Automation() {
   const [input, setInput] = useState<WorkflowInput>({
     ...initialInput,
     ...(restored?.input || {}),
-    audience: 'BC',
-    preferred_requirements: '',
-    required_requirements: [],
   });
   const [runMode, setRunMode] = useState(
     restored?.mode || (params.get('mode') === 'scheduled' ? 'scheduled' : 'now'),
@@ -279,8 +272,7 @@ export function Automation() {
       timingError = (error as Error).message;
     }
   }
-  const weeklyRuns =
-    (timing.repeat === 'daily' ? 7 : scheduleWeekdays(timing).length) * timing.times.length;
+  const weeklyRuns = (timing.weekdays?.length ?? 0) * timing.times.length;
   const canSubmit =
     status?.configured &&
     !statusError &&
@@ -811,27 +803,16 @@ export function Automation() {
                             ['weekly', '重复执行'],
                           ] as const
                         ).map(([value, label]) => (
-                          <label
-                            className={
-                              (timing.repeat === 'once' ? 'once' : 'weekly') === value
-                                ? 'selected'
-                                : ''
-                            }
-                            key={value}
-                          >
+                          <label className={timing.repeat === value ? 'selected' : ''} key={value}>
                             <input
                               type="radio"
                               name="schedule-repeat"
                               value={value}
-                              checked={(timing.repeat === 'once' ? 'once' : 'weekly') === value}
+                              checked={timing.repeat === value}
                               onChange={() =>
                                 setTiming({
                                   ...timing,
                                   repeat: value,
-                                  weekdays:
-                                    timing.repeat === 'daily'
-                                      ? [1, 2, 3, 4, 5, 6, 7]
-                                      : scheduleWeekdays(timing),
                                   times: value === 'once' ? timing.times.slice(0, 1) : timing.times,
                                 })
                               }
@@ -849,10 +830,7 @@ export function Automation() {
                             type="multiple"
                             className="acq-weekdays"
                             aria-labelledby="acq-weekday-label"
-                            value={(timing.repeat === 'daily'
-                              ? [1, 2, 3, 4, 5, 6, 7]
-                              : scheduleWeekdays(timing)
-                            ).map(String)}
+                            value={(timing.weekdays ?? []).map(String)}
                             disabled={locked}
                             onValueChange={(values) =>
                               setTiming({

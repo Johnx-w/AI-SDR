@@ -2,7 +2,6 @@ import type {
   AcquisitionJob,
   IntegrationStatus,
   WorkflowInput,
-  WorkflowRun,
   AcquisitionSchedule,
   ScheduleTiming,
   ConnectionSettings,
@@ -97,16 +96,6 @@ export const acquisitionApi = {
   status: () => request<IntegrationStatus>('/status'),
   locations: (country: string, region: string, signal?: AbortSignal) =>
     request<LocationOptions>(`/locations?${new URLSearchParams({ country, region })}`, { signal }),
-  run: (input: WorkflowInput, requestId: string) =>
-    request<WorkflowRun>('/runs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': requestId },
-      body: JSON.stringify(input),
-    }),
-  executions: () =>
-    request<{
-      data: { id: string; status: string; startedAt: string; stoppedAt: string | null }[];
-    }>('/executions'),
 };
 
 async function connectionsRequest(init?: RequestInit): Promise<ConnectionSettings> {

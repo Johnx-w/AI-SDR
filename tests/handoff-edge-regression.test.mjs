@@ -12,7 +12,6 @@ const research = {
   company_name: 'Buyer LLC',
   entity_type: 'business',
   eligibility: { status: 'eligible' },
-  required_match: 'unrestricted',
   checked_urls: [site],
   company_identity: {
     name: 'Buyer LLC',
@@ -137,7 +136,6 @@ test('同企业不同操作重放旧新增结果不会重复计入新增', async
   const target = {
     country: 'United States',
     product: 'roller blinds',
-    audience: 'B',
     acquisition_channel: 'web',
     target_count: 1,
     research_budget: 1,

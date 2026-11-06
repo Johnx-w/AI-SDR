@@ -86,9 +86,6 @@ export function createAcquisitionProvider({
         : null;
     },
     status: (id) => service().status(id),
-    recoverRun: (id) => service().status(id),
-    run: (...args) => service().run(...args),
-    history: () => service().store.history(),
     close: () => {
       const pending = customers.close?.();
       if (pending) return pending.finally(() => native?.close());

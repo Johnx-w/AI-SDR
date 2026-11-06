@@ -5,7 +5,7 @@ import { AcquisitionStore } from '../server/acquisition-store.mjs';
 
 const site = 'https://blinds.example.org/';
 const text = 'Example Blinds supplies zip screens and roller blinds to trade customers.';
-const input = { country: 'United States', product: 'zip screens', audience: 'BC' };
+const input = { country: 'United States', product: 'zip screens' };
 const selectShell = `Custom Blinds, Shades & Curtains for Every Window | SelectBlinds
 Skip to content
 Over 18 million windows covered!

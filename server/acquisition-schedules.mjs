@@ -57,8 +57,7 @@ export class AcquisitionSchedules {
         /* Retain schedule history if an old job was archived. */
       }
     }
-    const times = plan.timing.times || [plan.timing.time];
-    return { ...plan, timing: { ...plan.timing, times, time: times[0] }, lastJob };
+    return { ...plan, lastJob };
   }
   create({ name, input, timing }, key) {
     this.checkInput(input);
@@ -143,48 +142,53 @@ export class AcquisitionSchedules {
       // selected. Returning to its table resumes its own persisted schedule.
       if (plan.scope && plan.scope !== currentScope) continue;
       const now = this.now();
-      if (!plan.nextRunAt || Date.parse(plan.nextRunAt) > now) continue;
-      const manager = this.jobs();
-      const key = `schedule-${plan.id}-${Date.parse(plan.nextRunAt)}`;
-      // Recover a crash between job creation and schedule bookkeeping without replaying it.
-      let job = manager.findByKey(key);
-      if (!job) {
-        // A minute-precision slot can run during that minute; missed slots never build a backlog.
-        const skipped =
-          now >= Date.parse(plan.nextRunAt) + 60000
+      const minuteStart = Math.floor(now / 60000) * 60000;
+      while (plan.nextRunAt && Date.parse(plan.nextRunAt) <= now) {
+        const manager = this.jobs();
+        const key = `schedule-${plan.id}-${Date.parse(plan.nextRunAt)}`;
+        // Recover a crash between job creation and schedule bookkeeping without replaying it.
+        let job = manager.findByKey(key);
+        if (!job) {
+          // A minute-precision slot can run during that minute; missed slots never build a backlog.
+          const missed = Date.parse(plan.nextRunAt) < minuteStart;
+          const skipped = missed
             ? '执行时点已错过'
             : !this.ready()
               ? 'API 连接尚未配置'
               : !this.available() || manager.active()
                 ? '当前任务尚未完成或待核对'
                 : '';
-        if (skipped) {
-          plan.lastError = `${skipped}，已跳过本次执行，不补跑`;
-          plan.nextRunAt = nextOccurrence(plan.timing, now);
-          if (!plan.nextRunAt) plan.status = 'completed';
-          this.save(plan);
-          continue;
+          if (skipped) {
+            plan.lastError = `${skipped}，已跳过本次执行，不补跑`;
+            plan.nextRunAt = nextOccurrence(plan.timing, missed ? minuteStart - 1 : now);
+            if (!plan.nextRunAt) plan.status = 'completed';
+            this.save(plan);
+            continue;
+          }
+          try {
+            // The connection may have changed since this plan was saved. Never
+            // dispatch a preserved scope to an engine that cannot honor it.
+            this.checkInput(plan.input);
+            job = manager.create(plan.input, key, { scheduleId: plan.id });
+          } catch (error) {
+            const reason = error.status ? error.message : '计划启动失败，请检查本机服务';
+            if (plan.lastError !== reason) this.save({ ...plan, lastError: reason });
+            break;
+          }
         }
-        try {
-          // The connection may have changed since this plan was saved. Never
-          // dispatch a preserved scope to an engine that cannot honor it.
-          this.checkInput(plan.input);
-          job = manager.create(plan.input, key, { scheduleId: plan.id });
-        } catch (error) {
-          const reason = error.status ? error.message : '计划启动失败，请检查本机服务';
-          if (plan.lastError !== reason) this.save({ ...plan, lastError: reason });
-          continue;
-        }
+        plan.lastJobId = job.id;
+        plan.lastScheduledAt = plan.nextRunAt;
+        plan.lastRunAt = job.createdAt;
+        plan.runs++;
+        plan.lastError = '';
+        plan.nextRunAt = nextOccurrence(
+          plan.timing,
+          Math.max(Date.parse(plan.nextRunAt), minuteStart - 1),
+        );
+        if (!plan.nextRunAt) plan.status = 'completed';
+        this.save(plan);
+        if (plan.input.auto_first_touch) this.onOutreachChange();
       }
-      plan.lastJobId = job.id;
-      plan.lastScheduledAt = plan.nextRunAt;
-      plan.lastRunAt = job.createdAt;
-      plan.runs++;
-      plan.lastError = '';
-      plan.nextRunAt = nextOccurrence(plan.timing, now);
-      if (!plan.nextRunAt) plan.status = 'completed';
-      this.save(plan);
-      if (plan.input.auto_first_touch) this.onOutreachChange();
     }
   }
   start() {

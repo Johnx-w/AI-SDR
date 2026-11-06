@@ -56,11 +56,6 @@ export const groupedMarkets = {
     'Vatican City',
   ],
 };
-export const audienceTerms = {
-  B: '(wholesale OR trade OR dealer OR commercial)',
-  C: '(residential OR homeowners OR home)',
-  BC: '',
-};
 export const canadaRegions = [
   ['AB', 'Alberta', '艾伯塔省'],
   ['BC', 'British Columbia', '不列颠哥伦比亚省'],

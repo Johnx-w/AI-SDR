@@ -14,7 +14,6 @@ const target = {
   product: 'window coverings',
   country: 'United States',
   market_countries: ['United States'],
-  audience: 'BC',
   query_mode: 'auto',
 };
 

@@ -10,7 +10,6 @@ const target = {
   country: 'United States',
   region: 'Florida',
   product: 'roller blinds',
-  audience: 'B',
   acquisition_channel: 'tavily_web',
   target_count: 1,
 };

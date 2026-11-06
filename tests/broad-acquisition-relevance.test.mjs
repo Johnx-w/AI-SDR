@@ -12,7 +12,6 @@ const broad = {
   query_mode: 'auto',
   country: 'Australia',
   market_countries: ['Australia'],
-  audience: 'BC',
 };
 const source = 'https://example-window.example/about';
 const evidence = (value, quote) => ({ value, quote, source_url: source });

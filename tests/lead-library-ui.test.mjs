@@ -291,15 +291,13 @@ test('同步耗时与变更计数集中在默认折叠的同步详情中', () =>
   assert.match(text, /新增 1 位 · 更新 2 位 · 移除 3 位 · 未变化 10 位/);
 });
 
-test('官网偏好证据使用可理解的中文名称', () => {
+test('企业客群事实使用可理解的中文名称', () => {
   const html = renderLibrary('官网证据', [
     {
       ...lead,
-      facts: [
-        { field: 'preference_evidence', value: 'motorized', quote: 'We offer motorized blinds.' },
-      ],
+      facts: [{ field: 'audience', value: 'C', quote: 'We supply blinds to homeowners.' }],
     },
   ]);
-  assert.match(html, /补充要求相关证据/);
-  assert.doesNotMatch(html, /preference_evidence/);
+  assert.match(html, /服务客群/);
+  assert.doesNotMatch(html, /audience/);
 });

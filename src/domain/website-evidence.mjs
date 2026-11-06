@@ -15,7 +15,6 @@ const categories = {
   manufactured_products: '制造产品',
   actual_country: '经营国家',
   customer_type: '客户类型',
-  preference_evidence: '补充要求相关证据',
   audience: '服务客群',
   main_product_preference: '主营产品概况',
   industry_profile: '企业概况',

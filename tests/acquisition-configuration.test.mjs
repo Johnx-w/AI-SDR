@@ -17,17 +17,23 @@ const selectedProduct = {
   aliases: ['electric roller shades'],
 };
 
-test('结构化产品、角色和条件经过校验，并由同一快照生成搜索词', () => {
+test('获客参数拒绝已删除的客群筛选、补充要求和必需条件', () => {
+  for (const removed of [
+    { audience: 'B' },
+    { preferred_requirements: '优先酒店项目' },
+    { required_requirements: ['只服务企业'] },
+  ])
+    assert.throws(() => validateTarget({ country: 'United States', ...removed }), { status: 400 });
+});
+
+test('结构化产品和角色经过校验，并由同一快照生成搜索词', () => {
   const target = validateTarget({
     query_mode: 'auto',
     products: [selectedProduct],
     customer_types: ['supplier', 'distributor'],
-    preferred_requirements: '优先有酒店工程经验',
-    required_requirements: ['必须是经营企业'],
     country: 'United States',
     region: 'Texas',
     product: '由结构化产品覆盖',
-    audience: 'BC',
     acquisition_channel: 'tavily_web',
   });
   assert.equal(target.product, selectedProduct.value);
@@ -52,7 +58,6 @@ test('室内和室外成品可以同时全选并提交', () => {
     country: 'United States',
     region: '',
     product: '',
-    audience: 'BC',
     acquisition_channel: 'tavily_web',
   });
   assert.equal(target.products.length, finishedProducts.length);
@@ -71,7 +76,6 @@ test('产品数量仍受任务上限保护', () => {
         country: 'United States',
         region: '',
         product: '',
-        audience: 'BC',
         acquisition_channel: 'tavily_web',
       }),
     /1–40个产品/,
@@ -103,7 +107,6 @@ test('大型组合按执行上限均匀生成搜索计划', () => {
       ],
       country: countries[0],
       region: '',
-      audience: 'BC',
     },
     countries,
   );
@@ -136,7 +139,7 @@ const sourceUrl = 'https://example.com/about';
 const sourceText =
   'Example Blinds is a distributor of roller blinds for commercial projects across Texas.';
 const evidence = (value, quote = sourceText) => ({ value, quote, source_url: sourceUrl });
-const response = (requirementChecks) => ({
+const response = () => ({
   choices: [
     {
       finish_reason: 'stop',
@@ -151,8 +154,6 @@ const response = (requirementChecks) => ({
           actual_country: evidence('United States'),
           customer_type: evidence('distributor'),
           customer_types: [evidence('distributor')],
-          preference_evidence: [],
-          requirement_checks: requirementChecks,
           audience: evidence('B'),
           main_product_preference: evidence('主营卷帘'),
           industry_profile: evidence('窗饰经销企业'),
@@ -175,48 +176,19 @@ const target = {
   query_mode: 'auto',
   product: 'roller blinds',
   country: 'United States',
-  audience: 'BC',
   customer_types: ['importer', 'distributor'],
-  preferred_requirements: '优先有酒店项目',
-  required_requirements: ['必须承接商用项目'],
 };
 
-test('多角色按任意命中；优先偏好缺证不排除，必需条件未知进入待核实', () => {
-  const research = parseCompanyResearch(
-    response([
-      {
-        condition: '必须承接商用项目',
-        verdict: 'unknown',
-        quote: '',
-        source_url: '',
-      },
-    ]),
-    page,
-    target,
-  );
+test('多角色按任意命中，企业客群事实保留且不生成已删除的筛选结论', () => {
+  const research = parseCompanyResearch(response(), page, target);
   assert.equal(research.customer_type_match, 'matched');
-  assert.deepEqual(research.preference_evidence, []);
-  assert.equal(research.required_match, 'unknown');
-  assert.equal(research.review_required, true);
-  assert.match(research.reason, /待核实/);
-});
-
-test('必需条件只有取得明确反证才排除', () => {
-  const contradiction = 'Example Blinds only serves residential homes.';
-  const fullText = sourceText + ' ' + contradiction;
-  const research = parseCompanyResearch(
-    response([
-      {
-        condition: '必须承接商用项目',
-        verdict: 'not_matched',
-        quote: contradiction,
-        source_url: sourceUrl,
-      },
-    ]),
-    { ...page, page_text: fullText, research_pages: [{ source_url: sourceUrl, text: fullText }] },
-    target,
-  );
-  assert.equal(research.required_match, 'not_matched');
-  assert.equal(research.review_required, false);
-  assert.match(research.reason, /不符合必需条件/);
+  assert.equal(research.audience, 'B');
+  assert.ok(research.facts.some((fact) => fact.field === 'audience' && fact.value === 'B'));
+  for (const field of [
+    'preference_evidence',
+    'requirement_checks',
+    'required_match',
+    'audience_match',
+  ])
+    assert.equal(Object.hasOwn(research, field), false);
 });

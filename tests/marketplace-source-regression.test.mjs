@@ -70,7 +70,7 @@ test('未知B2B市场的产品、会员与买卖家注册组合在研究前进�
   });
   try {
     const result = await service.research(
-      { country: 'Canada', product: 'roller blind fabric', audience: 'BC' },
+      { country: 'Canada', product: 'roller blind fabric' },
       { source_url: source, operation_id: 'unknown-marketplace-regression' },
     );
     assert.equal(modelCalls, 0);

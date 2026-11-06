@@ -15,7 +15,12 @@ const plan = (status) => ({
   id: 'plan-1',
   name: '定时计划',
   status,
-  timing: { repeat: 'daily', startDate: '2026-10-30', times: ['09:00'] },
+  timing: {
+    repeat: 'weekly',
+    weekdays: [1, 2, 3, 4, 5, 6, 7],
+    startDate: '2026-10-30',
+    times: ['09:00'],
+  },
   input: { country: 'United States', target_count: 10, product_scope: 'all' },
   nextRunAt: null,
   lastRunAt: null,

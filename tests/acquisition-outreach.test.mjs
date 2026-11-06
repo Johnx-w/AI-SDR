@@ -165,7 +165,8 @@ function harness(path = ':memory:') {
         name: '定时获客',
         input,
         timing: {
-          repeat: 'daily',
+          repeat: 'weekly',
+          weekdays: [1, 2, 3, 4, 5, 6, 7],
           startDate: '2026-11-05',
           times: ['09:00'],
           timezone: 'Asia/Shanghai',

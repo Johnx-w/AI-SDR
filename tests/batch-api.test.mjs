@@ -7,12 +7,11 @@ const input = {
   country: 'United States',
   region: 'Florida',
   product: 'outdoor zip screens',
-  audience: 'BC',
   acquisition_channel: 'tavily_web',
   search_query: 'outdoor zip screens Florida',
   target_count: 1,
 };
-test('批量接口立即接收、持久查询、幂等返回、校验数量且拒绝旧接口并行', async () => {
+test('批量接口立即接收、持久查询、幂等返回、校验数量且活跃任务阻止连接修改', async () => {
   let release;
   const gate = new Promise((r) => (release = r));
   let calls = 0;
@@ -42,7 +41,7 @@ test('批量接口立即接收、持久查询、幂等返回、校验数量且�
   try {
     for (const acquisition_channel of ['customs', 'dual']) {
       const retired = { ...input, acquisition_channel };
-      for (const path of ['/jobs', '/search-preview', '/runs'])
+      for (const path of ['/jobs', '/search-preview'])
         assert.equal((await post(path, retired)).status, 400);
       assert.equal(
         (
@@ -64,7 +63,16 @@ test('批量接口立即接收、持久查询、幂等返回、校验数量且�
     const duplicate = await post('/jobs', input);
     assert.equal((await duplicate.json()).id, job.id);
     assert.equal((await post('/jobs', { ...input, target_count: 5 })).status, 409);
-    assert.equal((await post('/runs', input, 'legacy-conflict')).status, 429);
+    assert.equal(
+      (
+        await fetch(new URL('/api/v1/connections', root), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ values: {} }),
+        })
+      ).status,
+      409,
+    );
     const list = await (await fetch(root + '/jobs')).json();
     assert.equal(list.jobs[0].id, job.id);
     assert.equal('seen' in list.jobs[0], false);

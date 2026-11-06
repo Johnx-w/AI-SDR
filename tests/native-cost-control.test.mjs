@@ -24,7 +24,6 @@ const env = {
 const input = {
   country: 'United States',
   product: 'zip screens',
-  audience: 'BC',
   customer_type: '',
   customer_profile: 'all',
   acquisition_channel: 'tavily_web',
@@ -60,8 +59,6 @@ function fixture({
     actual_country: { value: 'United States', quote: text, source_url: source },
     customer_type: null,
     customer_types: [],
-    preference_evidence: [],
-    requirement_checks: [],
     audience: null,
     main_product_preference: null,
     industry_profile: null,
@@ -243,9 +240,9 @@ test('正文、目标条件或模型身份变化触发新研究，而不是沿�
     await f.research('change-first');
     f.state.text += ' We also supply roller blinds.';
     await f.research('change-page');
-    await f.research('change-target', { ...input, audience: 'B' });
+    await f.research('change-target', { ...input, region: 'Florida' });
     f.providers.model.cacheIdentity = { provider: 'fixture', model: 'text-v2' };
-    await f.research('change-model', { ...input, audience: 'B' });
+    await f.research('change-model', { ...input, region: 'Florida' });
     assert.equal(f.state.calls, 4);
     assert.equal(f.state.writes, 0);
   } finally {
@@ -396,7 +393,7 @@ test('排除按客户库和业务条件隔离，任务预算搜索词与产品�
       product('zip screens', 'finished', ['outdoor screens', 'zip blinds']),
       product('roller blinds', 'finished', ['roller shades']),
     ],
-    required_requirements: ['trade supply', 'United States'],
+    customer_types: ['distributor', 'wholesaler'],
   };
   try {
     const f = fixture({ path });
@@ -408,7 +405,7 @@ test('排除按客户库和业务条件隔离，任务预算搜索词与产品�
         ...p,
         aliases: [...p.aliases].reverse(),
       })),
-      required_requirements: [...target.required_requirements].reverse(),
+      customer_types: [...target.customer_types].reverse(),
       target_count: 50,
       budget: 100,
       search_query: 'different',
@@ -430,7 +427,7 @@ test('排除按客户库和业务条件隔离，任务预算搜索词与产品�
         'alias',
         { products: [product('zip screens', 'finished', ['another name']), target.products[1]] },
       ],
-      ['required', { required_requirements: ['trade supply'] }],
+      ['roles', { customer_types: ['distributor'] }],
     ]) {
       await f.research('conditions-' + id, { ...target, ...changed });
     }

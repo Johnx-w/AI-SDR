@@ -176,7 +176,7 @@ export function CustomerProfile({
       {!!pending.length && (
         <section className="profile-business-card profile-pending" aria-label="需核实事项">
           <h3>需核实事项</h3>
-          <p>经营事实或必需条件存在冲突，自动首封暂不可发送，请先核实。</p>
+          <p>经营事实存在冲突，自动首封暂不可发送，请先核实。</p>
           <ul>
             {pending.map((item) => (
               <li key={item}>

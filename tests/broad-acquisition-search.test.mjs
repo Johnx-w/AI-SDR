@@ -13,7 +13,6 @@ const allProducts = {
   products: [],
   country: 'United States',
   region: '',
-  audience: 'BC',
   customer_types: [],
 };
 const indoor =
@@ -93,7 +92,6 @@ test('指定产品保留精确产品与别名、角色、地区，旧任务保�
     country: 'United States',
     product: 'Roman blinds',
     region: '',
-    audience: 'BC',
     search_query: 'custom legacy search',
   };
   assert.equal(searchPlan(legacy)[0].query, legacy.search_query);

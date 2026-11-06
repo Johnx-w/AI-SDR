@@ -16,7 +16,6 @@ const input = {
   region: '',
   market_countries: ['Australia'],
   product: 'outdoor zip screens, folding arm awnings',
-  audience: 'BC',
   customer_type: 'distributor',
   customer_profile: 'all',
   search_query: 'outdoor screens',

@@ -25,7 +25,8 @@ const input = {
   target_count: 1,
 };
 const timing = {
-  repeat: 'daily',
+  repeat: 'weekly',
+  weekdays: [1, 2, 3, 4, 5, 6, 7],
   startDate: '2030-01-01',
   times: ['09:00', '14:30', '18:00'],
   timezone: 'Asia/Shanghai',
@@ -107,7 +108,7 @@ test('模型配置无需读取目录，HTTP 保存和重载后研究请求使用
   }
 });
 
-test('多时间点按北京时间排序，拒绝重复时间和无效日期；兼容旧单时间与每周计划', () => {
+test('多时间点按北京时间排序，拒绝重复时间和无效日期', () => {
   const now = Date.parse('2030-01-01T08:00:00+08:00');
   assert.deepEqual(validateTiming({ ...timing, times: ['18:00', '09:00'] }, now).times, [
     '09:00',
@@ -122,10 +123,8 @@ test('多时间点按北京时间排序，拒绝重复时间和无效日期；�
     { repeat: 'once', times: ['07:00'] },
   ])
     assert.throws(() => validateTiming({ ...timing, ...changes }, now), { status: 400 });
-  const { times, ...legacy } = timing;
-  assert.deepEqual(validateTiming({ ...legacy, time: '09:00' }, now).times, ['09:00']);
   assert.equal(
-    nextOccurrence({ ...timing, repeat: 'weekly' }, Date.parse('2030-01-01T18:00:00+08:00')),
+    nextOccurrence({ ...timing, weekdays: [2] }, Date.parse('2030-01-01T18:00:00+08:00')),
     '2030-01-08T01:00:00.000Z',
   );
 });
@@ -149,12 +148,10 @@ function harness(extra = {}) {
   };
 }
 
-test('每周多选校验、排序及旧计划兼容，拒绝空选和非法星期', () => {
+test('每周多选校验、排序，拒绝空选和非法星期', () => {
   const weekly = { ...timing, repeat: 'weekly', weekdays: [5, 1, 3] };
   assert.deepEqual(validateTiming(weekly).weekdays, [1, 3, 5]);
   assert.equal(scheduleRepeatLabel(weekly), '每周一、三、五');
-  assert.deepEqual(validateTiming({ ...timing, repeat: 'weekly' }).weekdays, [2]);
-  assert.equal(scheduleRepeatLabel({ ...timing, repeat: 'weekly' }), '每周二');
   for (const weekdays of [[], null, '1', [0], [8], [1.5], ['1'], [1, 1], [1, 2, 3, 4, 5, 6, 7, 8]])
     assert.throws(() => validateTiming({ ...weekly, weekdays }), { status: 400 });
 });
@@ -174,12 +171,12 @@ test('所选星期与开始日期独立，按北京时间跨日、跨周、跨�
   ])
     assert.equal(nextOccurrence(weekly, Date.parse(after)), new Date(expected).toISOString());
   const allDays = { ...weekly, weekdays: [1, 2, 3, 4, 5, 6, 7] };
-  let after = Date.parse('2026-11-05T00:00:00+08:00');
-  for (let i = 0; i < 20; i++) {
-    const next = nextOccurrence(allDays, after);
-    assert.equal(next, nextOccurrence({ ...allDays, repeat: 'daily' }, after));
-    after = Date.parse(next);
-  }
+  assert.equal(scheduleRepeatLabel(allDays), '每天');
+  for (const [after, expected] of [
+    ['2026-11-06T18:00:00+08:00', '2026-11-07T00:15:00+08:00'],
+    ['2026-11-08T18:00:00+08:00', '2026-11-09T00:15:00+08:00'],
+  ])
+    assert.equal(nextOccurrence(allDays, Date.parse(after)), new Date(expected).toISOString());
 });
 
 test('每周多选保存重载后只触发所选星期，暂停恢复跳过已过时间', () => {
@@ -240,6 +237,46 @@ test('计划分钟内正常执行且不重复，多个时点逐次推进', () =>
     schedules.close();
     jobs.close();
   }
+});
+
+test('恢复调度跳过过期时点但执行当前分钟，已创建的旧任务先恢复记账且不重复', () => {
+  for (const time of ['14:30:00', '14:30:20', '14:30:59.999']) {
+    for (const recoverCreated of [false, true]) {
+      const { jobs, schedules, advance } = harness();
+      try {
+        const plan = schedules.create(
+          { name: '恢复当前时点', input, timing },
+          'schedule-current-minute',
+        );
+        if (recoverCreated) {
+          const job = jobs.create(input, `schedule-${plan.id}-${Date.parse(plan.nextRunAt)}`);
+          jobs.finish(job, 'target_reached');
+        }
+        advance(`2030-01-01T${time}+08:00`);
+        schedules.tick();
+        const current = schedules.get(plan.id);
+        assert.equal(current.lastScheduledAt, '2030-01-01T06:30:00.000Z');
+        assert.equal(current.nextRunAt, '2030-01-01T10:00:00.000Z');
+        assert.equal(current.runs, recoverCreated ? 2 : 1);
+        assert.equal(current.lastError, '');
+        schedules.tick();
+        assert.equal(jobs.list().length, recoverCreated ? 2 : 1);
+      } finally {
+        schedules.close();
+        jobs.close();
+      }
+    }
+  }
+});
+
+test('定时参数拒绝旧 daily、单 time 及缺少星期的格式', () => {
+  const weekly = { ...timing, repeat: 'weekly', weekdays: [1, 3, 5] };
+  for (const changes of [
+    { repeat: 'daily' },
+    { times: undefined, time: '09:00' },
+    { weekdays: undefined },
+  ])
+    assert.throws(() => validateTiming({ ...weekly, ...changes }), { status: 400 });
 });
 
 test('错过一分钟或多天的时点不补跑；忙碌时跳过且不打断正在执行的任务', () => {
@@ -345,18 +382,12 @@ test('API 未配置时跳过该时点；暂停后恢复跳过暂停期间时间�
   }
 });
 
-test('HTTP 保存连接即时生效；计划接口校验和幂等生效，未知单次结果阻止更换连接', async () => {
+test('HTTP 保存连接即时生效；计划接口校验和幂等生效', async () => {
   await withApp(
     {
       env: nativeEnv,
       fetchImpl: async () => {
         throw new Error('Unexpected external request');
-      },
-      nativeImpl: {
-        run: async () => {
-          throw Object.assign(new Error('结果待核对'), { status: 409 });
-        },
-        close() {},
       },
     },
     async (base) => {
@@ -411,8 +442,6 @@ test('HTTP 保存连接即时生效；计划接口校验和幂等生效，未知
         listed.schedules.find((item) => item.id === weeklyPlan.id).timing.weekdays,
         [1, 3, 5],
       );
-      assert.equal((await write('/api/v1/acquisition/runs', input)).status, 409);
-      assert.equal((await write('/api/v1/connections', { values: {} }, 'PUT')).status, 409);
     },
   );
 });

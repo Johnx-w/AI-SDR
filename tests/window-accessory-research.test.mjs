@@ -12,7 +12,6 @@ const broad = {
   product_scope: 'all',
   product: 'window coverings',
   market_countries: ['United States'],
-  audience: 'BC',
 };
 const identity = 'Welcome to Fix My Blinds.';
 const accessoryQuote =

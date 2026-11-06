@@ -3,12 +3,21 @@ import assert from 'node:assert/strict';
 import { withApp } from './helpers/http.mjs';
 import { acquisitionConfig } from '../server/acquisition-config.mjs';
 import { ApiConnections } from '../server/api-connections.mjs';
-import { summarizeRunOutput } from '../server/run-outcome.mjs';
 
-test('获客返回只接受结构化业务结果，不再解释工作流数组包装', () => {
-  const output = { outcome: 'completed', 新增: 1, reason: '已保存' };
-  assert.equal(summarizeRunOutput(output).inserted, 1);
-  assert.throws(() => summarizeRunOutput([output]), /业务结果格式无效/);
+test('删除单次获客与执行历史入口，直接返回404且不调用上游', async () => {
+  await withApp({ env: {}, fetchImpl: () => assert.fail('不应调用外部服务') }, async (base) => {
+    assert.equal(
+      (
+        await fetch(base + '/api/v1/acquisition/runs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{',
+        })
+      ).status,
+      404,
+    );
+    assert.equal((await fetch(base + '/api/v1/acquisition/executions')).status, 404);
+  });
 });
 
 test('退役引擎配置不能启用旧服务，兼容入口全部返回404且没有外部调用', async () => {

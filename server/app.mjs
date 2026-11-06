@@ -1,11 +1,10 @@
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { decorateLeadDevelopment } from './lead-development.mjs';
 import { isDevelopmentCustomer } from './customer-eligibility.mjs';
 import { BrandingCache } from './branding-cache.mjs';
-import { summarizeRunOutput } from './run-outcome.mjs';
 import { validateTarget, locationOptions } from './search-target.mjs';
 import {
   BatchJobs,
@@ -107,7 +106,6 @@ export function createApp({
     nativeImpl,
     customerLibrary: () => library(),
   });
-  const runs = new Map();
   const brandingCache = new BrandingCache({ path: env.BRANDING_CACHE_PATH, ...brandingOptions });
   let readingLeads;
   const readLeads = () => {
@@ -250,7 +248,7 @@ export function createApp({
       path: env.SCHEDULE_DB_PATH || ':memory:',
       jobs,
       ready: () => provider.info.configured,
-      available: () => running === 0 && ![...runs.values()].some((run) => run.status === 'unknown'),
+      available: () => running === 0,
       checkInput: (input) => validateInput(input),
       scope: acquisitionScope,
       onOutreachChange: () => {
@@ -270,24 +268,6 @@ export function createApp({
         .update(JSON.stringify([acquisitionScope(), 'native', '']))
         .digest('hex'),
   });
-  const completeRun = (requestId, hash, output) => {
-    let summary;
-    try {
-      summary = summarizeRunOutput(output);
-    } catch (error) {
-      throw new ApiError(502, error.message);
-    }
-    const result = {
-      requestId,
-      status: 'completed',
-      summary,
-      result: output,
-      completedAt: new Date().toISOString(),
-    };
-    runs.set(requestId, { hash, status: 'completed', result });
-    leadLibrary?.invalidate();
-    return result;
-  };
   const json = (response, status, body, serialized = JSON.stringify(body)) => {
     response.writeHead(status, {
       'Content-Type': 'application/json; charset=utf-8',
@@ -382,8 +362,7 @@ export function createApp({
               leadLibrary?.refreshing ||
               provider.syncing ||
               productKnowledge?.documents.running.size ||
-              jobs().active() ||
-              [...runs.values()].some((r) => r.status === 'unknown')
+              jobs().active()
             )
               throw new ApiError(409, '请先完成或核对当前任务，再修改 API 连接');
             const result = connections.update(body);
@@ -801,55 +780,6 @@ export function createApp({
             }
           }
           throw new ApiError(404, '任务接口不存在');
-        }
-        if (url.pathname === `${prefix}/runs` && request.method === 'POST') {
-          if (!provider.info.configured)
-            throw new ApiError(503, '获客执行引擎尚未配置，请先完成接入配置。');
-          const input = validateInput(await readJson(request));
-          const requestId = request.headers['idempotency-key'] || randomUUID();
-          if (typeof requestId !== 'string' || !/^[\w-]{8,100}$/.test(requestId))
-            throw new ApiError(400, '无效的 Idempotency-Key');
-          const hash = createHash('sha256').update(JSON.stringify(input)).digest('hex');
-          const existing = runs.get(requestId);
-          if (existing) {
-            if (existing.hash !== hash) throw new ApiError(409, '同一请求编号不能使用不同参数');
-            if (existing.result) return json(response, 200, existing.result);
-            if (existing.status === 'unknown') {
-              const settled = await provider.recoverRun(requestId);
-              if (settled.settled)
-                return json(response, 200, completeRun(requestId, hash, settled.output));
-            }
-            throw new ApiError(
-              409,
-              existing.status === 'unknown'
-                ? '该任务结果待确认，请先查看执行记录，避免重复入库。'
-                : '该任务正在执行，请勿重复提交。',
-            );
-          }
-          if (running >= 1 || jobs().active())
-            throw new ApiError(429, '已有获客任务正在执行或待核对，请先处理该任务。');
-          // 不自动重试：研究会调用付费服务，未知保存结果需先核对。
-          // 为防止不确定结果被自动重复执行，本地幂等记录保留到服务重启。
-          if (runs.size >= 500)
-            throw new ApiError(503, '本地运行记录已满，请核对所有任务后重启服务。');
-          runs.set(requestId, { hash, status: 'running' });
-          running++;
-          try {
-            const output = await provider.run(input, requestId);
-            return json(response, 200, completeRun(requestId, hash, output));
-          } catch (error) {
-            runs.set(requestId, { hash, status: 'unknown' });
-            if (error.status) throw error;
-            throw new ApiError(
-              504,
-              '未能确认执行结果。任务可能仍在运行，请先查看任务记录，勿直接重复提交。',
-            );
-          } finally {
-            running--;
-          }
-        }
-        if (url.pathname === `${prefix}/executions` && request.method === 'GET') {
-          return json(response, 200, { data: await provider.history() });
         }
         throw new ApiError(404, '接口不存在');
       }

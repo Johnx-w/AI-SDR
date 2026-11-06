@@ -28,6 +28,12 @@ export function locationOptions(country, region = '') {
 export function validateTarget(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input))
     throw invalid('请提交有效的搜索参数');
+  if (
+    ['audience', 'preferred_requirements', 'required_requirements'].some((key) =>
+      Object.hasOwn(input, key),
+    )
+  )
+    throw invalid('获客任务不再支持服务客群筛选、补充要求或必需条件');
   const result = {};
   if (input.product_scope !== undefined && !['all', 'specific'].includes(input.product_scope))
     throw invalid('请选择全部窗饰业务或指定产品');
@@ -105,23 +111,6 @@ export function validateTarget(input) {
     result.customer_type = '';
     result.customer_profile = 'all';
   }
-  if (input.preferred_requirements !== undefined) {
-    if (
-      typeof input.preferred_requirements !== 'string' ||
-      input.preferred_requirements.length > 600
-    )
-      throw invalid('补充要求不能超过600字');
-    result.preferred_requirements = input.preferred_requirements.trim();
-  }
-  if (input.required_requirements !== undefined) {
-    if (
-      !Array.isArray(input.required_requirements) ||
-      input.required_requirements.length > 6 ||
-      input.required_requirements.some((s) => typeof s !== 'string' || !s.trim() || s.length > 160)
-    )
-      throw invalid('必需条件最多6条，每条不超过160字');
-    result.required_requirements = [...new Set(input.required_requirements.map((s) => s.trim()))];
-  }
   if (input.query_mode !== undefined) {
     if (input.query_mode !== 'auto') throw invalid('新任务仅支持自动生成搜索词');
     result.query_mode = 'auto';
@@ -129,9 +118,6 @@ export function validateTarget(input) {
   const channel = input.acquisition_channel ?? 'tavily_web';
   if (!['tavily_web', 'web'].includes(channel)) throw invalid('该获客渠道尚未接入');
   result.acquisition_channel = channel;
-  const audience = input.audience ?? 'BC';
-  if (!['B', 'C', 'BC'].includes(audience)) throw invalid('客群选项必须是 B、C 或 BC');
-  result.audience = audience;
   result.market_countries = groupedMarkets[result.country] || [result.country];
   return result;
 }

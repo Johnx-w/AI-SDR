@@ -297,7 +297,7 @@ test('人工确认后官网研究失败沿用此前完整事实和人工依据�
     const originalFacts = structuredClone(f.engine.assessments.latest(customerId).facts);
     const roleFact = structuredClone(confirmed.lead.assessment.dimensions.R.facts[0]);
     assert.equal(confirmed.lead.score, 85);
-    const input = { product: 'roller blinds', country: 'United States', audience: 'BC' };
+    const input = { product: 'roller blinds', country: 'United States' };
     const item = {
       source_url: website,
       target_record_id: customerId,

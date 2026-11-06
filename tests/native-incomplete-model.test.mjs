@@ -38,7 +38,7 @@ test('新候选模型输出达到上限时明确说明完整JSON未取得，不�
   });
   try {
     const result = await service.research(
-      { country: 'United States', product: 'zip screens', audience: 'BC' },
+      { country: 'United States', product: 'zip screens' },
       {
         source_url: 'https://acmescreens.example.org/',
         operation_id: 'incomplete-model-output-regression',

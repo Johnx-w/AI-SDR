@@ -11,10 +11,10 @@ const business = {
 
 test('企业面向 B、C 或 BC 不影响全局准入，个人消费者始终淘汰', () => {
   for (const audience of ['B', 'C', 'BC']) {
-    const target = { product: 'outdoor zip screens', audience };
-    assert.equal(customerEligibility(business, target).status, 'eligible');
+    const target = { product: 'outdoor zip screens' };
+    assert.equal(customerEligibility({ ...business, audience }, target).status, 'eligible');
     assert.equal(
-      customerEligibility({ ...business, entity_type: 'individual' }, target).code,
+      customerEligibility({ ...business, audience, entity_type: 'individual' }, target).code,
       'individual_consumer',
     );
   }

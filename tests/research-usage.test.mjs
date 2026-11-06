@@ -6,7 +6,6 @@ const input = {
   country: 'United States',
   region: '',
   product: 'roller blinds',
-  audience: 'BC',
   search_query: 'roller blinds United States',
   acquisition_channel: 'web',
   target_count: 5,

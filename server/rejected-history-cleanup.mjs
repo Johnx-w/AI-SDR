@@ -16,10 +16,8 @@ const fixedReasons = new Set([
   '官网主体不是经营企业',
   '官网产品与本次目标不相关',
   '官网所在国家与目标市场不符',
-  '官网服务客群与本次筛选不符',
   '官网客户类型与本次筛选不符',
   '官网业务画像与本次筛选不符',
-  '不符合本次必需条件',
   '官网经营资格与本次目标不符',
   '官网内容与目标产品不相关，已预筛排除',
 ]);
@@ -40,10 +38,8 @@ function fixedReason(operation) {
   if (research.entity_type === 'individual') return '官网主体不是经营企业';
   if (research.product_match === 'not_matched') return '官网产品与本次目标不相关';
   if (research.country_match === 'not_matched') return '官网所在国家与目标市场不符';
-  if (research.audience_match === 'not_matched') return '官网服务客群与本次筛选不符';
   if (research.customer_type_match === 'not_matched') return '官网客户类型与本次筛选不符';
   if (research.profile_match === 'not_matched') return '官网业务画像与本次筛选不符';
-  if (research.required_match === 'not_matched') return '不符合本次必需条件';
   if (research.eligibility?.status === 'rejected') return '官网经营资格与本次目标不符';
   return fixedReasons.has(operation.output?.reason)
     ? operation.output.reason

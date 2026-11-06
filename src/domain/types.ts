@@ -5,9 +5,6 @@ export interface WorkflowInput {
   environment_preference?: 'all' | 'indoor' | 'outdoor';
   products?: ProductSelection[];
   customer_types?: string[];
-  preferred_requirements?: string;
-  required_requirements?: string[];
-  audience: 'B' | 'C' | 'BC';
   customer_type?: string;
   customer_profile?: string;
   country: string;
@@ -70,22 +67,6 @@ export interface IntegrationStatus {
   webProvider?: string;
   modelProvider?: string;
 }
-export interface WorkflowRun {
-  requestId: string;
-  status: 'completed';
-  summary: {
-    outcome: 'completed' | 'partial' | 'failed' | 'review' | 'no_new_candidates' | 'unconfirmed';
-    message: string;
-    inserted?: number;
-    updated?: number;
-    failed?: number;
-    review?: number;
-    executionId?: string;
-  };
-  result: unknown;
-  completedAt: string;
-}
-
 export interface AcquisitionJob {
   scheduleId?: string;
   autoFirstTouchPaused?: boolean;
@@ -127,13 +108,6 @@ export interface AcquisitionJob {
       contact_verified?: boolean;
       contacts?: { kind: string; value: string; source_url: string; quote: string }[];
     };
-    preferenceEvidence?: { value: string; quote: string; source_url: string }[];
-    requirementChecks?: {
-      condition: string;
-      verdict: 'matched' | 'not_matched' | 'unknown';
-      quote?: string;
-      source_url?: string;
-    }[];
     review_resolution?: {
       key: string;
       source_url: string;
@@ -172,11 +146,10 @@ export interface ConnectionSettings {
 }
 
 export interface ScheduleTiming {
-  repeat: 'once' | 'daily' | 'weekly';
+  repeat: 'once' | 'weekly';
   weekdays?: number[];
   startDate: string;
   times: string[];
-  time?: string;
   timezone: 'Asia/Shanghai';
 }
 
