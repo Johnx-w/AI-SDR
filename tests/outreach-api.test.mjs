@@ -3,6 +3,51 @@ import assert from 'node:assert/strict';
 import { createApp } from '../server/app.mjs';
 import { OutreachService } from '../server/outreach-service.mjs';
 
+test('计划摘要省略批量HTML和候选快照，单封读取保留原文且不修改数据', async (t) => {
+  const service = new OutreachService({ mailboxes: { list: () => [] } });
+  const campaign = service.saveCampaign({ name: 'Large historical plan', mailboxIds: [] });
+  service.putCampaign({ ...campaign, status: 'completed' });
+  for (let i = 0; i < 3; i++)
+    service.putDelivery({
+      id: `delivery-${i}`,
+      campaignId: campaign.id,
+      status: 'accepted',
+      subject: `Mail ${i}`,
+      bodyText: `Original ${i}`,
+      bodyHtml: `<p>Original ${i}</p><img src="data:image/png;base64,${'A'.repeat(200_000)}">`,
+      candidate: { evidence: 'Full research snapshot' },
+    });
+  const original = service.detail(campaign.id);
+  const server = createApp({ env: {}, outreachServiceFactory: () => service });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}/api/v1/outreach`;
+  const response = await fetch(`${base}/campaigns/${campaign.id}?summary=1`);
+  assert.equal(response.status, 200);
+  const raw = await response.text();
+  assert.ok(Buffer.byteLength(raw) < 10_000, 'summary must not transfer repeated logos');
+  const summary = JSON.parse(raw);
+  assert.deepEqual(summary.campaign, original.campaign);
+  assert.equal(summary.deliveries.length, 3);
+  assert.equal(summary.deliveries[0].bodyText, 'Original 0');
+  assert.equal(summary.deliveries[0].bodyHtml, undefined);
+  assert.equal(summary.deliveries[0].candidate, undefined);
+  const full = await (await fetch(`${base}/deliveries/delivery-1`)).json();
+  const { candidate, ...expected } = original.deliveries[1];
+  assert.deepEqual(full, expected);
+  assert.equal((await fetch(`${base}/deliveries/missing`)).status, 404);
+  assert.equal(
+    (
+      await fetch(`${base}/deliveries/delivery-1`, {
+        headers: { Origin: 'https://unrelated.example' },
+      })
+    ).status,
+    403,
+  );
+  assert.deepEqual(await (await fetch(`${base}/campaigns/${campaign.id}`)).json(), original);
+  assert.deepEqual(service.detail(campaign.id), original);
+});
+
 test('mailbox signature uploads accept a logo above 32 KB while enforcing the mailbox request limit', async (t) => {
   const saved = [];
   const server = createApp({

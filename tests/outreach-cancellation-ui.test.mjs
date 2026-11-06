@@ -29,6 +29,9 @@ function setup(
     mailboxes = [],
     mailboxDetails = {},
     tab = 'campaigns',
+    detailResponse,
+    deliveryResponse,
+    extraDeliveries = [],
   } = {},
 ) {
   let campaign = {
@@ -62,11 +65,13 @@ function setup(
       from: 'sales@example.org',
       subject: 'Original submitted subject',
       bodyText: 'Original submitted message',
+      bodyHtml: '<p>Original submitted message</p>',
       status: deliveryStatus,
       createdAt: '2026-10-26T08:00:00Z',
       sentAt: '2026-10-26T08:00:00Z',
       messageId: '<original-message@example.org>',
     },
+    ...extraDeliveries,
   ];
   const state = () => ({
     mailboxes,
@@ -149,7 +154,18 @@ function setup(
               pageSize: 20,
               totalPages: 1,
             };
-          if (path === '/campaigns/campaign-one') return structuredClone({ campaign, deliveries });
+          if (path === '/campaigns/campaign-one' || path === '/campaigns/campaign-one?summary=1') {
+            const result = structuredClone({ campaign, deliveries });
+            if (path.endsWith('?summary=1'))
+              result.deliveries = result.deliveries.map(({ bodyHtml, ...item }) => item);
+            return detailResponse ? detailResponse(result) : result;
+          }
+          if (path.startsWith('/deliveries/')) {
+            const result = structuredClone(
+              deliveries.find((item) => path === `/deliveries/${item.id}`),
+            );
+            return deliveryResponse ? deliveryResponse(result) : result;
+          }
           if (path === '/campaigns/campaign-one/approve') {
             deliveries[0].status = 'queued';
             return structuredClone({ campaign, deliveries });
@@ -164,13 +180,22 @@ function setup(
       };
   });
   const { OutreachCommunication } = load(entry);
+  const intervals = new Map();
+  let nextInterval = 0;
+  const timerWindow = {
+    setInterval(callback, delay) {
+      intervals.set(++nextInterval, { callback, delay });
+      return nextInterval;
+    },
+    clearInterval(id) {
+      intervals.delete(id);
+    },
+  };
   const render = () => {
     stateIndex = refIndex = effectIndex = callbackIndex = 0;
     const tree = OutreachCommunication();
-    // Effects load the real page data; polling callbacks are unnecessary for
-    // these explicit user actions and never run in the test environment.
     const previousWindow = globalThis.window;
-    globalThis.window = { setInterval: () => 0, clearInterval() {} };
+    globalThis.window = timerWindow;
     try {
       while (pendingEffects.length) pendingEffects.shift()();
     } finally {
@@ -184,6 +209,24 @@ function setup(
     allElements(root).find((node) => node.type === 'button' && textContent(node) === label);
   return {
     requests,
+    tick(delay = 5000) {
+      const previousDocument = globalThis.document;
+      globalThis.document = { hidden: false };
+      try {
+        for (const timer of [...intervals.values()]) if (timer.delay === delay) timer.callback();
+      } finally {
+        if (previousDocument === undefined) delete globalThis.document;
+        else globalThis.document = previousDocument;
+      }
+    },
+    closeDetail() {
+      const dialog = elements().find(
+        (node) => node.props.title === campaign.name || node.props.title === '计划详情',
+      );
+      assert.ok(dialog);
+      dialog.props.onClose();
+      render();
+    },
     render,
     elements,
     button,
@@ -209,6 +252,147 @@ function setup(
     },
   };
 }
+
+test('详情响应超过多个轮询周期仍显示结果，完成及取消的计划不再自动请求', async () => {
+  for (const status of ['active', 'completed', 'cancelled']) {
+    const pending = [];
+    const h = setup(status, {
+      detailResponse: (result) => new Promise((resolve) => pending.push(() => resolve(result))),
+    });
+    await h.ready();
+    if (status !== 'active') h.click('历史计划');
+    h.click('样稿与详情');
+    h.render();
+    assert.match(h.html(), /正在读取计划/);
+    for (let i = 0; i < 8; i++) h.tick();
+    assert.equal(pending.length, 1, 'a slow request must not be superseded by polling');
+    pending[0]();
+    await flush();
+    assert.doesNotMatch(h.html(), /正在读取计划/);
+    assert.match(h.html(), /Original submitted subject/);
+    h.tick();
+    assert.equal(pending.length, status === 'active' ? 2 : 1);
+    assert.deepEqual(h.writes(), []);
+  }
+});
+
+test('关闭再打开计划取消旧请求，迟到的结果不能覆盖新详情', async () => {
+  const pending = [];
+  const h = setup('active', {
+    detailResponse: (result) => new Promise((resolve) => pending.push({ result, resolve })),
+  });
+  await h.ready();
+  h.click('样稿与详情');
+  h.render();
+  const first = h.requests.find(({ path }) => path.startsWith('/campaigns/'));
+  h.closeDetail();
+  assert.equal(first.init.signal?.aborted, true);
+  h.click('样稿与详情');
+  h.render();
+  pending[1].resolve(pending[1].result);
+  await flush();
+  pending[0].result.campaign.name = 'Stale campaign response';
+  pending[0].resolve(pending[0].result);
+  await flush();
+  assert.doesNotMatch(h.html(), /Stale campaign response|正在读取计划/);
+});
+
+test('详情加载失败结束等待并允许重试', async () => {
+  let fail = true;
+  const h = setup('completed', {
+    detailResponse: (result) => {
+      if (fail) throw new Error('读取计划失败');
+      return result;
+    },
+  });
+  await h.ready();
+  h.click('历史计划');
+  h.click('样稿与详情');
+  h.render();
+  await flush();
+  assert.match(h.html(), /读取计划失败/);
+  assert.doesNotMatch(h.html(), /正在读取计划/);
+  fail = false;
+  h.click('重试读取计划');
+  await flush();
+  assert.match(h.html(), /Original submitted subject/);
+});
+
+test('计划只读取所选邮件正文，轮询相同摘要不重读，切换时忽略旧正文', async () => {
+  const pending = [];
+  const h = setup('active', {
+    extraDeliveries: [
+      {
+        id: 'delivery-two',
+        companyName: 'Second buyer',
+        subject: 'Second subject',
+        bodyText: 'Second body',
+        bodyHtml: '<p>Second body</p>',
+        status: 'accepted',
+      },
+    ],
+    deliveryResponse: (result) => new Promise((resolve) => pending.push({ result, resolve })),
+  });
+  await h.ready();
+  h.click('样稿与详情');
+  h.render();
+  await flush();
+  h.render();
+  assert.equal(pending.length, 1);
+  assert.ok(h.requests.some(({ path }) => path === '/campaigns/campaign-one?summary=1'));
+  const first = h.requests.find(({ path }) => path === '/deliveries/delivery-one');
+  h.tick();
+  await flush();
+  h.render();
+  assert.equal(
+    pending.length,
+    1,
+    'unchanged summaries must not restart the selected body download',
+  );
+  const second = h
+    .elements()
+    .find((node) => node.type === 'button' && textContent(node).startsWith('Second buyer'));
+  second.props.onClick();
+  h.render();
+  assert.equal(first.init.signal.aborted, true);
+  assert.equal(pending.length, 2);
+  pending[1].resolve(pending[1].result);
+  await flush();
+  pending[0].resolve(pending[0].result);
+  await flush();
+  const preview = h.elements().find((node) => node.props.delivery);
+  assert.equal(preview.props.delivery.id, 'delivery-two');
+  assert.equal(preview.props.delivery.bodyHtml, '<p>Second body</p>');
+  h.closeDetail();
+  assert.deepEqual(h.writes(), []);
+});
+
+test('单封正文读取失败可重试，不重新下载整个计划', async () => {
+  let fail = true;
+  const h = setup('completed', {
+    deliveryResponse: (result) => {
+      if (fail) throw new Error('正文网络错误');
+      return result;
+    },
+  });
+  await h.ready();
+  h.click('历史计划');
+  h.click('样稿与详情');
+  h.render();
+  await flush();
+  h.render();
+  await flush();
+  assert.match(h.html(), /正文网络错误/);
+  assert.doesNotMatch(h.html(), /正在读取邮件正文/);
+  fail = false;
+  h.click('重试读取正文');
+  h.render();
+  await flush();
+  const preview = h.elements().find((node) => node.props.delivery);
+  assert.equal(preview.props.delivery.bodyHtml, '<p>Original submitted message</p>');
+  assert.equal(h.requests.filter(({ path }) => path.startsWith('/campaigns/')).length, 1);
+  assert.deepEqual(h.writes(), []);
+});
 
 test('自动计划草稿直接提供启动入口，不展示样稿准备或审批步骤', async () => {
   const h = setup('draft', { generationMode: 'simple' });
@@ -317,6 +501,8 @@ test('confirming cancellation submits the reviewed campaign revision and keeps i
   assert.ok(h.button('样稿与详情'));
   assert.match(h.html(), /已取消/);
   h.click('样稿与详情');
+  h.render();
+  await flush();
   h.render();
   await flush();
   const html = h.html();

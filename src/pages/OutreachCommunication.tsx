@@ -1026,6 +1026,12 @@ export function OutreachCommunication() {
   const [detail, setDetail] = useState<OutreachCampaignDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [sampleId, setSampleId] = useState<string | null>(null);
+  const [sampleBody, setSampleBody] = useState<{
+    key: string;
+    delivery?: OutreachDelivery;
+    error?: string;
+  } | null>(null);
+  const [sampleRetry, setSampleRetry] = useState(0);
   const [deliveryPreview, setDeliveryPreview] = useState<OutreachDelivery | null>(null);
   const [suppressionTarget, setSuppressionTarget] = useState<OutreachDelivery | null>(null);
   const [suppressionReason, setSuppressionReason] = useState('人工标记不再联系');
@@ -1059,7 +1065,8 @@ export function OutreachCommunication() {
     q: query.trim(),
   }).toString();
   const request = useRef(0);
-  const detailRequest = useRef(0);
+  const detailController = useRef<AbortController | null>(null);
+  const detailStatus = useRef<string | null>(null);
   const internalTestKey = useRef<string | null>(null);
 
   useEffect(() => {
@@ -1114,15 +1121,26 @@ export function OutreachCommunication() {
     if (current === request.current) setState(result);
   }, []);
   const refreshDetail = useCallback(async (id: string) => {
-    const current = ++detailRequest.current;
+    detailController.current?.abort();
+    const controller = new AbortController();
+    detailController.current = controller;
+    setDetailError(null);
     try {
-      const result = await outreachApi<OutreachCampaignDetail>(pathFor('campaigns', id));
-      if (current === detailRequest.current) {
+      const result = await outreachApi<OutreachCampaignDetail>(
+        `${pathFor('campaigns', id)}?summary=1`,
+        {
+          signal: controller.signal,
+        },
+      );
+      if (!controller.signal.aborted) {
+        detailStatus.current = result.campaign.status;
         setDetail(result);
         setDetailError(null);
       }
     } catch (reason) {
-      if (current === detailRequest.current) setDetailError(message(reason));
+      if (!controller.signal.aborted) setDetailError(message(reason));
+    } finally {
+      if (detailController.current === controller) detailController.current = null;
     }
   }, []);
 
@@ -1143,15 +1161,22 @@ export function OutreachCommunication() {
     setDetail(null);
     setDetailError(null);
     setSampleId(null);
+    detailStatus.current = null;
     if (detailId) void refreshDetail(detailId);
     const interval = detailId
       ? window.setInterval(() => {
-          if (!document.hidden) void refreshDetail(detailId);
+          if (
+            !document.hidden &&
+            !detailController.current &&
+            !['completed', 'cancelled'].includes(detailStatus.current || '')
+          )
+            void refreshDetail(detailId);
         }, 5000)
       : null;
     return () => {
       if (interval) window.clearInterval(interval);
-      detailRequest.current += 1;
+      detailController.current?.abort();
+      detailController.current = null;
     };
   }, [detailId, refreshDetail]);
 
@@ -1258,6 +1283,24 @@ export function OutreachCommunication() {
     shownDetail?.deliveries.find((delivery) => delivery.status === 'draft') ||
     shownDetail?.deliveries.find((delivery) => delivery.status !== 'cancelled') ||
     shownDetail?.deliveries[0];
+  const sampleKey = sample ? JSON.stringify(sample) : '';
+  useEffect(() => {
+    setSampleBody(null);
+    if (!sampleKey) return;
+    const controller = new AbortController();
+    const selected: OutreachDelivery = JSON.parse(sampleKey);
+    void outreachApi<OutreachDelivery>(pathFor('deliveries', selected.id), {
+      signal: controller.signal,
+    })
+      .then((delivery) => {
+        if (!controller.signal.aborted) setSampleBody({ key: sampleKey, delivery });
+      })
+      .catch((reason: unknown) => {
+        if (!controller.signal.aborted) setSampleBody({ key: sampleKey, error: message(reason) });
+      });
+    return () => controller.abort();
+  }, [sampleKey, sampleRetry]);
+  const samplePreview = sampleBody?.key === sampleKey ? sampleBody : null;
   const needsReview = state?.review.internalTestPassed && !state.review.productionApproved;
   const currentDeliveryPreview = deliveryPreview
     ? recordData?.items.find((delivery) => delivery.id === deliveryPreview.id) || deliveryPreview
@@ -2098,10 +2141,16 @@ export function OutreachCommunication() {
             <InlineError value={detailError} />
             <InlineError value={error} />
             {!shownDetail ? (
-              <div className="outreach-loading">
-                <LoaderCircle className="outreach-spin" size={20} />
-                正在读取计划…
-              </div>
+              detailError ? (
+                <button className="btn secondary" onClick={() => void refreshDetail(detailId)}>
+                  重试读取计划
+                </button>
+              ) : (
+                <div className="outreach-loading" role="status">
+                  <LoaderCircle className="outreach-spin" size={20} />
+                  正在读取计划…
+                </div>
+              )
             ) : (
               <>
                 <div className="outreach-detail-summary">
@@ -2259,14 +2308,30 @@ export function OutreachCommunication() {
                         </button>
                       ))}
                     </div>
-                    {sample && (
+                    {samplePreview?.delivery ? (
                       <MessagePreview
-                        delivery={sample}
+                        key={samplePreview.delivery.id}
+                        delivery={samplePreview.delivery}
                         onSuppress={(delivery) => {
                           setSuppressionReason('人工标记不再联系');
                           setSuppressionTarget(delivery);
                         }}
                       />
+                    ) : samplePreview?.error ? (
+                      <div>
+                        <InlineError value={samplePreview.error} />
+                        <button
+                          className="btn secondary"
+                          onClick={() => setSampleRetry((value) => value + 1)}
+                        >
+                          重试读取正文
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="outreach-loading" role="status">
+                        <LoaderCircle className="outreach-spin" size={20} />
+                        正在读取邮件正文…
+                      </div>
                     )}
                   </div>
                 ) : (
