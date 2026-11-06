@@ -3,61 +3,10 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { validateAutoFirstTouch } from './batch-jobs.mjs';
+import { validateTiming, nextOccurrence } from '../src/domain/schedule-timing.mjs';
+export { validateTiming, nextOccurrence } from '../src/domain/schedule-timing.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
-const day = 86400000;
-
-// Older plans stored one `time`; new plans store a minute-precision list.
-function timingTimes(timing) {
-  return Array.isArray(timing.times) ? timing.times : [timing.time];
-}
-
-export function validateTiming(timing, now = Date.now()) {
-  if (
-    !timing ||
-    !['once', 'daily', 'weekly'].includes(timing.repeat) ||
-    !/^20\d\d-\d{2}-\d{2}$/.test(timing.startDate || '') ||
-    (timing.timezone && timing.timezone !== 'Asia/Shanghai')
-  )
-    throw fail(400, '请选择有效的日期、时间和执行周期（北京时间）');
-  if (timing.times !== undefined && !Array.isArray(timing.times))
-    throw fail(400, '执行时间须为时间点列表');
-  const selected = timingTimes(timing);
-  if (
-    !selected.length ||
-    selected.length > 24 ||
-    selected.some((time) => typeof time !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time))
-  )
-    throw fail(400, '请设置 1–24 个执行时间，精确到分钟');
-  if (new Set(selected).size !== selected.length) throw fail(400, '执行时间不能重复');
-  const times = [...selected].sort();
-  const normalized = {
-    repeat: timing.repeat,
-    startDate: timing.startDate,
-    times,
-    timezone: 'Asia/Shanghai',
-  };
-  const first = Date.parse(`${normalized.startDate}T${times[0]}:00+08:00`);
-  if (
-    !Number.isFinite(first) ||
-    new Date(first + 8 * 3600000).toISOString().slice(0, 10) !== normalized.startDate
-  )
-    throw fail(400, '执行日期无效');
-  if (normalized.repeat === 'once' && first <= now)
-    throw fail(400, '指定日期的所有执行时间必须晚于当前时间');
-  return normalized;
-}
-
-export function nextOccurrence(timing, after) {
-  const interval = (timing.repeat === 'weekly' ? 7 : 1) * day;
-  const candidates = timingTimes(timing).flatMap((time) => {
-    const first = Date.parse(`${timing.startDate}T${time}:00+08:00`);
-    if (first > after) return [first];
-    if (timing.repeat === 'once') return [];
-    return [first + (Math.floor((after - first) / interval) + 1) * interval];
-  });
-  return candidates.length ? new Date(Math.min(...candidates)).toISOString() : null;
-}
 
 export class AcquisitionSchedules {
   constructor({
@@ -108,7 +57,7 @@ export class AcquisitionSchedules {
         /* Retain schedule history if an old job was archived. */
       }
     }
-    const times = timingTimes(plan.timing);
+    const times = plan.timing.times || [plan.timing.time];
     return { ...plan, timing: { ...plan.timing, times, time: times[0] }, lastJob };
   }
   create({ name, input, timing }, key) {
@@ -193,19 +142,27 @@ export class AcquisitionSchedules {
       // Keep an explicitly scoped plan dormant while another customer table is
       // selected. Returning to its table resumes its own persisted schedule.
       if (plan.scope && plan.scope !== currentScope) continue;
-      if (!plan.nextRunAt || Date.parse(plan.nextRunAt) > this.now()) continue;
+      const now = this.now();
+      if (!plan.nextRunAt || Date.parse(plan.nextRunAt) > now) continue;
       const manager = this.jobs();
       const key = `schedule-${plan.id}-${Date.parse(plan.nextRunAt)}`;
       // Recover a crash between job creation and schedule bookkeeping without replaying it.
       let job = manager.findByKey(key);
       if (!job) {
-        const waiting = !this.ready()
-          ? 'API 连接尚未配置，等待完成配置'
-          : !this.available() || manager.active()
-            ? '等待当前任务完成或核对后执行'
-            : '';
-        if (waiting) {
-          if (plan.lastError !== waiting) this.save({ ...plan, lastError: waiting });
+        // A minute-precision slot can run during that minute; missed slots never build a backlog.
+        const skipped =
+          now >= Date.parse(plan.nextRunAt) + 60000
+            ? '执行时点已错过'
+            : !this.ready()
+              ? 'API 连接尚未配置'
+              : !this.available() || manager.active()
+                ? '当前任务尚未完成或待核对'
+                : '';
+        if (skipped) {
+          plan.lastError = `${skipped}，已跳过本次执行，不补跑`;
+          plan.nextRunAt = nextOccurrence(plan.timing, now);
+          if (!plan.nextRunAt) plan.status = 'completed';
+          this.save(plan);
           continue;
         }
         try {
@@ -224,9 +181,7 @@ export class AcquisitionSchedules {
       plan.lastRunAt = job.createdAt;
       plan.runs++;
       plan.lastError = '';
-      // Advance from the scheduled slot, not the actual launch time: if a prior
-      // run is still busy, later slots remain queued and each gets its own key.
-      plan.nextRunAt = nextOccurrence(plan.timing, Date.parse(plan.nextRunAt));
+      plan.nextRunAt = nextOccurrence(plan.timing, now);
       if (!plan.nextRunAt) plan.status = 'completed';
       this.save(plan);
       if (plan.input.auto_first_touch) this.onOutreachChange();

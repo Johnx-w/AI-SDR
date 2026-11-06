@@ -14,6 +14,7 @@ import {
 } from '../server/acquisition-schedules.mjs';
 import { BatchJobs } from '../server/batch-jobs.mjs';
 import { withApp } from './helpers/http.mjs';
+import { scheduleRepeatLabel } from '../src/domain/schedule-timing.mjs';
 
 const input = {
   country: 'United States',
@@ -24,7 +25,7 @@ const input = {
   target_count: 1,
 };
 const timing = {
-  repeat: 'once',
+  repeat: 'daily',
   startDate: '2030-01-01',
   times: ['09:00', '14:30', '18:00'],
   timezone: 'Asia/Shanghai',
@@ -117,7 +118,8 @@ test('多时间点按北京时间排序，拒绝重复时间和无效日期；�
     { times: ['24:00'] },
     { startDate: '2030-02-30' },
     { timezone: 'UTC' },
-    { times: ['07:00', '18:00'] },
+    { repeat: 'once', times: ['09:00', '18:00'] },
+    { repeat: 'once', times: ['07:00'] },
   ])
     assert.throws(() => validateTiming({ ...timing, ...changes }, now), { status: 400 });
   const { times, ...legacy } = timing;
@@ -147,12 +149,82 @@ function harness(extra = {}) {
   };
 }
 
-test('延迟启动按原时间点排队，活跃任务阻止下一轮，重复 tick 不创建额外任务', () => {
+test('每周多选校验、排序及旧计划兼容，拒绝空选和非法星期', () => {
+  const weekly = { ...timing, repeat: 'weekly', weekdays: [5, 1, 3] };
+  assert.deepEqual(validateTiming(weekly).weekdays, [1, 3, 5]);
+  assert.equal(scheduleRepeatLabel(weekly), '每周一、三、五');
+  assert.deepEqual(validateTiming({ ...timing, repeat: 'weekly' }).weekdays, [2]);
+  assert.equal(scheduleRepeatLabel({ ...timing, repeat: 'weekly' }), '每周二');
+  for (const weekdays of [[], null, '1', [0], [8], [1.5], ['1'], [1, 1], [1, 2, 3, 4, 5, 6, 7, 8]])
+    assert.throws(() => validateTiming({ ...weekly, weekdays }), { status: 400 });
+});
+
+test('所选星期与开始日期独立，按北京时间跨日、跨周、跨年推进多个时间点', () => {
+  const weekly = {
+    repeat: 'weekly',
+    startDate: '2026-11-05',
+    times: ['00:15', '18:00'],
+    weekdays: [1, 3, 5],
+  };
+  for (const [after, expected] of [
+    ['2026-11-03T00:00:00+08:00', '2026-11-06T00:15:00+08:00'],
+    ['2026-11-06T00:15:00+08:00', '2026-11-06T18:00:00+08:00'],
+    ['2026-11-06T18:00:00+08:00', '2026-11-09T00:15:00+08:00'],
+    ['2026-12-31T23:59:00+08:00', '2027-01-01T00:15:00+08:00'],
+  ])
+    assert.equal(nextOccurrence(weekly, Date.parse(after)), new Date(expected).toISOString());
+  const allDays = { ...weekly, weekdays: [1, 2, 3, 4, 5, 6, 7] };
+  let after = Date.parse('2026-11-05T00:00:00+08:00');
+  for (let i = 0; i < 20; i++) {
+    const next = nextOccurrence(allDays, after);
+    assert.equal(next, nextOccurrence({ ...allDays, repeat: 'daily' }, after));
+    after = Date.parse(next);
+  }
+});
+
+test('每周多选保存重载后只触发所选星期，暂停恢复跳过已过时间', () => {
+  const folder = mkdtempSync(join(tmpdir(), 'shadeflow-weekdays-'));
+  const path = join(folder, 'schedules.sqlite');
+  const fixture = harness({ path });
+  let schedules = fixture.schedules;
+  let clock = Date.parse('2030-01-02T09:00:00+08:00');
+  try {
+    const plan = schedules.create(
+      { name: '每周多天', input, timing: { ...timing, repeat: 'weekly', weekdays: [1, 3, 5] } },
+      'schedule-weekdays-01',
+    );
+    assert.equal(plan.nextRunAt, '2030-01-02T01:00:00.000Z');
+    schedules.close();
+    schedules = new AcquisitionSchedules({
+      path,
+      jobs: () => fixture.jobs,
+      ready: () => true,
+      available: () => true,
+      now: () => clock,
+    });
+    assert.deepEqual(schedules.get(plan.id).timing.weekdays, [1, 3, 5]);
+    schedules.tick();
+    assert.equal(schedules.get(plan.id).runs, 1);
+    assert.equal(schedules.get(plan.id).nextRunAt, '2030-01-02T06:30:00.000Z');
+    schedules.tick();
+    assert.equal(fixture.jobs.list().length, 1);
+    fixture.jobs.finish(fixture.jobs.get(schedules.get(plan.id).lastJobId), 'target_reached');
+    schedules.control(plan.id, 'pause');
+    clock = Date.parse('2030-01-04T18:00:00+08:00');
+    assert.equal(schedules.control(plan.id, 'resume').nextRunAt, '2030-01-07T01:00:00.000Z');
+  } finally {
+    schedules.close();
+    fixture.jobs.close();
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test('计划分钟内正常执行且不重复，多个时点逐次推进', () => {
   const { jobs, schedules, advance } = harness();
   try {
     const plan = schedules.create({ name: '多时点计划', input, timing }, 'schedule-slots-01');
-    advance('2030-01-01T19:00:00+08:00');
     for (const slot of timing.times) {
+      advance(`2030-01-01T${slot}:20+08:00`);
       schedules.tick();
       const current = schedules.get(plan.id);
       assert.equal(current.lastScheduledAt, new Date(`2030-01-01T${slot}:00+08:00`).toISOString());
@@ -161,9 +233,59 @@ test('延迟启动按原时间点排队，活跃任务阻止下一轮，重复 t
       assert.equal(jobs.list().length, count);
       jobs.finish(jobs.get(current.lastJobId), 'target_reached');
     }
-    assert.equal(schedules.get(plan.id).status, 'completed');
+    assert.equal(schedules.get(plan.id).status, 'enabled');
     assert.equal(schedules.get(plan.id).runs, 3);
-    assert.equal(jobs.list().length, 3);
+    assert.equal(schedules.get(plan.id).nextRunAt, '2030-01-02T01:00:00.000Z');
+  } finally {
+    schedules.close();
+    jobs.close();
+  }
+});
+
+test('错过一分钟或多天的时点不补跑；忙碌时跳过且不打断正在执行的任务', () => {
+  const { jobs, schedules, advance } = harness();
+  try {
+    const plan = schedules.create({ name: '跳过时点', input, timing }, 'schedule-skip-01');
+    advance('2030-01-01T09:01:00+08:00');
+    schedules.tick();
+    assert.equal(jobs.list().length, 0);
+    assert.equal(schedules.get(plan.id).nextRunAt, '2030-01-01T06:30:00.000Z');
+    advance('2030-01-01T14:30:00+08:00');
+    schedules.tick();
+    const active = jobs.active();
+    assert.ok(active);
+    advance('2030-01-01T18:00:00+08:00');
+    schedules.tick();
+    assert.equal(jobs.list().length, 1);
+    assert.equal(jobs.active().id, active.id);
+    assert.match(schedules.get(plan.id).lastError, /跳过/);
+    jobs.finish(jobs.get(active.id), 'target_reached');
+    advance('2030-01-04T19:00:00+08:00');
+    schedules.tick();
+    schedules.tick();
+    assert.equal(jobs.list().length, 1);
+    assert.equal(schedules.get(plan.id).nextRunAt, '2030-01-05T01:00:00.000Z');
+  } finally {
+    schedules.close();
+    jobs.close();
+  }
+});
+
+test('单次任务只允许一个时点，错过后结束且不伪造已执行次数', () => {
+  const { jobs, schedules, advance } = harness();
+  try {
+    const plan = schedules.create(
+      { name: '单次计划', input, timing: { ...timing, repeat: 'once', times: ['09:00'] } },
+      'schedule-once-01',
+    );
+    advance('2030-01-01T09:01:00+08:00');
+    schedules.tick();
+    const current = schedules.get(plan.id);
+    assert.equal(current.status, 'completed');
+    assert.equal(current.runs, 0);
+    assert.equal(current.nextRunAt, null);
+    assert.match(current.lastError, /错过/);
+    assert.equal(jobs.list().length, 0);
   } finally {
     schedules.close();
     jobs.close();
@@ -198,12 +320,12 @@ test('创建任务后计划记账中断，重启按固定幂等键关联原任�
   }
 });
 
-test('API 未配置时计划等待；暂停后恢复跳过暂停期间时间点，关闭保留历史', () => {
+test('API 未配置时跳过该时点；暂停后恢复跳过暂停期间时间点，关闭保留历史', () => {
   let ready = false;
   const { jobs, schedules, advance } = harness({ ready: () => ready });
   try {
     const plan = schedules.create({ name: '等待计划', input, timing }, 'schedule-pause-01');
-    advance('2030-01-01T09:05:00+08:00');
+    advance('2030-01-01T09:00:00+08:00');
     schedules.tick();
     assert.equal(jobs.list().length, 0);
     assert.match(schedules.get(plan.id).lastError, /尚未配置/);
@@ -274,6 +396,20 @@ test('HTTP 保存连接即时生效；计划接口校验和幂等生效，未知
           )
         ).status,
         400,
+      );
+      const weekly = await write(
+        '/api/v1/acquisition/schedules',
+        { ...body, timing: { ...timing, repeat: 'weekly', weekdays: [5, 1, 3] } },
+        'POST',
+        'http-weekdays-01',
+      );
+      assert.equal(weekly.status, 201);
+      const weeklyPlan = await weekly.json();
+      assert.deepEqual(weeklyPlan.timing.weekdays, [1, 3, 5]);
+      const listed = await (await fetch(base + '/api/v1/acquisition/schedules')).json();
+      assert.deepEqual(
+        listed.schedules.find((item) => item.id === weeklyPlan.id).timing.weekdays,
+        [1, 3, 5],
       );
       assert.equal((await write('/api/v1/acquisition/runs', input)).status, 409);
       assert.equal((await write('/api/v1/connections', { values: {} }, 'PUT')).status, 409);

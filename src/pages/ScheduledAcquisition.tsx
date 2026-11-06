@@ -5,6 +5,7 @@ import { Badge, Empty } from '../components/ui';
 import { BatchProgress } from '../components/BatchProgress';
 import { acquisitionApi } from '../services/acquisition';
 import type { AcquisitionSchedule } from '../domain/types';
+import { scheduleRepeatLabel } from '../domain/schedule-timing.mjs';
 import {
   ALL_PRODUCTS_LABEL,
   directionLabels,
@@ -12,8 +13,7 @@ import {
   isAllProductScope,
 } from '../domain/acquisition-products.mjs';
 
-const names = { enabled: '已启用', paused: '已暂停', closed: '已关闭', completed: '已触发' };
-const repeatNames = { once: '指定日期', daily: '每天', weekly: '每周' };
+const names = { enabled: '已启用', paused: '已暂停', closed: '已关闭', completed: '已结束' };
 const time = (value: string | null) =>
   value
     ? new Date(value).toLocaleString('zh-CN', {
@@ -127,7 +127,7 @@ export function ScheduledAcquisition() {
         </Link>
       </div>
       <p className="muted schedule-help">
-        按北京时间执行，每个时间点各运行一次；上一轮未完成时按时间顺序排队。本机后端服务需保持启动。暂停或关闭计划会停止后续触发和待发首封，本轮在当前企业处理结束后停止。
+        按北京时间执行，每个时间点各运行一轮；上轮未结束或停机错过的时点跳过，不补跑。重复计划持续运行直到暂停或关闭；暂停或关闭会停止后续触发和待发首封，本轮在当前企业处理结束后停止。
       </p>
       <div className="filter-chips">
         {[
@@ -166,7 +166,7 @@ export function ScheduledAcquisition() {
                   {plan.name}
                 </h2>
                 <p>
-                  {repeatNames[plan.timing.repeat]} · {plan.timing.startDate} 起 ·{' '}
+                  {scheduleRepeatLabel(plan.timing)} · {plan.timing.startDate} 起 ·{' '}
                   {(plan.timing.times || [plan.timing.time]).filter(Boolean).join('、')}
                   （北京时间，每个时间点执行一次）
                 </p>
@@ -191,7 +191,8 @@ export function ScheduledAcquisition() {
                         )
                         .join('、')
                     : plan.input.product}
-                {plan.input.environment_preference &&
+                {isAllProductScope(plan.input) &&
+                  plan.input.environment_preference &&
                   plan.input.environment_preference !== 'all' && (
                     <small>
                       {' '}

@@ -300,7 +300,6 @@
   font-size: 11px;
 }
 .acq-product-menu summary::-webkit-details-marker,
-.acq-advanced summary::-webkit-details-marker,
 .acq-search-strategy summary::-webkit-details-marker {
   display: none;
 }
@@ -450,20 +449,6 @@
   border-color: var(--color-border);
   color: var(--color-primary);
 }
-.acq-advanced {
-  border-top: 1px solid var(--color-border);
-  margin-top: 20px;
-  padding-top: 14px;
-}
-.acq-advanced > summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 12px;
-  color: var(--color-text-muted);
-  list-style: none;
-  cursor: pointer;
-}
 .acq-page .acq-quantity {
   display: flex;
   align-items: center;
@@ -501,7 +486,7 @@
   border-color: var(--color-border);
 }
 .acq-schedule-config {
-  background: var(--color-surface-muted);
+  background: var(--color-surface);
   padding: 18px;
   border: 1px solid var(--color-border);
   border-radius: 9px;
@@ -515,6 +500,44 @@
   flex-wrap: wrap;
   gap: 12px;
   margin-top: 18px;
+}
+.acq-weekday-field {
+  margin-top: 16px;
+}
+.acq-weekdays {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.acq-weekdays button {
+  min-width: 48px;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}
+.acq-weekdays button[data-state='on'] {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+.acq-weekdays button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.acq-weekdays button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.acq-weekday-field > p {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.8;
 }
 .acq-time-list > div {
   display: flex;
@@ -537,6 +560,79 @@
   top: 22px;
   padding: 22px;
   border-top: 3px solid var(--color-border-strong);
+  max-height: calc(100vh - 44px);
+  overflow-y: auto;
+}
+.acq-summary-block {
+  border-bottom: 1px solid var(--color-border);
+  padding: 16px 0;
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.acq-summary-block:first-of-type {
+  padding-top: 0;
+}
+.acq-summary-block h3 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+.acq-summary-block p {
+  margin: 8px 0;
+}
+.acq-summary-block small {
+  display: block;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+.acq-summary-products > span,
+.acq-summary-products details > span {
+  display: block;
+  margin: 5px 0;
+}
+.acq-summary-products span small {
+  display: inline;
+  margin-left: 6px;
+}
+.acq-summary-products summary {
+  color: var(--color-primary);
+  font-size: 11px;
+  cursor: pointer;
+}
+.acq-summary-count {
+  color: var(--color-primary);
+  font-size: 23px;
+}
+.acq-summary-sending {
+  color: var(--color-primary);
+}
+.acq-followup-options {
+  display: grid;
+  gap: 10px;
+}
+.acq-followup-options label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  cursor: pointer;
+}
+.acq-followup-options label.selected {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+.acq-followup-options strong {
+  display: block;
+  font-size: 13px;
+}
+.acq-followup-options small {
+  display: block;
+  margin-top: 6px;
+  color: var(--color-text-muted);
+  line-height: 1.6;
 }
 .acq-summary dl {
   margin: 0;
@@ -777,6 +873,8 @@
   }
   .acq-page .acq-summary {
     position: static;
+    max-height: none;
+    overflow: visible;
   }
   .acq-summary dl {
     display: grid;
@@ -790,6 +888,7 @@
   }
   .acq-form-grid,
   .acq-run-mode,
+  .acq-followup-options,
   .acq-scope-options {
     grid-template-columns: minmax(0, 1fr);
   }

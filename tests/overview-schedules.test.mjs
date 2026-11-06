@@ -38,7 +38,7 @@ test('显式绑定客户表的计划只在当前范围派发，切回原表可�
     const first = schedules.create({ name: '第一张表的计划', input, timing }, 'scope-one-plan');
     scope = 'two';
     const second = schedules.create({ name: '第二张表的计划', input, timing }, 'scope-two-plan');
-    clock = Date.parse('2030-01-01T09:05:00+08:00');
+    clock = Date.parse('2030-01-01T09:00:20+08:00');
     schedules.tick();
     assert.equal(managers.get('one').list().length, 0);
     assert.equal(managers.get('two').list().length, 1);
@@ -76,7 +76,7 @@ test('没有scope的历史计划保留原有派发语义', () => {
     delete legacy.scope;
     schedules.save(legacy);
     scope = 'two';
-    clock = Date.parse('2030-01-01T09:05:00+08:00');
+    clock = Date.parse('2030-01-01T09:00:20+08:00');
     schedules.tick();
     assert.equal(manager.list().length, 1);
     assert.equal(schedules.get(legacy.id).runs, 1);

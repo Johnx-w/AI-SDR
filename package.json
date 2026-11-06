@@ -23,6 +23,7 @@
     "format:check": "prettier --check src server scripts tests docs README.md *.json *.ts"
   },
   "dependencies": {
+    "@radix-ui/react-toggle-group": "1.2.1",
     "dompurify": "^3.4.17",
     "imapflow": "^2.9.1",
     "lucide-react": "0.468.0",

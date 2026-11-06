@@ -177,6 +177,7 @@ export interface ConnectionSettings {
 
 export interface ScheduleTiming {
   repeat: 'once' | 'daily' | 'weekly';
+  weekdays?: number[];
   startDate: string;
   times: string[];
   time?: string;
