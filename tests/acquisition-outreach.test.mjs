@@ -511,7 +511,35 @@ test('缺项客户列明原因，后续补齐自动发送；处理超过200家�
   }
 });
 
-test('下一轮自动纳入新增产品与邮箱，补处理旧缺项客户；已经准备的首封保持原产品和邮箱', async () => {
+for (const missing of ['邮箱启用', '产品审核', '邮箱产品授权', '邮箱连接', '固定签名'])
+  test(`一次性获客结束后补齐${missing}配置，自动继续首发且不重复发送`, async () => {
+    const h = harness();
+    try {
+      if (missing === '邮箱启用') h.boxes[0].paused = true;
+      if (missing === '产品审核') h.products[0].status = 'draft';
+      if (missing === '邮箱产品授权') h.boxes[0].productIds = [];
+      if (missing === '邮箱连接') h.boxes[0].smtpStatus = 'error';
+      if (missing === '固定签名') h.boxes[0].signature = '';
+      const job = h.create();
+      await h.capture(job.id, buyer('waiting'));
+      h.jobs.finish(h.jobs.get(job.id), 'target_reached');
+      await h.pump();
+      assert.equal(h.state.sent.length, 0);
+      h.boxes[0].paused = false;
+      h.products[0].status = 'approved';
+      h.boxes[0].productIds = ['pvc'];
+      h.boxes[0].smtpStatus = 'connected';
+      h.boxes[0].signature = 'Brand sales';
+      await h.pump();
+      await h.pump();
+      assert.equal(h.state.sent.length, 1);
+      assert.equal(h.state.sent[0].to, 'info@waiting.example.org');
+    } finally {
+      await h.close();
+    }
+  });
+
+test('同轮自动纳入新增产品与邮箱，补处理旧缺项客户；已经准备的首封保持原产品和邮箱', async () => {
   const h = harness();
   try {
     const plan = h.plan();
@@ -532,9 +560,7 @@ test('下一轮自动纳入新增产品与邮箱，补处理旧缺项客户；�
       email: 'sales@new-brand.example.org',
       productIds: ['aaa', 'roller'],
     });
-    h.jobs.finish(h.jobs.get(first.id), 'target_reached');
-    const next = h.create({}, plan.id);
-    await h.capture(next.id, buyer('next-round', 'roller blinds'));
+    await h.capture(first.id, buyer('next-customer', 'roller blinds'));
     await h.pump();
     await h.pump();
     const preserved = h.service.delivery(queued.id);
@@ -546,7 +572,7 @@ test('下一轮自动纳入新增产品与邮箱，补处理旧缺项客户；�
     );
     assert.ok(
       h.state.sent.some(
-        (mail) => mail.to === 'info@next-round.example.org' && mail.id === 'new-box',
+        (mail) => mail.to === 'info@next-customer.example.org' && mail.id === 'new-box',
       ),
     );
   } finally {

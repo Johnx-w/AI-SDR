@@ -615,8 +615,7 @@
   cursor: default;
 }
 .outreach-choice input,
-.outreach-check-stack input,
-.outreach-review-check input {
+.outreach-check-stack input {
   accent-color: var(--outreach-accent);
   width: 15px;
   height: 15px;
@@ -649,8 +648,7 @@
   border-radius: 8px;
   background: var(--color-surface-muted);
 }
-.outreach-check-stack label,
-.outreach-form .outreach-review-check {
+.outreach-check-stack label {
   display: flex;
   flex-direction: row;
   align-items: flex-start;
@@ -658,8 +656,7 @@
   font-weight: 400;
   line-height: 1.6;
 }
-.outreach-check-stack input,
-.outreach-review-check input {
+.outreach-check-stack input {
   margin-top: 2px;
 }
 .outreach-form .modal-actions {
@@ -861,27 +858,6 @@
   margin: 0;
   overflow-wrap: anywhere;
   color: var(--color-text-secondary);
-}
-.outreach-approved-claim {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--color-border);
-}
-.outreach-approved-claim strong {
-  font-size: 12px;
-  font-weight: 500;
-}
-.outreach-approved-claim small {
-  color: var(--color-text-muted);
-  font-size: 10px;
-  font-weight: 400;
-  margin-left: 8px;
-}
-.outreach-approved-claim p {
-  margin: 8px 0 0;
-  font-size: 12px;
-  line-height: 1.7;
-  white-space: pre-wrap;
 }
 .outreach-preview-layout {
   display: grid;

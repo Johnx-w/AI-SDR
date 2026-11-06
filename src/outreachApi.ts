@@ -59,8 +59,6 @@ export interface OutreachCampaign {
   cancelledAt?: string;
   lastError?: string;
   approvedRevision: number | null;
-  generationMode?: 'simple' | 'professional';
-  outreachClaims?: { productId: string; productVersion: number; text: string }[];
   productScopes?: { productId: string; name: string; englishName: string }[];
   deliveryGroups: Record<DeliveryGroup, number>;
   stats: {
@@ -103,7 +101,6 @@ export interface OutreachDelivery {
   messageId?: string | null;
   receivedVerifiedAt?: string | null;
   recordError?: string | null;
-  agentId?: 'shutter' | 'venetian' | 'indoor' | 'outdoor';
   productClaimIds?: string[];
   materialVersion?: string;
   productFacts?: OutreachFact[];
@@ -116,11 +113,6 @@ export interface OutreachState {
   deliveryGroups: Record<DeliveryGroup, number>;
   products: OutreachProduct[];
   readiness: { generatorConfigured: boolean };
-  review: {
-    internalTestPassed: boolean;
-    productionApproved: boolean;
-    internalReceiptVerified?: boolean;
-  };
 }
 
 export interface OutreachCampaignDetail {

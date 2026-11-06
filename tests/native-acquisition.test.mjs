@@ -1029,10 +1029,10 @@ test('读回字段不一致不宣称成功；跨域跳转与缺少正文不调�
 test('迁移后旧引擎的暂停任务无法交给新引擎继续', async () => {
   const folder = mkdtempSync(join(tmpdir(), 'native-provider-')),
     path = join(folder, 'jobs.sqlite');
-  let manager = new BatchJobs({ path, schedule: false, provider: 'retired' });
+  let manager = new BatchJobs({ path, schedule: false, provider: 'retired', scope: 'table' });
   const job = manager.create({ ...input, target_count: 1 }, 'provider-switch-test');
   manager.close();
-  manager = new BatchJobs({ path, schedule: false, provider: 'native' });
+  manager = new BatchJobs({ path, schedule: false, provider: 'native', scope: 'table' });
   try {
     await assert.rejects(manager.resume(job.id), /其他执行引擎/);
   } finally {

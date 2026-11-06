@@ -4,7 +4,6 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const shared = (await readFile(path.join(root, 'shared-system.md'), 'utf8')).trim();
-const outreach = (await readFile(path.join(root, 'outreach-system.md'), 'utf8')).trim();
 const profiles = JSON.parse(await readFile(path.join(root, 'category-profiles.json'), 'utf8'));
 const check = process.argv.includes('--check');
 const expected = ['shutter', 'venetian', 'indoor', 'outdoor'];
@@ -17,8 +16,7 @@ if (
 }
 
 const output = path.join(root, 'prompts');
-const outreachOutput = path.join(output, 'outreach');
-await mkdir(outreachOutput, { recursive: true });
+await mkdir(output, { recursive: true });
 const changed = [];
 
 async function emit(target, content) {
@@ -53,18 +51,7 @@ for (const profile of profiles) {
     profile.specialist_instructions.trim(),
     '',
   ].join('\n');
-  const outreachContent = [
-    `# ${profile.name}｜主动开发邮件 Agent`,
-    '',
-    `当前 Agent ID：\`${profile.agent_id}\`。你是中国出口供货卖方的品类业务员；本提示词只用于经过业务系统授权的主动开发邮件，不处理客户来信。`,
-    '',
-    profile.specialist_instructions.trim(),
-    '',
-    outreach.replace('"agent_id": "当前 Agent ID"', `"agent_id": "${profile.agent_id}"`),
-    '',
-  ].join('\n');
   await emit(path.join(output, profile.prompt_filename), conversationContent);
-  await emit(path.join(outreachOutput, profile.prompt_filename), outreachContent);
 }
 
 if (changed.length) {

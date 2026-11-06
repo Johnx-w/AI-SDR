@@ -41,7 +41,7 @@ function fixture(brand = policy.brands[0], scope = brand.products[1] || brand.pr
     productIds: [product.id],
     signature: `Best regards,\nSender Name\n${brand.name}`,
   };
-  const campaign = { generationMode: 'simple', productScopes: [outreachProductScope(product)] };
+  const campaign = { productScopes: [outreachProductScope(product)] };
   const candidate = {
     customerId: 'customer',
     companyName: 'Example Dealer',

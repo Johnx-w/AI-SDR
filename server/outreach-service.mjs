@@ -80,7 +80,6 @@ export class OutreachService {
       CREATE TABLE IF NOT EXISTS outreach_deliveries(id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,state TEXT NOT NULL,data TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS outreach_delivery_campaign ON outreach_deliveries(campaign_id,state);
       CREATE TABLE IF NOT EXISTS outreach_reservations(identity TEXT PRIMARY KEY,delivery_id TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS outreach_meta(key TEXT PRIMARY KEY,data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS outreach_requests(key TEXT PRIMARY KEY,kind TEXT NOT NULL,result_id TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS outreach_suppression(identity TEXT PRIMARY KEY,reason TEXT NOT NULL);`);
     Object.assign(this, {
@@ -147,17 +146,6 @@ export class OutreachService {
       this.db.exec('ROLLBACK');
       throw e;
     }
-  }
-  meta(key) {
-    const row = this.db.prepare('SELECT data FROM outreach_meta WHERE key=?').get(key);
-    return row ? JSON.parse(row.data) : null;
-  }
-  setMeta(key, value) {
-    this.db
-      .prepare(
-        'INSERT INTO outreach_meta VALUES(?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data',
-      )
-      .run(key, JSON.stringify(value));
   }
   campaigns() {
     return this.db
@@ -294,42 +282,6 @@ export class OutreachService {
   generatorClient() {
     return this.generator || createOutreachGenerator({ env: this.getEnv() });
   }
-  testFingerprint() {
-    return hash(
-      this.mailboxes
-        .list()
-        .filter((m) => m.configured)
-        .map((m) => [m.id, m.email, m.displayName, m.signature, m.signatureDesign]),
-    );
-  }
-  review(campaigns = this.campaigns()) {
-    const tests = campaigns.filter(
-      (c) =>
-        c.mode === 'internal_test' &&
-        c.status === 'completed' &&
-        c.testFingerprint === this.testFingerprint(),
-    );
-    const successful = tests.find(
-      (c) => c.stats.accepted >= 2 && this.deliveries(c.id).every((d) => d.status === 'accepted'),
-    );
-    const reviewed = this.meta('production_review');
-    return {
-      internalTestPassed: !!successful,
-      productionApproved:
-        !!successful &&
-        reviewed?.testId === successful.id &&
-        reviewed?.fingerprint === this.testFingerprint() &&
-        this.mailboxes
-          .list()
-          .filter((m) => m.configured && !m.paused && m.smtpStatus === 'connected')
-          .every((m) => successful.mailboxIds.includes(m.id)),
-      testId: successful?.id || null,
-      testedMailboxIds: successful?.mailboxIds || [],
-      internalReceiptVerified:
-        !!successful && this.deliveries(successful.id).every((d) => !!d.receivedVerifiedAt),
-      reviewedAt: reviewed?.at || null,
-    };
-  }
   async state() {
     const mailboxes = this.mailboxes.list().map(({ signatureDesign, ...mailbox }) => mailbox);
     const campaigns = this.campaigns();
@@ -370,7 +322,6 @@ export class OutreachService {
       deliveryGroups,
       products: this.products(),
       readiness: { generatorConfigured },
-      review: this.review(campaigns),
     };
   }
   saveCampaign(input, id) {
@@ -390,29 +341,12 @@ export class OutreachService {
       throw fail(400, '发送间隔至少5秒');
     const name = text(input.name);
     if (!name) throw fail(400, '请填写计划名称');
-    const generationMode = input.generationMode ?? prior?.generationMode ?? 'professional';
-    if (!['simple', 'professional'].includes(generationMode)) throw fail(400, '邮件生成方式无效');
-    const claims = Array.isArray(input.outreachClaims)
-      ? input.outreachClaims.map((v) => ({
-          productId: text(v.productId),
-          productVersion: Number(v.productVersion),
-          text: text(v.text, 1200),
-        }))
-      : [];
-    if (
-      claims.some(
-        (v) =>
-          !v.productId || !Number.isInteger(v.productVersion) || v.productVersion < 1 || !v.text,
-      )
-    )
-      throw fail(400, '请填写有效的产品版本与开发信产品介绍');
     const mailboxIds = list(input.mailboxIds);
     if (mailboxIds.some((v) => !this.mailboxes.get(v))) throw fail(400, '请选择存在的邮箱');
     const c = {
       id: prior?.id || randomUUID(),
       name,
       mode: 'production',
-      generationMode,
       status: 'draft',
       revision: (prior?.revision || 0) + 1,
       approvedRevision: null,
@@ -428,7 +362,6 @@ export class OutreachService {
       includeExisting: input.includeExisting !== false,
       continuous: input.continuous !== false,
       customerIds: list(input.customerIds),
-      outreachClaims: claims,
       createdAt: prior?.createdAt || iso(this.now),
       updatedAt: iso(this.now),
       scope: this.getScope(),
@@ -469,12 +402,10 @@ export class OutreachService {
       if (source.scope !== this.getScope()) continue;
       const id = `acquisition-${source.jobId}`;
       const prior = campaigns.get(id);
-      const refresh = !prior || prior.acquisitionSource.roundId !== source.roundId;
-      let campaign = prior || {
+      const campaign = prior || {
         id,
         name: source.name,
         mode: 'production',
-        generationMode: 'simple',
         status: source.status,
         revision: 1,
         approvedRevision: 1,
@@ -484,7 +415,6 @@ export class OutreachService {
         continuous: true,
         customerIds: [],
         filters: { markets: [], grades: [], products: [], categories: [] },
-        outreachClaims: [],
         baselineCustomerIds: [],
         scope: source.scope,
         createdAt: iso(this.now),
@@ -492,58 +422,46 @@ export class OutreachService {
         lastError: '',
         sendWindow: null,
       };
-      const changed =
-        refresh ||
-        !prior?.acquisitionSource.senderVersions ||
-        campaign.status !== source.status ||
-        JSON.stringify(campaign.customerIds) !== JSON.stringify(source.customerIds);
-      if (!changed) continue;
-      if (refresh) {
-        const boxes = this.mailboxes
-          .list()
-          .filter(
-            (box) =>
-              box.configured &&
-              !box.paused &&
-              box.smtpStatus === 'connected' &&
-              box.signature?.trim() &&
-              box.displayName?.trim(),
-          );
-        const products = this.products().filter(
-          (product) =>
-            product.status === 'approved' &&
-            boxes.some((box) => box.productIds?.includes(product.id)),
+      const boxes = this.mailboxes
+        .list()
+        .filter(
+          (box) =>
+            box.configured &&
+            !box.paused &&
+            box.smtpStatus === 'connected' &&
+            box.signature?.trim() &&
+            box.displayName?.trim(),
         );
-        campaign = {
-          ...campaign,
-          mailboxIds: boxes.map((box) => box.id),
-          filters: { ...campaign.filters, products: products.map((product) => product.id) },
-          productScopes: products.map(outreachProductScope),
-        };
-      }
+      const products = this.products().filter(
+        (product) =>
+          product.status === 'approved' &&
+          boxes.some((box) => box.productIds?.includes(product.id)),
+      );
+      const configuration = {
+        mailboxIds: boxes.map((box) => box.id),
+        filters: { ...campaign.filters, products: products.map((product) => product.id) },
+        productScopes: products.map(outreachProductScope),
+      };
+      const acquisitionSource = {
+        jobId: source.jobId,
+        scheduleId: source.scheduleId,
+        roundId: source.roundId,
+      };
+      const changed =
+        !prior ||
+        campaign.status !== source.status ||
+        JSON.stringify(campaign.customerIds) !== JSON.stringify(source.customerIds) ||
+        JSON.stringify(campaign.acquisitionSource) !== JSON.stringify(acquisitionSource) ||
+        Object.entries(configuration).some(
+          ([key, value]) => JSON.stringify(campaign[key]) !== JSON.stringify(value),
+        );
+      if (!changed) continue;
       this.putCampaign({
         ...campaign,
+        ...configuration,
         status: source.status,
         customerIds: source.customerIds,
-        acquisitionSource: {
-          jobId: source.jobId,
-          scheduleId: source.scheduleId,
-          roundId: source.roundId,
-          senderVersions:
-            (!refresh && prior.acquisitionSource.senderVersions) ||
-            Object.fromEntries(
-              this.mailboxes
-                .list()
-                .map((box) => [
-                  box.id,
-                  (!refresh &&
-                    this.deliveries(id).find(
-                      (delivery) => delivery.mailboxId === box.id && delivery.senderVersion,
-                    )?.senderVersion) ||
-                    senderVersion(box),
-                ]),
-            ),
-        },
+        acquisitionSource,
         updatedAt: iso(this.now),
         lastRefreshAt: null,
       });
@@ -669,7 +587,17 @@ export class OutreachService {
       : leads.filter((l) => !c.baselineCustomerIds.includes(l.id));
     if (c.acquisitionSource) {
       const members = new Set(c.customerIds);
-      eligibleLeads = eligibleLeads.filter((lead) => members.has(lead.id));
+      const prepared = this.deliveries(c.id, ['blocked']).filter(
+        (delivery) =>
+          delivery.subject && delivery.acquisitionRoundId === c.acquisitionSource.roundId,
+      );
+      eligibleLeads = eligibleLeads.filter((lead) => {
+        if (!members.has(lead.id)) return false;
+        const draft = prepared.find((delivery) => delivery.customerId === lead.id);
+        const mailbox = draft && this.mailboxes.get(draft.mailboxId);
+        // Same-round configuration repairs cannot change a prepared email's sender identity.
+        return !draft || (mailbox && draft.senderVersion === senderVersion(mailbox));
+      });
     }
     const existing = ignoreDelivery ? this.delivery(ignoreDelivery) : null;
     const history = this.deliveries().filter((d) => d.id !== ignoreDelivery);
@@ -690,7 +618,6 @@ export class OutreachService {
       ? mailboxes.filter(
           (box) =>
             c.mailboxIds.includes(box.id) &&
-            c.acquisitionSource.senderVersions?.[box.id] === senderVersion(box) &&
             box.configured &&
             !box.paused &&
             box.smtpStatus === 'connected' &&
@@ -886,6 +813,7 @@ export class OutreachService {
           createdAt: unfinished?.createdAt || iso(this.now),
           candidate,
           revision,
+          acquisitionRoundId: c.acquisitionSource?.roundId,
           senderVersion: senderVersion(mailbox),
           productVersion: product.version,
           materialVersion:
@@ -957,8 +885,6 @@ export class OutreachService {
             status: wasActive && current.approvedRevision === revision ? 'queued' : 'draft',
             reason: '',
             sourceIds: generated.sourceIds || [],
-            agentId: generated.agentId,
-            generationMode: c.generationMode,
             productClaimIds: generated.factIds || [],
             productFacts: eligibleOutreachFacts(product, c, new Date(this.now())).filter((fact) =>
               (generated.factIds || []).includes(fact.id),
@@ -1015,99 +941,46 @@ export class OutreachService {
         lastError: pending
           ? ''
           : summary
-            ? `暂未生成样稿。${summary}。请打开“样稿与详情”查看。`
+            ? `暂未生成邮件。${summary}。请打开“执行详情”查看。`
             : '当前没有可加入的未开发客户',
       });
     }
   }
-  approve(id, revision) {
+  activate(id, revision) {
     const c = this.campaign(id);
     if (
+      c.mode !== 'production' ||
       c.revision !== revision ||
-      !['ready', 'active', 'paused'].includes(c.status) ||
-      this.preparing.has(id)
+      !['draft', 'ready', 'paused', 'active'].includes(c.status)
     )
-      throw fail(409, '请等待草稿准备完成并检查当前版本');
-    const drafts = this.deliveries(id).filter((d) => d.status === 'draft' && d.subject);
-    if (!drafts.length) throw fail(400, '尚无可审核的开发信');
-    return this.transaction(() => {
-      for (const draft of drafts)
-        this.putDelivery({
-          ...draft,
-          status: c.status === 'active' ? 'queued' : 'draft',
-        });
-      return this.putCampaign({ ...c, approvedRevision: revision, approvedAt: iso(this.now) });
+      throw fail(409, '计划已更新或正在处理，请刷新后启动');
+    if (!this.generatorClient().configured) throw fail(503, '请先配置邮件生成模型');
+    if (
+      !c.mailboxIds.length ||
+      c.mailboxIds.some((id) => {
+        const m = this.mailboxes.get(id);
+        return (
+          !m?.configured ||
+          m.paused ||
+          m.smtpStatus !== 'connected' ||
+          !m.signature?.trim() ||
+          !m.displayName?.trim()
+        );
+      })
+    )
+      throw fail(409, '请先核对所选邮箱连接和固定签名');
+    this.putCampaign({
+      ...c,
+      status: 'active',
+      approvedRevision: revision,
+      approvedAt: iso(this.now),
+      startedAt: c.startedAt || iso(this.now),
+      lastError: '',
     });
-  }
-  approveReview(approved) {
-    if (approved !== true) throw fail(400, '请明确确认已共同检查内部测试邮件');
-    const r = this.review();
-    if (!r.internalTestPassed) throw fail(409, '请先完成所有内部测试邮件发送，并在原邮箱检查内容');
-    this.setMeta('production_review', {
-      testId: r.testId,
-      fingerprint: this.testFingerprint(),
-      at: iso(this.now),
-    });
-    return this.review();
-  }
-  activate(id, revision) {
-    let c = this.campaign(id);
-    if (c.generationMode === 'simple') {
-      if (
-        c.mode !== 'production' ||
-        c.revision !== revision ||
-        !['draft', 'ready', 'paused', 'active'].includes(c.status)
-      )
-        throw fail(409, '计划已更新或正在处理，请刷新后启动');
-      if (!this.generatorClient().configured) throw fail(503, '请先配置邮件生成模型');
-      if (
-        !c.mailboxIds.length ||
-        c.mailboxIds.some((id) => {
-          const m = this.mailboxes.get(id);
-          return (
-            !m?.configured ||
-            m.paused ||
-            m.smtpStatus !== 'connected' ||
-            !m.signature?.trim() ||
-            !m.displayName?.trim()
-          );
-        })
-      )
-        throw fail(409, '请先核对所选邮箱连接和固定签名');
-      this.putCampaign({
-        ...c,
-        status: 'active',
-        approvedRevision: revision,
-        approvedAt: iso(this.now),
-        startedAt: c.startedAt || iso(this.now),
-        lastError: '',
-      });
-      for (const d of this.deliveries(id))
-        if (d.status === 'draft' && d.subject) this.putDelivery({ ...d, status: 'queued' });
-      this.start();
-      this.prepare(id);
-      void this.tick();
-      return this.detail(id);
-    }
-    if (c.mode !== 'production' || c.revision !== revision || c.approvedRevision !== revision)
-      throw fail(409, '请先审核当前版本的计划和邮件样稿');
-    if (!this.review().productionApproved)
-      throw fail(409, '请先共同检查内部测试结果，再启用正式发送');
-    if (c.mailboxIds.some((id) => !this.review().testedMailboxIds.includes(id)))
-      throw fail(409, '所选邮箱尚未完成内部测试，请先测试这些邮箱');
-    if (c.status === 'active') return this.detail(id);
-    if (!['ready', 'paused'].includes(c.status)) throw fail(409, '计划当前不能启动');
-    this.transaction(() => {
-      for (const d of this.deliveries(id))
-        if (d.status === 'draft' && d.subject) this.putDelivery({ ...d, status: 'queued' });
-      this.putCampaign({
-        ...c,
-        status: 'active',
-        startedAt: c.startedAt || iso(this.now),
-        lastError: '',
-      });
-    });
+    for (const d of this.deliveries(id))
+      if (d.status === 'draft' && d.subject) this.putDelivery({ ...d, status: 'queued' });
     this.start();
+    if (!this.deliveries(id, ['queued']).length) this.prepare(id);
     void this.tick();
     return this.detail(id);
   }
@@ -1195,7 +1068,6 @@ export class OutreachService {
       mailboxIds: boxes.map((m) => m.id),
       intervalSeconds: 0,
       createdAt: iso(this.now),
-      testFingerprint: this.testFingerprint(),
       continuous: false,
     };
     this.transaction(() => {
@@ -1250,13 +1122,7 @@ export class OutreachService {
     if (!this.acquisitionAllowed(c)) return false;
     if (!m || m.paused || m.smtpStatus !== 'connected' || !m.configured) return false;
     if (c.mode === 'internal_test') return true;
-    if (
-      (c.generationMode !== 'simple' &&
-        (!this.review().productionApproved || !this.review().testedMailboxIds.includes(m.id))) ||
-      c.approvedRevision !== c.revision ||
-      !this.inWindow(c)
-    )
-      return false;
+    if (c.approvedRevision !== c.revision || !this.inWindow(c)) return false;
     const history = this.deliveries().filter(
       (v) =>
         v.mailboxId === m.id && ['accepted', 'sending', 'unknown', 'failed'].includes(v.status),
@@ -1355,12 +1221,8 @@ export class OutreachService {
       )
         this.putCampaign({
           ...current,
-          status: c.generationMode === 'simple' ? 'paused' : 'completed',
-          ...(c.generationMode === 'simple'
-            ? {
-                lastError: `本轮已提交 ${consumed} / ${c.targetCount} 封，剩余客户或邮件条件待处理，请查看执行详情。`,
-              }
-            : {}),
+          status: 'paused',
+          lastError: `本轮已提交 ${consumed} / ${c.targetCount} 封，剩余客户或邮件条件待处理，请查看执行详情。`,
         });
     }
   }
@@ -1443,9 +1305,7 @@ export class OutreachService {
       senderVersion(latestMailbox) !== d.senderVersion ||
       latestCampaign.revision !== c.revision ||
       (c.mode === 'production' &&
-        ((c.generationMode !== 'simple' && !this.review().productionApproved) ||
-          latestCampaign.approvedRevision !== c.revision ||
-          this.isReserved(d.candidate, d.id)))
+        (latestCampaign.approvedRevision !== c.revision || this.isReserved(d.candidate, d.id)))
     ) {
       this.putDelivery({
         ...d,
@@ -1489,10 +1349,8 @@ export class OutreachService {
               (campaign.status !== 'active' || campaign.revision !== c.revision
                 ? '计划已暂停或更新，邮件尚未提交发送'
                 : '') ||
-              (c.mode === 'production' &&
-              (campaign.approvedRevision !== c.revision ||
-                (campaign.generationMode !== 'simple' && !this.review().productionApproved))
-                ? '当前计划或邮箱测试授权已失效，请重新核对'
+              (c.mode === 'production' && campaign.approvedRevision !== c.revision
+                ? '当前计划授权已失效，请重新核对'
                 : '') ||
               (senderVersion(this.mailboxes.get(m.id)) !== d.senderVersion
                 ? '发件身份已变化，邮件尚未提交发送'

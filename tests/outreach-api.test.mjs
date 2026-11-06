@@ -22,6 +22,21 @@ test('计划摘要省略批量HTML和候选快照，单封读取保留原文且�
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise((resolve) => server.close(resolve)));
   const base = `http://127.0.0.1:${server.address().port}/api/v1/outreach`;
+  assert.equal(campaign.generationMode, undefined);
+  assert.equal(campaign.outreachClaims, undefined);
+  assert.equal((await service.state()).review, undefined);
+  for (const path of [
+    `/campaigns/${campaign.id}/prepare`,
+    `/campaigns/${campaign.id}/approve`,
+    '/review',
+  ]) {
+    const response = await fetch(base + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revision: campaign.revision, approved: true }),
+    });
+    assert.equal(response.status, 404);
+  }
   const response = await fetch(`${base}/campaigns/${campaign.id}?summary=1`);
   assert.equal(response.status, 200);
   const raw = await response.text();
@@ -200,7 +215,7 @@ test('取消触达接口核对确认和版本并可重复请求，保留详情�
   assert.equal(cancelled.campaign.status, 'cancelled');
   assert.deepEqual(await (await request(campaign.id, '/cancel', body)).json(), cancelled);
   assert.deepEqual(await (await fetch(base + campaign.id)).json(), cancelled);
-  for (const action of ['/prepare', '/approve', '/start', '/pause'])
+  for (const action of ['/start', '/pause'])
     assert.equal(
       (await request(campaign.id, action, { revision: cancelled.campaign.revision })).status,
       409,

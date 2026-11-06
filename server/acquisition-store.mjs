@@ -59,9 +59,6 @@ export class AcquisitionStore {
       'CREATE TABLE IF NOT EXISTS customer_contact_corrections(scope TEXT NOT NULL, record_id TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(scope, record_id))',
     );
     this.db.exec(
-      'CREATE TABLE IF NOT EXISTS website_research_identities(scope TEXT NOT NULL, domain TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(scope,domain))',
-    );
-    this.db.exec(
       'CREATE TABLE IF NOT EXISTS research_model_responses(scope TEXT NOT NULL, cache_key TEXT NOT NULL, created_at INTEGER NOT NULL, response TEXT NOT NULL, PRIMARY KEY(scope,cache_key)); CREATE INDEX IF NOT EXISTS research_model_responses_age ON research_model_responses(scope,created_at)',
     );
     this.db.exec(`CREATE TABLE IF NOT EXISTS acquisition_exclusions (
@@ -392,36 +389,5 @@ export class AcquisitionStore {
   }
   close() {
     this.db.close();
-  }
-  websiteResearch(website) {
-    const row = this.db
-      .prepare('SELECT data FROM website_research_identities WHERE scope=? AND domain=?')
-      .get(this.scope, domainKey(website));
-    return row ? JSON.parse(row.data) : null;
-  }
-  saveWebsiteResearch(website, research, recordId) {
-    const entry = {
-      company_name: research.company_name,
-      company_identity: research.company_identity,
-      actual_country: research.actual_country,
-      address: research.address,
-      facts: (research.facts || []).filter((f) =>
-        [
-          'company_name',
-          'legal_company_name',
-          'trading_names',
-          'address',
-          'actual_country',
-        ].includes(f.field),
-      ),
-      record_id: recordId,
-      checked_at: new Date().toISOString(),
-    };
-    this.db
-      .prepare(
-        'INSERT INTO website_research_identities VALUES(?,?,?) ON CONFLICT(scope,domain) DO UPDATE SET data=excluded.data',
-      )
-      .run(this.scope, domainKey(website), JSON.stringify(entry));
-    return entry;
   }
 }

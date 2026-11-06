@@ -4,7 +4,7 @@
 
 ## 当前状态与目标
 
-- 已实现：沟通中心的多邮箱首封计划、手动只读邮件同步、原格式阅读、人工回复、草稿及发送台账。新首封计划按 ADR-0018 使用普通 LLM、程序固定称呼和账号签名；旧专业模式计划保留原方式。操作见 [沟通中心](../../docs/outreach-first-touch.md)。
+- 已实现：沟通中心的多邮箱首封计划、手动只读邮件同步、原格式阅读、人工回复、草稿及发送台账。首封计划使用普通 LLM、程序固定称呼和账号签名；旧专业模式已移除。操作见 [沟通中心](../../docs/outreach-first-touch.md)。
 - 待实现：侧边栏「AI 业务员」、接待配置、后台增量收信触发、来信自动起草与发送、自动接待中的人工交接。
 - 后续范围：客户未回复时的主动跟进、图纸自动解析及自动选择技术附件。人工回复现已支持附件，不代表这些自动流程已接通。
 
@@ -42,7 +42,7 @@ examples/quote-_ 展示缺少报价依据时澄清，mixed-_ 展示需求分别�
 
 ## 维护与检查
 
-来信规则维护来源为 shared-system.md，专业差异来自 category-profiles.json；outreach-system.md 和 prompts/outreach/ 保留旧专业首封模式的规则，不是当前新首封计划的默认生成方式。修改源文案后执行：
+来信规则维护来源为 shared-system.md，专业差异来自 category-profiles.json。首次开发信使用独立的 [写作模块](../first-touch-writer/system.md)。修改源文案后执行：
 
 ```powershell
 node agents/export-sales/build-prompts.mjs
@@ -50,4 +50,4 @@ node agents/export-sales/build-prompts.mjs --check
 node --test tests/agent-policy.test.mjs
 ```
 
-生成命令只维护八份提示词，不连接邮箱或发送邮件。提示词不能代替邮箱授权、持久化状态、发送检查和人工按钮；正式实现前仍须升级协议并执行最终设计中的接入验收。
+生成命令只维护四份来信提示词，不连接邮箱或发送邮件。提示词不能代替邮箱授权、持久化状态、发送检查和人工按钮；正式实现前仍须升级协议并执行最终设计中的接入验收。

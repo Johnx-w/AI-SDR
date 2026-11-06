@@ -181,7 +181,7 @@ test('文件候选只在用户采用后进入草稿，保留原有参数并清�
   assert.deepEqual(h.writes[0].documentIds, ['pd_' + 'a'.repeat(64)]);
 });
 
-test('计划引用资料库事实无需重复声明，兼容旧介绍且只展示邮箱负责的产品', async (t) => {
+test('计划只展示邮箱负责的产品，不再填写旧介绍文案', async (t) => {
   const page = new URL('../src/pages/OutreachCommunication.tsx', import.meta.url);
   const fact = {
     id: 'supply',
@@ -200,7 +200,7 @@ test('计划引用资料库事实无需重复声明，兼容旧介绍且只展�
       outreachFacts: [fact],
     },
     {
-      id: 'legacy-product',
+      id: 'curtains-product',
       name: 'Curtains',
       englishName: 'Curtains',
       status: 'approved',
@@ -216,13 +216,12 @@ test('计划引用资料库事实无需重复声明，兼容旧介绍且只展�
           {
             id: 'mailbox-one',
             email: 'sales@seller.example.org',
-            productIds: ['facts-product', 'legacy-product'],
+            productIds: ['facts-product', 'curtains-product'],
           },
         ],
         products,
         campaigns: [],
         deliveries: [],
-        review: {},
         readiness: {},
       },
     ],
@@ -268,7 +267,7 @@ test('计划引用资料库事实无需重复声明，兼容旧介绍且只展�
   );
   assert.ok(editor);
   let saved;
-  const render = (campaign = { generationMode: 'professional', outreachClaims: [] }) => {
+  const render = (campaign = null) => {
     context = 'editor';
     stateIndex = 0;
     return editor.type({
@@ -280,22 +279,16 @@ test('计划引用资料库事实无需重复声明，兼容旧介绍且只展�
       onClose() {},
     });
   };
-  assert.match(text(render(null)), /无需准备或审核样稿/);
+  assert.match(text(render(null)), /自动发送/);
   assert.equal(elements(render(null)).filter((node) => node.type === 'textarea').length, 0);
   states.editor = [];
-  assert.match(text(render()), /来自产品资料库/);
-  assert.equal(elements(render()).filter((node) => node.type === 'textarea').length, 1);
-  assert.equal(elements(render()).find((node) => node.type === 'textarea').props.value, '');
   const picker = elements(render()).find((node) =>
     node.props.emptyText?.startsWith('所选邮箱与品类范围内'),
   );
   assert.deepEqual(
     picker.props.products.map((product) => product.id),
-    ['facts-product', 'legacy-product'],
+    ['facts-product', 'curtains-product'],
   );
-  elements(render())
-    .find((node) => node.type === 'textarea')
-    .props.onChange({ target: { value: 'We supply curtains.' } });
   const values = {
     name: 'New outreach',
     targetCount: '5',
@@ -311,16 +304,8 @@ test('计划引用资料库事实无需重复声明，兼容旧介绍且只展�
     .find((node) => node.type === 'form')
     .props.onSubmit({ preventDefault() {}, currentTarget: {} });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(saved.outreachClaims, [
-    { productId: 'legacy-product', productVersion: 2, text: 'We supply curtains.' },
-  ]);
+  assert.equal(saved.outreachClaims, undefined);
   assert.deepEqual(saved.mailboxIds, ['mailbox-one']);
   states.editor = [];
-  assert.equal(
-    elements(render({ generationMode: 'professional', outreachClaims: [] })).find(
-      (node) => node.type === 'textarea',
-    ).props.value,
-    '',
-    'editing a plan must preserve an intentionally excluded product',
-  );
+  assert.equal(elements(render(saved)).filter((node) => node.type === 'textarea').length, 0);
 });

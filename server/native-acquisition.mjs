@@ -1251,9 +1251,6 @@ export class NativeAcquisition {
   }
   async finishWritten(op) {
     op.recordVerifiedAt ||= new Date().toISOString();
-    if (op.research?.company_name && op.recordId) {
-      this.store.saveWebsiteResearch(op.source_url, op.research, op.recordId);
-    }
     if (op.research?.company_identity && op.recordId) {
       const name = op.fields?.['公司名称'] || op.fields?.['客户名称'];
       if (name)

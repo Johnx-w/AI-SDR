@@ -12,7 +12,6 @@ function fixture() {
     CREATE TABLE acquisition_operations(id TEXT PRIMARY KEY, hash TEXT, data TEXT);
     CREATE TABLE jobs(id TEXT PRIMARY KEY, data TEXT);
     CREATE TABLE research_model_responses(scope TEXT, cache_key TEXT, response TEXT);
-    CREATE TABLE website_research_identities(scope TEXT, domain TEXT, data TEXT);
     CREATE TABLE company_identities(scope TEXT, record_id TEXT, data TEXT);
   `);
   const rejected = {
@@ -108,11 +107,6 @@ function fixture() {
     'key-2',
     'accepted cache',
   );
-  db.prepare('INSERT INTO website_research_identities VALUES(?,?,?)').run(
-    'table-1',
-    'discarded.example',
-    JSON.stringify({ recordId: 'record-1', url: source }),
-  );
   db.prepare('INSERT INTO company_identities VALUES(?,?,?)').run(
     'table-1',
     'record-1',
@@ -136,7 +130,6 @@ test('历史明确淘汰仅留幂等与统计，终态清队列；活跃和已�
       active: operation(db, 'active-1'),
       unsafe: operation(db, 'unsafe-1'),
       paused: job(db, 'job-paused'),
-      websiteIdentity: db.prepare('SELECT data FROM website_research_identities').get().data,
       companyIdentity: db.prepare('SELECT data FROM company_identities').get().data,
     };
     const plan = cleanupRejectedHistory(db, { clearModelCache: true });
@@ -190,10 +183,6 @@ test('历史明确淘汰仅留幂等与统计，终态清队列；活跃和已�
     assert.deepEqual(operation(db, 'active-1'), before.active);
     assert.deepEqual(operation(db, 'unsafe-1'), before.unsafe);
     assert.deepEqual(job(db, 'job-paused'), before.paused);
-    assert.equal(
-      db.prepare('SELECT data FROM website_research_identities').get().data,
-      before.websiteIdentity,
-    );
     assert.equal(
       db.prepare('SELECT data FROM company_identities').get().data,
       before.companyIdentity,

@@ -58,13 +58,11 @@ type CampaignInput = Pick<
   | 'includeExisting'
   | 'continuous'
   | 'intervalSeconds'
-  | 'outreachClaims'
-  | 'generationMode'
 > & { mode: 'production' };
 
 const labels: Record<string, string> = {
-  draft: '待审核',
-  preparing: '正在准备样稿',
+  draft: '待发送',
+  preparing: '正在生成',
   ready: '已就绪',
   active: '运行中',
   paused: '已暂停',
@@ -95,7 +93,7 @@ const campaignStatusLabel = (campaign: OutreachCampaign) =>
     ? '待补齐条件'
     : campaign.status === 'draft'
       ? '未启动'
-      : campaign.status === 'preparing' && campaign.generationMode === 'simple'
+      : campaign.status === 'preparing'
         ? '正在生成'
         : statusLabel(campaign.status);
 const productName = (product: OutreachProduct) => product.label || product.name || product.id;
@@ -113,12 +111,6 @@ const productCategories = [
   { id: 'outdoor', label: '户外遮阳' },
 ];
 const priorityGrades = ['A', 'B', 'C'];
-const agentLabels = {
-  shutter: '透气窗业务员',
-  venetian: '百叶窗业务员',
-  indoor: '室内成品帘业务员',
-  outdoor: '户外遮阳业务员',
-};
 const message = (error: unknown) =>
   error instanceof Error ? error.message : '操作未完成，请稍后重试。';
 const split = (value: string) => [
@@ -553,23 +545,8 @@ function CampaignEditor({
   const [selectedProducts, setSelectedProducts] = useState(campaign?.filters?.products || []);
   const [selectedCategories, setSelectedCategories] = useState(campaign?.filters?.categories || []);
   const [grades, setGrades] = useState(campaign?.filters?.grades || []);
-  const [claims, setClaims] = useState<Record<string, string>>(() =>
-    Object.fromEntries(
-      campaign
-        ? (campaign.outreachClaims || []).map((claim) => [claim.productId, claim.text])
-        : products
-            .filter(
-              (product) =>
-                productApproved(product) &&
-                !product.outreachFacts?.length &&
-                product.englishName?.trim(),
-            )
-            .map((product) => [product.id, `We supply ${product.englishName!.trim()}.`]),
-    ),
-  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const simple = !campaign || campaign.generationMode === 'simple';
   const coveredProductIds = new Set(
     mailboxes
       .filter((mailbox) => selectedMailboxes.includes(mailbox.id))
@@ -579,11 +556,6 @@ function CampaignEditor({
     (product) =>
       coveredProductIds.has(product.id) &&
       (!selectedCategories.length || selectedCategories.includes(product.category || '')),
-  );
-  const claimProducts = categoryProducts.filter(
-    (product) =>
-      productApproved(product) &&
-      (!selectedProducts.length || selectedProducts.includes(product.id)),
   );
   const unavailableSelections = selectedProducts.filter(
     (id) => !categoryProducts.some((product) => product.id === id && productApproved(product)),
@@ -605,7 +577,6 @@ function CampaignEditor({
       await onSave({
         name: String(form.get('name')).trim(),
         mode: 'production',
-        generationMode: simple ? 'simple' : 'professional',
         targetCount: Number(form.get('targetCount')),
         filters: {
           markets: split(String(form.get('markets') || '')),
@@ -619,15 +590,6 @@ function CampaignEditor({
         includeExisting: form.get('includeExisting') === 'on',
         continuous: form.get('continuous') === 'on',
         intervalSeconds: Number(form.get('intervalSeconds')),
-        outreachClaims: simple
-          ? []
-          : claimProducts
-              .filter((product) => !product.outreachFacts?.length && claims[product.id]?.trim())
-              .map((product) => ({
-                productId: product.id,
-                productVersion: product.version ?? 1,
-                text: claims[product.id].trim(),
-              })),
       });
       onClose();
     } catch (reason) {
@@ -787,7 +749,7 @@ function CampaignEditor({
           ))}
         </div>
         <span className="outreach-field-label">
-          供货产品 · 仅显示所选邮箱负责的产品，不选则匹配其中已有外发资料或介绍内容的产品
+          供货产品 · 仅显示所选邮箱负责的产品，不选则匹配其中已审核的产品
         </span>
         <ProductOptions
           products={categoryProducts}
@@ -830,55 +792,9 @@ function CampaignEditor({
             <span>自动加入后续新发现的符合条件客户</span>
           </label>
         </div>
-        {simple ? (
-          <p className="outreach-hint">
-            启动后，LLM
-            根据客户资料和匹配产品生成开发信，附上对应邮箱的固定签名并自动发送。无需准备或审核样稿。
-          </p>
-        ) : (
-          <>
-            <div className="outreach-form-section">
-              <h3>本次允许介绍的产品内容</h3>
-              <p>
-                品类业务员依据已审核且有效的资料撰写完整首封。计划授权并启动后，在确认的产品和邮箱范围内自动发送。
-              </p>
-            </div>
-            {claimProducts.length ? (
-              claimProducts.map((product) => (
-                <label key={product.id}>
-                  {productName(product)}
-                  {product.outreachFacts?.length ? (
-                    <small>
-                      来自产品资料库 · 当前第 {product.version ?? 1} 版 ·{' '}
-                      {product.outreachFacts.length} 条外发资料。
-                      仅引用已确认且仍有效的内容，无需在计划重复填写；同范围新版本确认后自动重做受影响的待发邮件。
-                    </small>
-                  ) : (
-                    <>
-                      <textarea
-                        rows={3}
-                        value={claims[product.id] || ''}
-                        onChange={(event) =>
-                          setClaims({ ...claims, [product.id]: event.target.value })
-                        }
-                        placeholder="例如：We supply PVC plantation shutters to overseas window-furnishing businesses."
-                      />
-                      <small>
-                        产品资料版本 {product.version ?? 1} ·
-                        新计划按已审核英文名称预填基础介绍，可修改。
-                        不包含价格、交期等未确认信息；清空后不使用此产品生成开发信。
-                      </small>
-                    </>
-                  )}
-                </label>
-              ))
-            ) : (
-              <p className="outreach-hint">
-                当前邮箱及品类范围内尚无已审核产品。请检查邮箱负责产品，或先保存草稿再补齐资料。
-              </p>
-            )}
-          </>
-        )}
+        <p className="outreach-hint">
+          启动后，LLM 根据客户资料和匹配产品生成开发信，附上对应邮箱的固定签名并自动发送。
+        </p>
         <div className="modal-actions">
           <button type="button" className="btn secondary" disabled={busy} onClick={onClose}>
             取消
@@ -928,12 +844,6 @@ function MessagePreview({
           <dt>企业</dt>
           <dd>{delivery.companyName || '公司自有测试邮箱'}</dd>
         </div>
-        {delivery.agentId && (
-          <div>
-            <dt>品类业务员</dt>
-            <dd>{agentLabels[delivery.agentId]}</dd>
-          </div>
-        )}
       </dl>
       {!!delivery.productFacts?.length && (
         <details className="outreach-hint">
@@ -1020,8 +930,6 @@ export function OutreachCommunication() {
   const [importOpen, setImportOpen] = useState(false);
   const [testOpen, setTestOpen] = useState(false);
   const [testMailboxes, setTestMailboxes] = useState<OutreachMailbox[]>([]);
-  const [reviewOpen, setReviewOpen] = useState(false);
-  const [reviewChecked, setReviewChecked] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(searchParams.get('campaignId'));
   const [detail, setDetail] = useState<OutreachCampaignDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
@@ -1301,7 +1209,6 @@ export function OutreachCommunication() {
     return () => controller.abort();
   }, [sampleKey, sampleRetry]);
   const samplePreview = sampleBody?.key === sampleKey ? sampleBody : null;
-  const needsReview = state?.review.internalTestPassed && !state.review.productionApproved;
   const currentDeliveryPreview = deliveryPreview
     ? recordData?.items.find((delivery) => delivery.id === deliveryPreview.id) || deliveryPreview
     : null;
@@ -1436,32 +1343,10 @@ export function OutreachCommunication() {
                     <Send size={22} />
                   </span>
                   <div>
-                    <h3>
-                      {state.review.productionApproved
-                        ? '公司试发已检查，正式计划可独立启用'
-                        : needsReview
-                          ? '公司试发已完成，等待检查邮件效果'
-                          : '先通过公司邮箱检查发送链路'}
-                    </h3>
-                    <p>
-                      {needsReview
-                        ? '在公司邮箱查看实际收到的测试信，再确认是否进入正式计划。'
-                        : '测试邮件仅发送到已配置的公司邮箱，使用带标记的固定测试内容。'}
-                    </p>
+                    <h3>公司邮箱发送测试</h3>
+                    <p>测试邮件仅发送到已配置的公司邮箱，使用带标记的固定测试内容。</p>
                   </div>
                   <div className="outreach-strip-actions">
-                    {needsReview && (
-                      <button
-                        className="btn primary"
-                        onClick={() => {
-                          setReviewChecked(false);
-                          setReviewOpen(true);
-                        }}
-                      >
-                        检查试发结果
-                        <ChevronRight size={15} />
-                      </button>
-                    )}
                     <button
                       className="btn secondary"
                       disabled={!!busy || connected.length < 2}
@@ -1659,9 +1544,7 @@ export function OutreachCommunication() {
                                     onClick={() => setDetailId(campaign.id)}
                                   >
                                     <Eye size={15} />
-                                    {campaign.generationMode === 'simple'
-                                      ? '执行详情'
-                                      : '样稿与详情'}
+                                    执行详情
                                   </button>
                                   {campaign.acquisitionSource && (
                                     <Link
@@ -2163,20 +2046,7 @@ export function OutreachCommunication() {
                       : `目标 ${shownDetail.campaign.targetCount} 封`}
                   </span>
                   <span>版本 {shownDetail.campaign.revision}</span>
-                  {shownDetail.campaign.generationMode === 'simple' ? (
-                    <span>LLM 自动生成 · 固定签名</span>
-                  ) : (
-                    shownDetail.campaign.status !== 'cancelled' && (
-                      <span>
-                        {shownDetail.campaign.status === 'active' &&
-                        shownDetail.deliveries.some((delivery) => delivery.status === 'draft')
-                          ? '有新样稿待审核'
-                          : shownDetail.campaign.approvedRevision === shownDetail.campaign.revision
-                            ? '当前版本已审核'
-                            : '当前版本待审核'}
-                      </span>
-                    )
-                  )}
+                  <span>LLM 自动生成 · 固定签名</span>
                 </div>
                 <InlineError value={shownDetail.campaign.lastError || null} />
                 {shownDetail.campaign.status === 'cancelled' && (
@@ -2192,9 +2062,7 @@ export function OutreachCommunication() {
                   <>
                     {canCancelCampaign(shownDetail.campaign) && (
                       <p className="outreach-hint">
-                        {shownDetail.campaign.generationMode === 'simple'
-                          ? '启动后，系统从客户库筛选合适客户，生成开发信、附上固定签名并自动发送。可在此查看实际邮件与执行结果。'
-                          : '检查客户范围、产品与发件邮箱的对应关系和邮件样稿。批准当前计划后，系统按相同规则生成首封邮件，使用负责对应产品的邮箱发送。'}
+                        启动后，系统从客户库筛选合适客户，生成开发信、附上固定签名并自动发送。可在此查看实际邮件与执行结果。
                       </p>
                     )}
                     <details className="outreach-plan-rules" open>
@@ -2263,32 +2131,8 @@ export function OutreachCommunication() {
                           </dd>
                         </div>
                       </dl>
-                      {(shownDetail.campaign.outreachClaims || []).map((claim) => (
-                        <div className="outreach-approved-claim" key={claim.productId}>
-                          <strong>
-                            {products.find((product) => product.id === claim.productId)?.name ||
-                              claim.productId}
-                            <small>版本 {claim.productVersion}</small>
-                          </strong>
-                          <p>{claim.text}</p>
-                        </div>
-                      ))}
-                      {(shownDetail.campaign.productScopes || [])
-                        .filter(
-                          (scope) =>
-                            products.find((product) => product.id === scope.productId)
-                              ?.outreachFacts?.length,
-                        )
-                        .map((scope) => (
-                          <div className="outreach-approved-claim" key={scope.productId}>
-                            <strong>{scope.name || scope.englishName}</strong>
-                            <p>使用产品资料库中已确认且有效的外发事实与适用条件。</p>
-                          </div>
-                        ))}
                       <p className="outreach-hint">
-                        {shownDetail.campaign.generationMode === 'simple'
-                          ? '根据客户资料和邮箱负责的已确认产品范围生成基础介绍，使用该邮箱的固定签名。'
-                          : '已授权产品有外发资料时，使用资料库中已确认且有效的版本；未登记外发资料的产品仅使用本计划填写的当前版本介绍。'}
+                        根据客户资料和邮箱负责的已确认产品范围生成基础介绍，使用该邮箱的固定签名。
                       </p>
                     </details>
                   </>
@@ -2336,17 +2180,11 @@ export function OutreachCommunication() {
                   </div>
                 ) : (
                   <Empty
-                    title={
-                      shownDetail.campaign.generationMode === 'simple'
-                        ? '还没有执行邮件'
-                        : '还没有邮件样稿'
-                    }
+                    title="还没有执行邮件"
                     detail={
                       shownDetail.campaign.status === 'cancelled'
                         ? '此计划已取消，不会再生成样稿或发送邮件。'
-                        : shownDetail.campaign.generationMode === 'simple'
-                          ? '启动计划后自动生成并发送，可在此查看执行结果。'
-                          : '点击准备样稿，系统会检查客户范围、匹配邮箱并生成首封邮件。此步骤不会发信。'
+                        : '启动计划后自动生成并发送，可在此查看执行结果。'
                     }
                   />
                 )}
@@ -2366,76 +2204,6 @@ export function OutreachCommunication() {
                   {shownDetail.campaign.mode === 'production' &&
                     canCancelCampaign(shownDetail.campaign) && (
                       <>
-                        {shownDetail.campaign.generationMode !== 'simple' && (
-                          <>
-                            <button
-                              className="btn secondary"
-                              disabled={
-                                !!busy ||
-                                shownDetail.campaign.status === 'active' ||
-                                shownDetail.campaign.status === 'preparing' ||
-                                !state?.readiness.generatorConfigured
-                              }
-                              onClick={() =>
-                                void act(
-                                  'prepare',
-                                  pathFor('campaigns', shownDetail.campaign.id, 'prepare'),
-                                  {},
-                                  '正在准备样稿，完成后可检查。',
-                                )
-                              }
-                            >
-                              <BusyIcon busy={busy === 'prepare'}>
-                                <FileText size={15} />
-                              </BusyIcon>
-                              {busy === 'prepare' || shownDetail.campaign.status === 'preparing'
-                                ? '正在准备样稿…'
-                                : '准备样稿'}
-                            </button>
-                            {(shownDetail.campaign.approvedRevision !==
-                              shownDetail.campaign.revision ||
-                              (['active', 'paused'].includes(shownDetail.campaign.status) &&
-                                shownDetail.deliveries.some(
-                                  (delivery) => delivery.status === 'draft',
-                                ))) && (
-                              <button
-                                className="btn secondary"
-                                disabled={
-                                  !!busy ||
-                                  !['ready', 'active', 'paused'].includes(
-                                    shownDetail.campaign.status,
-                                  ) ||
-                                  !shownDetail.deliveries.some(
-                                    (delivery) =>
-                                      delivery.status === 'draft' &&
-                                      delivery.subject &&
-                                      delivery.bodyText &&
-                                      !['blocked', 'failed', 'unknown', 'cancelled'].includes(
-                                        delivery.status,
-                                      ),
-                                  )
-                                }
-                                onClick={() =>
-                                  void act(
-                                    'approve',
-                                    pathFor('campaigns', shownDetail.campaign.id, 'approve'),
-                                    { revision: shownDetail.campaign.revision },
-                                    shownDetail.campaign.status === 'active'
-                                      ? '已审核的样稿已加入发送队列，将按计划节奏发送。'
-                                      : '当前计划版本已审核，尚未启动发送。',
-                                  )
-                                }
-                              >
-                                <Check size={15} />
-                                {shownDetail.campaign.status === 'active'
-                                  ? '审核并加入发送队列'
-                                  : shownDetail.campaign.status === 'paused'
-                                    ? '审核待发送样稿'
-                                    : '批准此版本与样稿'}
-                              </button>
-                            )}
-                          </>
-                        )}
                         {shownDetail.campaign.status === 'active' ? (
                           <button
                             className="btn secondary"
@@ -2457,14 +2225,7 @@ export function OutreachCommunication() {
                             className="btn primary"
                             disabled={
                               !!busy ||
-                              (shownDetail.campaign.generationMode === 'simple'
-                                ? !['draft', 'ready', 'paused'].includes(
-                                    shownDetail.campaign.status,
-                                  )
-                                : !['ready', 'paused'].includes(shownDetail.campaign.status) ||
-                                  shownDetail.campaign.approvedRevision !==
-                                    shownDetail.campaign.revision ||
-                                  !state?.review.productionApproved)
+                              !['draft', 'ready', 'paused'].includes(shownDetail.campaign.status)
                             }
                             onClick={() =>
                               void act(
@@ -2492,12 +2253,6 @@ export function OutreachCommunication() {
                     </button>
                   )}
                 </div>
-                {shownDetail.campaign.mode === 'production' &&
-                  shownDetail.campaign.generationMode !== 'simple' &&
-                  canCancelCampaign(shownDetail.campaign) &&
-                  !state?.review.productionApproved && (
-                    <p className="outreach-hint">公司试发结果检查完成后，才能启动正式计划。</p>
-                  )}
               </>
             )}
           </div>
@@ -2680,54 +2435,6 @@ export function OutreachCommunication() {
                   <Send size={15} />
                 </BusyIcon>
                 发送这 {testMailboxes.length} 封测试信
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
-      {reviewOpen && (
-        <Modal
-          title="检查公司试发结果"
-          onClose={() => {
-            if (!busy) setReviewOpen(false);
-          }}
-        >
-          <div className="modal-body outreach-form">
-            <p>请在公司邮箱中确认实际收到的测试信，检查发件地址、显示名称与邮件内容。</p>
-            <label className="outreach-review-check">
-              <input
-                type="checkbox"
-                checked={reviewChecked}
-                onChange={(event) => setReviewChecked(event.target.checked)}
-              />
-              <span>我已检查测试邮件，允许准备正式计划。</span>
-            </label>
-            <p className="outreach-hint">正式计划仍需要检查样稿并单独点击启动。</p>
-            <InlineError value={error} />
-            <div className="modal-actions">
-              <button
-                className="btn secondary"
-                disabled={!!busy}
-                onClick={() => setReviewOpen(false)}
-              >
-                稍后检查
-              </button>
-              <button
-                className="btn primary"
-                disabled={!!busy || !reviewChecked || !state?.review.internalTestPassed}
-                onClick={() => {
-                  void act(
-                    'review',
-                    '/review',
-                    { approved: true },
-                    '试发检查已确认。正式计划可审核后单独启动。',
-                  ).then((ok) => {
-                    if (ok) setReviewOpen(false);
-                  });
-                }}
-              >
-                <CheckCircle2 size={15} />
-                确认检查结果
               </button>
             </div>
           </div>

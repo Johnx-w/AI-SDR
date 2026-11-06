@@ -21,7 +21,6 @@ function setup(
   {
     cancelError,
     deliveryStatus = 'accepted',
-    generationMode,
     acceptedCount = 1,
     acquisitionSource,
     grades = [],
@@ -39,7 +38,6 @@ function setup(
     name: 'Australia first outreach',
     mode: 'production',
     status,
-    generationMode,
     revision: 7,
     approvedRevision: 7,
     targetCount: acquisitionSource ? null : 150,
@@ -79,7 +77,6 @@ function setup(
     deliveries,
     products: [],
     readiness: { generatorConfigured: true },
-    review: { internalTestPassed: false, productionApproved: true },
   });
   let searchParams = new URLSearchParams({ tab });
   const requests = [],
@@ -165,10 +162,6 @@ function setup(
               deliveries.find((item) => path === `/deliveries/${item.id}`),
             );
             return deliveryResponse ? deliveryResponse(result) : result;
-          }
-          if (path === '/campaigns/campaign-one/approve') {
-            deliveries[0].status = 'queued';
-            return structuredClone({ campaign, deliveries });
           }
           if (path === '/campaigns/campaign-one/cancel') {
             if (cancelError) throw new Error(cancelError);
@@ -261,7 +254,7 @@ test('详情响应超过多个轮询周期仍显示结果，完成及取消的�
     });
     await h.ready();
     if (status !== 'active') h.click('历史计划');
-    h.click('样稿与详情');
+    h.click('执行详情');
     h.render();
     assert.match(h.html(), /正在读取计划/);
     for (let i = 0; i < 8; i++) h.tick();
@@ -282,12 +275,12 @@ test('关闭再打开计划取消旧请求，迟到的结果不能覆盖新详�
     detailResponse: (result) => new Promise((resolve) => pending.push({ result, resolve })),
   });
   await h.ready();
-  h.click('样稿与详情');
+  h.click('执行详情');
   h.render();
   const first = h.requests.find(({ path }) => path.startsWith('/campaigns/'));
   h.closeDetail();
   assert.equal(first.init.signal?.aborted, true);
-  h.click('样稿与详情');
+  h.click('执行详情');
   h.render();
   pending[1].resolve(pending[1].result);
   await flush();
@@ -307,7 +300,7 @@ test('详情加载失败结束等待并允许重试', async () => {
   });
   await h.ready();
   h.click('历史计划');
-  h.click('样稿与详情');
+  h.click('执行详情');
   h.render();
   await flush();
   assert.match(h.html(), /读取计划失败/);
@@ -334,7 +327,7 @@ test('计划只读取所选邮件正文，轮询相同摘要不重读，切换�
     deliveryResponse: (result) => new Promise((resolve) => pending.push({ result, resolve })),
   });
   await h.ready();
-  h.click('样稿与详情');
+  h.click('执行详情');
   h.render();
   await flush();
   h.render();
@@ -377,7 +370,7 @@ test('单封正文读取失败可重试，不重新下载整个计划', async ()
   });
   await h.ready();
   h.click('历史计划');
-  h.click('样稿与详情');
+  h.click('执行详情');
   h.render();
   await flush();
   h.render();
@@ -395,7 +388,7 @@ test('单封正文读取失败可重试，不重新下载整个计划', async ()
 });
 
 test('自动计划草稿直接提供启动入口，不展示样稿准备或审批步骤', async () => {
-  const h = setup('draft', { generationMode: 'simple' });
+  const h = setup('draft', {});
   await h.ready();
   h.click('执行详情');
   h.render();
@@ -415,7 +408,6 @@ test('尚无可发送邮件的就绪计划仍提示待补齐条件', async () =>
 
 test('运行中的获客自动首发保留在当前计划，按收录客户展示并由获客入口管理', async () => {
   const h = setup('active', {
-    generationMode: 'simple',
     acquisitionSource: { jobId: 'source-job', roundId: 'source-job' },
   });
   await h.ready();
@@ -434,36 +426,6 @@ test('运行中的获客自动首发保留在当前计划，按收录客户展�
   for (const label of ['暂停', '取消计划', '启动自动发送', '恢复计划'])
     assert.equal(h.button(label), undefined);
   assert.deepEqual(h.writes(), []);
-});
-
-test('活跃计划里的恢复后草稿保留明确审核入口，查看详情不会直接发送', async () => {
-  const h = setup('active', { deliveryStatus: 'draft' });
-  await h.ready();
-  h.click('样稿与详情');
-  h.render();
-  await flush();
-  assert.ok(h.button('审核并加入发送队列'));
-  assert.deepEqual(h.writes(), []);
-  h.click('审核并加入发送队列');
-  await flush();
-  assert.equal(h.writes().length, 1);
-  assert.equal(h.writes()[0].path, '/campaigns/campaign-one/approve');
-  assert.deepEqual(JSON.parse(h.writes()[0].init.body), { revision: 7 });
-});
-
-test('暂停计划仍可核对恢复后草稿，审核与恢复计划是两个独立操作', async () => {
-  const h = setup('paused', { deliveryStatus: 'draft' });
-  await h.ready();
-  h.click('样稿与详情');
-  h.render();
-  await flush();
-  assert.ok(h.button('审核待发送样稿'));
-  assert.ok(h.button('恢复计划'));
-  assert.deepEqual(h.writes(), []);
-  h.click('审核待发送样稿');
-  await flush();
-  assert.equal(h.writes().length, 1);
-  assert.equal(h.writes()[0].path, '/campaigns/campaign-one/approve');
 });
 
 test('unfinished outreach plans offer cancellation after an explicit confirmation, with an option to keep the plan', async () => {
@@ -498,9 +460,9 @@ test('confirming cancellation submits the reviewed campaign revision and keeps i
   assert.equal(h.button('取消计划'), undefined);
   assert.equal(h.button('编辑'), undefined);
   h.click('历史计划');
-  assert.ok(h.button('样稿与详情'));
+  assert.ok(h.button('执行详情'));
   assert.match(h.html(), /已取消/);
-  h.click('样稿与详情');
+  h.click('执行详情');
   h.render();
   await flush();
   h.render();
@@ -521,7 +483,7 @@ test('completed and cancelled plans retain details without controls that could r
     h.click('历史计划');
     assert.equal(h.button('取消计划'), undefined);
     assert.equal(h.button('编辑'), undefined);
-    h.click('样稿与详情');
+    h.click('执行详情');
     h.render();
     await flush();
     assert.match(h.html(), /Original submitted subject/);

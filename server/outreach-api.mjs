@@ -59,7 +59,7 @@ export async function handleOutreach({ request, url, service, readJson, idempote
   }
   if (path === '/campaigns' && method === 'POST')
     return service.saveCampaign(await readJson(request));
-  const campaign = path.match(/^\/campaigns\/([\w-]+)(?:\/(prepare|approve|start|pause|cancel))?$/);
+  const campaign = path.match(/^\/campaigns\/([\w-]+)(?:\/(start|pause|cancel))?$/);
   if (campaign) {
     const [, id, action] = campaign;
     if (!action && method === 'GET') {
@@ -75,8 +75,6 @@ export async function handleOutreach({ request, url, service, readJson, idempote
     if (!action && method === 'PUT') return service.saveCampaign(await readJson(request), id);
     if (method === 'POST') {
       const body = await readJson(request);
-      if (action === 'prepare') return service.prepare(id);
-      if (action === 'approve') return service.approve(id, body.revision);
       if (action === 'start') return service.activate(id, body.revision);
       if (action === 'pause') return service.pause(id);
       if (action === 'cancel') return service.cancel(id, body.revision, body.confirmed);
@@ -87,8 +85,6 @@ export async function handleOutreach({ request, url, service, readJson, idempote
       ...(await readJson(request)),
       idempotencyKey: idempotencyKey(request),
     });
-  if (path === '/review' && method === 'POST')
-    return service.approveReview((await readJson(request)).approved);
   if (path === '/suppress' && method === 'POST') return service.suppress(await readJson(request));
   const receipt = path.match(/^\/internal-test\/([\w-]+)\/received$/);
   if (receipt && method === 'POST') {
