@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { fieldText, mapFeishuRecord } from './feishu.mjs';
-import { fieldValue, customerWebsite } from './customer-fields.mjs';
+import { fieldValue, customerWebsite, encodeCustomerFields } from './customer-fields.mjs';
 import { domainKey } from './website-identity.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -136,9 +136,12 @@ export class CustomerArchive {
     return this.syncing;
   }
   async synchronize() {
+    let definitions;
     for (const queued of this.entries().filter((entry) => entry.revision > entry.syncedRevision)) {
       const id = queued.record.record_id;
       try {
+        definitions ??= await this.remote.fields();
+        const fields = encodeCustomerFields(queued.fields, definitions);
         let remoteId = queued.remoteId;
         if (!remoteId) {
           // Reconcile every insert before creating, including responses lost across a restart.
@@ -147,7 +150,7 @@ export class CustomerArchive {
             (record) => domainKey(customerWebsite(record)) === domain,
           );
           if (matches.length > 1) throw fail(409, '飞书存在相同官网的重复客户，请核对');
-          if (matches.length && !sameFields(matches[0], queued.fields))
+          if (matches.length && !sameFields(matches[0], fields))
             throw fail(409, '飞书已有相同官网但内容不同的客户，本地档案已保留，请核对后再同步');
           remoteId = matches[0]?.record_id;
         }
@@ -158,10 +161,10 @@ export class CustomerArchive {
           domainKey(customerWebsite(saved)) !== domainKey(customerWebsite(queued.record))
         )
           throw fail(409, '飞书客户官网已变更，本地档案已保留，请核对客户身份');
-        if (!saved || !sameFields(saved, queued.fields)) {
+        if (!saved || !sameFields(saved, fields)) {
           const written = await this.remote.write(
             remoteId ? 'update' : 'insert',
-            queued.fields,
+            fields,
             remoteId,
             queued.clientToken,
           );
@@ -169,7 +172,7 @@ export class CustomerArchive {
           this.put({ ...this.entry(id), remoteId });
           saved = await this.remote.record(remoteId);
         }
-        if (!sameFields(saved, queued.fields)) throw fail(502, '飞书读回与本地档案不一致');
+        if (!sameFields(saved, fields)) throw fail(502, '飞书读回与本地档案不一致');
         const latest = this.entry(id);
         this.put({
           ...latest,

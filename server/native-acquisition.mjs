@@ -48,6 +48,7 @@ import {
   customerWebsite,
   fieldValue,
   resolveCustomerField,
+  encodeCustomerFields,
 } from './customer-fields.mjs';
 
 const conflict = (message) => Object.assign(new Error(message), { status: 409 });
@@ -378,7 +379,7 @@ export class NativeAcquisition {
       )
         throw Object.assign(new Error('请先完成T2评分字段配置：' + name), { status: 503 });
     const record = await this.feishu.record(recordId);
-    const countryValue = body.country || fieldText(record.fields?.['国家']);
+    const countryValue = body.country || fieldText(fieldValue(record.fields, '国家'));
     const country = markets.find(
       (m) => normalizeCountry(m.value) === normalizeCountry(countryValue),
     )?.value;
@@ -1223,7 +1224,10 @@ export class NativeAcquisition {
     if (!op.recordId) return false;
     const record = await this.feishu.record(op.recordId);
     if (domainKey(customerWebsite(record)) !== domainKey(op.source_url)) return false;
-    return Object.entries(op.fields).every(([key, value]) => {
+    const fields = this.feishu.localFirst
+      ? op.fields
+      : encodeCustomerFields(op.fields, await this.feishu.fields());
+    return Object.entries(fields).every(([key, value]) => {
       if (['公司名称', '客户名称'].includes(key))
         return (
           fieldText(record.fields?.['公司名称'] || record.fields?.['客户名称']) === fieldText(value)

@@ -214,3 +214,45 @@ test('远端修改和删除不覆盖本地主档案，相同官网内容冲突�
   assert.equal(remote.rows[1].fields.开发状态, '已成交');
   assert.equal(library.metadata().sync.pendingWrites, 2);
 });
+
+test('精简原T2按实际写入列核对，内部编号和完整摘要保留本地，重启不重复客户', async (t) => {
+  const { remote, open } = fixture(t);
+  remote.fields = async () => [
+    { field_name: '客户ID', type: 1005 },
+    { field_name: '公司名称', type: 1 },
+    { field_name: '官网链接', type: 1 },
+    { field_name: '客户画像摘要', type: 1 },
+    { field_name: '主要供货机会', type: 1 },
+  ];
+  const { archive, library } = open();
+  await library.refresh();
+  const raw = {
+    公司名称: 'Shade Co',
+    企业官网: 'https://shadeco.com',
+    customer_id: 'web_shadeco.com',
+    来源链接: 'https://directory.example/shade',
+    公开采购需求: '原始需求依据',
+    客户行业画像:
+      '旧摘要\n依据：old\n来源：https://shadeco.com/\n最新摘要\n依据：new\n来源：https://shadeco.com/about',
+    主要供货机会: '成品 · ZIP（潜在供货机会）',
+  };
+  const saved = await archive.write('insert', raw, undefined, 'compact-original-t2');
+  remote.loseResponse = true;
+  await archive.sync();
+  await archive.close();
+  const restarted = open();
+  await restarted.archive.sync();
+  assert.equal(restarted.library.metadata().sync.pendingWrites, 0);
+  assert.equal(remote.rows.length, 1);
+  assert.deepEqual(remote.rows[0].fields, {
+    公司名称: 'Shade Co',
+    官网链接: 'https://shadeco.com',
+    客户画像摘要: '最新摘要',
+    主要供货机会: '成品 · ZIP',
+  });
+  assert.equal(
+    (await restarted.archive.record(saved.record_id)).fields.客户行业画像,
+    raw.客户行业画像,
+  );
+  assert.equal(restarted.archive.remoteId(saved.record_id), remote.rows[0].record_id);
+});

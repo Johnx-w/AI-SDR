@@ -1,5 +1,6 @@
 // Keep the transport's field values intact. This module deliberately does not
 // import Feishu mapping or assessment code: both use it for customer identity.
+import { groupCustomerProducts } from './product-format.mjs';
 export const BUSINESS_SCHEMA_VERSION = 't2-t5-v1';
 
 export const CUSTOMER_FIELD_ALIASES = Object.freeze({
@@ -10,8 +11,48 @@ export const CUSTOMER_FIELD_ALIASES = Object.freeze({
   服务客群: '企业服务客群',
 });
 
-const legacyName = (name) =>
-  Object.keys(CUSTOMER_FIELD_ALIASES).find((key) => CUSTOMER_FIELD_ALIASES[key] === name) || name;
+export const CUSTOMER_TABLE_FIELD_ALIASES = Object.freeze({
+  国家: ['国家/地区'],
+  '州 / 城市': ['城市/区域'],
+  企业官网: ['官网链接'],
+  初评结果: ['最新客户评级'],
+  客户行业画像: ['客户画像摘要'],
+});
+
+const semanticName = (name) =>
+  CUSTOMER_FIELD_ALIASES[name] ||
+  Object.keys(CUSTOMER_TABLE_FIELD_ALIASES).find((key) =>
+    CUSTOMER_TABLE_FIELD_ALIASES[key].includes(name),
+  ) ||
+  name;
+
+const legacyName = (name) => {
+  const current = semanticName(name);
+  return (
+    Object.keys(CUSTOMER_FIELD_ALIASES).find((key) => CUSTOMER_FIELD_ALIASES[key] === current) ||
+    current
+  );
+};
+
+const customerFieldNames = (name) => {
+  const oldName = legacyName(name);
+  const currentName = CUSTOMER_FIELD_ALIASES[oldName] || oldName;
+  return [...new Set([currentName, oldName, ...(CUSTOMER_TABLE_FIELD_ALIASES[currentName] || [])])];
+};
+
+const legacyTextValue = (value) =>
+  value == null ||
+  typeof value === 'string' ||
+  (Array.isArray(value) &&
+    value.every(
+      (item) =>
+        item &&
+        typeof item.text === 'string' &&
+        !['record_id', 'record_ids', 'link_record_ids', 'table_id'].some((key) => key in item),
+    ));
+
+const customerFieldValue = (fields, name) =>
+  name === '主营产品偏好' && !legacyTextValue(fields[name]) ? undefined : fields[name];
 
 const text = (value) => {
   if (value == null) return '';
@@ -24,8 +65,10 @@ const populated = (value) => text(value).trim() !== '';
 
 export function fieldValue(fields = {}, name) {
   const oldName = legacyName(name);
-  const currentName = CUSTOMER_FIELD_ALIASES[oldName] || oldName;
-  return populated(fields[currentName]) ? fields[currentName] : fields[oldName];
+  const preferred = customerFieldNames(name).find((key) =>
+    populated(customerFieldValue(fields, key)),
+  );
+  return preferred ? customerFieldValue(fields, preferred) : customerFieldValue(fields, oldName);
 }
 
 // Existing research/merge routines use the established internal keys. Translate
@@ -33,19 +76,114 @@ export function fieldValue(fields = {}, name) {
 export function canonicalCustomerFields(fields = {}) {
   const result = { ...fields };
   for (const [oldName, currentName] of Object.entries(CUSTOMER_FIELD_ALIASES)) {
+    if (oldName === '主营产品偏好' && !legacyTextValue(fields[oldName])) continue;
     if (Object.hasOwn(fields, oldName) || Object.hasOwn(fields, currentName))
       result[oldName] = fieldValue(fields, oldName);
     delete result[currentName];
+  }
+  for (const [currentName, alternatives] of Object.entries(CUSTOMER_TABLE_FIELD_ALIASES)) {
+    if (!alternatives.some((name) => Object.hasOwn(fields, name))) continue;
+    result[legacyName(currentName)] = fieldValue(fields, currentName);
+    for (const name of alternatives) delete result[name];
   }
   return result;
 }
 
 export function resolveCustomerField(definitions = [], name) {
-  const oldName = legacyName(name);
-  const currentName = CUSTOMER_FIELD_ALIASES[oldName] || oldName;
-  const names = new Set(definitions.map((field) => field.field_name));
-  if (names.has(currentName)) return currentName;
-  return names.has(oldName) ? oldName : undefined;
+  return customerFieldNames(name).find((key) =>
+    definitions.some(
+      (field) => field.field_name === key && !(key === '主营产品偏好' && field.type === 18),
+    ),
+  );
+}
+
+export function customerProfileSummary(value) {
+  const summaries = text(value)
+    .split(/(?:^|\r?\n)\s*来源[：:][^\r\n]*(?:\r?\n|$)/u)
+    .map((block) => block.split(/(?:^|\r?\n)\s*依据[：:]/u)[0].trim())
+    .filter(Boolean);
+  return (summaries.at(-1) || '')
+    .replace(/\[([^\]]*)\]\(https?:\/\/[^)]+\)/gu, '$1')
+    .replace(/https?:\/\/[^\s<>）)]+/gu, '')
+    .replace(/\s+/gu, ' ')
+    .trim();
+}
+
+export const customerOpportunitySummary = (value) => text(value).replace(/（潜在供货机会）/gu, '');
+
+export function encodeCustomerFields(fields, definitions = []) {
+  const byName = new Map(definitions.map((field) => [field.field_name, field]));
+  const originalTable = byName.get('客户ID')?.type === 1005 && byName.has('官网链接');
+  const encoded = {};
+  const labels = (value) => {
+    const values = Array.isArray(value) ? value : [value];
+    if (!values.every((item) => typeof item === 'string'))
+      throw new Error('客户类型多选值必须为文本标签');
+    return [
+      ...new Set(
+        values
+          .flatMap((item) => item.split(/[、,，;；\r\n]+/u))
+          .map((item) => item.trim())
+          .filter(Boolean),
+      ),
+    ];
+  };
+  for (const [inputName, rawValue] of Object.entries(fields)) {
+    let value = rawValue;
+    const exact = byName.get(inputName);
+    if (
+      inputName === '主营产品偏好' &&
+      exact?.type === 18 &&
+      Array.isArray(value) &&
+      (!value.length || !legacyTextValue(value))
+    ) {
+      encoded[inputName] = value;
+      continue;
+    }
+    const name = resolveCustomerField(definitions, inputName) || inputName;
+    const definition = byName.get(name);
+    if (originalTable) {
+      if (
+        !definition &&
+        ['customer_id', '来源链接', '需求产品', '公开采购需求'].includes(inputName)
+      )
+        continue;
+      if (value != null && name === '客户画像摘要') value = customerProfileSummary(value);
+      if (value != null && name === '主要供货机会') value = customerOpportunitySummary(value);
+      if (value != null && name === '企业经营产品') value = groupCustomerProducts(text(value));
+    }
+    if (name === '主营产品偏好' && definition?.type === 18 && legacyTextValue(value))
+      throw new Error('主营产品概况文本不能写入主营产品偏好关联字段');
+    if (value == null) {
+      encoded[name] = value;
+    } else if (semanticName(name) === '客户类型' && definition?.type === 4) {
+      encoded[name] = labels(value);
+    } else if (value === '') {
+      encoded[name] = value;
+    } else if (
+      semanticName(name) === '客户类型' &&
+      definition?.type === 1 &&
+      Array.isArray(value)
+    ) {
+      encoded[name] = labels(value).join('、');
+    } else if (
+      definition?.type === 1 &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      (value.link || value.url)
+    ) {
+      const link = value.link || value.url;
+      if (typeof link !== 'string') throw new Error('客户超链接字段格式不兼容：' + name);
+      encoded[name] = link;
+    } else if (definition?.type === 15) {
+      const link = typeof value === 'string' ? value : value.link || value.url;
+      if (typeof link !== 'string') throw new Error('客户超链接字段格式不兼容：' + name);
+      encoded[name] = { text: typeof value === 'string' ? value : value.text || link, link };
+    } else {
+      encoded[name] = value;
+    }
+  }
+  return encoded;
 }
 
 export function customerWebsite(recordOrFields = {}) {
@@ -54,7 +192,7 @@ export function customerWebsite(recordOrFields = {}) {
     value && !Array.isArray(value) && typeof value === 'object'
       ? String(value.link || value.text || '').trim()
       : text(value).trim();
-  return websiteText(fields['企业官网']) || websiteText(fields['来源链接']);
+  return websiteText(fieldValue(fields, '企业官网')) || websiteText(fields['来源链接']);
 }
 
 export function customerSource(recordOrFields = {}) {
@@ -69,8 +207,19 @@ export const customerFieldHelpers =
   'const CUSTOMER_FIELD_ALIASES = ' +
   JSON.stringify(CUSTOMER_FIELD_ALIASES) +
   ';\n' +
+  'const CUSTOMER_TABLE_FIELD_ALIASES = ' +
+  JSON.stringify(CUSTOMER_TABLE_FIELD_ALIASES) +
+  ';\nconst semanticName = ' +
+  semanticName.toString() +
+  ';\n' +
   'const legacyName = ' +
   legacyName.toString() +
+  ';\nconst customerFieldNames = ' +
+  customerFieldNames.toString() +
+  ';\nconst legacyTextValue = ' +
+  legacyTextValue.toString() +
+  ';\nconst customerFieldValue = ' +
+  customerFieldValue.toString() +
   ';\n' +
   'const text = ' +
   text.toString() +

@@ -1,7 +1,7 @@
 import { platformJson } from './acquisition-config.mjs';
 import { fieldText, mapFeishuRecord } from './feishu.mjs';
 import { domainKey } from './website-identity.mjs';
-import { customerWebsite, resolveCustomerField } from './customer-fields.mjs';
+import { customerWebsite, resolveCustomerField, encodeCustomerFields } from './customer-fields.mjs';
 
 const base = 'https://open.feishu.cn/open-apis';
 const fail = (message) => Object.assign(new Error(message), { status: 502 });
@@ -144,12 +144,7 @@ export class FeishuClient {
   async write(action, fields, recordId, clientToken, tableId) {
     if (!tableId) {
       const definitions = await this.fields();
-      fields = Object.fromEntries(
-        Object.entries(fields).map(([name, value]) => [
-          resolveCustomerField(definitions, name) || name,
-          value,
-        ]),
-      );
+      fields = encodeCustomerFields(fields, definitions);
     }
     const path =
       this.tablePath(tableId) +
@@ -171,6 +166,7 @@ export function recordsForDomain(records, domain) {
 
 export function encodeResearchFields(raw, definitions) {
   const types = new Map(definitions.map((f) => [f.field_name, f.type]));
+  const originalTable = types.get('客户ID') === 1005 && types.has('官网链接');
   const nameField = types.has('公司名称') ? '公司名称' : '客户名称';
   if (types.get(nameField) !== 1) throw fail('客户表缺少公司名称文本字段');
   const name = raw['公司名称'] || raw['客户名称'];
@@ -178,24 +174,37 @@ export function encodeResearchFields(raw, definitions) {
     Object.entries(raw).filter(([key]) => !['公司名称', '客户名称'].includes(key)),
   );
   if (name) raw[nameField] = name;
-  for (const name of ['来源链接', 'customer_id', '需求产品', '客户行业画像'])
+  const required = originalTable
+    ? ['客户行业画像']
+    : ['来源链接', 'customer_id', '需求产品', '客户行业画像'];
+  for (const name of required)
     if (!resolveCustomerField(definitions, name)) throw fail('客户表缺少迁移必需字段：' + name);
-  for (const name of ['需求产品', '客户行业画像'])
-    if (types.get(resolveCustomerField(definitions, name)) !== 1)
-      throw fail('客户表字段必须为文本：' + name);
-  if (![1, 3].includes(types.get('客户类型')))
-    throw fail('客户类型必须为文本字段（迁移期间兼容旧单选）');
+  for (const name of ['需求产品', '客户行业画像']) {
+    const field = resolveCustomerField(definitions, name);
+    if (originalTable && name === '需求产品' && !field) continue;
+    if (types.get(field) !== 1) throw fail('客户表字段必须为文本：' + name);
+  }
+  if (![1, 3, 4].includes(types.get('客户类型'))) throw fail('客户类型必须为文本、单选或多选字段');
   const fields = {};
   for (const [inputName, value] of Object.entries(raw)) {
     const name = resolveCustomerField(definitions, inputName);
     const type = types.get(name);
     if (!type || value === undefined || value === null || value === '') continue;
     if ([1, 3, 13].includes(type) && typeof value === 'string') fields[name] = value;
+    else if (
+      type === 4 &&
+      name === '客户类型' &&
+      (typeof value === 'string' || Array.isArray(value))
+    )
+      fields[name] = value;
     else if ([2, 5].includes(type) && typeof value === 'number') fields[name] = value;
     else if (type === 15 && typeof value === 'string') fields[name] = { text: value, link: value };
     else throw fail('客户表字段类型不兼容：' + name);
   }
-  if (!fields[nameField] || !(fields['企业官网'] || fields['来源链接']))
+  if (
+    !fields[nameField] ||
+    !(fields[resolveCustomerField(definitions, '企业官网')] || fields['来源链接'])
+  )
     throw fail('公司名称或来源链接不足，已阻止写入');
-  return fields;
+  return encodeCustomerFields(fields, definitions);
 }

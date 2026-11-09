@@ -1,5 +1,73 @@
+const customerProductGroups = [
+  '户外遮阳',
+  '室内窗饰',
+  '百叶窗',
+  '纱门纱窗',
+  '面料与配件',
+  '电机与控制',
+  '其他经营产品',
+];
+const customerProductRules = [
+  [
+    '面料与配件',
+    /\b(?:fabrics?|textiles?|hardware|accessor(?:y|ies)|parts?|components?|brackets?|trimmings?|swatches?|linings?|cords?|chains?)\b|curtain\s+(?:tracks?|rods?|poles?|tapes?)|面料|配件|组件|支架|端盖|侧链|底轨|窗帘轨|窗帘杆|色卡|样册/iu,
+  ],
+  [
+    '电机与控制',
+    /\b(?:motors?|motorisation|motorization|controls?|remotes?|switch(?:es)?|hubs?|automation)\b|wi-?fi|电机|控制|遥控|自动化/iu,
+  ],
+  ['室内窗饰', /\b(?:indoor|interior|internal)\b.*\b(?:blinds?|shades?|curtains?|drapery)\b/iu],
+  ['百叶窗', /shutters?|百叶窗/iu],
+  [
+    '户外遮阳',
+    /awnings?|pergolas?|shade\s*sails?|umbrellas?|parasols?|sunroof|\b(?:e[ -]?zip|ziptrak|zipscreens?|zip[- ](?:track|screens?))\b|(?:outdoor|exterior|external|patio|bistro|cafe|wire\s*guide|straight\s*drop).*\b(?:blinds?|shades?|screens?)\b|遮阳篷|遮阳伞|防风帘|户外.*帘|凉棚|凉亭/iu,
+  ],
+  [
+    '纱门纱窗',
+    /(?:^|\s)(?:screens?|screen\s*doors?|flyscreens?|insect\s*mesh)(?:\s|$)|纱门|纱窗|防虫网/iu,
+  ],
+  [
+    '室内窗饰',
+    /blinds?|shades?|curtains?|drap(?:e|ery|eries)|venetians?|shadings?|honeycomb|panel\s*(?:glid|track)|window\s*(?:coverings?|treatments?)|valances?|cornices?|pelmets?|sheers?|百叶帘|卷帘|窗帘|布艺帘|蜂巢帘|斑马帘/iu,
+  ],
+];
+
+export function groupCustomerProducts(value) {
+  const groups = new Map(customerProductGroups.map((name) => [name, []]));
+  const seen = new Set();
+  for (const line of String(value || '')
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean)) {
+    const separator = line.indexOf('｜');
+    const existingGroup = line.slice(0, separator);
+    const grouped = separator >= 0 && groups.has(existingGroup);
+    const product = grouped ? line.slice(separator + 1).trim() : line;
+    if (!product) continue;
+    const key = product.replace(/\s+/gu, ' ').toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const group = grouped
+      ? existingGroup
+      : customerProductRules.find(([, pattern]) => pattern.test(product))?.[0] || '其他经营产品';
+    groups.get(group).push(product);
+  }
+  return [...groups]
+    .filter(([, products]) => products.length)
+    .map(([name, products]) => name + '｜' + products.join('、'))
+    .join('\n');
+}
+
 // Display translations only: the original website product wording remains in facts.
 export function formatRelatedProducts(value) {
+  if (
+    customerProductGroups.some((name) =>
+      String(value || '')
+        .trim()
+        .startsWith(name + '｜'),
+    )
+  )
+    return groupCustomerProducts(value);
   const catalog = [
     ['Zip Screens', '户外拉链遮阳帘：手动/电动', ['Zip Screen 户外拉链遮阳帘(手动/电动)']],
     ['Plantation Shutters', '种植园百叶窗', ['Plantation Shutters 种植园百叶窗']],
