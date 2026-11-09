@@ -89,10 +89,14 @@ test('官网直连不可达时通过已配置代理读取 Horizons 页尾，社�
 
 test('启用官网代理后仍在建立连接前拒绝私网来源和含私网解析的域名', async (t) => {
   let requests = 0;
-  t.mock.method(dns, 'lookup', async () => [
-    { address: '23.37.80.10', family: 4 },
-    { address: '127.0.0.1', family: 4 },
-  ]);
+  const read = (value) =>
+    readPublicHtml(new URL(value), AbortSignal.timeout(1000), {
+      lookupImpl: async () => [
+        { address: '23.37.80.10', family: 4 },
+        { address: '127.0.0.1', family: 4 },
+      ],
+      proxyImpl: async () => new URL('http://127.0.0.1:7897'),
+    });
   t.mock.method(https, 'request', () => {
     requests++;
     throw new Error('Must not reach transport');
@@ -107,10 +111,7 @@ test('启用官网代理后仍在建立连接前拒绝私网来源和含私网�
     'https://169.254.169.254/',
     'https://user:secret@www.horizonshades.com/',
   ])
-    await assert.rejects(
-      readPublicHtml(new URL(value), AbortSignal.timeout(1000)),
-      /非公网 HTTPS 来源/,
-    );
-  await assert.rejects(readPublicHtml(new URL(site), AbortSignal.timeout(1000)), /非公网来源/);
+    await assert.rejects(read(value), /非公网 HTTPS 来源/);
+  await assert.rejects(read(site), /非公网来源/);
   assert.equal(requests, 0);
 });
