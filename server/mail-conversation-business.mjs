@@ -89,14 +89,34 @@ export async function recordMailConversation({ store, conversation, messages }) 
           prior.body !== (message.bodyText || '（邮件正文为空）')
         )
           throw fail('相同邮件编号的原文或客户归属不同，未覆盖原记录');
-        if (prior.deliveryStatus === 'accepted' && message.deliveryStatus === 'sent') {
+        const confirmedSent =
+          prior.deliveryStatus === 'accepted' && message.deliveryStatus === 'sent';
+        const headers = {
+          inReplyTo: prior.inReplyTo || message.inReplyTo || '',
+          references: prior.references?.length ? prior.references : message.references || [],
+        };
+        const enriched =
+          (headers.inReplyTo && !prior.inReplyTo) ||
+          (headers.references.length && !prior.references?.length);
+        if (confirmedSent || enriched) {
           store.put('messages', {
             ...prior,
-            deliveryStatus: 'sent',
-            notes: '已在原邮箱已发件箱核实副本；不代表客户已经收件或阅读。',
+            ...headers,
+            ...(confirmedSent
+              ? {
+                  deliveryStatus: 'sent',
+                  notes: '已在原邮箱已发件箱核实副本；不代表客户已经收件或阅读。',
+                }
+              : {}),
             version: prior.version + 1,
             updatedAt: timestamp,
-            audit: [...(prior.audit || []), { action: 'mailbox_sent_confirmed', at: timestamp }],
+            audit: [
+              ...(prior.audit || []),
+              {
+                action: confirmedSent ? 'mailbox_sent_confirmed' : 'mailbox_reply_headers',
+                at: timestamp,
+              },
+            ],
           });
         }
         continue;
@@ -125,6 +145,8 @@ export async function recordMailConversation({ store, conversation, messages }) 
           ? message.classification
           : 'normal',
         externalId: message.messageId || '',
+        inReplyTo: message.inReplyTo || '',
+        references: message.references || [],
         attachments: [],
         attachmentMetadata: message.attachments || [],
         demandIds: [],

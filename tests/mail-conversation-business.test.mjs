@@ -51,6 +51,28 @@ test('only matched real messages enter customer business; no demands or tasks ar
   assert.equal(h.store.context('customer').fixedEmail, h.conversation.account);
 });
 
+test('reply headers are persisted and enrich historical business messages without replacing facts', async (t) => {
+  const h = setup(t);
+  await h.record([h.incoming]);
+  const before = h.store.all('messages')[0];
+  await h.record([
+    {
+      ...h.incoming,
+      inReplyTo: '<outgoing@example.com>',
+      references: ['<first@example.com>', '<outgoing@example.com>'],
+    },
+  ]);
+  const after = h.store.get('messages', before.id);
+  assert.equal(after.inReplyTo, '<outgoing@example.com>');
+  assert.equal(after.version, before.version + 1);
+  assert.equal(after.body, before.body);
+  assert.equal(after.classification, before.classification);
+  await h.record([
+    { ...h.incoming, inReplyTo: '<outgoing@example.com>', references: after.references },
+  ]);
+  assert.equal(h.store.get('messages', before.id).version, after.version);
+});
+
 test('mailbox classifications are preserved as original business facts, including automatic replies', async (t) => {
   const h = setup(t);
   for (const classification of [

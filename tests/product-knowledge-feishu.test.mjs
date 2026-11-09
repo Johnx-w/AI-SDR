@@ -98,7 +98,7 @@ function fixture() {
     env: { FEISHU_APP_TOKEN: 'isolated-test-app' },
     client,
   });
-  return { state, mirror };
+  return { state, mirror, client };
 }
 
 test('T5 镜像完整创建并读回核对，再次同步不重复写入且不访问 T2/T12 记录', async () => {
@@ -274,4 +274,30 @@ test('开发信事实完整镜像到现有备注字段，清空事实后恢复�
   assert.equal((await mirror.sync({ ...saved, outreachFacts: [], version: 2 })).status, 'synced');
   assert.equal(state.rows[0].fields['备注'], saved.notes);
   assert.equal(saved.notes, '内部备注');
+});
+
+test('显式T5编号选中原表并复用MOQ旧列，不修改自动产品ID或同名副本', async () => {
+  const { state, client } = fixture();
+  state.tables.find((table) => table.table_id === 't5').name = 'T5｜产品资料库';
+  state.tables.push({ table_id: 'copy-t5', name: 'T5 产品资料库' });
+  state.fields.find((field) => field.field_name === 'MOQ').field_name = 'MOQ最小起订量';
+  state.fields.push({
+    field_name: '产品ID',
+    field_id: 'automatic-id',
+    type: 1005,
+    is_primary: true,
+  });
+  const mirror = new ProductKnowledgeFeishu({ env: { FEISHU_PRODUCTS_TABLE_ID: 't5' }, client });
+  const saved = product();
+  const result = await mirror.sync(saved);
+  assert.equal(result.status, 'synced', result.error);
+  assert.equal(result.tableId, 't5');
+  assert.equal(state.rows[0].fields['MOQ最小起订量'], saved.moq);
+  assert.equal(state.rows[0].fields['产品编号'], saved.id);
+  assert(!Object.hasOwn(state.rows[0].fields, 'MOQ'));
+  assert(!Object.hasOwn(state.rows[0].fields, '产品ID'));
+  const count = state.calls.filter((call) => call.method === 'write').length;
+  assert.equal((await mirror.sync(saved)).status, 'synced');
+  assert.equal(state.calls.filter((call) => call.method === 'write').length, count);
+  assert(state.calls.filter((call) => call.tableId).every((call) => call.tableId === 't5'));
 });

@@ -6,8 +6,10 @@ import { FeishuClient } from './feishu-direct.mjs';
 import { fieldText } from './feishu.mjs';
 import { decorateLeadDevelopment } from './lead-development.mjs';
 import { customerMirrorFields } from './customer-mirror.mjs';
+import { enrichCommunicationMessages } from './communication-analysis.mjs';
+import { BUSINESS_TABLE_ID_ENV } from './feishu-business-client.mjs';
 
-export const CUSTOMER_BUSINESS_VERSION = 't1-t3-t4-v1';
+export const CUSTOMER_BUSINESS_VERSION = 't1-t3-t4-v2';
 const kinds = new Set(['conversations', 'messages', 'demands', 'tasks']);
 const methods = {
   conversations: 'saveConversation',
@@ -16,8 +18,17 @@ const methods = {
   tasks: 'saveTask',
 };
 const fail = (status, message) => Object.assign(new Error(message), { status });
-const mirrorHash = (workspace, products) =>
-  createHash('sha256').update(JSON.stringify({ workspace, products })).digest('hex');
+const mirrorHash = (workspace, products, env) =>
+  createHash('sha256')
+    .update(
+      JSON.stringify({
+        version: CUSTOMER_BUSINESS_VERSION,
+        workspace,
+        products,
+        tables: Object.values(BUSINESS_TABLE_ID_ENV).map((key) => env[key] || ''),
+      }),
+    )
+    .digest('hex');
 
 // The HTTP entry point owns graph persistence and its collaboration mirror.
 // A saved business record remains readable when the mirror needs reconciliation.
@@ -32,6 +43,7 @@ export class CustomerBusinessApi {
     syncCustomers,
     mailBodies = () => ({}),
     saveCustomerFields,
+    communicationModel,
   }) {
     this.getEnv = getEnv;
     this.fetch = fetchImpl;
@@ -42,6 +54,7 @@ export class CustomerBusinessApi {
     this.syncCustomers = syncCustomers;
     this.mailBodies = mailBodies;
     this.saveCustomerFields = saveCustomerFields;
+    this.communicationModel = communicationModel;
     this.active = 0;
     this.current = null;
     this.syncTail = Promise.resolve();
@@ -51,7 +64,19 @@ export class CustomerBusinessApi {
     const path = env.CUSTOMER_BUSINESS_DB_PATH || env.BATCH_DB_PATH || ':memory:';
     const scope = String(env.FEISHU_APP_TOKEN || '') + '/' + String(env.FEISHU_TABLE_ID || '');
     const fingerprint = createHash('sha256')
-      .update(JSON.stringify([path, scope, env.FEISHU_APP_ID || '', env.FEISHU_APP_SECRET || '']))
+      .update(
+        JSON.stringify([
+          path,
+          scope,
+          env.FEISHU_APP_ID || '',
+          env.FEISHU_APP_SECRET || '',
+          Object.entries(env).filter(
+            ([key]) =>
+              Object.values(BUSINESS_TABLE_ID_ENV).includes(key) ||
+              /^(RESEARCH_MODEL_|DEEPSEEK_)/.test(key),
+          ),
+        ]),
+      )
       .digest('hex');
     if (this.current?.fingerprint === fingerprint) return this.current;
     this.reset();
@@ -99,7 +124,9 @@ export class CustomerBusinessApi {
           const customers = await this.loadCustomers();
           if (this.saveCustomerFields) {
             const byId = new Map(customers.map((lead) => [lead.id, lead]));
-            for (const { id, fields } of customerMirrorFields(customers, workspace)) {
+            for (const { id, fields } of customerMirrorFields(customers, workspace, {
+              emailValidity: Boolean(state.env.FEISHU_MESSAGES_TABLE_ID?.trim()),
+            })) {
               const changed = Object.fromEntries(
                 Object.entries(fields).filter(
                   ([key, value]) => fieldText(byId.get(id).fields?.[key]) !== fieldText(value),
@@ -110,7 +137,7 @@ export class CustomerBusinessApi {
           }
           await this.syncCustomers?.();
           const products = this.knowledge().list();
-          const hash = mirrorHash(workspace, products);
+          const hash = mirrorHash(workspace, products, state.env);
           const prior = state.store.db
             .prepare('SELECT hash,error FROM customer_business_sync WHERE scope=?')
             .get(state.store.scope);
@@ -127,7 +154,17 @@ export class CustomerBusinessApi {
             if (result.status !== 'synced')
               throw new Error('T5 产品资料尚未核对同步，请先处理产品资料');
           }
-          const result = await state.mirror.sync(workspace, { products });
+          const mirrorWorkspace = state.env.FEISHU_MESSAGES_TABLE_ID?.trim()
+            ? {
+                ...workspace,
+                messages: await enrichCommunicationMessages(state.store, workspace.messages, {
+                  env: state.env,
+                  fetchImpl: this.fetch,
+                  model: this.communicationModel,
+                }),
+              }
+            : workspace;
+          const result = await state.mirror.sync(mirrorWorkspace, { products });
           state.store.db
             .prepare('INSERT OR REPLACE INTO customer_business_sync VALUES(?,?,?)')
             .run(
@@ -178,7 +215,7 @@ export class CustomerBusinessApi {
       .prepare('SELECT hash,error FROM customer_business_sync WHERE scope=?')
       .get(store.scope);
     const products = this.knowledge().list();
-    const pending = sync?.hash !== mirrorHash(store.view(), products);
+    const pending = sync?.hash !== mirrorHash(store.view(), products, this.state().env);
     const feishu = await mirror.info();
     return {
       schemaVersion: CUSTOMER_BUSINESS_VERSION,

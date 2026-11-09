@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { FeishuClient } from './feishu-direct.mjs';
+import { mapBusinessFeishuClient } from './feishu-business-client.mjs';
 
 const categories = {
   ventilation: '透气窗',
@@ -139,7 +140,7 @@ function clientToken(product) {
 export class ProductKnowledgeFeishu {
   constructor({ env = {}, fetchImpl = fetch, client } = {}) {
     this.env = env;
-    this.client = client || new FeishuClient({ env, fetchImpl });
+    this.client = mapBusinessFeishuClient(client || new FeishuClient({ env, fetchImpl }), env);
     this.configured =
       Boolean(client) ||
       ['FEISHU_APP_ID', 'FEISHU_APP_SECRET', 'FEISHU_APP_TOKEN', 'FEISHU_TABLE_ID'].every(
@@ -154,7 +155,10 @@ export class ProductKnowledgeFeishu {
         error: '尚未配置飞书连接，产品资料已保存在本地',
       };
     try {
-      const tables = (await this.client.tables()).filter((table) => table.name === 'T5 产品资料库');
+      const configured = this.env.FEISHU_PRODUCTS_TABLE_ID?.trim();
+      const tables = (await this.client.tables()).filter((table) =>
+        configured ? table.table_id === configured : table.name === 'T5 产品资料库',
+      );
       if (!tables.length)
         return {
           configured: false,

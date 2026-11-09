@@ -5,6 +5,12 @@ import { dirname } from 'node:path';
 import { FeishuClient } from './feishu-direct.mjs';
 import { assertBusinessMigrationIdle, businessSchemaDigest } from './business-schema-migration.mjs';
 import { PRODUCT_KNOWLEDGE_FEISHU_FIELDS } from './product-knowledge-feishu.mjs';
+import { BUSINESS_TABLE_ID_ENV, mapBusinessFeishuClient } from './feishu-business-client.mjs';
+import {
+  communicationRounds,
+  communicationRoundFields,
+  REPLY_TYPES,
+} from './communication-rounds.mjs';
 
 const categories = {
   ventilation: '透气窗',
@@ -30,6 +36,23 @@ const stages = {
   won: '已成交',
   lost: '未成交',
   closed: '已关闭',
+};
+const inquiryStatuses = {
+  new: '待处理',
+  clarifying: '跟进中',
+  quoting: '已报价',
+  sampling: '跟进中',
+  negotiating: '跟进中',
+  won: '已成交',
+  lost: '丢失归档',
+  closed: '丢失归档',
+};
+const inquirySources = {
+  email: '收件邮箱',
+  whatsapp: 'WhatsApp',
+  form: '网站留言',
+  phone: '人工录入',
+  other: '人工录入',
 };
 const taskTypes = {
   first_contact: '首次联系',
@@ -79,7 +102,10 @@ export const BUSINESS_TABLES = Object.freeze({
   tasks: { name: 'T4 跟进任务表', primary: '任务编号' },
 });
 
-export function buildBusinessTableFields(ids = {}) {
+export function buildBusinessTableFields(
+  ids = {},
+  { originalTasks = false, originalDemands = false, originalMessages = false } = {},
+) {
   const schema = {
     demands: [
       scalar('需求编号'),
@@ -155,6 +181,59 @@ export function buildBusinessTableFields(ids = {}) {
     schema.messages.push(relation('关联需求', ids.demands, true));
     schema.tasks.push(relation('关联需求', ids.demands, true));
   }
+  if (originalDemands)
+    schema.demands = [
+      scalar('询盘编号', 1005),
+      relation('客户', ids.customers, true),
+      {
+        field_name: '询盘来源',
+        type: 4,
+        property: {
+          options: ['官网表单', '收件邮箱', 'WhatsApp', '网站留言', '人工录入'].map((name) => ({
+            name,
+          })),
+        },
+      },
+      relation('产品资料', ids.products, true),
+      scalar('客户需求'),
+      select('意向等级', { high: 'A高意向', medium: 'B中意向', low: 'C低意向' }),
+      scalar('询盘接收时间', 5),
+      relation('负责业务员', undefined, true),
+      select('处理状态', {
+        new: '待处理',
+        following: '跟进中',
+        quoted: '已报价',
+        won: '已成交',
+        archived: '丢失归档',
+      }),
+      scalar('备注'),
+    ];
+  if (originalTasks)
+    schema.tasks = [
+      scalar('任务ID', 1005),
+      relation('客户', ids.customers, true),
+      relation('关联沟通', ids.messages, true),
+      select('渠道', { email: '邮件', whatsapp: 'WhatsApp', form: '网页留言', phone: '电话' }),
+      scalar('计划执行时间', 5),
+      select('任务状态', taskStatuses),
+      relation('使用模板', undefined, true),
+      scalar('任务说明'),
+      relation('负责业务员', undefined, true),
+    ];
+  if (originalMessages)
+    schema.messages = [
+      scalar('沟通记录ID', 1005),
+      relation('客户', ids.customers, true),
+      select('渠道', channels),
+      scalar('发生时间', 5),
+      scalar('发送内容摘要'),
+      scalar('收到回复内容'),
+      select('回复类型', REPLY_TYPES),
+      scalar('提取客户信息'),
+      scalar('客户需求摘要'),
+      scalar('业务员纪要'),
+      relation('关联模板', undefined, true),
+    ];
   return schema;
 }
 
@@ -232,11 +311,11 @@ async function safeWrite({ journal, checkpoint, retry = false }, key, write, con
   throw new Error('飞书写入结果尚未核对，未重复执行：' + key);
 }
 
-function assertSchema(fields, expected) {
+function assertSchema(fields, expected, { allowMultipleCustomer = false } = {}) {
   for (const item of expected) {
     const actual = fields.find((field) => field.field_name === item.field_name);
     assert(actual && actual.type === item.type, '字段缺失或类型不符：' + item.field_name);
-    if (item.type === 3) {
+    if ([3, 4].includes(item.type)) {
       const options = new Set((actual.property?.options || []).map((option) => option.name));
       assert(
         item.property.options.every((option) => options.has(option.name)),
@@ -245,8 +324,9 @@ function assertSchema(fields, expected) {
     }
     if (item.type === 18)
       assert(
-        actual.property?.table_id === item.property.table_id &&
-          Boolean(actual.property?.multiple) === item.property.multiple,
+        (!item.property.table_id || actual.property?.table_id === item.property.table_id) &&
+          (Boolean(actual.property?.multiple) === item.property.multiple ||
+            (allowMultipleCustomer && item.field_name === '客户' && !item.property.multiple)),
         '关联字段目标或多选配置不符：' + item.field_name,
       );
   }
@@ -264,7 +344,7 @@ export class CustomerBusinessFeishu {
   } = {}) {
     this.customerRemoteId = customerRemoteId;
     this.env = env;
-    this.client = client || new FeishuClient({ env, fetchImpl });
+    this.client = mapBusinessFeishuClient(client || new FeishuClient({ env, fetchImpl }), env);
     this.configured =
       Boolean(client) ||
       ['FEISHU_APP_ID', 'FEISHU_APP_SECRET', 'FEISHU_APP_TOKEN', 'FEISHU_TABLE_ID'].every(
@@ -302,15 +382,28 @@ export class CustomerBusinessFeishu {
   async tableIds() {
     const tables = await this.client.tables();
     const ids = { customers: this.env.FEISHU_TABLE_ID };
+    const explicit = Object.values(BUSINESS_TABLE_ID_ENV).some((key) => this.env[key]?.trim());
     assert(
       ids.customers &&
-        tables.some((table) => table.table_id === ids.customers && /^T2(?:\s|$)/.test(table.name)),
+        tables.some(
+          (table) =>
+            table.table_id === ids.customers && (explicit || /^T2(?:\s|$)/.test(table.name)),
+        ),
       '未找到配置中的T2客户主表',
     );
     for (const [key, definition] of [
       ...Object.entries(BUSINESS_TABLES),
       ['products', { name: 'T5 产品资料库' }],
     ]) {
+      const configured = this.env[BUSINESS_TABLE_ID_ENV[key]]?.trim();
+      if (configured) {
+        assert(
+          tables.some((table) => table.table_id === configured),
+          '配置的飞书业务表不存在：' + key,
+        );
+        ids[key] = configured;
+        continue;
+      }
       const matches = tables.filter((table) => table.name === definition.name);
       assert(matches.length <= 1, '发现同名重复表：' + definition.name);
       ids[key] = matches[0]?.table_id || null;
@@ -335,9 +428,15 @@ export class CustomerBusinessFeishu {
           tables,
           error: '请先建立T1、T3、T4及T5业务表',
         };
-      const expected = buildBusinessTableFields(ids);
+      const expected = buildBusinessTableFields(ids, {
+        originalTasks: Boolean(this.env.FEISHU_TASKS_TABLE_ID?.trim()),
+        originalDemands: Boolean(this.env.FEISHU_DEMANDS_TABLE_ID?.trim()),
+        originalMessages: Boolean(this.env.FEISHU_MESSAGES_TABLE_ID?.trim()),
+      });
       for (const key of Object.keys(BUSINESS_TABLES))
-        assertSchema(await this.client.fields(ids[key]), expected[key]);
+        assertSchema(await this.client.fields(ids[key]), expected[key], {
+          allowMultipleCustomer: Boolean(this.env[BUSINESS_TABLE_ID_ENV[key]]?.trim()),
+        });
       assertSchema(await this.client.fields(ids.products), PRODUCT_KNOWLEDGE_FEISHU_FIELDS);
       return { configured: true, status: 'ready', tables, productsTableId: ids.products };
     } catch (error) {
@@ -346,6 +445,10 @@ export class CustomerBusinessFeishu {
   }
   async provision({ backup, readApi, journal = [], checkpoint } = {}) {
     assert(this.configured, '请先配置飞书连接');
+    assert(
+      !Object.values(BUSINESS_TABLE_ID_ENV).some((key) => this.env[key]?.trim()),
+      '已指定原有业务表，无需重新建表或补充镜像字段',
+    );
     assert.equal(typeof backup, 'function', '建立业务表前必须配置持久备份');
     await assertBusinessMigrationIdle(readApi);
     const all = await this.client.tables();
@@ -505,7 +608,34 @@ export class CustomerBusinessFeishu {
         customers: this.env.FEISHU_TABLE_ID,
         products: config.productsTableId,
       };
-      const definitions = buildBusinessTableFields(tableIds);
+      const originalTasks = Boolean(this.env.FEISHU_TASKS_TABLE_ID?.trim());
+      const originalDemands = Boolean(this.env.FEISHU_DEMANDS_TABLE_ID?.trim());
+      const originalMessages = Boolean(this.env.FEISHU_MESSAGES_TABLE_ID?.trim());
+      const messageRounds = originalMessages ? communicationRounds(workspace.messages) : null;
+      const roundById = new Map(messageRounds?.rounds.map((round) => [round.id, round]) || []);
+      const compactKinds = {
+        tasks: originalTasks,
+        demands: originalDemands,
+        messages: originalMessages,
+      };
+      const definitions = buildBusinessTableFields(tableIds, {
+        originalTasks,
+        originalDemands,
+        originalMessages,
+      });
+      // Keep source IDs in the durable journal; the Base keeps its auto-number columns.
+      const mappingKey = (key, id) =>
+        this.scope +
+        ':' +
+        { tasks: 'task', demands: 'demand', messages: 'message' }[key] +
+        '-record:' +
+        tableIds[key] +
+        ':' +
+        id;
+      const recordMapping = (key, id) =>
+        this.journal.findLast(
+          (event) => event.key === mappingKey(key, id) && event.state === 'mapped',
+        );
       const remote = {},
         index = {},
         local = {};
@@ -513,11 +643,21 @@ export class CustomerBusinessFeishu {
         remote[key] = await this.client.records(tableIds[key]);
         index[key] = new Map();
         local[key] = new Map();
-        for (const record of remote[key]) {
-          const id = text(record.fields?.[BUSINESS_TABLES[key].primary]);
-          assert(!index[key].has(id), '飞书存在重复业务编号');
-          index[key].set(id, record);
-        }
+        if (compactKinds[key]) {
+          for (const entry of workspace[key]) {
+            const mapped = recordMapping(key, entry.id);
+            if (!mapped) continue;
+            assert(mapped.version <= entry.version, '飞书业务记录已有更高同步版本');
+            const record = remote[key].find((record) => record.record_id === mapped.recordId);
+            assert(record, '已同步业务记录在飞书中不存在，请先核对编号映射');
+            index[key].set(entry.id, record);
+          }
+        } else
+          for (const record of remote[key]) {
+            const id = text(record.fields?.[BUSINESS_TABLES[key].primary]);
+            assert(!index[key].has(id), '飞书存在重复业务编号');
+            index[key].set(id, record);
+          }
         for (const entry of workspace[key]) {
           assert(entry.id && !local[key].has(entry.id), '本地业务编号缺失或重复');
           local[key].set(entry.id, entry);
@@ -533,6 +673,16 @@ export class CustomerBusinessFeishu {
         productRecords.set(id, record.record_id);
       }
       const productVersions = new Map(products.map((product) => [product.id, product.version]));
+      const ownersByKind = {};
+      for (const key of ['demands', 'tasks']) {
+        ownersByKind[key] = [];
+        if (!compactKinds[key] || !workspace[key].length) continue;
+        const field = (await this.client.fields(tableIds[key])).find(
+          (field) => field.field_name === '负责业务员',
+        );
+        if (field?.property?.table_id)
+          ownersByKind[key] = await this.client.records(field.property.table_id);
+      }
       const customer = (entry) => {
         const remoteId = this.customerRemoteId(entry.customerId);
         assert(remoteId && customers.has(remoteId), '客户档案尚未同步至飞书T2，请先核对客户同步');
@@ -547,18 +697,21 @@ export class CustomerBusinessFeishu {
           );
           return productRecords.get(id);
         });
-      const mapReferences = (key, ids, entry) =>
-        unique(ids).map((id) => {
-          const related = local[key].get(id);
-          assert(
-            related &&
-              related.customerId === entry.customerId &&
-              related.conversationId === entry.conversationId,
-            '关联业务记录缺失或属于其他客户/会话',
-          );
-          assert(index[key].has(id), '关联业务记录尚未同步');
-          return index[key].get(id).record_id;
-        });
+      const mapReferences = (key, ids, entry) => [
+        ...new Set(
+          unique(ids).map((id) => {
+            const related = local[key].get(id);
+            assert(
+              related &&
+                related.customerId === entry.customerId &&
+                related.conversationId === entry.conversationId,
+              '关联业务记录缺失或属于其他客户/会话',
+            );
+            assert(index[key].has(id), '关联业务记录尚未同步');
+            return index[key].get(id).record_id;
+          }),
+        ),
+      ];
       const bases = { demands: new Map(), messages: new Map(), tasks: new Map() };
       for (const [key, entries] of Object.entries(local))
         for (const entry of entries.values()) {
@@ -569,6 +722,7 @@ export class CustomerBusinessFeishu {
                 ['manual', 'outreach', 'mailbox'].includes(entry.origin),
               '沟通记录尚未确认实际发生，不能同步为真实沟通',
             );
+          if (key === 'messages' && originalMessages && !roundById.has(entry.id)) continue;
           const common = {
             [BUSINESS_TABLES[key].primary]: entry.id,
             会话编号: nullable(entry.conversationId),
@@ -605,6 +759,43 @@ export class CustomerBusinessFeishu {
               产品资料: productLinks(entry),
               最近更新时间: date(entry.updatedAt),
             };
+          if (key === 'demands' && originalDemands) {
+            const source = local.messages.get(entry.sourceMessageId);
+            assert(source, '询盘缺少来源沟通，不能推断接收时间和来源');
+            const owners = entry.owner
+              ? ownersByKind.demands.filter(
+                  (record) => text(record.fields?.['业务员名称']) === entry.owner,
+                )
+              : [];
+            fields = {
+              客户: customer(entry),
+              产品资料: productLinks(entry),
+              客户需求:
+                [
+                  entry.title,
+                  entry.productText ? '产品：' + entry.productText : '',
+                  entry.specifications ? '规格：' + entry.specifications : '',
+                  entry.quantity
+                    ? '数量：' + entry.quantity + (entry.unit ? ' ' + entry.unit : '')
+                    : '',
+                  !entry.quantity && entry.unit ? '单位：' + entry.unit : '',
+                ]
+                  .filter(Boolean)
+                  .join('\n') || null,
+              询盘来源: [choice(inquirySources, source.channel, '询盘来源渠道')],
+              询盘接收时间: date(source.occurredAt),
+              处理状态: choice(inquiryStatuses, entry.stage, '需求阶段'),
+              备注: [
+                '需求阶段：' + choice(stages, entry.stage, '需求阶段'),
+                entry.owner && owners.length !== 1 ? '负责人：' + entry.owner : '',
+              ]
+                .filter(Boolean)
+                .join('\n'),
+              ...(entry.owner
+                ? { 负责业务员: owners.length === 1 ? [owners[0].record_id] : [] }
+                : {}),
+            };
+          }
           if (key === 'messages')
             fields = {
               ...common,
@@ -634,6 +825,13 @@ export class CustomerBusinessFeishu {
                   : entry.origin === 'mailbox' || entry.mailboxMessageId
                     ? '邮箱同步'
                     : '人工补录',
+            };
+          if (key === 'messages' && originalMessages)
+            fields = {
+              客户: customer(entry),
+              渠道: choice(channels, entry.channel, '沟通渠道'),
+              发生时间: date(entry.occurredAt),
+              ...communicationRoundFields(roundById.get(entry.id)),
             };
           if (key === 'tasks')
             fields = {
@@ -681,6 +879,31 @@ export class CustomerBusinessFeishu {
               产品资料: productLinks(entry),
               最近更新时间: date(entry.updatedAt),
             };
+          if (key === 'tasks' && originalTasks) {
+            const owners = entry.owner
+              ? ownersByKind.tasks.filter(
+                  (record) => text(record.fields?.['业务员名称']) === entry.owner,
+                )
+              : [];
+            fields = {
+              客户: customer(entry),
+              渠道: entry.channel === 'other' ? null : choice(channels, entry.channel, '任务渠道'),
+              计划执行时间: date(entry.dueAt),
+              任务状态: choice(taskStatuses, entry.status, '任务状态'),
+              任务说明:
+                [
+                  entry.title || taskTypes[entry.kind],
+                  entry.notes || entry.description,
+                  entry.owner ? '负责人：' + entry.owner : '',
+                  entry.channel === 'other' ? '触达渠道：其他' : '',
+                ]
+                  .filter(Boolean)
+                  .join('\n') || null,
+              ...(entry.owner
+                ? { 负责业务员: owners.length === 1 ? [owners[0].record_id] : [] }
+                : {}),
+            };
+          }
           bases[key].set(entry.id, fields);
         }
       // Validate all local references before any remote business record is written.
@@ -710,13 +933,101 @@ export class CustomerBusinessFeishu {
               );
             }
         }
+      const claimedMessageRecords = new Map();
       const upsert = async (key, entry, expected, pass) => {
+        const compactRecord = Boolean(compactKinds[key]);
+        let cached = index[key].get(entry.id);
+        const saveMapping = async (source, record) => {
+          const mapped = recordMapping(key, source.id);
+          if (mapped?.recordId === record.record_id && mapped.version === source.version) return;
+          this.journal.push({
+            at: new Date().toISOString(),
+            key: mappingKey(key, source.id),
+            state: 'mapped',
+            recordId: record.record_id,
+            version: source.version,
+          });
+          await this.persistJournal();
+        };
+        if (key === 'messages' && originalMessages) {
+          const round = roundById.get(entry.id);
+          const linked = [
+            ...new Set(
+              round.members
+                .map((member) => index.messages.get(member.id)?.record_id)
+                .filter(Boolean),
+            ),
+          ];
+          assert(linked.length <= 1, '同轮沟通仍映射到多条旧记录，请先完成归并');
+          if (!cached && linked.length)
+            cached = remote.messages.find((r) => r.record_id === linked[0]);
+          if (!cached) {
+            // Adopt the already-verified copy by immutable send facts, never by customer alone.
+            const candidates = remote.messages.filter(
+              (record) =>
+                businessSchemaDigest(unique(record.fields.客户).sort()) ===
+                  businessSchemaDigest(expected.客户.slice().sort()) &&
+                text(record.fields.渠道) === expected.渠道 &&
+                Number(record.fields.发生时间) === expected.发生时间,
+            );
+            const matches = candidates.filter((record) =>
+              entry.direction === 'outbound'
+                ? text(record.fields['发送内容摘要']) === String(entry.body || '')
+                : entry.direction === 'inbound'
+                  ? text(record.fields['收到回复内容']).includes(entry.body)
+                  : text(record.fields['业务员纪要']).includes(entry.body),
+            );
+            assert(
+              matches.length <= 1 && (!candidates.length || matches.length === 1),
+              '原 T3 沟通匹配不唯一或正文已变更，请先核对',
+            );
+            cached = matches[0];
+          }
+          if (cached) {
+            assert(
+              !claimedMessageRecords.has(cached.record_id) ||
+                claimedMessageRecords.get(cached.record_id) === entry.id,
+              '不同沟通轮次匹配到同一条原 T3 记录，请先核对',
+            );
+            claimedMessageRecords.set(cached.record_id, entry.id);
+            index.messages.set(entry.id, cached);
+            expected['业务员纪要'] =
+              [
+                ...new Set(
+                  [text(cached.fields['业务员纪要']), expected['业务员纪要']]
+                    .filter(Boolean)
+                    .flatMap((value) => value.split('\n')),
+                ),
+              ].join('\n') || null;
+            await saveMapping(entry, cached);
+          }
+        }
         const operationKey =
-          this.scope + ':record:' + key + ':' + entry.id + ':' + entry.version + ':' + pass;
-        const cached = index[key].get(entry.id);
+          compactRecord && !cached
+            ? mappingKey(key, entry.id) + ':create'
+            : this.scope +
+              ':record:' +
+              key +
+              ':' +
+              entry.id +
+              ':' +
+              entry.version +
+              ':' +
+              pass +
+              (key === 'messages' && originalMessages ? ':' + businessSchemaDigest(expected) : '');
+        const saveRecordMapping = async (record) => {
+          if (!compactRecord) return;
+          for (const source of key === 'messages' && originalMessages
+            ? roundById.get(entry.id).members
+            : [entry]) {
+            index[key].set(source.id, record);
+            await saveMapping(source, record);
+          }
+        };
         // The graph was just read completely. Unchanged records need no further
         // per-record requests; changed writes still require direct readback.
         if (cached && sameFields(cached, expected, definitions[key])) {
+          await saveRecordMapping(cached);
           const previous = this.journal.filter((event) => event.key === operationKey).at(-1);
           if (previous && ['pending', 'uncertain'].includes(previous.state))
             await safeWrite(
@@ -730,13 +1041,19 @@ export class CustomerBusinessFeishu {
           return;
         }
         const find = async () => {
-          const matches = (await this.client.records(tableIds[key])).filter(
-            (record) => text(record.fields?.[BUSINESS_TABLES[key].primary]) === entry.id,
+          const matches = (await this.client.records(tableIds[key])).filter((record) =>
+            compactRecord
+              ? record.record_id === recordMapping(key, entry.id)?.recordId
+              : text(record.fields?.[BUSINESS_TABLES[key].primary]) === entry.id,
           );
           assert(matches.length <= 1, '存在重复业务编号');
           const record = matches[0];
           if (record) {
-            assert(Number(record.fields['记录版本']) <= entry.version, '飞书业务记录已有更高版本');
+            if (!compactRecord)
+              assert(
+                Number(record.fields['记录版本']) <= entry.version,
+                '飞书业务记录已有更高版本',
+              );
             index[key].set(entry.id, record);
           }
           return record;
@@ -748,17 +1065,31 @@ export class CustomerBusinessFeishu {
           const readback = await this.client.record(record.record_id, tableIds[key]);
           if (!sameFields(readback, expected, definitions[key])) return false;
           index[key].set(entry.id, readback);
+          await saveRecordMapping(readback);
           return true;
         };
         const token = createHash('sha256')
-          .update(this.scope + ':' + key + ':' + entry.id + ':' + entry.version)
+          .update(
+            this.scope +
+              ':' +
+              key +
+              ':' +
+              entry.id +
+              ':' +
+              entry.version +
+              (compactRecord ? ':' + tableIds[key] : ''),
+          )
           .digest('hex');
         const uuid = `${token.slice(0, 8)}-${token.slice(8, 12)}-4${token.slice(13, 16)}-a${token.slice(17, 20)}-${token.slice(20, 32)}`;
         const values = existing
           ? expected
           : Object.fromEntries(Object.entries(expected).filter(([, value]) => value !== null));
         await safeWrite(
-          { journal: this.journal, checkpoint: () => this.persistJournal(), retry: true },
+          {
+            journal: this.journal,
+            checkpoint: () => this.persistJournal(),
+            retry: !compactRecord || Boolean(cached),
+          },
           operationKey,
           async () => {
             existing = await this.client.write(
@@ -768,23 +1099,30 @@ export class CustomerBusinessFeishu {
               uuid,
               tableIds[key],
             );
+            await saveRecordMapping(existing);
           },
           confirm,
         );
       };
+      const mirrorEntries = {
+        ...local,
+        ...(originalMessages
+          ? { messages: new Map(messageRounds.rounds.map((round) => [round.id, round.anchor])) }
+          : {}),
+      };
       for (const key of ['messages', 'demands', 'tasks'])
-        for (const entry of local[key].values())
+        for (const entry of mirrorEntries[key].values())
           await upsert(key, entry, bases[key].get(entry.id), 'base');
       for (const key of ['messages', 'demands', 'tasks'])
-        for (const entry of local[key].values()) {
+        for (const entry of mirrorEntries[key].values()) {
           const expected = { ...bases[key].get(entry.id) };
-          if (key === 'demands')
+          if (key === 'demands' && !originalDemands)
             expected['来源沟通'] = mapReferences(
               'messages',
               entry.sourceMessageId ? [entry.sourceMessageId] : [],
               entry,
             );
-          if (key === 'messages')
+          if (key === 'messages' && !originalMessages)
             expected['关联需求'] = mapReferences(
               'demands',
               [
@@ -796,27 +1134,32 @@ export class CustomerBusinessFeishu {
               entry,
             );
           if (key === 'tasks') {
-            expected['关联需求'] = mapReferences('demands', entry.demandIds || [], entry);
+            if (!originalTasks)
+              expected['关联需求'] = mapReferences('demands', entry.demandIds || [], entry);
             expected['关联沟通'] = mapReferences(
               'messages',
               [
                 ...(entry.messageIds || []),
                 ...(entry.basisMessageId ? [entry.basisMessageId] : []),
+                ...(originalTasks && entry.resultMessageId ? [entry.resultMessageId] : []),
               ],
               entry,
             );
-            expected['执行结果沟通'] = mapReferences(
-              'messages',
-              entry.resultMessageId ? [entry.resultMessageId] : [],
-              entry,
-            );
+            if (!originalTasks)
+              expected['执行结果沟通'] = mapReferences(
+                'messages',
+                entry.resultMessageId ? [entry.resultMessageId] : [],
+                entry,
+              );
           }
           await upsert(key, entry, expected, 'relations');
         }
       return {
         status: 'synced',
         tables: config.tables,
-        counts: Object.fromEntries(Object.keys(local).map((key) => [key, local[key].size])),
+        counts: Object.fromEntries(
+          Object.keys(mirrorEntries).map((key) => [key, mirrorEntries[key].size]),
+        ),
       };
     } catch (error) {
       return pending(error.message, { tables: config.tables });
