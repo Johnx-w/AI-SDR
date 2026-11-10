@@ -1,53 +1,19 @@
 # Domain Docs
 
-How the engineering skills should consume this repo's domain documentation when exploring the codebase.
+This repo has one domain context: root `GLOSSARY.md` and `docs/adr/`.
 
-## Before exploring, read these
+## Before exploring
 
-- **`GLOSSARY.md`** at the repo root, or
-- **`GLOSSARY-MAP.md`** at the repo root if it exists: it points at one `GLOSSARY.md` per context. Read each one relevant to the topic.
-- **`docs/adr/`**: read applicable, still-effective decisions for the area you're about to work in. Skip revoked or superseded content. In multi-context repos, also check `src/<context>/docs/adr/` for context-scoped decisions.
+1. Start at [current documentation](../README.md) and select the topic relevant to the task.
+2. Read the relevant terms in root [GLOSSARY](../../GLOSSARY.md).
+3. Read applicable ADRs from the current index, including their implementation status. Preserve confirmed pending designs as designs; they do not prove a runtime feature exists.
 
-Apply the documentation rules in root `AGENTS.md`: start from `docs/README.md`, and exclude `docs/archive/**` from routine discovery, searches and reading. Links to archived decisions do not trigger a history lookup.
-
-If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
-
-## File structure
-
-Single-context repo (most repos):
-
-```
-/
-├── GLOSSARY.md
-├── docs/adr/
-│   ├── 0001-event-sourced-orders.md
-│   └── 0002-postgres-for-write-model.md
-└── src/
-```
-
-Multi-context repo (presence of `GLOSSARY-MAP.md` at the root):
-
-```
-/
-├── GLOSSARY-MAP.md
-├── docs/adr/                          ← system-wide decisions
-└── src/
-    ├── ordering/
-    │   ├── GLOSSARY.md
-    │   └── docs/adr/                  ← context-specific decisions
-    └── billing/
-        ├── GLOSSARY.md
-        └── docs/adr/
-```
+Apply the documentation rules in root [AGENTS](../../AGENTS.md#新功能设计的文档依据): routine file discovery, searches and reading exclude `docs/archive/**`; historical links do not trigger a lookup. Read historical material only when the user explicitly asks for it.
 
 ## Use the glossary's vocabulary
 
-When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, a test name), use the term as defined in `GLOSSARY.md`. Don't drift to synonyms the glossary explicitly avoids.
+Use the defined domain terms in designs, issue titles and code. When a needed term is missing, distinguish a real domain gap from a new synonym; update the glossary only when its meaning is resolved. Keep implementation steps in topic docs.
 
-If the concept you need isn't in the glossary yet, that's a signal: either you're inventing language the project doesn't use (reconsider) or there's a real gap (note it for `/domain-modeling`).
+## Flag conflicts
 
-## Flag ADR conflicts
-
-If your output contradicts a still-effective ADR, surface it explicitly rather than silently overriding:
-
-> _Contradicts ADR-0007 (event-sourced orders), but worth reopening because…_
+If a proposal contradicts a still-effective decision, identify that ADR and the proposed change explicitly. When documentation and code differ, state whether the text is a confirmed pending design or a stale description; do not silently treat either as an implemented feature.
