@@ -959,6 +959,22 @@ test('已返回记录编号后读回短暂中断，由受控重试完成且不�
   }
 });
 
+test('本地档案多选字段读回一致时可确认写入', async () => {
+  const record = {
+    record_id: 'local-test',
+    fields: { 官网链接: { link: site }, 客户类型: ['零售商', '工厂'] },
+  };
+  const service = { feishu: { localFirst: true, record: async () => record } };
+  const operation = {
+    recordId: record.record_id,
+    source_url: site,
+    fields: { 官网链接: { link: site }, 客户类型: ['零售商', '工厂'] },
+  };
+  assert.equal(await NativeAcquisition.prototype.verify.call(service, operation), true);
+  record.fields.客户类型 = ['零售商'];
+  assert.equal(await NativeAcquisition.prototype.verify.call(service, operation), false);
+});
+
 test('重启核对仅把未写入的抓取中断标为可重试', async () => {
   const f = fixture(),
     svc = f.make();

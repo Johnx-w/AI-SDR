@@ -4,7 +4,7 @@ export function acquisitionOutreachSources(jobs, plans) {
   return jobs.outreachJobs().map((job) => {
     const plan = job.scheduleId ? schedules.get(job.scheduleId) : null;
     const status = job.scheduleId
-      ? !plan || plan.status === 'closed'
+      ? !plan || plan.status === 'closed' || (plan.lastJobId && plan.lastJobId !== job.id)
         ? 'cancelled'
         : plan.status === 'paused' || !plan.input.auto_first_touch
           ? 'paused'
@@ -19,7 +19,7 @@ export function acquisitionOutreachSources(jobs, plans) {
       scope: job.scope,
       name: `${plan?.name || '立即获客'} · ${new Date(job.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })} · 自动首发`,
       status: job.autoFirstTouchPaused && status === 'active' ? 'paused' : status,
-      roundId: plan?.lastJobId || job.id,
+      roundId: job.id,
       customerIds: [
         ...new Set(
           job.rows.filter((row) => row.stored && row.record_id).map((row) => row.record_id),

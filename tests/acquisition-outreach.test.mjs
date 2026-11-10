@@ -452,7 +452,8 @@ for (const change of ['已回复', '勿联系', '产品撤回审核', '发件身
     assert.ok(h.service.deliveries(undefined, ['blocked']).some((row) => row.reason));
     if (change === '发件身份变化') {
       h.jobs.finish(h.jobs.get(job.id), 'target_reached');
-      h.create({}, plan.id);
+      const next = h.create({}, plan.id);
+      await h.capture(next.id, lead, true);
       await h.pump();
       assert.equal(h.state.sent.length, 1, '下一轮可使用新的有效身份处理待发客户');
       assert.equal(h.state.sent[0].from.address, 'sales@changed-brand.example.org');
@@ -803,6 +804,28 @@ test('定时计划追信开关只用于之后建立的轮次，已有计划不�
     assert.equal(fresh.followUpEnabled, true);
     assert.equal(h.service.followUps.all().length, 0, '首封成功前不造任务');
     assert.throws(() => h.create({ auto_follow_up: 'yes' }), { status: 400 });
+  } finally {
+    await h.close();
+  }
+});
+
+test('新轮次启动时停止旧轮次待发首封，保留已发送历史', async () => {
+  const h = harness();
+  try {
+    const plan = h.plan();
+    const first = h.create({}, plan.id);
+    await h.capture(first.id, buyer('first-round'));
+    await h.pump();
+    assert.equal(h.service.deliveries(undefined, ['accepted']).length, 1);
+    h.jobs.finish(h.jobs.get(first.id), 'target_reached');
+    const second = h.create({}, plan.id);
+    h.service.syncAcquisition();
+    const old = h.service.campaign(`acquisition-${first.id}`);
+    const current = h.service.campaign(`acquisition-${second.id}`);
+    assert.equal(old.status, 'cancelled');
+    assert.equal(old.acquisitionSource.roundId, first.id);
+    assert.equal(current.status, 'active');
+    assert.equal(h.service.deliveries(undefined, ['accepted']).length, 1);
   } finally {
     await h.close();
   }

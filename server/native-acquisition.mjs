@@ -1233,7 +1233,11 @@ export class NativeAcquisition {
           fieldText(record.fields?.['公司名称'] || record.fields?.['客户名称']) === fieldText(value)
         );
       if (value === null) return fieldText(fieldValue(record.fields, key)) === '';
-      const expected = typeof value === 'object' ? value.link || value.text : value;
+      const expected = Array.isArray(value)
+        ? fieldText(value)
+        : typeof value === 'object'
+          ? value.link || value.text
+          : value;
       if (typeof expected === 'number') return Number(fieldValue(record.fields, key)) === expected;
       return fieldText(fieldValue(record.fields, key)) === expected;
     });
