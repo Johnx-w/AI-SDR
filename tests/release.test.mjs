@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -8,6 +9,43 @@ import {
   assertQuiet,
   validateArchiveEntries,
 } from '../scripts/release-server.mjs';
+
+test('Git保留历史文档，云端发布包排除归档并保留运行依赖的现行文档', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'shadeflow-archive-test-'));
+  const git = (...args) =>
+    execFileSync('git', args, { cwd: directory, encoding: 'utf8', windowsHide: true }).trim();
+  try {
+    mkdirSync(join(directory, 'docs', 'archive'), { recursive: true });
+    writeFileSync(
+      join(directory, '.gitattributes'),
+      readFileSync(new URL('../.gitattributes', import.meta.url)),
+    );
+    writeFileSync(join(directory, 'docs', 'archive', 'old-design.md'), 'historical');
+    writeFileSync(
+      join(directory, 'docs', 'new-feishu-bitable-filling-spec.md'),
+      'runtime templates',
+    );
+    writeFileSync(join(directory, 'AGENTS.md'), 'current instructions');
+    git('init', '--quiet');
+    git('-c', 'core.autocrlf=false', 'add', '.');
+    const tree = git('write-tree');
+    assert.match(git('ls-tree', '-r', '--name-only', tree), /docs\/archive\/old-design\.md/);
+    const archive = join(directory, 'release.tar');
+    git('archive', '--format=tar', '--output', archive, tree);
+    const entries = execFileSync('tar', ['-tf', archive], {
+      encoding: 'utf8',
+      windowsHide: true,
+    }).split(/\r?\n/);
+    assert.equal(
+      entries.some((entry) => entry.startsWith('docs/archive/')),
+      false,
+    );
+    assert.ok(entries.includes('docs/new-feishu-bitable-filling-spec.md'));
+    assert.ok(entries.includes('AGENTS.md'));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test('发布拒绝运行中的任务、自动计划和发信，允许已暂停或结束的任务', () => {
   const quiet = {
