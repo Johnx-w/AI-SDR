@@ -31,8 +31,6 @@ export function researchProviderConfig(env = {}) {
     throw configError('WEB_SEARCH_PROVIDER 只能是 tavily、deepseek 或 http');
   if (!['deepseek', 'openai_compatible'].includes(modelProvider))
     throw configError('RESEARCH_MODEL_PROVIDER 只能是 deepseek 或 openai_compatible');
-  if (webProvider === 'deepseek' && modelProvider !== 'deepseek')
-    throw configError('DeepSeek 网页检索需要使用 DeepSeek 研究模型连接');
   const webKeyName =
     webProvider === 'tavily' && !configured(env.WEB_SEARCH_API_KEY)
       ? 'TAVILY_API_KEY'
@@ -41,11 +39,16 @@ export function researchProviderConfig(env = {}) {
     modelProvider === 'deepseek' && !configured(env.RESEARCH_MODEL_API_KEY)
       ? 'DEEPSEEK_API_KEY'
       : 'RESEARCH_MODEL_API_KEY';
-  const webBase =
-    env.WEB_SEARCH_BASE_URL?.trim() || (webProvider === 'tavily' ? 'https://api.tavily.com' : '');
   const modelBase =
     env.RESEARCH_MODEL_BASE_URL?.trim() ||
     (modelProvider === 'deepseek' ? 'https://api.deepseek.com' : '');
+  const webBase =
+    env.WEB_SEARCH_BASE_URL?.trim() ||
+    (webProvider === 'tavily'
+      ? 'https://api.tavily.com'
+      : webProvider === 'deepseek'
+        ? 'https://api.deepseek.com'
+        : '');
   const reasoningEffort = env.RESEARCH_MODEL_REASONING_EFFORT?.trim() || 'none';
   if (!['none', 'low', 'high', 'max'].includes(reasoningEffort))
     throw configError('研究推理强度只能是 none、low、high 或 max');
@@ -69,17 +72,9 @@ export function researchProviderConfig(env = {}) {
   return {
     web: {
       provider: webProvider,
-      baseUrl:
-        webProvider === 'deepseek'
-          ? providerBaseUrl(modelBase, 'RESEARCH_MODEL_BASE_URL')
-          : webBase
-            ? providerBaseUrl(webBase, 'WEB_SEARCH_BASE_URL')
-            : '',
-      apiKey: env[webProvider === 'deepseek' ? modelKeyName : webKeyName]?.trim() || '',
-      requirements: [
-        webProvider === 'deepseek' ? modelKeyName : webKeyName,
-        ...(webProvider === 'http' ? ['WEB_SEARCH_BASE_URL'] : []),
-      ],
+      baseUrl: webBase ? providerBaseUrl(webBase, 'WEB_SEARCH_BASE_URL') : '',
+      apiKey: env[webKeyName]?.trim() || '',
+      requirements: [webKeyName, ...(webProvider === 'http' ? ['WEB_SEARCH_BASE_URL'] : [])],
     },
     model: {
       provider: modelProvider,
