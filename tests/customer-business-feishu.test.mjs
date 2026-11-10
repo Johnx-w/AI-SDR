@@ -8,7 +8,10 @@ import {
   buildBusinessTableFields,
   CustomerBusinessFeishu,
 } from '../server/customer-business-feishu.mjs';
-import { PRODUCT_KNOWLEDGE_FEISHU_FIELDS } from '../server/product-knowledge-feishu.mjs';
+import {
+  ORIGINAL_T5_FIELDS,
+  PRODUCT_KNOWLEDGE_FEISHU_FIELDS,
+} from '../server/product-knowledge-feishu.mjs';
 
 const time = '2026-10-24T12:00:00.000Z';
 const ids = { customers: 't2', products: 't5', demands: 't1', messages: 't3', tasks: 't4' };
@@ -146,6 +149,31 @@ function fixture({ provisioned = true, journalPath } = {}) {
   };
   return { bridge, client, tables, fields, records, writes, state, backups, journal, provision };
 }
+
+test('正式原建 T5 恢复九列后仍可核对业务表，空产品表不会阻断无产品关联的同步', async () => {
+  const f = fixture();
+  const t5 = 'tblxkJ09HhalZf33';
+  f.tables.delete('t5');
+  f.tables.set(t5, { table_id: t5, name: 'T5｜产品资料库' });
+  f.fields.set(
+    t5,
+    ORIGINAL_T5_FIELDS.map((field) =>
+      field.field_name === 'MOQ' ? { ...field, field_name: 'MOQ最小起订量' } : field,
+    ),
+  );
+  f.records.set(t5, []);
+  for (const fields of f.fields.values())
+    for (const field of fields) if (field.property?.table_id === 't5') field.property.table_id = t5;
+  const bridge = new CustomerBusinessFeishu({
+    env: { ...env, FEISHU_APP_TOKEN: 'Xat4bgUFuaL6tBsXqRccnYaknEf', FEISHU_PRODUCTS_TABLE_ID: t5 },
+    client: f.client,
+  });
+  const info = await bridge.info();
+  assert.equal(info.status, 'ready', info.error);
+  const result = await bridge.sync({ demands: [], messages: [], tasks: [] }, { products: [] });
+  assert.equal(result.status, 'synced', result.error);
+  assert.equal(f.writes.length, 0);
+});
 
 function workspace() {
   const common = {

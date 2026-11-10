@@ -144,6 +144,19 @@ test('未配置连接、未建 T5 或同名表冲突均不伪装同步成功', a
   assert.equal(state.calls.filter((call) => call.method === 'write').length, 0);
 });
 
+test('正式原建 T5 不回写网页旧产品或已删除字段', async () => {
+  const { state, client } = fixture();
+  const mirror = new ProductKnowledgeFeishu({
+    env: {
+      FEISHU_APP_TOKEN: 'Xat4bgUFuaL6tBsXqRccnYaknEf',
+      FEISHU_PRODUCTS_TABLE_ID: 'tblxkJ09HhalZf33',
+    },
+    client,
+  });
+  assert.equal((await mirror.sync(product())).status, 'pending');
+  assert.equal(state.calls.length, 0);
+});
+
 test('更新时显式清空旧来源、附件、规格、审核人和时间，未知值保持为空', async () => {
   const { state, mirror } = fixture();
   const saved = product();

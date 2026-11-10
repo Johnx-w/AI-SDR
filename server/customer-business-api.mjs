@@ -2,7 +2,7 @@ import { extractAutomaticDemands } from './automatic-demands.mjs';
 import { createHash } from 'node:crypto';
 import { CustomerBusiness } from './customer-business.mjs';
 import { CustomerBusinessFeishu } from './customer-business-feishu.mjs';
-import { ProductKnowledgeFeishu } from './product-knowledge-feishu.mjs';
+import { isOriginalT5, ProductKnowledgeFeishu } from './product-knowledge-feishu.mjs';
 import { FeishuClient } from './feishu-direct.mjs';
 import { fieldText } from './feishu.mjs';
 import { decorateLeadDevelopment } from './lead-development.mjs';
@@ -175,7 +175,7 @@ export class CustomerBusinessApi {
             env: state.env,
             fetchImpl: this.fetch,
           });
-          for (const id of productIds) {
+          for (const id of isOriginalT5(state.env) ? [] : productIds) {
             const product = this.knowledge().get(id);
             if (!product) throw new Error('关联产品资料不存在，请核对后重新同步');
             const result = await productMirror.sync(product);

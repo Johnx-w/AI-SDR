@@ -4,7 +4,11 @@ import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { FeishuClient } from './feishu-direct.mjs';
 import { assertBusinessMigrationIdle, businessSchemaDigest } from './business-schema-migration.mjs';
-import { PRODUCT_KNOWLEDGE_FEISHU_FIELDS } from './product-knowledge-feishu.mjs';
+import {
+  isOriginalT5,
+  ORIGINAL_T5_FIELDS,
+  PRODUCT_KNOWLEDGE_FEISHU_FIELDS,
+} from './product-knowledge-feishu.mjs';
 import { BUSINESS_TABLE_ID_ENV, mapBusinessFeishuClient } from './feishu-business-client.mjs';
 import {
   communicationRounds,
@@ -438,7 +442,10 @@ export class CustomerBusinessFeishu {
         assertSchema(await this.client.fields(ids[key]), expected[key], {
           allowMultipleCustomer: Boolean(this.env[BUSINESS_TABLE_ID_ENV[key]]?.trim()),
         });
-      assertSchema(await this.client.fields(ids.products), PRODUCT_KNOWLEDGE_FEISHU_FIELDS);
+      assertSchema(
+        await this.client.fields(ids.products),
+        isOriginalT5(this.env) ? ORIGINAL_T5_FIELDS : PRODUCT_KNOWLEDGE_FEISHU_FIELDS,
+      );
       return { configured: true, status: 'ready', tables, productsTableId: ids.products };
     } catch (error) {
       return { configured: false, ...pending(error.message), tables: {} };
@@ -670,6 +677,7 @@ export class CustomerBusinessFeishu {
       const productRecords = new Map();
       for (const record of await this.client.records(tableIds.products)) {
         const id = text(record.fields?.['产品编号']);
+        if (!id) continue;
         assert(!productRecords.has(id), 'T5存在重复产品编号');
         productRecords.set(id, record.record_id);
       }

@@ -42,6 +42,24 @@ export const PRODUCT_KNOWLEDGE_FEISHU_FIELDS = [
   { field_name: '备注', type: 1 },
 ];
 
+// The business client maps the physical MOQ最小起订量 column to MOQ.
+export const ORIGINAL_T5_FIELDS = [
+  { field_name: '产品ID', type: 1005 },
+  ...[
+    '产品名称',
+    '产品简介',
+    '核心卖点',
+    'MOQ',
+    '参考价格区间',
+    '产品图片链接',
+    '适用市场',
+    '备注',
+  ].map((field_name) => ({ field_name, type: 1 })),
+];
+export const isOriginalT5 = (env) =>
+  env.FEISHU_APP_TOKEN === 'Xat4bgUFuaL6tBsXqRccnYaknEf' &&
+  env.FEISHU_PRODUCTS_TABLE_ID === 'tblxkJ09HhalZf33';
+
 const locks = new Map();
 const pending = (error, details = {}) => ({ status: 'pending', ...details, error });
 const problem = (message) => new Error(message);
@@ -148,6 +166,11 @@ export class ProductKnowledgeFeishu {
       );
   }
   async info() {
+    if (isOriginalT5(this.env))
+      return {
+        configured: false,
+        ...pending('正式 T5 已恢复原始字段，网页现有产品资料不再镜像到此表'),
+      };
     if (!this.configured)
       return {
         configured: false,
