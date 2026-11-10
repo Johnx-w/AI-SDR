@@ -2,9 +2,9 @@
 
 确认日期：2026-11-06；2026-11-10 确认本轮只同步三份首封开发模板。
 
-适用对象：[公司飞书「外贸窗饰AI全自动获客系统V2」](https://gcnznasvot5k.feishu.cn/base/Xat4bgUFuaL6tBsXqRccnYaknEf)。本文当前收录已确认的 T7、T10 规则。
+适用对象：[公司飞书「外贸窗饰AI全自动获客系统V2」](https://gcnznasvot5k.feishu.cn/base/Xat4bgUFuaL6tBsXqRccnYaknEf)。本文收录已确认的 T7、T8、T10 规则。
 
-本规范用于将项目已有事实填写到这份新表中，不表示已完成导入或自动同步。系统仍按 [ADR-0009](adr/0009-business-tables-with-web-managed-configuration.md) 在网页后台管理获客计划及执行；T7 展示执行结果，填写或编辑 T7 不启用、暂停或改变系统任务。
+截至 2026-11-10，云端数据已同步到这份正式 Base 的 T7、T8、T10，后续由服务定期核对。系统仍按 [ADR-0009](adr/0009-business-tables-with-web-managed-configuration.md) 在网页后台管理获客计划及执行；T7 展示执行结果，填写或编辑 T7 不启用、暂停或改变系统任务。
 
 ## T7｜定时触发调度表
 
