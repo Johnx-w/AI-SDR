@@ -689,9 +689,19 @@ export class BatchJobs {
       this.busy = false;
     }
   }
-  view(job) {
+  view(job, { summary = false } = {}) {
     return {
       ...job,
+      ...(summary
+        ? {
+            summary: true,
+            rows: [],
+            queryPlan: undefined,
+            searchStats: undefined,
+            current: undefined,
+            pendingSearch: undefined,
+          }
+        : {}),
       queue: undefined,
       seen: undefined,
       skippedDomains: undefined,

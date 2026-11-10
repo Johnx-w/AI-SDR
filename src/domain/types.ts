@@ -69,6 +69,8 @@ export interface IntegrationStatus {
   modelProvider?: string;
 }
 export interface AcquisitionJob {
+  summary?: boolean;
+  updatedAt?: string;
   scheduleId?: string;
   autoFirstTouchPaused?: boolean;
   input: WorkflowInput & { target_count: number };

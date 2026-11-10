@@ -48,11 +48,11 @@ export class AcquisitionSchedules {
     this.db.prepare('UPDATE schedules SET data=? WHERE id=?').run(JSON.stringify(plan), plan.id);
     return plan;
   }
-  view(plan) {
+  view(plan, { summary = false } = {}) {
     let lastJob = null;
     if (plan.lastJobId) {
       try {
-        lastJob = this.jobs().view(this.jobs().get(plan.lastJobId));
+        lastJob = this.jobs().view(this.jobs().get(plan.lastJobId), { summary });
       } catch {
         /* Retain schedule history if an old job was archived. */
       }

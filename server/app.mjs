@@ -3,6 +3,8 @@ import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { createHash } from 'node:crypto';
+import { gzip } from 'node:zlib';
+import { promisify } from 'node:util';
 import { decorateLeadDevelopment } from './lead-development.mjs';
 import { isDevelopmentCustomer } from './customer-eligibility.mjs';
 import { BrandingCache } from './branding-cache.mjs';
@@ -51,6 +53,7 @@ const types = {
   '.ico': 'image/x-icon',
 };
 const maxJsonBytes = 32768;
+const compress = promisify(gzip);
 export function validateInput(input) {
   const target = validateTarget(input);
   if (input.auto_first_touch !== undefined)
@@ -177,8 +180,9 @@ export function createApp({
   let acquisitionReviews;
   const reviews = () =>
     (acquisitionReviews ??= new AcquisitionReviews(jobs().db, acquisitionScope()));
-  const reviewJob = (job) => {
-    const snapshot = jobs().view(job);
+  const reviewJob = (job, summary = false) => {
+    const snapshot = jobs().view(job, { summary });
+    if (summary) return snapshot;
     const resolutions = reviews().forJob(job.id);
     return {
       ...snapshot,
@@ -188,9 +192,9 @@ export function createApp({
       })),
     };
   };
-  const reviewPlan = (plan) => {
-    const snapshot = plans().view(plan);
-    return snapshot.lastJob
+  const reviewPlan = (plan, summary = false) => {
+    const snapshot = plans().view(plan, { summary });
+    return snapshot.lastJob && !summary
       ? { ...snapshot, lastJob: reviewJob(jobs().get(snapshot.lastJob.id)) }
       : snapshot;
   };
@@ -507,7 +511,9 @@ export function createApp({
           const manager = plans();
           if (!suffix.length && request.method === 'GET')
             return json(response, 200, {
-              schedules: manager.list().map(reviewPlan),
+              schedules: manager
+                .list()
+                .map((plan) => reviewPlan(plan, url.searchParams.get('summary') === '1')),
             });
           if (!suffix.length && request.method === 'POST') {
             const body = await readJson(request);
@@ -723,7 +729,11 @@ export function createApp({
           const suffix = url.pathname.slice(`${prefix}/jobs`.length).split('/').filter(Boolean);
           const manager = jobs();
           if (!suffix.length && request.method === 'GET')
-            return json(response, 200, { jobs: manager.list().map(reviewJob) });
+            return json(response, 200, {
+              jobs: manager
+                .list()
+                .map((job) => reviewJob(job, url.searchParams.get('summary') === '1')),
+            });
           if (!suffix.length && request.method === 'POST') {
             if (!provider.info.configured)
               throw new ApiError(503, '获客执行引擎尚未配置，请检查接入状态');
@@ -841,8 +851,24 @@ export function createApp({
       } catch {
         throw new ApiError(404, '请先运行 npm run build，或使用 npm run dev');
       }
+      const compressed =
+        ['.html', '.js', '.css', '.svg'].includes(extname(target)) &&
+        (request.headers['accept-encoding'] || '').split(',').some((value) => {
+          const [encoding, ...parameters] = value.trim().toLowerCase().split(';');
+          return (
+            encoding === 'gzip' &&
+            parameters.every((parameter) => {
+              const [name, quality] = parameter.trim().split('=');
+              return name === 'q' && Number(quality) > 0 && Number(quality) <= 1;
+            })
+          );
+        });
+      if (compressed) content = await compress(content);
       response.writeHead(200, {
         'Content-Type': types[extname(target)] || 'application/octet-stream',
+        'Content-Length': content.length,
+        Vary: 'Accept-Encoding',
+        ...(compressed ? { 'Content-Encoding': 'gzip' } : {}),
         'X-Content-Type-Options': 'nosniff',
         'Referrer-Policy': 'same-origin',
       });

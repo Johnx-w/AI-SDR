@@ -274,15 +274,60 @@ function AutomaticFirstTouchProgress({ job }: { job: AcquisitionJob }) {
   );
 }
 
-export function BatchProgress({
-  job,
-  control,
-  busy,
-}: {
+type BatchProgressProps = {
   job: AcquisitionJob;
   control: (action: 'stop' | 'resume') => void;
   busy: boolean;
-}) {
+};
+
+export function BatchProgress(props: BatchProgressProps) {
+  const { job } = props;
+  const [detail, setDetail] = useState<AcquisitionJob | null>(null);
+  const [error, setError] = useState('');
+  const [revision, setRevision] = useState(0);
+  useEffect(() => {
+    if (!job.summary) return;
+    let alive = true;
+    const controller = new AbortController();
+    void acquisitionApi.job(job.id, controller.signal).then(
+      (value) => {
+        if (alive) {
+          setDetail(value);
+          setError('');
+        }
+      },
+      (cause: unknown) => {
+        if (alive) setError(cause instanceof Error ? cause.message : '读取执行详情失败');
+      },
+    );
+    return () => {
+      alive = false;
+      controller.abort();
+    };
+  }, [job.id, job.updatedAt, job.summary, revision]);
+  const value = job.summary ? (detail?.id === job.id ? detail : null) : job;
+  return (
+    <>
+      {error && job.summary && (
+        <p className="error-message" role="alert">
+          {error}
+          <button className="btn secondary" onClick={() => setRevision((n) => n + 1)}>
+            重新读取详情
+          </button>
+        </p>
+      )}
+      {value ? (
+        <BatchProgressDetail {...props} job={value} />
+      ) : !error ? (
+        <p className="muted" role="status">
+          正在读取执行详情…
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+function BatchProgressDetail({ job, control, busy }: BatchProgressProps) {
   return (
     <section className="batch-progress" aria-label="批量任务进度">
       <div className="result-title">
