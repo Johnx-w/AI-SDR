@@ -12,13 +12,22 @@ import type {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/v1/acquisition${path}`, {
     ...init,
-    signal: init?.signal ?? AbortSignal.timeout(125000),
+    signal: init?.signal
+      ? AbortSignal.any([init.signal, AbortSignal.timeout(125000)])
+      : AbortSignal.timeout(125000),
   });
-  const body = await response.json().catch(() => ({ error: '服务未返回有效 JSON' }));
+  const body = await response.json().catch(() => {
+    throw new Error('服务未返回有效 JSON，请重试');
+  });
   if (!response.ok)
-    throw Object.assign(new Error(body.error || `请求失败 (${response.status})`), {
+    throw Object.assign(new Error(body?.error || `请求失败 (${response.status})`), {
       status: response.status,
     });
+  return body as T;
+}
+async function list<T>(name: 'jobs' | 'schedules'): Promise<T> {
+  const body = await request<Record<string, unknown>>(`/${name}?summary=1`);
+  if (!Array.isArray(body?.[name])) throw new Error('服务返回的列表格式不正确，请重试');
   return body as T;
 }
 export const acquisitionApi = {
@@ -36,7 +45,7 @@ export const acquisitionApi = {
       body: JSON.stringify(input),
       signal,
     }),
-  schedules: () => request<{ schedules: AcquisitionSchedule[] }>('/schedules'),
+  schedules: () => list<{ schedules: AcquisitionSchedule[] }>('schedules'),
   setAutomaticFirstTouch: (kind: 'schedules' | 'jobs', id: string, enabled: boolean) =>
     request<AcquisitionSchedule | AcquisitionJob>(
       `/${kind}/${encodeURIComponent(id)}/auto-first-touch`,
@@ -74,8 +83,9 @@ export const acquisitionApi = {
     request<AcquisitionSchedule>(`/schedules/${encodeURIComponent(id)}/${action}`, {
       method: 'POST',
     }),
-  jobs: () => request<{ jobs: AcquisitionJob[] }>('/jobs'),
-  job: (id: string) => request<AcquisitionJob>(`/jobs/${encodeURIComponent(id)}`),
+  jobs: () => list<{ jobs: AcquisitionJob[] }>('jobs'),
+  job: (id: string, signal?: AbortSignal) =>
+    request<AcquisitionJob>(`/jobs/${encodeURIComponent(id)}`, { signal }),
   reviewEvidence: (jobId: string, index: number) =>
     request<{
       resolution: AcquisitionJob['rows'][number]['review_resolution'] | null;

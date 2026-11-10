@@ -177,8 +177,9 @@ export function createApp({
   let acquisitionReviews;
   const reviews = () =>
     (acquisitionReviews ??= new AcquisitionReviews(jobs().db, acquisitionScope()));
-  const reviewJob = (job) => {
-    const snapshot = jobs().view(job);
+  const reviewJob = (job, summary = false) => {
+    const snapshot = jobs().view(job, { summary });
+    if (summary) return snapshot;
     const resolutions = reviews().forJob(job.id);
     return {
       ...snapshot,
@@ -188,9 +189,9 @@ export function createApp({
       })),
     };
   };
-  const reviewPlan = (plan) => {
-    const snapshot = plans().view(plan);
-    return snapshot.lastJob
+  const reviewPlan = (plan, summary = false) => {
+    const snapshot = plans().view(plan, { summary });
+    return snapshot.lastJob && !summary
       ? { ...snapshot, lastJob: reviewJob(jobs().get(snapshot.lastJob.id)) }
       : snapshot;
   };
@@ -508,7 +509,9 @@ export function createApp({
           const manager = plans();
           if (!suffix.length && request.method === 'GET')
             return json(response, 200, {
-              schedules: manager.list().map(reviewPlan),
+              schedules: manager
+                .list()
+                .map((plan) => reviewPlan(plan, url.searchParams.get('summary') === '1')),
             });
           if (!suffix.length && request.method === 'POST') {
             const body = await readJson(request);
@@ -724,7 +727,11 @@ export function createApp({
           const suffix = url.pathname.slice(`${prefix}/jobs`.length).split('/').filter(Boolean);
           const manager = jobs();
           if (!suffix.length && request.method === 'GET')
-            return json(response, 200, { jobs: manager.list().map(reviewJob) });
+            return json(response, 200, {
+              jobs: manager
+                .list()
+                .map((job) => reviewJob(job, url.searchParams.get('summary') === '1')),
+            });
           if (!suffix.length && request.method === 'POST') {
             if (!provider.info.configured)
               throw new ApiError(503, '获客执行引擎尚未配置，请检查接入状态');
