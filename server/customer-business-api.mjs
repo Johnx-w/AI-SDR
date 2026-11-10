@@ -1,3 +1,4 @@
+import { extractAutomaticDemands } from './automatic-demands.mjs';
 import { createHash } from 'node:crypto';
 import { CustomerBusiness } from './customer-business.mjs';
 import { CustomerBusinessFeishu } from './customer-business-feishu.mjs';
@@ -12,19 +13,16 @@ import { FollowUpFeishu, followUpEnvironment } from './follow-up-feishu.mjs';
 
 export const CUSTOMER_BUSINESS_VERSION = 't1-t3-t4-v2';
 const kinds = new Set(['conversations', 'messages', 'demands', 'tasks']);
-const methods = {
-  conversations: 'saveConversation',
-  messages: 'saveMessage',
-  demands: 'saveDemand',
-  tasks: 'saveTask',
-};
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const mirrorHash = (workspace, products, env) =>
   createHash('sha256')
     .update(
       JSON.stringify({
         version: CUSTOMER_BUSINESS_VERSION,
-        workspace,
+        workspace: {
+          ...workspace,
+          tasks: workspace.tasks.filter((task) => task.origin === 'automatic-followup'),
+        },
         products,
         tables: Object.values(BUSINESS_TABLE_ID_ENV).map((key) => env[key] || ''),
         followUpDestination: [env.FOLLOWUP_FEISHU_APP_TOKEN, env.FOLLOWUP_FEISHU_TABLE_ID],
@@ -43,7 +41,6 @@ export class CustomerBusinessApi {
     customerRecord,
     customerRemoteId,
     syncCustomers,
-    mailBodies = () => ({}),
     saveCustomerFields,
     communicationModel,
   }) {
@@ -54,7 +51,6 @@ export class CustomerBusinessApi {
     this.customerRecord = customerRecord;
     this.customerRemoteId = customerRemoteId;
     this.syncCustomers = syncCustomers;
-    this.mailBodies = mailBodies;
     this.saveCustomerFields = saveCustomerFields;
     this.communicationModel = communicationModel;
     this.active = 0;
@@ -99,7 +95,17 @@ export class CustomerBusinessApi {
       journalPath:
         env.BUSINESS_MIRROR_JOURNAL_PATH || (path === ':memory:' ? ':memory:' : undefined),
     });
-    this.current = { fingerprint, store, mirror, env, tasksOnly };
+    // Both destinations share the journal in memory as well as on disk.
+    const businessMirror = tasksOnly
+      ? new CustomerBusinessFeishu({
+          env,
+          customerRemoteId: this.customerRemoteId,
+          fetchImpl: this.fetch,
+          journal: mirror.journal,
+          journalPath: mirror.journalPath || ':memory:',
+        })
+      : mirror;
+    this.current = { fingerprint, store, mirror, businessMirror, env, tasksOnly };
     return this.current;
   }
   reset() {
@@ -125,21 +131,19 @@ export class CustomerBusinessApi {
       .catch(() => {})
       .then(async () => {
         try {
+          await extractAutomaticDemands(state.store, {
+            env: state.env,
+            fetchImpl: this.fetch,
+            model: this.communicationModel,
+          });
           const workspace = state.store.view();
+          workspace.tasks = workspace.tasks.filter((task) => task.origin === 'automatic-followup');
           const customers = await this.loadCustomers();
-          if (state.tasksOnly) {
-            const result = await state.mirror.sync(workspace, { customers });
-            state.store.db
-              .prepare('INSERT OR REPLACE INTO customer_business_sync VALUES(?,?,?)')
-              .run(
-                state.store.scope,
-                result.status === 'synced'
-                  ? mirrorHash(workspace, this.knowledge().list(), state.env)
-                  : '',
-                result.error || '',
-              );
-            return result;
-          }
+          const taskResult = state.tasksOnly
+            ? await state.mirror
+                .sync(workspace, { customers })
+                .catch(() => ({ status: 'pending', error: 'T4 同步未完成，稍后自动重试' }))
+            : null;
           if (this.saveCustomerFields) {
             const byId = new Map(customers.map((lead) => [lead.id, lead]));
             for (const { id, fields } of customerMirrorFields(customers, workspace, {
@@ -159,7 +163,13 @@ export class CustomerBusinessApi {
           const prior = state.store.db
             .prepare('SELECT hash,error FROM customer_business_sync WHERE scope=?')
             .get(state.store.scope);
-          if (!force && prior?.hash === hash && !prior.error) return { status: 'synced' };
+          if (
+            !force &&
+            prior?.hash === hash &&
+            !prior.error &&
+            (!taskResult || taskResult.status === 'synced')
+          )
+            return { status: 'synced' };
           const productIds = new Set(products.map((product) => product.id));
           const productMirror = new ProductKnowledgeFeishu({
             env: state.env,
@@ -182,7 +192,11 @@ export class CustomerBusinessApi {
                 }),
               }
             : workspace;
-          const result = await state.mirror.sync(mirrorWorkspace, { products });
+          const mainResult = await (state.tasksOnly ? state.businessMirror : state.mirror).sync(
+            state.tasksOnly ? { ...mirrorWorkspace, tasks: [] } : mirrorWorkspace,
+            { products },
+          );
+          const result = taskResult && taskResult.status !== 'synced' ? taskResult : mainResult;
           state.store.db
             .prepare('INSERT OR REPLACE INTO customer_business_sync VALUES(?,?,?)')
             .run(
@@ -235,34 +249,29 @@ export class CustomerBusinessApi {
     const products = this.knowledge().list();
     const pending = sync?.hash !== mirrorHash(store.view(), products, this.state().env);
     const feishu = await mirror.info();
-    const taskReferences = this.state().tasksOnly
-      ? await mirror.references().catch(() => ({
-          owners: [],
-          templates: [],
-          error: '业务员或模板暂时无法读取，请稍后重试',
-        }))
-      : { owners: [], templates: [] };
     return {
       schemaVersion: CUSTOMER_BUSINESS_VERSION,
       ...data,
+      tasks: data.tasks.filter((task) => task.origin === 'automatic-followup'),
       ...(this.state().tasksOnly
         ? {
-            tasks: data.tasks.map((task) => ({
-              ...task,
-              displayId:
-                mirror.journal.findLast(
-                  (r) =>
-                    r.key ===
-                      `${mirror.scope}:task-record:${mirror.env.FEISHU_TASKS_TABLE_ID}:${task.id}` &&
-                    r.state === 'mapped',
-                )?.displayId || '',
-            })),
+            tasks: data.tasks
+              .filter((task) => task.origin === 'automatic-followup')
+              .map((task) => ({
+                ...task,
+                displayId:
+                  mirror.journal.findLast(
+                    (r) =>
+                      r.key ===
+                        `${mirror.scope}:task-record:${mirror.env.FEISHU_TASKS_TABLE_ID}:${task.id}` &&
+                      r.state === 'mapped',
+                  )?.displayId || '',
+              })),
           }
         : {}),
       customers,
       products,
       customerError,
-      taskReferences,
       feishu:
         pending || sync?.error
           ? { ...feishu, status: 'pending', error: sync?.error || '' }
@@ -290,71 +299,13 @@ export class CustomerBusinessApi {
       if (id && !/^[\w-]{1,100}$/.test(id)) throw fail(400, '业务记录编号无效');
       const store = this.state().store;
       if (request.method === 'GET') {
-        if (kind === 'conversations' && id && action === 'mail-bodies') {
-          if (!store.get(kind, id)) throw fail(404, '业务会话不存在，请刷新列表');
-          return {
-            status: 200,
-            body: {
-              originals: await this.mailBodies(
-                store
-                  .all('messages')
-                  .filter((row) => row.conversationId === id && row.channel === 'email'),
-              ),
-            },
-          };
-        }
         if (action) throw fail(405, '不支持的业务记录读取操作');
         if (!id) return { status: 200, body: { records: (await this.workspace(url))[kind] } };
         const record = store.get(kind, id);
         if (!record) throw fail(404, '业务记录不存在，请刷新列表');
         return { status: 200, body: { record } };
       }
-      if (kind === 'tasks' && id && action === 'preflight' && request.method === 'POST')
-        return { status: 200, body: await store.preflightTask(id) };
-      if (kind === 'tasks' && id && action === 'action' && request.method === 'POST') {
-        const body = await readJson(request);
-        if (!body || typeof body !== 'object' || Array.isArray(body))
-          throw fail(400, '任务操作格式不正确');
-        const record = await store.actTask(id, body);
-        return { status: 200, body: { record, feishu: { status: 'pending' } } };
-      }
-      if (suffix.length !== 1 || !['POST', 'PUT'].includes(request.method))
-        throw fail(405, '不支持的业务记录操作');
-      const body = await readJson(request);
-      if (!body || typeof body !== 'object' || Array.isArray(body))
-        throw fail(400, '业务记录格式不正确');
-      const { expectedVersion, ...value } = body;
-      if (kind === 'tasks') {
-        const selected = ['ownerIds', 'templateIds'].some((key) => value[key]?.length);
-        if (selected) {
-          if (!this.state().tasksOnly) throw fail(400, '请先配置跟进任务关联表');
-          const references = await this.state().mirror.references();
-          for (const [key, options] of [
-            ['ownerIds', references.owners],
-            ['templateIds', references.templates],
-          ]) {
-            if (
-              !Array.isArray(value[key]) ||
-              value[key].some((id) => !options.some((r) => r.id === id))
-            )
-              throw fail(400, '请选择当前表中的业务员和模板');
-          }
-          value.owner = references.owners
-            .filter((r) => value.ownerIds.includes(r.id))
-            .map((r) => r.name)
-            .join('、');
-        } else value.owner = '';
-      }
-      if (request.method === 'POST' && value.id) throw fail(400, '新增业务记录不能指定已有编号');
-      if (request.method === 'PUT' && !value.id) throw fail(400, '修改业务记录需要记录编号');
-      const key = request.method === 'POST' ? request.headers['idempotency-key'] : undefined;
-      if (request.method === 'POST' && (typeof key !== 'string' || !/^[\w-]{8,100}$/.test(key)))
-        throw fail(400, '新增业务记录需要有效的 Idempotency-Key');
-      const record = await store[methods[kind]](value, { expectedVersion, idempotencyKey: key });
-      return {
-        status: request.method === 'POST' ? 201 : 200,
-        body: { record, feishu: { status: 'pending' } },
-      };
+      throw fail(405, '客户需求、沟通和跟进任务由系统自动记录，不支持手工维护');
     } finally {
       this.active--;
     }

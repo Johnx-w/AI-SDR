@@ -737,7 +737,7 @@ export class CustomerBusinessFeishu {
               ...common,
               需求标题: nullable(entry.title),
               品类: choice(categories, entry.category, '需求品类'),
-              供货方向: choice(directions, entry.direction, '供货方向'),
+              供货方向: entry.direction ? choice(directions, entry.direction, '供货方向') : null,
               需求产品: nullable(entry.productText),
               规格要求: nullable(entry.specifications),
               数量: nullable(entry.quantity),

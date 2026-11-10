@@ -1,6 +1,6 @@
 import type { OverviewRange } from './overview-rules.mjs';
 export interface BusinessNavigation {
-  tab: 'demands' | 'messages' | 'tasks';
+  tab: 'tasks';
   state: string;
   bucket: string;
   focusedId: string;
@@ -8,10 +8,6 @@ export interface BusinessNavigation {
   frozen: boolean;
 }
 export function businessNavigation(params: URLSearchParams, now?: number): BusinessNavigation;
-export function matchesDemandNavigation(
-  demand: { id: string; stage: string },
-  navigation: BusinessNavigation,
-): boolean;
 export function matchesTaskNavigation(
   task: { id: string; status: string; dueAt: string },
   navigation: BusinessNavigation,

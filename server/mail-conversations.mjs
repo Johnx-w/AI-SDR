@@ -309,7 +309,10 @@ export class MailConversations {
             from: delivery.from,
             to: delivery.to,
             subject: delivery.subject,
+            inReplyTo: delivery.inReplyTo,
+            references: delivery.references,
             bodyText: delivery.bodyText,
+            bodyHtml: delivery.bodyHtml,
             occurredAt,
             source: 'outreach',
             deliveryStatus: 'accepted',
@@ -354,7 +357,7 @@ export class MailConversations {
       : thread;
   }
 
-  list({ mailboxId = 'all', q = '', unread = false } = {}) {
+  list({ mailboxId = 'all', customerId = '', q = '', unread = false } = {}) {
     this.importDeliveries();
     const selected = this.selected(mailboxId);
     const query = text(q, 500).toLowerCase().trim();
@@ -378,6 +381,7 @@ export class MailConversations {
       )
       .filter(
         (thread) =>
+          (!customerId || thread.customerId === customerId) &&
           (!unread || thread.unread) &&
           (!query ||
             [thread.account, thread.participant, thread.subject, thread.preview, thread.companyName]
@@ -410,44 +414,6 @@ export class MailConversations {
       conversation: this.localCustomer(JSON.parse(row.data)),
       messages: this.messages(id).map(({ unread, ...message }) => message),
     };
-  }
-
-  businessMailBodies(records) {
-    this.importDeliveries();
-    const accounts = new Map(
-      this.mailboxes.list().map((mailbox) => [address(mailbox.email), keyFor(mailbox)]),
-    );
-    const originals = {};
-    for (const record of records) {
-      const accountKey = accounts.get(address(record.account));
-      if (!accountKey || (!record.mailboxMessageId && !record.externalId)) continue;
-      const rows = this.db
-        .prepare(
-          `SELECT data FROM mailbox_thread_messages
-        WHERE account_key=? AND (id=? OR json_extract(data, '$.messageId')=?)`,
-        )
-        .all(accountKey, record.mailboxMessageId || '', record.externalId || '');
-      if (rows.length !== 1) continue;
-      const mail = JSON.parse(rows[0].data);
-      // Display formatting only when the cached mail still matches the recorded fact.
-      if (
-        (mail.bodyText || '（邮件正文为空）') !== record.body ||
-        address(mail.from) !== address(record.from)
-      )
-        continue;
-      originals[record.id] = Object.fromEntries(
-        [
-          'subject',
-          'bodyText',
-          'bodyHtml',
-          'bodyFormatVersion',
-          'inlineImages',
-          'bodyUnavailable',
-          'source',
-        ].map((key) => [key, mail[key]]),
-      );
-    }
-    return originals;
   }
 
   markRead(id, unread) {

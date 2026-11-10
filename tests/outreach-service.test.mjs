@@ -1254,3 +1254,214 @@ test('首次生成失败时发生资料变化，仍保留待重做状态与原�
   assert.equal(row.materialRefresh, true);
   assert.equal(row.mailboxId, h.boxes[0].id);
 });
+
+async function followUpHarness(options) {
+  const h = harness(options);
+  h.service.mailboxes.readMailbox = async () => ({ folders: [], hasMore: false });
+  h.service.generator.generateFollowUp = async ({ step }) =>
+    step === 1
+      ? 'Does your team source PVC shutters externally?'
+      : 'Who handles PVC shutters sourcing?';
+  const send = h.service.mailboxes.send;
+  h.service.mailboxes.send = async (id, message, options) => {
+    options?.beforeSend?.();
+    return send(id, message);
+  };
+  const c = await prepare(h, { targetCount: 1, followUpEnabled: true });
+  h.service.activate(c.id, c.revision);
+  await h.service.tick();
+  h.first = h.service.deliveries(c.id)[0];
+  h.campaign = c;
+  return h;
+}
+function addResponse(
+  h,
+  {
+    direction = 'inbound',
+    classification = 'normal',
+    bodyText = 'Please send details.',
+    subject = 'Re: Products',
+  } = {},
+) {
+  h.service.conversations.importDeliveries();
+  h.service.conversations.putMessage(h.boxes[0], {
+    identity: 'reply-' + h.state.clock,
+    messageId: `<reply-${h.state.clock}@example.org>`,
+    inReplyTo: h.first.messageId,
+    references: [h.first.messageId],
+    direction,
+    from: direction === 'inbound' ? h.first.to : h.first.from,
+    to: direction === 'inbound' ? h.first.from : h.first.to,
+    subject,
+    bodyText,
+    classification,
+    source: 'imap',
+    deliveryStatus: direction === 'inbound' ? 'received' : 'sent',
+    occurredAt: new Date(h.state.clock).toISOString(),
+  });
+}
+test('自动追信按首封72/168小时各一次，首封完成不终止追信且不污染首封数量', async () => {
+  const h = await followUpHarness();
+  try {
+    assert.equal(h.first.status, 'accepted');
+    assert.equal(h.service.followUps.all().length, 2);
+    assert.equal(h.service.campaign(h.campaign.id).status, 'completed');
+    assert.deepEqual((await h.service.state()).followUpStats, { sending: 0, active: 2 });
+    h.state.clock += 72 * 3600000;
+    await h.service.tick();
+    assert.equal(h.deliveries.length, 2, JSON.stringify(h.service.followUps.all()));
+    assert.equal(h.deliveries[1].inReplyTo, h.first.messageId);
+    assert(h.deliveries[1].html.includes('brand-a'));
+    assert.equal(h.service.conversations.list({ customerId: h.first.customerId }).items.length, 1);
+    assert.equal(h.service.conversations.list({ customerId: 'another-buyer' }).items.length, 0);
+    assert.equal(h.service.detail(h.campaign.id).campaign.stats.accepted, 1);
+    await h.service.tick();
+    assert.equal(h.deliveries.length, 2);
+    h.state.clock = Date.parse(h.first.sentAt) + 168 * 3600000;
+    await h.service.tick();
+    assert.equal(h.deliveries.length, 3, JSON.stringify(h.service.followUps.all()));
+    assert(h.service.followUps.all().every((r) => r.status === 'accepted'));
+    assert.equal(h.service.conversations.list().items.length, 1);
+  } finally {
+    await h.service.close();
+  }
+});
+
+test('追信重启恢复保留发送结果未知，不重复发送或自动执行第二次', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'followups-restart-'));
+  const h = await followUpHarness({ path: join(dir, 'outreach.sqlite') });
+  try {
+    const item = h.service.followUps.all()[0];
+    h.service.followUps.put({ ...item, status: 'sending', attemptedAt: item.dueAt });
+    await h.service.close();
+    h.service = new OutreachService(h.serviceOptions);
+    assert.equal(h.service.followUps.get(item.id).status, 'unknown');
+    h.state.clock = Date.parse(h.first.sentAt) + 168 * 3600000;
+    await h.service.tick();
+    assert.equal(h.deliveries.length, 1);
+  } finally {
+    await h.service.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('追信共享发送窗口和每日额度，SMTP提交前暂停生效，记录故障不改写成功结果', async () => {
+  const h = await followUpHarness();
+  try {
+    h.state.clock += 72 * 3600000;
+    h.service.putCampaign({
+      ...h.service.campaign(h.campaign.id),
+      sendWindow: { timezone: 'UTC', start: '05:00', end: '06:00' },
+    });
+    await h.service.tick();
+    assert.equal(h.deliveries.length, 1);
+    h.service.putCampaign({ ...h.service.campaign(h.campaign.id), sendWindow: null });
+    h.boxes[0].dailyLimit = 0;
+    await h.service.tick();
+    assert.equal(h.deliveries.length, 1);
+    h.boxes[0].dailyLimit = 50;
+    const send = h.service.mailboxes.send;
+    h.service.mailboxes.send = async (id, message, options) => {
+      h.service.putCampaign({ ...h.service.campaign(h.campaign.id), followUpPaused: true });
+      return send(id, message, options);
+    };
+    await h.service.tick();
+    assert.equal(h.deliveries.length, 1);
+    assert.equal(h.service.followUps.all()[0].status, 'pending');
+    h.service.mailboxes.send = send;
+    h.service.putCampaign({ ...h.service.campaign(h.campaign.id), followUpPaused: false });
+    h.state.clock += 60001;
+    const importDeliveries = h.service.conversations.importDeliveries.bind(h.service.conversations);
+    h.service.conversations.importDeliveries = () => {
+      if (h.service.followUps.all().some((r) => r.status === 'accepted'))
+        throw new Error('模拟收件缓存暂不可写');
+      return importDeliveries();
+    };
+    await h.service.tick();
+    assert.equal(h.service.followUps.all()[0].status, 'accepted');
+    h.service.conversations.importDeliveries = importDeliveries;
+    await h.service.tick();
+    assert.equal(h.deliveries.length, 2);
+  } finally {
+    await h.service.close();
+  }
+});
+test('真人回复及人工发信立即终止两次剩余追信，自动回执保留待执行直至明确恢复', async () => {
+  for (const direction of ['inbound', 'outbound']) {
+    const h = await followUpHarness();
+    try {
+      h.state.clock += 60000;
+      addResponse(h, { direction });
+      await h.service.tick();
+      assert(h.service.followUps.all().every((r) => r.status === 'cancelled'));
+      assert.equal(h.deliveries.length, 1);
+    } finally {
+      await h.service.close();
+    }
+  }
+  const h = await followUpHarness();
+  try {
+    h.state.clock += 60000;
+    addResponse(h, {
+      classification: 'auto_reply',
+      subject: 'Out of office',
+      bodyText: 'I am away.',
+    });
+    h.state.clock = Date.parse(h.first.sentAt) + 72 * 3600000;
+    await h.service.tick();
+    assert.equal(h.deliveries.length, 1);
+    assert.match(h.service.followUps.all()[0].reason, /自动回复/);
+    h.service.followUps.control(h.campaign.id, 'resume');
+    await h.service.tick();
+    assert.equal(h.deliveries.length, 2, JSON.stringify(h.service.followUps.all()));
+  } finally {
+    await h.service.close();
+  }
+});
+test('追信遵守暂停与24小时期限，收信失败或分页不完整不得发送，启用不追溯首封', async () => {
+  const h = await followUpHarness();
+  try {
+    h.state.clock += 72 * 3600000;
+    h.service.mailboxes.readMailbox = async () => ({ folders: [], hasMore: true });
+    await h.service.tick();
+    assert.equal(h.deliveries.length, 1);
+    h.state.clock += 24 * 3600000 + 1;
+    await h.service.tick();
+    assert.equal(h.service.followUps.all()[0].status, 'skipped');
+    h.service.followUps.control(h.campaign.id, 'disable');
+    h.service.followUps.control(h.campaign.id, 'enable');
+    await h.service.tick();
+    assert.equal(h.service.followUps.all().length, 2);
+    assert.equal(h.service.followUps.all()[1].status, 'cancelled');
+  } finally {
+    await h.service.close();
+  }
+});
+test('追信SMTP结果未知不重发也不继续第二次；生成中出现回复淘汰草稿', async () => {
+  const h = await followUpHarness();
+  try {
+    h.state.clock += 72 * 3600000;
+    h.state.sendError = new Error('socket lost');
+    await h.service.tick();
+    assert.equal(h.service.followUps.all()[0].status, 'unknown');
+    const count = h.deliveries.length;
+    h.state.clock = Date.parse(h.first.sentAt) + 168 * 3600000;
+    await h.service.tick();
+    assert.equal(h.deliveries.length, count);
+  } finally {
+    await h.service.close();
+  }
+  const g = await followUpHarness();
+  try {
+    g.state.clock += 72 * 3600000;
+    g.service.generator.generateFollowUp = async () => {
+      addResponse(g);
+      return 'Who handles sourcing?';
+    };
+    await g.service.tick();
+    assert.equal(g.deliveries.length, 1);
+    assert(g.service.followUps.all().every((r) => r.status === 'cancelled'));
+  } finally {
+    await g.service.close();
+  }
+});

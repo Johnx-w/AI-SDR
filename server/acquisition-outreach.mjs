@@ -14,6 +14,7 @@ export function acquisitionOutreachSources(jobs, plans) {
         : 'active';
     return {
       jobId: job.id,
+      followUpEnabled: Boolean((plan?.input || job.input).auto_follow_up),
       scheduleId: job.scheduleId,
       scope: job.scope,
       name: `${plan?.name || '立即获客'} · ${new Date(job.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })} · 自动首发`,

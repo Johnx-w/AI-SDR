@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { Archive, ExternalLink, Plus, RefreshCw, Search } from 'lucide-react';
 import { PageHeading } from '../components/PageHeading';
 import { ProductDocuments } from '../components/ProductDocuments';
@@ -534,15 +534,7 @@ export function ProductKnowledgePage() {
                         >
                           查看 / 编辑
                         </button>
-                        <Link
-                          className="btn secondary small"
-                          to={
-                            '/business?' +
-                            new URLSearchParams({ productId: product.id, tab: 'demands' })
-                          }
-                        >
-                          关联需求与跟进
-                        </Link>
+
                         {product.status !== 'archived' && (
                           <button
                             className="btn secondary small"

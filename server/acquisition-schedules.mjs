@@ -62,6 +62,7 @@ export class AcquisitionSchedules {
   create({ name, input, timing }, key) {
     this.checkInput(input);
     validateAutoFirstTouch(input.auto_first_touch);
+    validateAutoFirstTouch(input.auto_follow_up);
     if (typeof key !== 'string' || !/^[\w-]{8,100}$/.test(key))
       throw fail(400, '无效的 Idempotency-Key');
     if (typeof name !== 'string' || !name.trim() || name.length > 80)
@@ -103,6 +104,7 @@ export class AcquisitionSchedules {
       throw fail(400, '计划名称须为 1–80 字符');
     this.checkInput(input);
     validateAutoFirstTouch(input.auto_first_touch);
+    validateAutoFirstTouch(input.auto_follow_up);
     const normalized = validateTiming(timing, this.now());
     const nextRunAt = plan.status === 'enabled' ? nextOccurrence(normalized, this.now()) : null;
     if (plan.status === 'enabled' && !nextRunAt) throw fail(400, '所选日期已没有未到的执行时间');

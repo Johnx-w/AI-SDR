@@ -9,6 +9,7 @@ import {
   outreachMaterialVersion,
   eligibleOutreachFacts,
 } from './outreach-content.mjs';
+import { OutreachFollowUps } from './outreach-follow-ups.mjs';
 import { MailConversations } from './mail-conversations.mjs';
 import { MailReplies } from './mail-replies.mjs';
 import { renderMailboxSignature, signaturePlainTextHtml } from '../src/domain/mail-signature.mjs';
@@ -61,6 +62,7 @@ export class OutreachService {
     customers = () => [],
     recordAccepted,
     recordCommunication,
+    recordFollowUp,
     generator,
     now = Date.now,
     tickMs = 2000,
@@ -95,6 +97,7 @@ export class OutreachService {
       tickMs,
       acquisitionSources,
     });
+    this.followUps = new OutreachFollowUps(this, recordFollowUp);
     this.preparing = new Map();
     this.conversations = new MailConversations({
       db: this.db,
@@ -107,7 +110,18 @@ export class OutreachService {
               WHERE delivery_id=outreach_deliveries.id)`,
           )
           .all()
-          .map((row) => JSON.parse(row.data)),
+          .map((row) => JSON.parse(row.data))
+          .concat(
+            this.followUps
+              .all()
+              .filter(
+                (row) =>
+                  row.status === 'accepted' &&
+                  !this.db
+                    .prepare('SELECT 1 FROM mailbox_imported_deliveries WHERE delivery_id=?')
+                    .get(row.id),
+              ),
+          ),
       customers,
       recordCommunication,
       now,
@@ -315,11 +329,26 @@ export class OutreachService {
     try {
       generatorConfigured = !!this.generatorClient().configured;
     } catch {}
+    const followUps = this.followUps.all();
+    const followUpStats = {
+      sending: followUps.filter((item) => item.status === 'sending').length,
+      active: followUps.filter((item) => {
+        const campaign = campaigns.find((c) => c.id === item.campaignId);
+        return (
+          item.status === 'pending' &&
+          campaign?.followUpEnabled &&
+          !campaign.followUpPaused &&
+          ['active', 'completed'].includes(campaign.status) &&
+          this.acquisitionAllowed(campaign)
+        );
+      }).length,
+    };
     return {
       mailboxes,
       campaigns,
       deliveryStats,
       deliveryGroups,
+      followUpStats,
       products: this.products(),
       readiness: { generatorConfigured },
     };
@@ -361,6 +390,11 @@ export class OutreachService {
       mailboxIds,
       includeExisting: input.includeExisting !== false,
       continuous: input.continuous !== false,
+      followUpEnabled:
+        input.followUpEnabled === undefined
+          ? !!prior?.followUpEnabled
+          : input.followUpEnabled === true,
+      followUpPaused: !!prior?.followUpPaused,
       customerIds:
         input.customerIds === undefined ? (prior?.customerIds ?? []) : list(input.customerIds),
       createdAt: prior?.createdAt || iso(this.now),
@@ -408,6 +442,7 @@ export class OutreachService {
         name: source.name,
         mode: 'production',
         status: source.status,
+        followUpEnabled: source.followUpEnabled === true,
         revision: 1,
         approvedRevision: 1,
         targetCount: null,
@@ -601,7 +636,9 @@ export class OutreachService {
       });
     }
     const existing = ignoreDelivery ? this.delivery(ignoreDelivery) : null;
-    const history = this.deliveries().filter((d) => d.id !== ignoreDelivery);
+    const history = this.deliveries()
+      .concat(this.followUps.all())
+      .filter((d) => d.id !== ignoreDelivery);
     const { identities, blocked: stopped } = this.contactState(ignoreDelivery);
     const identityValues = (keys) =>
       [...keys].map((key) => key.replace(/^(company|domain|email):/, ''));
@@ -1124,10 +1161,12 @@ export class OutreachService {
     if (!m || m.paused || m.smtpStatus !== 'connected' || !m.configured) return false;
     if (c.mode === 'internal_test') return true;
     if (c.approvedRevision !== c.revision || !this.inWindow(c)) return false;
-    const history = this.deliveries().filter(
-      (v) =>
-        v.mailboxId === m.id && ['accepted', 'sending', 'unknown', 'failed'].includes(v.status),
-    );
+    const history = this.deliveries()
+      .concat(this.followUps.all())
+      .filter(
+        (v) =>
+          v.mailboxId === m.id && ['accepted', 'sending', 'unknown', 'failed'].includes(v.status),
+      );
     if (
       history.filter((v) => day(v.sentAt || v.attemptedAt || v.createdAt) === day(this.now()))
         .length >= m.dailyLimit
@@ -1153,6 +1192,13 @@ export class OutreachService {
     return this.running;
   }
   async runTick() {
+    if (
+      typeof this.mailboxes.readMailbox === 'function' &&
+      (!this.lastMailboxSync || this.now() - this.lastMailboxSync >= 60000)
+    ) {
+      this.lastMailboxSync = this.now();
+      await this.conversations.sync().catch(() => {});
+    }
     this.syncAcquisition();
     this.refreshProductMaterials();
     const campaigns = this.campaigns().filter((c) => c.status === 'active');
@@ -1226,6 +1272,7 @@ export class OutreachService {
           lastError: `本轮已提交 ${consumed} / ${c.targetCount} 封，剩余客户或邮件条件待处理，请查看执行详情。`,
         });
     }
+    await this.followUps.tick();
   }
   async dispatch(c, d, m) {
     const current = this.campaign(c.id);
@@ -1374,16 +1421,20 @@ export class OutreachService {
           String(typeof address === 'object' ? address.address : address).toLowerCase() ===
           d.to.toLowerCase(),
       );
-      const completed = this.putDelivery({
-        ...pending,
-        status: accepted ? 'accepted' : rejected ? 'failed' : 'unknown',
-        reason: accepted
-          ? ''
-          : rejected
-            ? '服务商拒绝该收件地址'
-            : '发送结果待核实，系统不会自动重发',
-        messageId: result.messageId || pending.messageId,
-        sentAt: accepted ? iso(this.now) : null,
+      const completed = this.transaction(() => {
+        const saved = this.putDelivery({
+          ...pending,
+          status: accepted ? 'accepted' : rejected ? 'failed' : 'unknown',
+          reason: accepted
+            ? ''
+            : rejected
+              ? '服务商拒绝该收件地址'
+              : '发送结果待核实，系统不会自动重发',
+          messageId: result.messageId || pending.messageId,
+          sentAt: accepted ? iso(this.now) : null,
+        });
+        if (accepted) this.followUps.schedule(saved, this.campaign(c.id));
+        return saved;
       });
       if (accepted && c.mode === 'production' && this.recordAccepted) {
         try {

@@ -1,5 +1,6 @@
 export interface WorkflowInput {
   auto_first_touch?: boolean;
+  auto_follow_up?: boolean;
   query_mode?: 'auto';
   product_scope?: 'all' | 'specific';
   environment_preference?: 'all' | 'indoor' | 'outdoor';

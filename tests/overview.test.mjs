@@ -18,6 +18,7 @@ const task = (id, customerId, dueAt, status = 'pending', demandIds = []) => ({
   status,
   demandIds,
   title: '跟进' + id,
+  origin: 'automatic-followup',
 });
 const demand = (id, customerId, stage = 'new') => ({ id, customerId, stage, title: '需求' + id });
 function fixture(overrides = {}) {

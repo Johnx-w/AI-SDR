@@ -52,27 +52,7 @@ export function decorateDossierConfirmations(lead, confirmations) {
   };
 }
 
-function validatePurchase(input, customerId, business) {
-  if (input.category !== 'purchase_need') return;
-  const message = business?.get('messages', input.sourceMessageId);
-  if (
-    !message ||
-    message.customerId !== customerId ||
-    message.actualConfirmed !== true ||
-    message.classification !== 'normal' ||
-    !(
-      (message.direction === 'inbound' && message.deliveryStatus === 'received') ||
-      (message.direction === 'note' &&
-        message.channel === 'phone' &&
-        message.deliveryStatus === 'recorded')
-    )
-  )
-    throw fail(400, '采购需求需要关联该客户的实际来信或已确认电话纪要，请先在沟通与跟进中记录');
-  if (!message.body?.includes(input.evidence))
-    throw fail(400, '采购需求依据必须摘自所选实际沟通记录');
-}
-
-export async function saveLeadSupplement({ engine, id, input: rawInput, key, business }) {
+export async function saveLeadSupplement({ engine, id, input: rawInput, key }) {
   const input = validateSupplement(rawInput);
   const opId =
     'supplement_' +
@@ -102,7 +82,6 @@ export async function saveLeadSupplement({ engine, id, input: rawInput, key, bus
         /经营法人|采购需求|采购方式/.test(input.pendingItem))
     )
       throw fail(400, '请从对应项目补充评分事实、法人名称或实际采购需求，普通备注不能清除该缺项');
-    validatePurchase(input, id, business);
     const confirmedAt = new Date(
       Math.max(Date.now(), Date.parse(current?.evaluatedAt || '') + 1 || 0),
     ).toISOString();

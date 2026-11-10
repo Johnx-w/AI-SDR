@@ -6,13 +6,6 @@ import { DatabaseSync } from 'node:sqlite';
 const kinds = { conversations: 'conv_', messages: 'msg_', demands: 'dem_', tasks: 'task_' };
 const channels = ['email', 'whatsapp', 'form', 'phone', 'other'];
 const ownerships = ['auto', 'human'];
-const communicationKinds = new Set([
-  'follow_up',
-  'first_contact',
-  'clarify_specs',
-  'quote_followup',
-]);
-const terminalStages = new Set(['won', 'lost', 'closed']);
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const text = (value, name, maximum = 500, required = false) => {
   if (value === undefined || value === null) {
@@ -91,10 +84,6 @@ const readOnly = new Set([
 const requestHash = (value) =>
   hash(Object.fromEntries(Object.entries(value).filter(([key]) => !readOnly.has(key))));
 const overlapping = (left, right) => left.some((id) => right.includes(id));
-const isActualReply = (message) =>
-  message.direction === 'inbound' &&
-  message.deliveryStatus === 'received' &&
-  message.classification === 'normal';
 const actualEmail = (message) =>
   message.channel === 'email' &&
   ((message.direction === 'inbound' && message.deliveryStatus === 'received') ||
@@ -573,11 +562,28 @@ export class CustomerBusiness {
     const evidenceQuote = text(value.evidenceQuote, '需求原文引文', 5000, true);
     if (!source.body.includes(evidenceQuote))
       throw fail(400, '需求引文必须逐字出现在来源消息原文中');
+    const evidence = value.evidence || prior?.evidence || [];
+    if (!Array.isArray(evidence) || evidence.length > 500) throw fail(400, '需求依据格式错误');
+    for (const item of evidence) {
+      const message = this.required('messages', item.messageId, '需求依据消息');
+      this.sameCustomer(message, customerId, '需求依据');
+      this.sameConversation(message, conversationId, '需求依据');
+      if (
+        !message.actualConfirmed ||
+        message.direction !== 'inbound' ||
+        message.deliveryStatus !== 'received' ||
+        ['auto_reply', 'unsubscribe', 'hard_bounce'].includes(message.classification) ||
+        !message.body.includes(text(item.quote, '需求引文', 5000, true))
+      )
+        throw fail(400, '需求补充必须有同会话真实客户原文');
+    }
     const productIds = ids(value.productIds, '产品资料');
     return {
       customerId,
       conversationId,
       sourceMessageId,
+      evidence,
+      origin: value.origin === 'automatic' ? 'automatic' : prior?.origin || 'manual',
       title: text(value.title, '需求名称', 240, true),
       category: choice(
         value.category,
@@ -585,12 +591,7 @@ export class CustomerBusiness {
         'other',
         '品类',
       ),
-      direction: choice(
-        value.direction,
-        ['finished', 'materials', 'samples'],
-        undefined,
-        '供货方向',
-      ),
+      direction: choice(value.direction, ['finished', 'materials', 'samples', ''], '', '供货方向'),
       productText: text(value.productText, '客户所需产品', 1000),
       productIds,
       ...(await this.products(productIds)),
@@ -610,228 +611,20 @@ export class CustomerBusiness {
   }
   saveDemand(value, options = {}) {
     return this.save('demands', value, options, this.normalizeDemand, function (record) {
-      const source = this.required('messages', record.sourceMessageId, '来源消息');
-      if (!source.demandIds.includes(record.id))
-        this.put('messages', {
-          ...source,
-          demandIds: [...source.demandIds, record.id],
-          version: source.version + 1,
-          updatedAt: record.updatedAt,
-        });
-    });
-  }
-  async normalizeTask(value, prior) {
-    const customerId = text(value.customerId, '客户编号', 180, true);
-    await this.actualCustomer(customerId);
-    if (prior && prior.customerId !== customerId) throw fail(409, '任务不能更换所属企业');
-    const selectedMessages = ids(value.messageIds, '关联消息').map((id) =>
-      this.required('messages', id, '沟通记录'),
-    );
-    const conversations = [...new Set(selectedMessages.map((message) => message.conversationId))];
-    const conversationId =
-      text(value.conversationId, '会话编号', 180) ||
-      (conversations.length === 1 ? conversations[0] : '');
-    const conversation = conversationId
-      ? this.required('conversations', conversationId, '会话')
-      : null;
-    if (conversation) this.sameCustomer(conversation, customerId, '会话');
-    const kind = choice(
-      value.kind,
-      [
-        'follow_up',
-        'first_contact',
-        'clarify_specs',
-        'quote_followup',
-        'sample',
-        'manual_review',
-        'other',
-      ],
-      'follow_up',
-      '任务类型',
-    );
-    if (['clarify_specs', 'quote_followup'].includes(kind) && !conversation)
-      throw fail(400, '后续沟通任务需要关联会话');
-    const demandIds = ids(value.demandIds, '关联需求');
-    const linkedDemands = demandIds.map((id) => this.required('demands', id, '需求'));
-    for (const demand of linkedDemands) {
-      this.sameCustomer(demand, customerId, '需求');
-      if (!conversationId || demand.conversationId !== conversationId)
-        throw fail(409, '任务需求必须属于所选会话');
-    }
-    const messageIds = ids(value.messageIds, '关联消息');
-    for (const id of messageIds) {
-      const message = this.required('messages', id, '沟通记录');
-      this.sameCustomer(message, customerId, '沟通记录');
-      if (conversationId && message.conversationId !== conversationId)
-        throw fail(409, '任务消息必须属于所选会话');
-    }
-    let basisMessageId = text(value.basisMessageId, '跟进依据消息', 180);
-    if (!basisMessageId && conversationId && !prior)
-      basisMessageId =
-        this.all('messages')
-          .filter((message) => message.conversationId === conversationId)
-          .sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt))
-          .at(-1)?.id || '';
-    if (basisMessageId) {
-      const message = this.required('messages', basisMessageId, '跟进依据消息');
-      this.sameCustomer(message, customerId, '跟进依据消息');
-      if (!conversationId || message.conversationId !== conversationId)
-        throw fail(409, '跟进依据必须属于所选会话');
-    }
-    const status = choice(
-      value.status,
-      ['pending', 'completed', 'skipped', 'cancelled'],
-      prior?.status || 'pending',
-      '任务状态',
-    );
-    if ((!prior && status !== 'pending') || (prior && status !== prior.status))
-      throw fail(409, '请通过完成、跳过或终止操作更改任务状态');
-    if (prior && ['completed', 'skipped', 'cancelled'].includes(prior.status))
-      throw fail(409, '已完成、跳过或终止的任务保留执行记录，不能覆盖');
-    const channel = choice(
-      value.channel,
-      ['email', 'whatsapp', 'form', 'phone'],
-      conversation?.channel || 'email',
-      '任务类型',
-    );
-    if (selectedMessages.some((message) => message.channel !== channel))
-      throw fail(409, '关联沟通记录与任务类型不一致');
-    if (conversation && communicationKinds.has(kind) && conversation.channel !== channel)
-      throw fail(409, '沟通任务渠道与会话不一致');
-    const productIds = [
-      ...new Set([
-        ...ids(value.productIds, '关联产品'),
-        ...linkedDemands.flatMap((demand) => demand.productIds),
-      ]),
-    ];
-    const products = await this.products(productIds);
-    return {
-      customerId,
-      conversationId,
-      demandIds,
-      messageIds,
-      productIds,
-      productVersions: products.productVersions,
-      title:
-        text(value.title, '下一步行动', 240) ||
-        text(value.notes, '任务说明', 3000).slice(0, 240) ||
-        { email: '邮件触达', whatsapp: 'WhatsApp触达', form: '网站留言', phone: '人工电话外呼' }[
-          channel
-        ],
-      kind,
-      executionMode: choice(value.executionMode, ['manual', 'automatic'], 'manual', '执行方式'),
-      channel,
-      dueAt: date(value.dueAt, '执行时间'),
-      status,
-      owner: text(value.owner, '负责人', 120),
-      ownerIds: ids(value.ownerIds, '负责业务员'),
-      templateIds: ids(value.templateIds, '使用模板'),
-      notes: text(value.notes, '任务说明', 3000),
-      basisMessageId,
-      audit: prior?.audit || [],
-      completedAt: prior?.completedAt || '',
-      resultMessageId: prior?.resultMessageId || '',
-    };
-  }
-  saveTask(value, options = {}) {
-    return this.save('tasks', value, options, this.normalizeTask);
-  }
-  taskIncludes(task, message) {
-    if (message.customerId !== task.customerId) return false;
-    if (message.classification === 'unsubscribe' && !message.demandIds.length) return true;
-    if (message.classification === 'hard_bounce') {
-      if (task.channel !== message.channel) return false;
-      const source = this.get('conversations', message.conversationId);
-      const target = task.conversationId ? this.get('conversations', task.conversationId) : null;
-      return (
-        !source?.participant ||
-        !target?.participant ||
-        source.participant.toLowerCase() === target.participant.toLowerCase()
-      );
-    }
-    if (message.classification === 'complaint')
-      return task.conversationId === message.conversationId;
-    if (message.demandIds.length)
-      return task.demandIds.length
-        ? overlapping(task.demandIds, message.demandIds)
-        : task.conversationId === message.conversationId;
-    return task.conversationId === message.conversationId;
-  }
-  afterBasis(message, task) {
-    if (message.id === task.basisMessageId) return false;
-    const basis = task.basisMessageId ? this.get('messages', task.basisMessageId) : null;
-    const baseline = basis?.occurredAt || task.createdAt;
-    if (Date.parse(message.occurredAt) !== Date.parse(baseline))
-      return Date.parse(message.occurredAt) > Date.parse(baseline);
-    if (!basis) return Date.parse(message.createdAt) >= Date.parse(task.createdAt);
-    const order = this.all('messages').map((item) => item.id);
-    return order.indexOf(message.id) > order.indexOf(basis.id);
-  }
-  localReasons(task) {
-    const reasons = [];
-    if (!communicationKinds.has(task.kind)) return reasons;
-    const context = this.context(task.customerId);
-    if (context.doNotContact) reasons.push('客户已明确拒绝联系，所有渠道的沟通任务暂停');
-    const conversation = task.conversationId
-      ? this.get('conversations', task.conversationId)
-      : null;
-    if (conversation?.status === 'closed') reasons.push('会话已经关闭');
-    if (task.executionMode === 'automatic' && conversation?.ownership === 'human')
-      reasons.push('会话由人工接管');
-    if (
-      conversation?.channel === 'email' &&
-      context.fixedEmail &&
-      conversation.account !== context.fixedEmail
-    )
-      reasons.push('会话账号与客户固定邮箱不一致');
-    for (const id of task.demandIds) {
-      const demand = this.get('demands', id);
-      if (
-        !demand ||
-        demand.customerId !== task.customerId ||
-        demand.conversationId !== task.conversationId
-      )
-        reasons.push('关联需求归属待核对');
-      else {
-        if (task.executionMode === 'automatic' && demand.ownership === 'human')
-          reasons.push('关联需求由人工接管：' + demand.title);
-        if (terminalStages.has(demand.stage)) reasons.push('关联需求已经结束：' + demand.title);
+      for (const id of new Set([
+        record.sourceMessageId,
+        ...(record.evidence || []).map((e) => e.messageId),
+      ])) {
+        const source = this.required('messages', id, '来源消息');
+        if (!source.demandIds.includes(record.id))
+          this.put('messages', {
+            ...source,
+            demandIds: [...source.demandIds, record.id],
+            version: source.version + 1,
+            updatedAt: record.updatedAt,
+          });
       }
-    }
-    const messages = this.all('messages').filter(
-      (message) => message.customerId === task.customerId,
-    );
-    for (const message of messages) {
-      if (!this.taskIncludes(task, message)) continue;
-      if (message.classification === 'unsubscribe')
-        reasons.push(message.demandIds.length ? '关联需求已经拒绝继续联系' : '客户已明确拒绝联系');
-      else if (message.classification === 'hard_bounce')
-        reasons.push('当前渠道及客户联系入口已有硬退信记录');
-      else if (message.classification === 'complaint') reasons.push('会话存在投诉，需要人工处理');
-      else if (isActualReply(message) && this.afterBasis(message, task))
-        reasons.push('客户已回复，请先处理新消息后调整任务');
-    }
-    const outbound = messages
-      .filter(
-        (message) =>
-          message.direction === 'outbound' &&
-          message.channel === task.channel &&
-          (!task.conversationId || message.conversationId === task.conversationId),
-      )
-      .sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt))
-      .at(-1);
-    if (outbound?.deliveryStatus === 'unknown')
-      reasons.push('上一条发出消息的实际结果尚未确认，不能重复联系');
-    if (
-      task.kind === 'first_contact' &&
-      messages.some(
-        (message) =>
-          actualEmail(message) ||
-          (message.direction === 'inbound' && message.deliveryStatus === 'received'),
-      )
-    )
-      reasons.push('客户已有真实沟通，请改为对应的后续行动');
-    return [...new Set(reasons)];
+    });
   }
   applyIncoming(message) {
     if (message.classification === 'unsubscribe' && !message.demandIds.length)
@@ -853,136 +646,6 @@ export class CustomerBusiness {
           { action: 'complaint_handoff', at: message.updatedAt, messageId: message.id },
         ],
       });
-    }
-  }
-  async checkTask(task) {
-    const reasons = this.localReasons(task);
-    if (task.status !== 'pending') reasons.unshift('任务当前状态为 ' + task.status);
-    let customer;
-    try {
-      customer = await this.actualCustomer(task.customerId);
-    } catch {
-      reasons.push('T2 企业档案尚未核对成功');
-    }
-    const development = customer?.fields?.['开发状态'];
-    const state =
-      typeof development === 'string'
-        ? development
-        : Array.isArray(development)
-          ? development.map((item) => item.text || '').join('')
-          : '';
-    if (communicationKinds.has(task.kind) && /暂不开发|停止开发|拒绝联系|已退订/u.test(state))
-      reasons.push('T2 已由人工标记暂停或不开发');
-    if (communicationKinds.has(task.kind)) {
-      const versions = [
-        task.productVersions,
-        ...task.demandIds.map((id) => this.get('demands', id)?.productVersions || {}),
-      ];
-      const productIds = [
-        ...new Set([...task.productIds, ...versions.flatMap((snapshot) => Object.keys(snapshot))]),
-      ];
-      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(
-        new Date(this.timestamp()),
-      );
-      for (const id of productIds) {
-        let product;
-        try {
-          product = await this.product(id);
-        } catch {
-          /* Unavailable product facts remain a reason to hold the task. */
-        }
-        if (!product || product.id !== id) reasons.push('关联 T5 产品资料已不存在或读取失败');
-        else {
-          if (product.status !== 'approved')
-            reasons.push('关联 T5 产品资料尚未审核或已归档：' + product.name);
-          if (product.effectiveDate && product.effectiveDate > today)
-            reasons.push('关联 T5 产品资料尚未生效：' + product.name);
-          if (
-            versions.some(
-              (snapshot) => snapshot[id] !== undefined && snapshot[id] !== product.version,
-            )
-          )
-            reasons.push('关联 T5 产品资料版本已变化，请重新核对需求和任务：' + product.name);
-        }
-      }
-    }
-    return {
-      ready: reasons.length === 0,
-      reasons: [...new Set(reasons)],
-      message: reasons.length
-        ? '任务需要核对后再推进；此入口不会自动发送消息'
-        : '记录条件已核对；实际沟通仍由人工执行和登记',
-      automaticSend: false,
-    };
-  }
-  async preflightTask(id) {
-    return this.checkTask(this.required('tasks', id, '跟进任务'));
-  }
-  async actTask(id, { action, expectedVersion, resultMessageId, notes } = {}) {
-    const task = this.required('tasks', id, '跟进任务');
-    await this.actualCustomer(task.customerId);
-    if (!Number.isInteger(expectedVersion) || expectedVersion !== task.version)
-      throw fail(409, '任务已更新，请刷新后再操作');
-    if (!['complete', 'skip', 'cancel'].includes(action)) throw fail(400, '任务操作不正确');
-    if (['completed', 'skipped', 'cancelled'].includes(task.status))
-      throw fail(409, '任务已经完成、跳过或终止');
-    const actionNotes = text(
-      notes,
-      '执行说明',
-      2000,
-      action === 'complete' && !communicationKinds.has(task.kind),
-    );
-    let result = null;
-    if (action === 'complete' && communicationKinds.has(task.kind)) {
-      result = this.required('messages', resultMessageId, '实际发出消息');
-      this.sameCustomer(result, task.customerId, '实际发出消息');
-      if (
-        (task.conversationId && result.conversationId !== task.conversationId) ||
-        result.channel !== task.channel ||
-        !(
-          (result.direction === 'outbound' && result.deliveryStatus === 'sent') ||
-          (task.channel === 'phone' &&
-            result.direction === 'note' &&
-            result.deliveryStatus === 'recorded')
-        ) ||
-        !result.actualConfirmed ||
-        Date.parse(result.occurredAt) < Date.parse(task.createdAt) ||
-        !task.demandIds.every((demandId) => result.demandIds.includes(demandId))
-      )
-        throw fail(
-          409,
-          '完成沟通任务需要同一客户、会话及相关需求的实际已发送消息，不能用草稿、失败或结果未知消息证明',
-        );
-    }
-    this.db.exec('BEGIN IMMEDIATE');
-    try {
-      const current = this.required('tasks', id, '跟进任务');
-      if (current.version !== expectedVersion) throw fail(409, '任务已更新，请刷新后再操作');
-      const now = this.timestamp();
-      const record = {
-        ...current,
-        status: { complete: 'completed', skip: 'skipped', cancel: 'cancelled' }[action],
-        conversationId: current.conversationId || result?.conversationId || '',
-        version: current.version + 1,
-        updatedAt: now,
-        completedAt: action === 'complete' ? now : '',
-        resultMessageId: result?.id || '',
-        audit: [
-          ...current.audit,
-          {
-            action,
-            at: now,
-            notes: actionNotes,
-            ...(result ? { resultMessageId: result.id } : {}),
-          },
-        ],
-      };
-      this.put('tasks', record);
-      this.db.exec('COMMIT');
-      return record;
-    } catch (error) {
-      this.db.exec('ROLLBACK');
-      throw error;
     }
   }
   close() {

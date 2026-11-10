@@ -57,6 +57,7 @@ type CampaignInput = Pick<
   | 'mailboxIds'
   | 'includeExisting'
   | 'continuous'
+  | 'followUpEnabled'
   | 'intervalSeconds'
 > & { mode: 'production' };
 
@@ -589,6 +590,7 @@ function CampaignEditor({
         mailboxIds: selectedMailboxes,
         includeExisting: form.get('includeExisting') === 'on',
         continuous: form.get('continuous') === 'on',
+        followUpEnabled: form.get('followUpEnabled') === 'on',
         intervalSeconds: Number(form.get('intervalSeconds')),
       });
       onClose();
@@ -790,6 +792,14 @@ function CampaignEditor({
               defaultChecked={campaign?.continuous ?? true}
             />
             <span>自动加入后续新发现的符合条件客户</span>
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              name="followUpEnabled"
+              defaultChecked={campaign?.followUpEnabled === true}
+            />
+            首封未回复自动跟进（第3天、第7天）
           </label>
         </div>
         <p className="outreach-hint">
@@ -1296,6 +1306,7 @@ export function OutreachCommunication() {
               <MailConversations
                 mailboxes={mailboxes}
                 mailboxId={conversationMailboxId}
+                customerId={searchParams.get('customerId') || ''}
                 onMailboxChange={openMailboxConversations}
               />
             )}
@@ -2049,6 +2060,65 @@ export function OutreachCommunication() {
                   <span>LLM 自动生成 · 固定签名</span>
                 </div>
                 <InlineError value={shownDetail.campaign.lastError || null} />
+                {shownDetail.campaign.mode === 'production' &&
+                  shownDetail.campaign.status !== 'cancelled' && (
+                    <div className="outreach-plan-rules">
+                      <p>
+                        首封未回复跟进：
+                        {shownDetail.campaign.followUpEnabled
+                          ? shownDetail.campaign.followUpPaused
+                            ? '已暂停'
+                            : '已开启'
+                          : '未开启'}
+                        。开启后成功发送的首封，未获真人回复时于第3天、第7天各跟进一次。
+                      </p>
+                      <button
+                        className="btn secondary"
+                        disabled={!!busy}
+                        onClick={() =>
+                          void act(
+                            'follow-up',
+                            `/campaigns/${shownDetail.campaign.id}/follow-ups`,
+                            { action: shownDetail.campaign.followUpEnabled ? 'disable' : 'enable' },
+                          )
+                        }
+                      >
+                        {shownDetail.campaign.followUpEnabled
+                          ? '关闭剩余追信'
+                          : '开启后续首封的自动追信'}
+                      </button>
+                      {shownDetail.campaign.followUpEnabled && (
+                        <>
+                          <button
+                            className="btn secondary"
+                            disabled={!!busy}
+                            onClick={() =>
+                              void act(
+                                'follow-up',
+                                `/campaigns/${shownDetail.campaign.id}/follow-ups`,
+                                { action: 'pause' },
+                              )
+                            }
+                          >
+                            暂停追信
+                          </button>
+                          <button
+                            className="btn secondary"
+                            disabled={!!busy}
+                            onClick={() =>
+                              void act(
+                                'follow-up',
+                                `/campaigns/${shownDetail.campaign.id}/follow-ups`,
+                                { action: 'resume' },
+                              )
+                            }
+                          >
+                            已核对来信，恢复追信
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
                 {shownDetail.campaign.status === 'cancelled' && (
                   <p className="outreach-hint" role="status">
                     此计划已取消

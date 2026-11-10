@@ -1,8 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { Plus, Save, Trash2 } from 'lucide-react';
-import { formatBeijingTime } from '../domain/date-time.mjs';
-import { customerBusinessApi } from '../services/customerBusiness';
-import type { BusinessMessage } from '../services/customerBusiness';
 import { pendingLeadSupplement, saveLeadSupplement } from '../services/leadSupplements';
 import type {
   SupplementAssessment,
@@ -25,10 +22,9 @@ const directions: Record<SupplementDirection, string> = {
   materials: '材料配件',
   samples: '样本展示',
 };
-const categories: Record<SupplementCategory, string> = {
+const categories: Partial<Record<SupplementCategory, string>> = {
   profile: '企业资料',
   legal_name: '经营法人名称',
-  purchase_need: '采购需求',
   assessment: '经营事实',
 };
 const factOptions: Record<SupplementDimension, [string, string][]> = {
@@ -76,7 +72,6 @@ const inputFingerprint = (input: SupplementInput) =>
       ...input,
       sourceUrl: input.sourceUrl || '',
       pendingItem: input.pendingItem || '',
-      sourceMessageId: input.sourceMessageId || '',
       product: input.product || '',
       direction: input.direction || '',
     },
@@ -142,15 +137,9 @@ export function SupplementPanel<TLead>({
   const [evidence, setEvidence] = useState('');
   const [sourceUrl, setSourceUrl] = useState('');
   const [confirmedBy, setConfirmedBy] = useState('');
-  const [sourceMessageId, setSourceMessageId] = useState('');
-  const [messages, setMessages] = useState<BusinessMessage[]>([]);
-  const [loadingMessages, setLoadingMessages] = useState(false);
-  const [messageError, setMessageError] = useState('');
-  const [messageRefresh, setMessageRefresh] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const submissionKeys = useRef(new Map<string, string>());
-  const sourceMessage = messages.find((message) => message.id === sourceMessageId);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -161,6 +150,8 @@ export function SupplementPanel<TLead>({
         if (controller.signal.aborted) return;
         if (pending) {
           const input = pending.input;
+          if (input.category === 'purchase_need')
+            throw new Error('旧手工采购录入已退役，需求将从真实来信自动整理');
           setRestoredInput(input);
           setEntryContext({
             category: input.category,
@@ -179,7 +170,6 @@ export function SupplementPanel<TLead>({
           setEvidence(input.evidence);
           setSourceUrl(input.sourceUrl || '');
           setConfirmedBy(input.confirmedBy);
-          setSourceMessageId(input.sourceMessageId || '');
           setExpectedAssessmentId(input.expectedAssessmentId);
           submissionKeys.current.set(inputFingerprint(input), pending.key);
         }
@@ -199,38 +189,6 @@ export function SupplementPanel<TLead>({
     return () => controller.abort();
   }, [leadId, recoveryRetry]);
 
-  useEffect(() => {
-    if (category !== 'purchase_need') return;
-    const controller = new AbortController();
-    setLoadingMessages(true);
-    setMessageError('');
-    void customerBusinessApi
-      .workspace({ customerId: leadId }, controller.signal)
-      .then((workspace) => {
-        if (controller.signal.aborted) return;
-        setMessages(
-          workspace.messages.filter(
-            (message) =>
-              message.customerId === leadId &&
-              message.actualConfirmed === true &&
-              ((message.direction === 'inbound' && message.deliveryStatus === 'received') ||
-                (message.direction === 'note' &&
-                  message.channel === 'phone' &&
-                  message.deliveryStatus === 'recorded')) &&
-              message.classification === 'normal',
-          ),
-        );
-      })
-      .catch((cause: unknown) => {
-        if (!controller.signal.aborted)
-          setMessageError(cause instanceof Error ? cause.message : '沟通记录读取失败');
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoadingMessages(false);
-      });
-    return () => controller.abort();
-  }, [category, leadId, messageRefresh]);
-
   const changeDimension = (value: SupplementDimension) => {
     setDimension(value);
     setFacts([{ kind: factOptions[value][0][0], value: '' }]);
@@ -240,14 +198,6 @@ export function SupplementPanel<TLead>({
     if (recovery !== 'ready') return;
     if (!restoredInput && category === 'assessment' && !opportunities[opportunityIndex]) {
       setError('当前没有可补充的产品评估，请先完成企业研究。');
-      return;
-    }
-    if (
-      !restoredInput &&
-      category === 'purchase_need' &&
-      (!sourceMessage || !sourceMessage.body.includes(evidence.trim()))
-    ) {
-      setError('请选择客户实际来信或通话记录，并从原文中逐字摘录依据。');
       return;
     }
     const selected = opportunities[opportunityIndex];
@@ -279,7 +229,6 @@ export function SupplementPanel<TLead>({
       (!entryContext.direction || scopedDirection === entryContext.direction)
         ? { pendingItem: entryContext.pendingItem }
         : {}),
-      ...(category === 'purchase_need' ? { sourceMessageId } : {}),
     };
     const serialized = inputFingerprint(input);
     const submissionKey = submissionKeys.current.get(serialized) || crypto.randomUUID();
@@ -390,11 +339,10 @@ export function SupplementPanel<TLead>({
           ) : (
             <div className="supplement-scope-grid">
               <label>
-                对应产品{category === 'purchase_need' ? '' : '（选填）'}
+                对应产品（选填）
                 <input
                   value={product}
                   maxLength={500}
-                  required={category === 'purchase_need'}
                   onChange={(event) => setProduct(event.target.value)}
                   placeholder="企业通用资料可留空"
                 />
@@ -501,74 +449,14 @@ export function SupplementPanel<TLead>({
               )}
             </section>
           )}
-          {category === 'purchase_need' && (
-            <section className="supplement-message" aria-label="采购需求来源">
-              <div className="supplement-message-toolbar">
-                <h4>采购需求来源</h4>
-                <button
-                  className="text-link"
-                  type="button"
-                  disabled={loadingMessages}
-                  onClick={() => setMessageRefresh((current) => current + 1)}
-                >
-                  刷新记录
-                </button>
-              </div>
-              <label>
-                实际来信或通话记录
-                <select
-                  value={sourceMessageId}
-                  required
-                  disabled={loadingMessages}
-                  onChange={(event) => {
-                    setSourceMessageId(event.target.value);
-                    setEvidence('');
-                  }}
-                >
-                  <option value="">
-                    {loadingMessages ? '正在读取沟通记录…' : '选择已确认的沟通记录'}
-                  </option>
-                  {messages.map((message) => (
-                    <option value={message.id} key={message.id}>
-                      {message.subject || (message.channel === 'phone' ? '通话记录' : '客户来信')} ·{' '}
-                      {formatBeijingTime(message.occurredAt)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {sourceMessage && <blockquote>{sourceMessage.body}</blockquote>}
-              {messageError && (
-                <p role="alert" className="supplement-error">
-                  {messageError}
-                </p>
-              )}
-              {!loadingMessages && !messages.length && (
-                <p className="supplement-hint">
-                  先在
-                  <a
-                    href={`/business?customerId=${encodeURIComponent(leadId)}&tab=messages`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    沟通记录
-                  </a>
-                  中登记实际来信或已确认的通话，回来刷新记录后再补充采购需求。
-                </p>
-              )}
-            </section>
-          )}
           <label>
-            {category === 'purchase_need' ? '依据原文（从所选记录逐字摘录）' : '确认依据'}
+            确认依据
             <textarea
               value={evidence}
               rows={3}
               maxLength={10000}
               required
-              placeholder={
-                category === 'purchase_need'
-                  ? '粘贴与采购需求直接相关的原文'
-                  : '记录官网原文、客户确认内容或通话核实结果'
-              }
+              placeholder="记录官网原文或核实依据"
               onChange={(event) => setEvidence(event.target.value)}
             />
           </label>
@@ -611,12 +499,7 @@ export function SupplementPanel<TLead>({
             className="btn primary"
             type="submit"
             disabled={
-              saving ||
-              recovery !== 'ready' ||
-              (category === 'assessment' && !opportunities.length) ||
-              (category === 'purchase_need' &&
-                !restoredInput &&
-                (!sourceMessage || loadingMessages))
+              saving || recovery !== 'ready' || (category === 'assessment' && !opportunities.length)
             }
           >
             <Save size={14} /> {saving ? '正在保存并重算…' : '保存资料'}

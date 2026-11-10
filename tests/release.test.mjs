@@ -23,6 +23,8 @@ test('发布拒绝运行中的任务、自动计划和发信，允许已暂停�
     { campaigns: [{ status: 'preparing' }] },
     { campaigns: [{ status: 'active' }] },
     { deliveryStats: { sending: 1 } },
+    { followUpStats: { sending: 1, active: 0 } },
+    { followUpStats: { sending: 0, active: 2 } },
   ])
     assert.throws(() => assertQuiet({ ...quiet, ...change }));
   assert.throws(() => assertQuiet({}));

@@ -661,7 +661,7 @@ export function Dashboard() {
           <PanelHeading
             title="当前需求阶段"
             detail="按需求条数统计，包含已结束的需求"
-            to="/business?tab=demands"
+            to="/outreach?tab=conversations"
             link="需求明细"
           />
           <SourceNotice source={data.sources.business} />
@@ -682,7 +682,7 @@ export function Dashboard() {
               title={
                 data.sources.business.state === 'unavailable'
                   ? '需求阶段暂不可用'
-                  : '暂无已登记采购需求'
+                  : '暂无自动整理的采购需求'
               }
               detail="从实际沟通登记需求后，将显示各阶段的当前分布。"
             />

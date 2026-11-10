@@ -194,6 +194,7 @@ async function smtpHarness(t) {
     env: {},
     path: join(dir, 'mailboxes.json'),
     seedPath: null,
+    mailboxReaderFactory: async () => ({ read: async () => ({ folders: [], hasMore: false }) }),
     protect: async (value) => ({
       credentialProtection: 'windows-dpapi-current-user',
       credential: Buffer.from(value).toString('base64'),
@@ -781,5 +782,28 @@ test('重启与跨轮重复发现不重复首发；发送结果未知不自动�
   } finally {
     await h.close();
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('定时计划追信开关只用于之后建立的轮次，已有计划不被改写', async () => {
+  const h = harness();
+  try {
+    const plan = h.plan();
+    const first = h.create({}, plan.id);
+    h.service.syncAcquisition();
+    const old = h.service.campaigns().find((c) => c.acquisitionSource.jobId === first.id);
+    assert.equal(old.followUpEnabled, false);
+    h.plans.save({ ...h.plans.get(plan.id), input: { ...input, auto_follow_up: true } });
+    h.service.syncAcquisition();
+    assert.equal(h.service.campaign(old.id).followUpEnabled, false);
+    h.jobs.save({ ...h.jobs.get(first.id), status: 'completed' });
+    const second = h.create({}, plan.id);
+    h.service.syncAcquisition();
+    const fresh = h.service.campaigns().find((c) => c.acquisitionSource.jobId === second.id);
+    assert.equal(fresh.followUpEnabled, true);
+    assert.equal(h.service.followUps.all().length, 0, '首封成功前不造任务');
+    assert.throws(() => h.create({ auto_follow_up: 'yes' }), { status: 400 });
+  } finally {
+    await h.close();
   }
 });

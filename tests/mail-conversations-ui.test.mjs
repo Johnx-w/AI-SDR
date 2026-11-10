@@ -57,12 +57,18 @@ test('mail lookup encodes account and search filters while writes are limited to
   requests.length = 0;
   const controller = new AbortController();
   await mailConversationsApi.list(
-    { mailboxId: 'account/a b', q: '  samples & quotes  ', unread: true },
+    {
+      mailboxId: 'account/a b',
+      customerId: 'customer/a b',
+      q: '  samples & quotes  ',
+      unread: true,
+    },
     controller.signal,
   );
   const url = new URL(requests[0].path, 'https://example.test');
   assert.equal(url.pathname, '/conversations');
   assert.equal(url.searchParams.get('mailboxId'), 'account/a b');
+  assert.equal(url.searchParams.get('customerId'), 'customer/a b');
   assert.equal(url.searchParams.get('q'), 'samples & quotes');
   assert.equal(url.searchParams.get('unread'), '1');
   assert.equal(requests[0].init.signal, controller.signal);
@@ -80,6 +86,15 @@ test('mail lookup encodes account and search filters while writes are limited to
 test('mail timeline preserves original participants and plain text while distinguishing accepted from received', () => {
   const html = render(MailConversationTimeline, {
     conversation,
+    demands: [
+      {
+        id: 'need',
+        title: 'Shutter enquiry',
+        productText: 'shutters',
+        evidenceQuote: 'Could you provide samples?',
+      },
+    ],
+    demandNotices: ['数量待核实'],
     messages: [
       {
         id: 'incoming',

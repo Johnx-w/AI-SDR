@@ -14,6 +14,7 @@ export async function handleOutreach({ request, url, service, readJson, idempote
   if (path === '/conversations' && method === 'GET')
     return service.conversations.list({
       mailboxId: url.searchParams.get('mailboxId') || 'all',
+      customerId: url.searchParams.get('customerId') || '',
       q: url.searchParams.get('q') || '',
       unread: url.searchParams.get('unread') === '1',
     });
@@ -26,8 +27,31 @@ export async function handleOutreach({ request, url, service, readJson, idempote
   const conversation = path.match(/^\/conversations\/([\w-]+)(?:\/(read|draft|reply))?$/);
   if (conversation) {
     const [, id, action] = conversation;
-    if (!action && method === 'GET')
-      return { ...service.conversations.detail(id), ...service.replies.detailExtras(id) };
+    if (!action && method === 'GET') {
+      const detail = service.conversations.detail(id);
+      const externalIds = new Set(detail.messages.map((m) => m.messageId).filter(Boolean));
+      const mailIds = new Set(detail.messages.map((m) => m.id));
+      const graph = service.businessState();
+      const records = (graph.messages || []).filter(
+        (m) =>
+          m.customerId === detail.conversation.customerId &&
+          m.account?.toLowerCase() === detail.conversation.account.toLowerCase() &&
+          (mailIds.has(m.mailboxMessageId) || externalIds.has(m.externalId)),
+      );
+      const recordIds = new Set(records.map((m) => m.id));
+      return {
+        ...detail,
+        ...service.replies.detailExtras(id),
+        demands: (graph.demands || []).filter(
+          (d) =>
+            recordIds.has(d.sourceMessageId) ||
+            (d.evidence || []).some((e) => recordIds.has(e.messageId)),
+        ),
+        demandNotices: records.flatMap((m) =>
+          [m.demandReviewReason, m.demandAnalysisError].filter(Boolean),
+        ),
+      };
+    }
     if (action === 'read' && method === 'POST')
       return service.conversations.markRead(id, (await readJson(request)).unread);
     if (action === 'draft' && method === 'GET') return { draft: service.replies.draft(id) };
@@ -59,7 +83,7 @@ export async function handleOutreach({ request, url, service, readJson, idempote
   }
   if (path === '/campaigns' && method === 'POST')
     return service.saveCampaign(await readJson(request));
-  const campaign = path.match(/^\/campaigns\/([\w-]+)(?:\/(start|pause|cancel))?$/);
+  const campaign = path.match(/^\/campaigns\/([\w-]+)(?:\/(start|pause|cancel|follow-ups))?$/);
   if (campaign) {
     const [, id, action] = campaign;
     if (!action && method === 'GET') {
@@ -70,6 +94,8 @@ export async function handleOutreach({ request, url, service, readJson, idempote
         deliveries: detail.deliveries.map(({ bodyHtml, candidate, ...item }) => item),
       };
     }
+    if (action === 'follow-ups' && method === 'POST')
+      return service.followUps.control(id, (await readJson(request)).action);
     if (service.campaign(id).acquisitionSource && ['PUT', 'POST'].includes(method))
       throw fail(409, '请在获客任务中管理自动首发');
     if (!action && method === 'PUT') return service.saveCampaign(await readJson(request), id);

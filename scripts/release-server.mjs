@@ -52,7 +52,7 @@ export function assertReleasePath(directory, path) {
   );
 }
 
-export function assertQuiet({ jobs, schedules, campaigns, deliveryStats }) {
+export function assertQuiet({ jobs, schedules, campaigns, deliveryStats, followUpStats }) {
   assert(
     Array.isArray(jobs) && Array.isArray(schedules) && Array.isArray(campaigns),
     '任务状态响应不完整',
@@ -67,6 +67,8 @@ export function assertQuiet({ jobs, schedules, campaigns, deliveryStats }) {
     '请先暂停发信计划并等待准备完成',
   );
   assert(deliveryStats && deliveryStats.sending === 0, '请等待正在发送的邮件完成');
+  assert(!followUpStats?.sending, '请等待正在发送的追信完成');
+  assert(!followUpStats?.active, '请先在所属发送计划暂停自动追信');
 }
 
 export function validateArchiveEntries(entries) {

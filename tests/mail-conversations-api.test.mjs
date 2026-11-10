@@ -6,6 +6,7 @@ import { OutreachService } from '../server/outreach-service.mjs';
 test('real mailbox conversations are directly accessible, enforce local origins and never send mail', async (t) => {
   const calls = [];
   const service = new OutreachService({
+    customers: () => [{ id: 'buyer', name: 'Buyer', email: 'buyer@buyer.example' }],
     mailboxes: {
       list: () => [{ id: 'account', email: 'sales@brand.example', configured: true }],
       readMailbox: async (id, options) => {
@@ -77,8 +78,37 @@ test('real mailbox conversations are directly accessible, enforce local origins 
   const list = await response.json();
   assert.equal(list.items.length, 1);
   const id = list.items[0].id;
+  const message = service.conversations.detail(id).messages[0];
+  service.businessState = () => ({
+    messages: [
+      {
+        id: 'actual',
+        customerId: 'buyer',
+        account: 'sales@brand.example',
+        mailboxMessageId: message.id,
+        demandReviewReason: '规格待澄清',
+      },
+      {
+        id: 'other',
+        customerId: 'buyer',
+        account: 'other@brand.example',
+        externalId: message.messageId,
+      },
+    ],
+    demands: [
+      { id: 'need', sourceMessageId: 'actual' },
+      { id: 'wrong', sourceMessageId: 'other' },
+    ],
+  });
   const detail = await request('/' + id);
-  assert.equal((await detail.json()).messages[0].source, 'imap');
+  const content = await detail.json();
+  assert.equal(content.messages[0].source, 'imap');
+  assert.deepEqual(
+    content.demands.map((d) => d.id),
+    ['need'],
+  );
+  assert.deepEqual(content.demandNotices, ['规格待澄清']);
+  assert.equal((await (await request('?customerId=another')).json()).items.length, 0);
   assert.equal(calls.length, 1);
   assert.equal(
     (await request('/' + id + '/read', { method: 'POST', body: '{"unread":false}' })).status,

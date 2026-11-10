@@ -32,7 +32,10 @@ const link = (path, params) =>
   new URLSearchParams(
     Object.entries(params).filter(([, value]) => value !== undefined && value !== ''),
   );
-const businessLink = (tab, params = {}) => link('/business', { tab, ...params });
+const businessLink = (tab, params = {}) =>
+  tab === 'demands'
+    ? link('/outreach', { tab: 'conversations', customerId: params.customerId })
+    : link('/business', { tab, ...params });
 
 // Reads existing facts only. Source caches are scoped to the active connection,
 // and never turn a missing source into a successful zero or a demo result.
@@ -132,6 +135,7 @@ export class OverviewService {
     const customers = (results.customers.data?.leads || []).filter(isDevelopmentCustomer);
     const customerMap = new Map(customers.map((customer) => [customer.id, customer]));
     const graph = results.business.data;
+    if (graph) graph.tasks = graph.tasks.filter((task) => task.origin === 'automatic-followup');
     const acquisition = results.acquisition.data;
     const productRows = results.products.data;
     const captures = (acquisition?.captures || [])

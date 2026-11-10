@@ -437,159 +437,6 @@ test('待核对保存遇到远端字段变化或新评估时停止覆盖，保�
   }
 });
 
-test('法人和实际采购确认更新档案，采购依据必须来自同客户的真实来信或电话原文', async () => {
-  const f = fixture();
-  try {
-    const source = await f.message();
-    const wrongCustomer = await f.message({ customer: 'other-customer' });
-    const outbound = await f.message({
-      direction: 'outbound',
-      deliveryStatus: 'sent',
-      from: 'sales@our.example.org',
-      to: 'buyer@buyer.example.org',
-    });
-    const automatic = await f.message({ classification: 'auto_reply' });
-    const complaint = await f.message({ classification: 'complaint' });
-    const notActual = { ...source, id: 'not-actual-message', actualConfirmed: false };
-    f.business.put('messages', notActual);
-    const purchase = (message, overrides = {}) => {
-      const { facts, dimension, ...body } = f.input();
-      return {
-        ...body,
-        category: 'purchase_need',
-        content: '确认采购300套电动卷帘',
-        sourceMessageId: message.id,
-        evidence: '300 roller blinds with motorized controls',
-        ...overrides,
-      };
-    };
-    for (const [index, message] of [
-      wrongCustomer,
-      outbound,
-      automatic,
-      complaint,
-      notActual,
-    ].entries())
-      await assert.rejects(() => f.save(purchase(message), 'rejected-purchase-' + index), {
-        status: 400,
-      });
-    await assert.rejects(
-      () => f.save(purchase(source, { evidence: '并不存在的来信原文' }), 'bad-evidence-key'),
-      { status: 400 },
-    );
-    assert.equal(f.writes(), 0);
-    const accepted = await f.save(purchase(source), 'actual-purchase-key');
-    assert.equal(accepted.lead.manualPurchaseNeed, '确认采购300套电动卷帘');
-    assert.equal(accepted.lead.score, 55);
-    assert.equal(accepted.lead.confirmations[0].sourceMessageId, source.id);
-    assert.equal(f.record().fields.公开采购需求, undefined);
-    assert.deepEqual(f.business.view().demands, [], '补充档案不凭空创建业务需求记录');
-    const { dimension, facts, ...legal } = f.input();
-    const result = await f.save(
-      {
-        ...legal,
-        category: 'legal_name',
-        content: 'Buyer Blinds LLC',
-        evidence: '登记证已核对，法人全称 Buyer Blinds LLC',
-        product: '',
-        direction: '',
-      },
-      'legal-confirm-key',
-    );
-    assert.equal(result.lead.companyIdentity.legal_name, 'Buyer Blinds LLC');
-    assert.equal(result.lead.companyIdentity.status, 'legal_name_manual_confirmed');
-    assert.equal(result.lead.manualPurchaseNeed, accepted.lead.manualPurchaseNeed);
-    assert.equal(result.lead.score, 55);
-    f.restart();
-    assert.equal(f.lead().companyIdentity.legal_name, 'Buyer Blinds LLC');
-    assert.equal(f.lead().confirmations.length, 2);
-  } finally {
-    f.dispose();
-  }
-});
-
-test('人工采购确认仅更新对应材料机会，普通备注不能代替主体或需求确认', async () => {
-  const f = fixture({ potentialInput: true });
-  try {
-    const note = f.engine.assessments.latest(customerId).supplyOpportunity.note;
-    const scoringMissing = f.lead().assessment.missing;
-    const { dimension, facts, ...profile } = f.input();
-    for (const [index, pendingItem] of [
-      ...scoringMissing,
-      '经营法人名称待核实',
-      '具体采购需求待确认',
-      note,
-    ].entries()) {
-      await assert.rejects(
-        () => f.save({ ...profile, category: 'profile', pendingItem }, 'invalid-profile-' + index),
-        { status: 400 },
-      );
-    }
-    assert.equal(f.writes(), 0);
-    const message = await f.message({
-      body: 'We need roller blinds now and will need 500m roller blind fabric.',
-    });
-    const purchase = {
-      ...profile,
-      category: 'purchase_need',
-      pendingItem: note,
-      sourceMessageId: message.id,
-      evidence: 'We need roller blinds now',
-      content: '已确认卷帘采购',
-    };
-    const wrongScope = await f.save(purchase, 'finished-purchase-key');
-    assert.equal(wrongScope.lead.assessment.supplyOpportunity.procurementStatus, 'unconfirmed');
-    assert.ok(!wrongScope.lead.pendingQuestions.includes(note));
-    const rightScope = await f.save(
-      {
-        ...purchase,
-        expectedAssessmentId: wrongScope.lead.assessment.id,
-        direction: 'materials',
-        product: 'roller blind fabric',
-        content: '确认需要500米卷帘面料',
-        evidence: 'will need 500m roller blind fabric',
-      },
-      'fabric-purchase-key',
-    );
-    assert.equal(rightScope.lead.score, 55);
-    assert.deepEqual(rightScope.lead.assessment.missing, scoringMissing);
-    assert.ok(!rightScope.lead.pendingQuestions.includes(note));
-    assert.equal(
-      f.engine.assessments.latest(customerId).supplyOpportunity.procurementStatus,
-      'confirmed',
-    );
-    assert.equal(f.record().fields.公开采购需求, undefined);
-  } finally {
-    f.dispose();
-  }
-});
-
-test('采购确认接受真实电话纪要，保留引用原文与沟通关联', async () => {
-  const f = fixture();
-  try {
-    const phone = await f.message({
-      channel: 'phone',
-      direction: 'note',
-      deliveryStatus: 'recorded',
-      body: '电话记录：客户确认需要200套卷帘。',
-    });
-    const { facts, dimension, ...input } = f.input();
-    const result = await f.save({
-      ...input,
-      category: 'purchase_need',
-      sourceMessageId: phone.id,
-      content: '确认需要200套卷帘',
-      evidence: '客户确认需要200套卷帘',
-    });
-    assert.equal(result.lead.manualPurchaseNeed, '确认需要200套卷帘');
-    assert.equal(result.confirmation.sourceMessageId, phone.id);
-    assert.equal(result.confirmation.evidence, '客户确认需要200套卷帘');
-    assert.equal(result.lead.score, 55);
-  } finally {
-    f.dispose();
-  }
-});
-
 test('实际HTTP补充入口验证保存编号和跨站请求，保存及刷新使用后台当前快照', async () => {
   const f = fixture({ mirrorFields: true });
   const app = createApp({ env: f.env, fetchImpl: f.fetchImpl, nativeImpl: f.engine });
@@ -663,5 +510,32 @@ test('HTTP补充先完成本地保存，飞书失败不要求重填表单，恢�
   } finally {
     await new Promise((resolve) => app.close(resolve));
     f.dispose({ engineClosed: true });
+  }
+});
+
+test('手工采购确认退役，法人确认仍可保存并重启读取', async () => {
+  const f = fixture();
+  try {
+    const { dimension, facts, ...body } = f.input();
+    await assert.rejects(() => f.save({ ...body, category: 'purchase_need' }, 'retired-purchase'), {
+      status: 400,
+    });
+    assert.equal(f.writes(), 0);
+    const result = await f.save(
+      {
+        ...body,
+        category: 'legal_name',
+        content: 'Buyer Blinds LLC',
+        evidence: '登记证已核对，法人全称 Buyer Blinds LLC',
+        product: '',
+        direction: '',
+      },
+      'legal-confirm-key',
+    );
+    assert.equal(result.lead.companyIdentity.legal_name, 'Buyer Blinds LLC');
+    f.restart();
+    assert.equal(f.lead().companyIdentity.legal_name, 'Buyer Blinds LLC');
+  } finally {
+    f.dispose();
   }
 });

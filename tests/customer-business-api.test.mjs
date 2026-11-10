@@ -1,3 +1,4 @@
+import { CustomerBusiness } from '../server/customer-business.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -160,386 +161,71 @@ async function serve(folder, remote) {
   };
 }
 
-const conversationInput = (customerId = 'customer-1') => ({
-  customerId,
-  title: 'Product inquiry',
-  channel: 'email',
-  account: 'sales@example.org',
-  participant: 'buyer@example.org',
-});
-const messageInput = (conversation, changes = {}) => ({
-  customerId: conversation.customerId,
-  conversationId: conversation.id,
-  channel: 'email',
-  direction: 'inbound',
-  deliveryStatus: 'received',
-  subject: 'Two products',
-  body: 'We need roller blinds and outdoor zip screens.',
-  from: 'buyer@example.org',
-  to: 'sales@example.org',
-  account: 'sales@example.org',
-  occurredAt: beforeTime,
-  actualConfirmed: true,
-  origin: 'manual',
-  externalId: 'inbound-' + conversation.id,
-  ...changes,
-});
-const demandInput = (conversation, message, changes = {}) => ({
-  customerId: conversation.customerId,
-  conversationId: conversation.id,
-  sourceMessageId: message.id,
-  title: 'Roller blinds',
-  category: 'indoor',
-  direction: 'finished',
-  productText: 'roller blinds',
-  evidenceQuote: 'roller blinds',
-  ...changes,
-});
-const taskInput = (conversation, demands, changes = {}) => ({
-  customerId: conversation.customerId,
-  conversationId: conversation.id,
-  demandIds: demands.map((item) => item.id),
-  title: 'Clarify specifications in one reply',
-  kind: 'clarify_specs',
-  channel: 'email',
-  dueAt: time(3600000),
-  ...changes,
-});
-async function create(server, kind, body, key) {
-  const result = await server.call('/api/v1/business/' + kind, { method: 'POST', body, key });
-  assert.equal(result.status, 201, JSON.stringify(result.body));
-  assert(result.body.record);
-  return result.body;
-}
-async function basicGraph(server, { productId } = {}) {
-  const conversation = (
-    await create(server, 'conversations', conversationInput(), 'graph-conversation-001')
-  ).record;
-  const message = (
-    await create(server, 'messages', messageInput(conversation), 'graph-message-001')
-  ).record;
-  const first = (
-    await create(
-      server,
-      'demands',
-      demandInput(conversation, message, productId ? { productIds: [productId] } : {}),
-      'graph-demand-001',
-    )
-  ).record;
-  const second = (
-    await create(
-      server,
-      'demands',
-      demandInput(conversation, message, {
-        title: 'Outdoor zip screens',
-        category: 'outdoor',
-        productText: 'outdoor zip screens',
-        evidenceQuote: 'outdoor zip screens',
-      }),
-      'graph-demand-002',
-    )
-  ).record;
-  return { conversation, message, demands: [first, second] };
-}
-
-test('业务HTTP串联一封真实来信、两个需求和一个任务，关联T2/T5且可按企业和产品筛选', async () => {
-  const folder = mkdtempSync(join(tmpdir(), 'business-api-graph-'));
-  const remote = remoteFixture();
-  const knowledge = new ProductKnowledge(join(folder, 'state.sqlite'));
-  const product = knowledge.save({
-    name: '已审核卷帘',
-    category: 'indoor',
-    direction: 'finished',
-    status: 'approved',
-    sourceUrl: 'https://company.example.org/catalog',
-    approvedBy: 'Johnson',
-  });
-  knowledge.close();
-  const t2 = structuredClone(remote.records.get('t2'));
-  let server;
+test('客户业务HTTP只读，全部旧手工维护入口返回405且不创建记录', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'business-readonly-'));
+  const server = await serve(folder, remoteFixture());
   try {
-    server = await serve(folder, remote);
-    const empty = await server.call();
-    assert.equal(empty.status, 200);
-    assert.deepEqual(empty.body.demands, []);
-    assert.equal(empty.body.customers.length, 2);
-    const graph = await basicGraph(server, { productId: product.id });
-    const task = (
-      await create(server, 'tasks', taskInput(graph.conversation, graph.demands), 'graph-task-001')
-    ).record;
-    assert.equal(remote.records.get('t3').length, 0, '保存只写数据库');
-    assert.equal(
-      (await server.call('/api/v1/business/sync', { method: 'POST' })).body.feishu.status,
-      'synced',
-    );
-    const state = (await server.call()).body;
-    assert.equal(state.conversations.length, 1);
-    assert.equal(state.messages.length, 1);
-    assert.equal(state.demands.length, 2);
-    assert.equal(state.tasks.length, 1);
-    assert.deepEqual(
-      state.messages[0].demandIds.sort(),
-      graph.demands.map((entry) => entry.id).sort(),
-    );
-    assert.equal(state.customerContexts[0].fixedEmail, 'sales@example.org');
-    assert.deepEqual(task.productIds, [product.id]);
-    assert.equal(remote.records.get('t5').length, 1);
-    assert.equal(remote.records.get('t1').length, 2);
-    assert.equal(remote.records.get('t3').length, 1);
-    assert.equal(remote.records.get('t4').length, 1);
-    assert.equal(remote.records.get('t2')[0].fields['开发状态'], '已回复');
-    assert.equal(remote.records.get('t2')[0].fields['公司名称'], t2[0].fields['公司名称']);
-    const productFilter = await server.call('/api/v1/business?productId=' + product.id);
-    assert.equal(productFilter.body.demands.length, 1);
-    assert.equal(productFilter.body.tasks.length, 1);
-    assert.equal(productFilter.body.conversations.length, 1);
-    const customerFilter = await server.call('/api/v1/business?customerId=customer-2');
-    assert.deepEqual(customerFilter.body.demands, []);
-    assert.deepEqual(customerFilter.body.messages, []);
-    const preflight = await server.call('/api/v1/business/tasks/' + task.id + '/preflight', {
-      method: 'POST',
-    });
-    assert.equal(preflight.status, 200);
-    assert.equal(preflight.body.ready, true, JSON.stringify(preflight.body));
-    assert.equal(preflight.body.automaticSend, false);
+    for (const kind of ['conversations', 'messages', 'demands', 'tasks']) {
+      for (const method of ['POST', 'PUT']) {
+        const result = await server.call('/api/v1/business/' + kind, {
+          method,
+          body: { customerId: 'customer-1' },
+          key: 'no-manual-write',
+        });
+        assert.equal(result.status, 405);
+      }
+    }
+    for (const action of ['preflight', 'action'])
+      assert.equal(
+        (
+          await server.call('/api/v1/business/tasks/old-task/' + action, {
+            method: 'POST',
+            body: {},
+          })
+        ).status,
+        405,
+      );
+    const result = await server.call();
+    assert.equal(result.status, 200);
+    assert.equal(result.body.tasks.length, 0);
+    assert.equal(result.body.demands.length, 0);
   } finally {
-    await server?.close();
-    rmSync(folder, { recursive: true, force: true });
-  }
-});
-
-test('新增回复阻止原跟进执行，完成任务必须关联同会话及全部需求的真实已发送消息', async () => {
-  const folder = mkdtempSync(join(tmpdir(), 'business-api-followup-'));
-  const remote = remoteFixture();
-  let server;
-  try {
-    server = await serve(folder, remote);
-    const graph = await basicGraph(server);
-    let task = (
-      await create(
-        server,
-        'tasks',
-        taskInput(graph.conversation, graph.demands),
-        'followup-task-001',
-      )
-    ).record;
-    const actionPath = '/api/v1/business/tasks/' + task.id + '/action';
-    const invalid = await server.call(actionPath, {
-      method: 'POST',
-      body: {
-        action: 'complete',
-        expectedVersion: task.version,
-        resultMessageId: graph.message.id,
-      },
-    });
-    assert.equal(invalid.status, 409);
-    await create(
-      server,
-      'messages',
-      messageInput(graph.conversation, {
-        externalId: 'followup-new-reply',
-        body: 'Please use the revised dimensions.',
-        occurredAt: time(1000),
-      }),
-      'followup-reply-001',
-    );
-    task = (await server.call('/api/v1/business/tasks/' + task.id)).body.record;
-    assert.equal(task.status, 'pending');
-    const blocked = await server.call('/api/v1/business/tasks/' + task.id + '/preflight', {
-      method: 'POST',
-    });
-    assert.equal(blocked.body.ready, false);
-    assert(blocked.body.reasons.some((reason) => reason.includes('客户已回复')));
-    const unknown = (
-      await create(
-        server,
-        'messages',
-        messageInput(graph.conversation, {
-          direction: 'outbound',
-          deliveryStatus: 'unknown',
-          from: 'sales@example.org',
-          to: 'buyer@example.org',
-          body: 'Outcome unknown',
-          externalId: 'followup-unknown',
-          occurredAt: time(2000),
-          demandIds: graph.demands.map((demand) => demand.id),
-        }),
-        'followup-unknown-001',
-      )
-    ).record;
-    assert.equal(
-      (
-        await server.call(actionPath, {
-          method: 'POST',
-          body: { action: 'complete', expectedVersion: task.version, resultMessageId: unknown.id },
-        })
-      ).status,
-      409,
-    );
-    const sent = (
-      await create(
-        server,
-        'messages',
-        messageInput(graph.conversation, {
-          direction: 'outbound',
-          deliveryStatus: 'sent',
-          from: 'sales@example.org',
-          to: 'buyer@example.org',
-          body: 'Please confirm specifications for both products.',
-          externalId: 'followup-sent',
-          occurredAt: time(3000),
-          demandIds: graph.demands.map((demand) => demand.id),
-        }),
-        'followup-sent-001',
-      )
-    ).record;
-    const completed = await server.call(actionPath, {
-      method: 'POST',
-      body: {
-        action: 'complete',
-        expectedVersion: task.version,
-        resultMessageId: sent.id,
-        notes: '已实际发出统一回复',
-      },
-    });
-    assert.equal(completed.status, 200, JSON.stringify(completed.body));
-    assert.equal(completed.body.record.status, 'completed');
-    assert.equal(completed.body.record.resultMessageId, sent.id);
-    assert.equal(completed.body.feishu.status, 'pending');
-    assert.equal(
-      (await server.call('/api/v1/business/sync', { method: 'POST' })).body.feishu.status,
-      'synced',
-    );
-    assert(remote.records.get('t4')[0].fields['执行结果沟通'].length === 1);
-    assert.match(remote.records.get('t4')[0].fields['实际执行记录'], /已实际发出统一回复/);
-  } finally {
-    await server?.close();
-    rmSync(folder, { recursive: true, force: true });
-  }
-});
-
-test('跨企业关联、覆盖沟通原文与切换固定邮箱被HTTP拒绝，已有记录保留', async () => {
-  const folder = mkdtempSync(join(tmpdir(), 'business-api-identity-'));
-  const remote = remoteFixture();
-  let server;
-  try {
-    server = await serve(folder, remote);
-    const graph = await basicGraph(server);
-    const second = (
-      await create(
-        server,
-        'conversations',
-        conversationInput('customer-2'),
-        'identity-conversation-002',
-      )
-    ).record;
-    const cross = await server.call('/api/v1/business/demands', {
-      method: 'POST',
-      key: 'identity-cross-001',
-      body: demandInput(second, graph.message),
-    });
-    assert.equal(cross.status, 409);
-    const badTask = await server.call('/api/v1/business/tasks', {
-      method: 'POST',
-      key: 'identity-cross-task',
-      body: taskInput(second, graph.demands),
-    });
-    assert.equal(badTask.status, 409);
-    const message = (await server.call('/api/v1/business/messages/' + graph.message.id)).body
-      .record;
-    const changed = await server.call('/api/v1/business/messages', {
-      method: 'PUT',
-      body: { ...message, body: 'Overwritten original', expectedVersion: message.version },
-    });
-    assert.equal(changed.status, 409);
-    const mailbox = await server.call('/api/v1/business/conversations', {
-      method: 'POST',
-      key: 'identity-new-mailbox',
-      body: { ...conversationInput(), account: 'another@example.org' },
-    });
-    assert.equal(mailbox.status, 409);
-    const state = (await server.call()).body;
-    assert.equal(state.demands.length, 2);
-    assert.equal(state.tasks.length, 0);
-    assert.equal(state.messages[0].body, graph.message.body);
-    assert.equal(remote.writes.filter((write) => write.tableId === 't2').length, 0);
-    assert.equal(remote.writes.filter((write) => write.tableId === 't5').length, 0);
-  } finally {
-    await server?.close();
-    rmSync(folder, { recursive: true, force: true });
-  }
-});
-
-test('新增幂等键在HTTP重放和服务重启后保持相同业务编号，不重复镜像消息', async () => {
-  const folder = mkdtempSync(join(tmpdir(), 'business-api-idempotency-'));
-  const remote = remoteFixture();
-  let server;
-  try {
-    server = await serve(folder, remote);
-    const input = conversationInput();
-    const first = await create(server, 'conversations', input, 'restart-conversation-001');
-    const replay = await create(server, 'conversations', input, 'restart-conversation-001');
-    assert.equal(replay.record.id, first.record.id);
-    const conflict = await server.call('/api/v1/business/conversations', {
-      method: 'POST',
-      key: 'restart-conversation-001',
-      body: { ...input, title: 'Different body' },
-    });
-    assert.equal(conflict.status, 409);
-    const body = messageInput(first.record);
-    const message = await create(server, 'messages', body, 'restart-message-001');
     await server.close();
-    server = await serve(folder, remote);
-    const after = await create(server, 'messages', body, 'restart-message-001');
-    assert.equal(after.record.id, message.record.id);
-    assert.equal(after.record.createdAt, message.record.createdAt);
-    assert.equal((await server.call()).body.messages.length, 1);
-    assert.equal(
-      (await server.call('/api/v1/business/sync', { method: 'POST' })).body.feishu.status,
-      'synced',
-    );
-    assert.equal(remote.records.get('t3').length, 1);
-    assert.equal(
-      remote.writes.filter((write) => write.tableId === 't3' && write.method === 'POST').length,
-      1,
-    );
-  } finally {
-    await server?.close();
     rmSync(folder, { recursive: true, force: true });
   }
 });
-
-test('飞书暂不可读时HTTP仍保留本地沟通，手动重新同步不增加重复消息', async () => {
-  const folder = mkdtempSync(join(tmpdir(), 'business-api-pending-'));
-  const remote = remoteFixture();
-  let server;
+test('只读任务列表过滤旧人工和MOCK，底层真实历史仍保留', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'business-history-'));
+  const store = new CustomerBusiness({
+    path: join(folder, 'business.sqlite'),
+    scope: 'fixture-base/t2',
+  });
+  const base = {
+    customerId: 'customer-1',
+    version: 1,
+    status: 'pending',
+    dueAt: time(),
+    productIds: [],
+    demandIds: [],
+    messageIds: [],
+  };
+  store.put('tasks', { ...base, id: 'old-manual', notes: 'MOCK', origin: 'manual' });
+  store.put('tasks', { ...base, id: 'automatic', origin: 'automatic-followup' });
+  store.close();
+  const server = await serve(folder, remoteFixture());
   try {
-    server = await serve(folder, remote);
-    const conversation = (
-      await create(server, 'conversations', conversationInput(), 'pending-conversation-001')
-    ).record;
-    remote.state.businessUnavailable = true;
-    const saved = await create(
-      server,
-      'messages',
-      messageInput(conversation),
-      'pending-message-001',
+    const result = await server.call();
+    assert.equal(result.status, 200);
+    assert.deepEqual(
+      result.body.tasks.map((r) => r.id),
+      ['automatic'],
     );
-    assert.equal(saved.feishu.status, 'pending');
-    assert.equal((await server.call()).body.messages[0].id, saved.record.id);
-    assert.equal(remote.records.get('t3').length, 0);
-    remote.state.businessUnavailable = false;
-    const synchronized = await server.call('/api/v1/business/sync', { method: 'POST' });
-    assert.equal(synchronized.status, 200);
-    assert.equal(synchronized.body.feishu.status, 'synced', JSON.stringify(synchronized.body));
-    await server.call('/api/v1/business/sync', { method: 'POST' });
-    assert.equal(remote.records.get('t3').length, 1);
     assert.equal(
-      remote.writes.filter((write) => write.tableId === 't3' && write.method === 'POST').length,
-      1,
+      (await server.call('/api/v1/business/tasks/old-manual')).body.record.notes,
+      'MOCK',
     );
   } finally {
-    await server?.close();
+    await server.close();
     rmSync(folder, { recursive: true, force: true });
   }
 });

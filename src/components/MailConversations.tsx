@@ -54,6 +54,8 @@ const statuses: Record<MailMessage['deliveryStatus'], { label: string; tone: str
 export function MailConversationTimeline({
   conversation,
   messages,
+  demands = [],
+  demandNotices = [],
   onReply,
 }: MailConversationDetail & { onReply?: (id: string) => void }) {
   return (
@@ -73,11 +75,33 @@ export function MailConversationTimeline({
           {conversation.companyName && <span>{conversation.participant}</span>}
           {conversation.customerId && (
             <Link to={`/business?customerId=${encodeURIComponent(conversation.customerId)}`}>
-              查看客户业务 <ArrowUpRight size={14} />
+              查看跟进任务 <ArrowUpRight size={14} />
             </Link>
           )}
         </div>
       </header>
+      {!!demands.length && (
+        <details className="mail-conversation-source">
+          <summary>自动整理的客户需求 · {demands.length}</summary>
+          {demands.map((d) => (
+            <div key={d.id}>
+              <strong>{d.title}</strong>
+              <p>
+                {[d.productText, d.specifications, d.quantity && `${d.quantity} ${d.unit}`]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </p>
+              <blockquote>{d.evidenceQuote}</blockquote>
+            </div>
+          ))}
+        </details>
+      )}
+      {demandNotices.map((notice, index) => (
+        <p role="alert" className="mail-reply-error" key={index}>
+          需求整理待核实：{notice}
+        </p>
+      ))}
+
       <div className="mail-conversation-timeline">
         {messages.length ? (
           messages.map((mail) => {
@@ -226,10 +250,12 @@ export function MailSyncSummary({ statuses: syncStatuses }: { statuses: MailboxS
 export function MailConversations({
   mailboxes,
   mailboxId = 'all',
+  customerId = '',
   onMailboxChange,
 }: {
   mailboxes: OutreachMailbox[];
   mailboxId?: string;
+  customerId?: string;
   onMailboxChange: (mailboxId: string) => void;
 }) {
   const [query, setQuery] = useState('');
@@ -272,7 +298,7 @@ export function MailConversations({
     const timeout = window.setTimeout(
       () => {
         void mailConversationsApi
-          .list({ mailboxId, q: query, unread }, controller.signal)
+          .list({ mailboxId, customerId, q: query, unread }, controller.signal)
           .then((value) => {
             if (controller.signal.aborted) return;
             setList(value);
@@ -290,7 +316,7 @@ export function MailConversations({
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [mailboxId, query, unread, revision, selectConversation]);
+  }, [mailboxId, customerId, query, unread, revision, selectConversation]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -434,6 +460,11 @@ export function MailConversations({
         </button>
       </div>
       <p className="mail-conversations-scope">
+        {customerId && (
+          <span>
+            仅显示该客户邮件 · <Link to="/outreach?tab=conversations">查看全部客户</Link> ·{' '}
+          </span>
+        )}
         首次同步读取最近 30 天的收件箱与可识别的已发件箱，之后继续增量读取。
       </p>
       {notice && (

@@ -1,8 +1,10 @@
 # 架构与运行
 
-当前口径：2026-11-05。React／TypeScript 网页通过同源 Node.js HTTP 接口操作后端，业务执行不依赖开发用 MCP 或 Codex OAuth。阿里云服务器持久库采用 Node.js 内置 SQLite，修改先写数据库，再由后台每分钟同步飞书；当前为单用户、单进程版本。
+当前口径：2026-11-10。React／TypeScript 网页通过同源 Node.js HTTP 接口操作后端，业务执行不依赖开发用 MCP 或 Codex OAuth。阿里云服务器持久库采用 Node.js 内置 SQLite，修改先写数据库，再由后台每分钟同步飞书；当前为单用户、单进程版本。
 
-业务行为分别见 [获客](acquisition.md)、[客户与产品数据](customer-data.md)、[评分](assessment.md)、[邮件沟通](outreach-first-touch.md)。[AI 业务员设计](ai-sales-agent-design.md) 明确待实现部分，不属于当前接口能力。
+业务行为分别见 [获客](acquisition.md)、[客户与产品数据](customer-data.md)、[评分](assessment.md)、[邮件沟通](outreach-first-touch.md)。[AI 业务员设计](ai-sales-agent-design.md) 区分已实现的首封追信与待实现的来信自动接待。
+
+2026-11-10 已完成本地实现：删除采购需求及重复沟通记录的手工界面，任务页只读；后台复用邮件证据和关联，接通 T1 自动整理与首封未回复追信。云端以实际部署为准。详见 [ADR-0025](adr/0025-automatic-business-records-with-read-only-followups.md)。
 
 ## 模块职责
 
@@ -14,6 +16,7 @@
 | 客户档案及评估  | lead-library 保存 SQLite 客户主档案；customer-archive 管理后台飞书同步与编号关联；AssessmentStore 保留最新快照                           |
 | 客户业务与产品  | CustomerBusiness 维护会话、需求、消息、任务和人工归属；产品资料管理审核版本                                                              |
 | 首封开发        | outreach-service 管理计划、邮箱匹配、企业占用和发送队列；outreach-content 生成与检查                                                     |
+| 自动需求与追信  | automatic-demands 从已匹配来信提取 T1；outreach-follow-ups 持久化两次追信、核验发送条件并投影只读任务                                    |
 | 邮件收发        | mail-conversations 保存原文和同步游标；mailbox-reader 只读 IMAP；mail-replies 管理草稿与幂等回信；outreach-mailboxes 管理加密账号和 SMTP |
 | 邮件业务桥接    | outreach-business、mail-conversation-business 只登记实际往来，不以记录失败触发再次发送                                                   |
 | 网页状态        | WorkspaceProvider 只负责界面通知，真实业务读取后端；已退役演示仓储不再加载                                                               |
@@ -34,10 +37,14 @@
 | 评估与补充 | GET /api/v1/assessments/rules；GET／POST /api/v1/leads/real/:id/assessments、supplements                                            |
 | 产品资料   | GET／POST／PUT /api/v1/products/knowledge；POST /api/v1/products/knowledge/:id/sync                                                 |
 | 产品原文件 | GET／POST /api/v1/products/knowledge/:id/documents；GET /:documentId/file；POST /:documentId/extract（后两项接在 documents 路径下） |
-| 客户业务   | /api/v1/business 下的 schema、conversations、messages、demands、tasks、sync；任务提供 preflight 与 action                           |
+| 客户业务   | GET /api/v1/business 及 schema、conversations、messages、demands、tasks；POST /sync；旧手工写入、任务 preflight/action 返回 405     |
 | 邮件       | /api/v1/outreach 下的邮箱、计划、会话和发送记录；会话提供 sync、read、draft 和 reply                                                |
 
 新增业务操作使用持久幂等编号；编辑核对当前版本。旧评估历史重试返回 410；旧固定邮箱试点 /api/v1/mail/\*、已移除搜索词生成接口返回 404。邮件读取／同步不自动回复，也不修改原邮箱已读；人工回信由 reply 入口单独发送。
+
+`POST /api/v1/outreach/campaigns/:id/follow-ups` 接受 enable、disable、pause、resume，在所属计划控制追信。独立 `outreach_followups` 表与首封共用 SQLite 和邮箱限额；首封成功入账与创建两次安排在同一事务完成，已完成首封计划仍可继续追信。每分钟后台收信，发送前再次完整核对，记录失败只补记录；旧人工任务不进入执行器。
+
+T1/T3 与独立 T4 目标分别同步，共享同一份去重日志，避免多个实例覆盖映射；单独配置或同步 T4 失败不跳过 T1/T3。自动需求提取先本地保存，不以飞书可用为前提。
 
 配置状态只说明所需配置是否齐备，不能当作远端健康或业务成功。常见状态为 400 参数错误、403 来源拒绝、409 冲突／待核对、413 过大、415 格式不支持、429 并发限制、502 上游失败、503 未配置、504 远端结果不明。不会降级为虚构成功。
 
@@ -90,7 +97,7 @@
 2. **同步并合并 main。** `git fetch origin` 后比较功能分支、本地 main 与 `origin/main`。先保留本地已有提交，再合并本次功能；可快进时快进，有分叉时普通合并，提交说明采用英文类型前缀加中文说明。处理冲突时核对两侧业务行为，不能整批选择一侧覆盖；业务取舍不明确才询问用户。main 所在工作树有其他未提交改动时，在独立干净工作树准备集成结果，保留原工作树；需要更新被占用的 main 时先协调，不能强改引用、强制检出或清理他人改动。完成条件：目标 main 包含最新远端 main 及本次功能，冲突消除。
 3. **验证最终合并结果。** 在干净的集成版本运行项目要求的格式、测试和构建；按改动补充必要验证。文档变更只核对格式、链接与指令准确性，不执行生产操作。全流程发布可复用下文 `npm run release` 的隔离安装、格式、完整测试与构建，避免对同一提交无意义重复。完成条件：验证对应最终合并提交，而非合并前的功能分支。
 4. **推送并跟进 CI。** 只用普通推送更新 `origin/main`；远端前进导致拒绝时，重新 fetch、集成及验证，不强推。仅上传任务用 `git push origin main` 后，通过 `gh run list --commit <完整SHA> --event push` 找到运行并跟进到结束；发布任务交由下文 `npm run release` 执行推送与 CI 门禁。CI 失败先查日志，修复代码后用新提交重新验证；只有确认是偶发环境故障才重跑原提交。完成条件：同一 SHA 的必需作业全部成功，具体规则见下文。
-5. **检查云端并部署。** 全流程发布从干净的 main 执行 `npm run release:check` 与 `npm run release`；发布脚本支持任意分支，操作者必须额外确认本次来自 main。部署前及实际切换前检查获客任务、启用的定时计划、发信计划和正在发送的邮件；另行只读核对人工回复台账，脚本的任务检查未覆盖人工回复，也不锁住新的网页请求。任务未结束或计划仍启用时报告具体阻塞，等待结束或由用户安排暂停，不取消任务、不把状态改成完成。维护期间协调停止新的手动操作。保留云端原数据及配置，不执行迁移；需要不兼容迁移的功能应停在已验证提交，另定方案。完成条件：发布脚本完成备份、版本切换和健康验收。
+5. **检查云端并部署。** 全流程发布从干净的 main 执行 `npm run release:check` 与 `npm run release`；发布脚本支持任意分支，操作者必须额外确认本次来自 main。部署前及实际切换前检查获客任务、启用的定时计划、发信计划、待运行追信和正在发送的邮件；另行只读核对人工回复台账，脚本的任务检查未覆盖人工回复，也不锁住新的网页请求。追信即使所属首封计划已完成，也须先在计划详情暂停。任务未结束或计划仍启用时报告具体阻塞，等待结束或由用户安排暂停，不取消任务、不把状态改成完成。维护期间协调停止新的手动操作。保留云端原数据及配置，不执行迁移；需要不兼容迁移的功能应停在已验证提交，另定方案。完成条件：发布脚本完成备份、版本切换和健康验收。
 6. **验收并报告。** 核对本地 main、远端 main、云端 current 及实际进程目录对应同一目标 SHA；读取健康接口、网页、相关只读业务接口和本次启动日志。核对原数据目录、配置及备份路径，变化应能解释；不通过试发客户邮件或写入业务记录来验收。失败按下文回退流程处理，不能用数据回滚掩盖发布问题。报告提交短哈希、CI 链接、云端版本、备份位置、验收结果及未完成项。仅上传任务报告 Git／CI 状态即可，不宣称云端已更新。
 
 `npm run release` 已包含检查、推送、CI 等待和部署；它不会自动合并 main。以上步骤是执行顺序和完成标准，不要求把脚本内部流程手工再做一遍。发布期间发现目标分支或云端版本被其他任务更新，重新核对目标后再继续，避免覆盖另一份发布。

@@ -27,9 +27,8 @@ const allowedKeys = new Set([
   'confirmedBy',
   'facts',
   'pendingItem',
-  'sourceMessageId',
 ]);
-const categories = new Set(['assessment', 'legal_name', 'purchase_need', 'profile']);
+const categories = new Set(['assessment', 'legal_name', 'profile']);
 const directions = new Set(['finished', 'materials', 'samples']);
 const normalize = (value) =>
   String(value ?? '')
@@ -82,7 +81,6 @@ export function validateSupplement(body, { at = Date.now() } = {}) {
     confirmedBy: text(body.confirmedBy, '确认人', 100, true),
     sourceUrl: text(body.sourceUrl, '来源链接', 2000),
     pendingItem: text(body.pendingItem, '对应待确认事项', 1000),
-    sourceMessageId: text(body.sourceMessageId, '沟通记录', 150),
   };
   if (result.sourceUrl) {
     let url;
@@ -94,7 +92,7 @@ export function validateSupplement(body, { at = Date.now() } = {}) {
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password)
       throw invalid('来源链接须为有效的 HTTP 或 HTTPS 地址');
   }
-  const scoped = body.category === 'assessment' || body.category === 'purchase_need';
+  const scoped = body.category === 'assessment';
   result.product = text(body.product, '对应产品', 500, scoped);
   result.direction = text(body.direction, '供货方向', 20, scoped);
   if ((result.product || result.direction) && !directions.has(result.direction))
@@ -125,8 +123,6 @@ export function validateSupplement(body, { at = Date.now() } = {}) {
   } else if (body.facts !== undefined || body.dimension !== undefined) {
     throw invalid('非评分资料不能携带评分事实');
   }
-  if (body.category === 'purchase_need' && !result.sourceMessageId)
-    throw invalid('采购需求需关联客户实际沟通记录');
   return result;
 }
 

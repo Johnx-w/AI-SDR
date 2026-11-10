@@ -110,7 +110,7 @@ export function CustomerProfile({
           .filter(needsReview),
       ]
         .map((item) => item.trim())
-        .filter(Boolean),
+        .filter((item) => item && !/采购需求|采购方式/.test(item)),
     ),
   ];
   const supplementContext = (item: string): SupplementContext => {
@@ -126,15 +126,6 @@ export function CustomerProfile({
         pendingItem: item,
       };
     if (/经营法人名称/.test(item)) return { category: 'legal_name', pendingItem: item };
-    if (/采购需求|采购方式/.test(item))
-      return {
-        category: 'purchase_need',
-        pendingItem: item,
-        ...(item === lead.assessment?.supplyOpportunity?.note &&
-        lead.assessment.supplyOpportunity.targetProduct
-          ? { product: lead.assessment.supplyOpportunity.targetProduct, direction: 'materials' }
-          : {}),
-      };
     return { category: 'profile', pendingItem: item };
   };
   const aliases = [

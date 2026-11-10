@@ -520,6 +520,9 @@ export function Automation() {
               ? '符合条件的未首发客户自动发送；缺项等待处理'
               : '仅收录客户和研究资料'}
           </small>
+          {input.auto_first_touch && input.auto_follow_up && (
+            <small>首封未回复：第 3 天、第 7 天各自动跟进一次</small>
+          )}
         </p>
       </div>
       <button
@@ -1067,6 +1070,16 @@ export function Automation() {
                       </span>
                     </label>
                   </div>
+                  {input.auto_first_touch && (
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={input.auto_follow_up === true}
+                        onChange={(event) => patch({ auto_follow_up: event.target.checked })}
+                      />
+                      首封未回复自动跟进（第3天、第7天，定时计划用于后续轮次）
+                    </label>
+                  )}
                   {input.auto_first_touch && (
                     <p className="acq-preference-help">
                       根据客户经营证据匹配最新已审核产品和可用邮箱。同一企业只安排一封首信。

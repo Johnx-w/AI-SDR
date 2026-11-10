@@ -1,17 +1,4 @@
-import type { MailMessage } from './mailConversations';
-
-export type BusinessMailBody = Pick<
-  MailMessage,
-  | 'subject'
-  | 'bodyText'
-  | 'bodyHtml'
-  | 'bodyFormatVersion'
-  | 'inlineImages'
-  | 'bodyUnavailable'
-  | 'source'
->;
 export type BusinessChannel = 'email' | 'whatsapp' | 'form' | 'phone' | 'other';
-export type BusinessEntity = 'conversations' | 'messages' | 'demands' | 'tasks';
 export interface BusinessCustomer {
   id: string;
   name: string;
@@ -67,7 +54,7 @@ export interface BusinessDemand extends BusinessRecord {
   conversationId: string;
   title: string;
   category: 'ventilation' | 'shutters' | 'indoor' | 'outdoor' | 'other';
-  direction: 'finished' | 'materials' | 'samples';
+  direction: '' | 'finished' | 'materials' | 'samples';
   productText: string;
   productIds: string[];
   productVersions?: Record<string, number>;
@@ -81,6 +68,9 @@ export interface BusinessDemand extends BusinessRecord {
   evidenceQuote: string;
 }
 export interface BusinessTask extends BusinessRecord {
+  origin?: string;
+  campaignId?: string;
+  deliveryStatus?: string;
   displayId?: string;
   ownerIds: string[];
   templateIds: string[];
@@ -124,30 +114,8 @@ export interface BusinessWorkspace {
   demands: BusinessDemand[];
   tasks: BusinessTask[];
   customerContexts: { customerId: string; fixedEmail?: string; doNotContact?: boolean }[];
-  taskReferences?: {
-    owners: { id: string; name: string; accountType: string; account: string; status: string }[];
-    templates: {
-      id: string;
-      name: string;
-      type: string;
-      status: string;
-      scenario: string;
-      body: string;
-    }[];
-    error?: string;
-  };
   customerError?: string;
   feishu?: BusinessFeishu;
-}
-export interface BusinessSaveResult {
-  record: BusinessRecord;
-  feishu?: BusinessFeishu;
-}
-export interface BusinessPreflight {
-  ready: boolean;
-  reasons: string[];
-  message: string;
-  automaticSend: false;
 }
 export class BusinessRequestError extends Error {
   constructor(
@@ -172,45 +140,12 @@ async function request<T>(path = '', options: RequestInit = {}): Promise<T> {
   if (!body) throw new Error('服务未返回有效结果，请刷新核对');
   return body as T;
 }
-const json = (body: object, key?: string): RequestInit => ({
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json', ...(key ? { 'Idempotency-Key': key } : {}) },
-  body: JSON.stringify(body),
-});
 export const customerBusinessApi = {
-  mailBodies: (id: string, signal?: AbortSignal) =>
-    request<{ originals: Record<string, BusinessMailBody> }>(
-      `/conversations/${encodeURIComponent(id)}/mail-bodies`,
-      { signal },
-    ),
   workspace: (filter: { customerId?: string; productId?: string } = {}, signal?: AbortSignal) => {
     const query = new URLSearchParams();
     if (filter.customerId) query.set('customerId', filter.customerId);
     if (filter.productId) query.set('productId', filter.productId);
     return request<BusinessWorkspace>(query.size ? '?' + query : '', { signal });
   },
-  save: (
-    entity: BusinessEntity,
-    value: Record<string, unknown>,
-    options: { id?: string; version?: number; key: string },
-  ) =>
-    request<BusinessSaveResult>('/' + entity, {
-      ...json(
-        { ...value, ...(options.id ? { id: options.id, expectedVersion: options.version } : {}) },
-        options.key,
-      ),
-      method: options.id ? 'PUT' : 'POST',
-    }),
-  taskAction: (
-    id: string,
-    value: {
-      action: 'complete' | 'skip' | 'cancel';
-      expectedVersion: number;
-      resultMessageId?: string;
-      notes?: string;
-    },
-  ) => request<BusinessSaveResult>(`/tasks/${encodeURIComponent(id)}/action`, json(value)),
-  preflight: (id: string) =>
-    request<BusinessPreflight>(`/tasks/${encodeURIComponent(id)}/preflight`, { method: 'POST' }),
   sync: () => request<{ feishu?: BusinessFeishu; status?: string }>('/sync', { method: 'POST' }),
 };

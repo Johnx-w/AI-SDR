@@ -1,3 +1,4 @@
+import { recordFollowUpTask } from './outreach-follow-ups.mjs';
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
@@ -53,6 +54,8 @@ export function validateInput(input) {
   const target = validateTarget(input);
   if (input.auto_first_touch !== undefined)
     target.auto_first_touch = validateAutoFirstTouch(input.auto_first_touch);
+  if (input.auto_follow_up !== undefined)
+    target.auto_follow_up = validateAutoFirstTouch(input.auto_follow_up);
   if (input.research_budget !== undefined)
     target.research_budget = validateResearchBudget(input.research_budget);
   if (target.query_mode === 'auto') return { ...target, search_query: searchPlan(target)[0].query };
@@ -212,7 +215,6 @@ export function createApp({
     customerRecord: (id) => provider.customerRecord?.(id),
     customerRemoteId: (id) => (provider.customerRemoteId ? provider.customerRemoteId(id) : id),
     syncCustomers: () => provider.syncCustomers?.(),
-    mailBodies: (records) => outreach().conversations.businessMailBodies(records),
     saveCustomerFields: (id, fields) => provider.saveCustomerFields(id, fields),
   });
   let outbound;
@@ -232,6 +234,8 @@ export function createApp({
           acquisitionSources: () => acquisitionOutreachSources(jobs(), plans()),
           businessState: () => business.state().store.view(),
           customers: () => library().snapshot(true).leads,
+          recordFollowUp: (action, first) =>
+            recordFollowUpTask(business.state().store, action, first),
           recordAccepted: (delivery) =>
             recordOutreachInBusiness({ store: business.state().store, delivery }),
           recordCommunication: (detail) =>
@@ -832,7 +836,7 @@ export function createApp({
   });
   server.on('listening', () => {
     plans().start();
-    if (env.BATCH_DB_PATH) business.start();
+    if (env.CUSTOMER_BUSINESS_DB_PATH || env.BATCH_DB_PATH) business.start();
     if (env.OUTREACH_DB_PATH || jobs().outreachJobs().length) outreach().start();
   });
   server.on('close', () => {

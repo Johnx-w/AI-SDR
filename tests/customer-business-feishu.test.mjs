@@ -991,6 +991,7 @@ test('原T1仅十列，汇总规格数量，重启后更新原询盘并保留意
     originalDemandTable(f);
     const inquiryEnv = { ...env, FEISHU_DEMANDS_TABLE_ID: 't1' };
     const graph = workspace();
+    graph.demands[0].direction = '';
     graph.messages[0].occurredAt = '2026-10-23T08:00:00.000Z';
     const raw = structuredClone(graph);
     const options = { products: [{ id: 'product-1', version: 2 }] };

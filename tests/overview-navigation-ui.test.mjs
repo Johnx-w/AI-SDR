@@ -19,26 +19,11 @@ const renderAt = (Component, path) =>
     React.createElement(MemoryRouter, { initialEntries: [path] }, React.createElement(Component)),
   );
 
-test('business deep links immediately render the linked task bucket and frozen cutoff', () => {
-  const html = renderAt(
-    CustomerBusiness,
-    '/business?tab=tasks&bucket=due&asOf=2026-10-25T02%3A00%3A00.000Z',
-  );
-  assert.match(html, /<option value="due" selected="">当前到期跟进<\/option>/);
-  assert.match(html, /当前筛选：到期跟进/);
-  assert.match(html, /北京时间/);
-  assert.match(html, /清除筛选/);
-});
-
-test('active demand and skipped task links retain their status selection on initial render', () => {
-  assert.match(
-    renderAt(CustomerBusiness, '/business?tab=demands&state=active'),
-    /<option value="active" selected="">进行中需求<\/option>/,
-  );
-  assert.match(
-    renderAt(CustomerBusiness, '/business?tab=tasks&state=skipped'),
-    /<option value="skipped" selected="">跳过<\/option>/,
-  );
+test('任务页只读且状态筛选可直达，不展示采购需求、沟通录入或完成按钮', () => {
+  const html = renderAt(CustomerBusiness, '/business?tab=tasks&state=skipped');
+  assert.match(html, /<option value="skipped" selected="">跳过<\/option>/);
+  assert.match(html, /所属发送计划/);
+  assert.doesNotMatch(html, /新增任务|录入沟通|新增需求|标记完成/);
 });
 
 test('product draft drilldown selects the real draft filter and invalid values use in-service documents', () => {

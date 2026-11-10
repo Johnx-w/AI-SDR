@@ -238,10 +238,13 @@ test('经营年限与日期有效，未来日期、重复事实及无沟通记�
   assert.throws(() => validateSupplement({ ...base, category: 'purchase_need' }, { at }), {
     status: 400,
   });
-  assert.equal(
-    validateSupplement({ ...base, category: 'purchase_need', sourceMessageId: 'message-1' }, { at })
-      .sourceMessageId,
-    'message-1',
+  assert.throws(
+    () =>
+      validateSupplement(
+        { ...base, category: 'purchase_need', sourceMessageId: 'message-1' },
+        { at },
+      ),
+    { status: 400 },
   );
   assert.equal(
     validateSupplement({ ...base, category: 'legal_name', product: '', direction: '' }, { at })

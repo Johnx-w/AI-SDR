@@ -42,6 +42,8 @@ export interface OutreachMailbox {
 }
 
 export interface OutreachCampaign {
+  followUpEnabled?: boolean;
+  followUpPaused?: boolean;
   id: string;
   name: string;
   mode: 'internal_test' | 'production';

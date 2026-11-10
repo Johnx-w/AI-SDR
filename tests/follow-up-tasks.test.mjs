@@ -164,84 +164,59 @@ test('关联目标不存在时留空，不创建其他表；失效模板引用�
   assert.equal(f.writes.length, 1);
 });
 
-test('T4 专用同步从 API 提前返回，不调用客户、产品或其他业务表同步', async () => {
+test('独立T4镜像不再阻断T1/T3主业务同步', async () => {
   const f = fixture();
+  const store = new CustomerBusiness();
+  let mainCalls = 0,
+    customerCalls = 0;
   const api = new CustomerBusinessApi({
     getEnv: () => ({}),
     knowledge: () => ({ list: () => [] }),
     loadCustomers: async () => f.customers,
-    syncCustomers: () => assert.fail('不应同步客户'),
-    saveCustomerFields: () => assert.fail('不应保存客户字段'),
+    syncCustomers: () => {
+      customerCalls++;
+    },
   });
   api.state = () => ({
     tasksOnly: true,
     env: {},
     mirror: f.mirror,
-    store: {
-      scope: 'local',
-      view: () => ({ tasks: [], messages: [], demands: [] }),
-      db: { prepare: () => ({ run: () => {} }) },
+    businessMirror: {
+      sync: async (workspace) => {
+        mainCalls++;
+        assert.deepEqual(workspace.tasks, []);
+        return { status: 'synced' };
+      },
     },
-  });
-  const result = await api.synchronize();
-  assert.equal(result.counts.tasks, 0);
-  assert.equal(f.writes.length, 0);
-});
-
-test('任务不需要旧行动标题，消息归属和类型校验，跳过与终止为终态', async () => {
-  const store = new CustomerBusiness({
-    customer: async (id) => ({ record_id: id }),
-    now: () => new Date('2026-11-10T01:00:00Z'),
+    store,
   });
   try {
-    const base = {
-      customerId: 'customer',
-      channel: 'email',
-      dueAt: '2026-11-11T01:00:00Z',
-      notes: '发送介绍',
-      templateIds: ['template'],
-      ownerIds: ['owner'],
+    assert.equal((await api.synchronize()).status, 'synced');
+    assert.equal(mainCalls, 1);
+    assert.equal(customerCalls, 1);
+    assert.equal(f.writes.length, 0);
+    f.mirror.sync = async () => {
+      throw new Error('模拟独立T4失败');
     };
-    const task = await store.saveTask(base);
-    assert.equal(task.kind, 'follow_up');
-    assert.equal(task.title, '发送介绍');
-    assert.deepEqual(task.templateIds, ['template']);
-    const skipped = await store.actTask(task.id, { action: 'skip', expectedVersion: task.version });
-    assert.equal(skipped.status, 'skipped');
-    await assert.rejects(() => store.saveTask({ ...skipped, notes: '覆盖' }), /不能覆盖/);
-    await assert.rejects(
-      () => store.actTask(task.id, { action: 'complete', expectedVersion: skipped.version }),
-      /已经完成、跳过或终止/,
-    );
-    const other = await store.saveTask(base);
-    assert.equal(
-      (await store.actTask(other.id, { action: 'cancel', expectedVersion: other.version })).status,
-      'cancelled',
-    );
-    const conversation = await store.saveConversation({
-      customerId: 'another',
-      title: '其他客户',
-      channel: 'email',
-    });
-    const message = await store.saveMessage({
-      customerId: 'another',
-      conversationId: conversation.id,
-      direction: 'inbound',
-      account: 'sales@example.test',
-      from: 'buyer@another.test',
-      to: 'sales@example.test',
-      channel: 'email',
-      occurredAt: '2026-11-10T00:00:00Z',
-      deliveryStatus: 'received',
-      body: 'hello',
-      actualConfirmed: true,
-    });
-    await assert.rejects(
-      () => store.saveTask({ ...base, messageIds: [message.id] }),
-      /其他客户|所属企业/,
-    );
+    assert.equal((await api.synchronize({ force: false })).status, 'pending');
+    assert.equal(mainCalls, 2, 'T4失败也必须继续T1/T3');
   } finally {
     store.close();
+  }
+});
+
+test('两个飞书目的地共用持久化去重日志，不相互覆盖', () => {
+  const api = new CustomerBusinessApi({
+    getEnv: () => ({
+      FOLLOWUP_FEISHU_APP_TOKEN: 'other',
+      BUSINESS_MIRROR_JOURNAL_PATH: ':memory:',
+    }),
+  });
+  try {
+    const state = api.state();
+    assert.equal(state.mirror.journal, state.businessMirror.journal);
+  } finally {
+    api.close();
   }
 });
 

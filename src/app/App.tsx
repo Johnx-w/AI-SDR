@@ -35,7 +35,7 @@ const nav = [
   { path: '/', name: '运营总览', icon: LayoutDashboard },
   { path: '/automation', name: '获客任务', icon: Zap },
   { path: '/leads', name: '客户库', icon: UsersRound },
-  { path: '/business', name: '客户业务', icon: ClipboardList },
+  { path: '/business', name: '跟进任务', icon: ClipboardList },
   { path: '/inbox', name: '沟通中心', icon: MessageSquare },
   { path: '/materials', name: '产品与资料', icon: FolderOpen },
   { path: '/settings', name: 'API 连接', icon: Settings2 },

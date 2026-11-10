@@ -191,6 +191,7 @@ export class BatchJobs {
       throw fail(400, '该获客渠道已停用');
     input = { ...input, target_count: validateCount(input.target_count) };
     validateAutoFirstTouch(input.auto_first_touch);
+    validateAutoFirstTouch(input.auto_follow_up);
     const researchBudget = validateResearchBudget(input.research_budget, input.target_count);
     if (typeof key !== 'string' || !/^[\w-]{8,100}$/.test(key))
       throw fail(400, '无效的 Idempotency-Key');

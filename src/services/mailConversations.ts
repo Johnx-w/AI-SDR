@@ -111,6 +111,16 @@ export interface MailConversationList {
 }
 
 export interface MailConversationDetail {
+  demands?: {
+    id: string;
+    title: string;
+    productText: string;
+    specifications: string;
+    quantity: string;
+    unit: string;
+    evidenceQuote: string;
+  }[];
+  demandNotices?: string[];
   conversation: MailThread;
   messages: MailMessage[];
   draft?: MailReplyDraft | null;
@@ -119,8 +129,12 @@ export interface MailConversationDetail {
 }
 
 export const mailConversationsApi = {
-  list(filters: { mailboxId: string; q: string; unread: boolean }, signal?: AbortSignal) {
+  list(
+    filters: { mailboxId: string; customerId?: string; q: string; unread: boolean },
+    signal?: AbortSignal,
+  ) {
     const params = new URLSearchParams({ mailboxId: filters.mailboxId });
+    if (filters.customerId) params.set('customerId', filters.customerId);
     if (filters.q.trim()) params.set('q', filters.q.trim());
     if (filters.unread) params.set('unread', '1');
     return outreachApi<MailConversationList>(`/conversations?${params}`, { signal });
