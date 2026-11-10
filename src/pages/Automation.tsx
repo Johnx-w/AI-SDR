@@ -20,6 +20,7 @@ import { acquisitionApi } from '../services/acquisition';
 import type { LocationOptions } from '../services/acquisition';
 import type {
   AcquisitionJob,
+  AcquisitionSchedule,
   DiscoveryQuery,
   IntegrationStatus,
   ProductSelection,
@@ -94,6 +95,7 @@ function remember(value: Submission | null) {
 export function Automation() {
   const { notify } = useWorkspace();
   const [params, setParams] = useSearchParams();
+  const editId = params.get('edit');
   const tab =
     params.get('tab') === 'schedules' ? 'schedules' : params.get('tab') === 'runs' ? 'runs' : 'new';
   const [restored] = useState(readSubmission);
@@ -135,7 +137,11 @@ export function Automation() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [pending, setPending] = useState<Submission | null>(restored);
-  const locked = submitting || !!pending;
+  const [editing, setEditing] = useState<AcquisitionSchedule | null>(null);
+  const [editError, setEditError] = useState('');
+  const editPlan = editing?.id === editId ? editing : null;
+  const previousEditId = useRef<string | null>(null);
+  const locked = submitting || (!!pending && !editId);
   const submissionRef = useRef(false);
   const specificProductsRef = useRef(restored?.input.products || []);
   const patch = (changes: Partial<WorkflowInput>) =>
@@ -155,6 +161,54 @@ export function Automation() {
   useEffect(() => {
     if (!pending && params.get('mode') === 'scheduled') setRunMode('scheduled');
   }, [params.get('mode'), pending]);
+  useEffect(() => {
+    if (!editId) {
+      if (previousEditId.current) {
+        setInput({ ...initialInput, ...(restored?.input || {}) });
+        setTargetCount(restored?.target || 20);
+        setName(restored?.name ?? null);
+        setTiming(
+          restored?.timing || {
+            repeat: 'weekly',
+            weekdays: [1, 2, 3, 4, 5, 6, 7],
+            startDate: dateInBeijing(),
+            times: ['09:00'],
+            timezone: 'Asia/Shanghai',
+          },
+        );
+        setRunMode(restored?.mode || 'now');
+        specificProductsRef.current = restored?.input.products || [];
+        setError('');
+      }
+      previousEditId.current = null;
+      setEditing(null);
+      return;
+    }
+    previousEditId.current = editId;
+    let alive = true;
+    setEditError('');
+    acquisitionApi
+      .schedules()
+      .then(({ schedules }) => {
+        if (!alive) return;
+        const plan = schedules.find((item) => item.id === editId);
+        if (!plan || !['enabled', 'paused'].includes(plan.status))
+          throw new Error('该计划已结束或不存在');
+        setEditing(plan);
+        setInput(plan.input);
+        setTargetCount(plan.input.target_count);
+        setName(plan.name);
+        setTiming(plan.timing);
+        setRunMode('scheduled');
+        specificProductsRef.current = plan.input.products || [];
+      })
+      .catch((cause) => {
+        if (alive) setEditError(cause instanceof Error ? cause.message : '读取计划失败');
+      });
+    return () => {
+      alive = false;
+    };
+  }, [editId]);
   useEffect(() => {
     let alive = true;
     acquisitionApi
@@ -264,7 +318,7 @@ export function Automation() {
   let timingError = '';
   let nextRunAt: string | null = null;
   const effectiveTiming =
-    timing.repeat === 'once' ? timing : { ...timing, startDate: dateInBeijing() };
+    editPlan || timing.repeat === 'once' ? timing : { ...timing, startDate: dateInBeijing() };
   if (runMode === 'scheduled') {
     try {
       nextRunAt = nextOccurrence(validateTiming(effectiveTiming, now), now);
@@ -286,7 +340,8 @@ export function Automation() {
     targetCount <= 200 &&
     !timingError &&
     (runMode !== 'scheduled' || !!scheduleName) &&
-    !(runMode === 'now' && active);
+    !(runMode === 'now' && active) &&
+    (!editId || (!!editPlan && !editError));
   async function submit(retry = false) {
     if (submissionRef.current || (!retry && (!canSubmit || locked))) return;
     const request = retry
@@ -312,10 +367,22 @@ export function Automation() {
     submissionRef.current = true;
     setSubmitting(true);
     setError('');
-    setPending(request);
-    remember(request);
+    if (!editPlan) {
+      setPending(request);
+      remember(request);
+    }
     try {
-      if (request.mode === 'scheduled') {
+      if (editPlan) {
+        await acquisitionApi.updateSchedule(
+          editPlan.id,
+          request.name,
+          request.input,
+          request.target,
+          request.timing,
+        );
+        notify('定时计划已更新');
+        setParams({ tab: 'schedules' });
+      } else if (request.mode === 'scheduled') {
         await acquisitionApi.createSchedule(
           request.name,
           request.input,
@@ -337,7 +404,11 @@ export function Automation() {
       }
     } catch (e) {
       const problem = e as Error & { status?: number };
-      if (problem.status && [400, 403, 404, 409, 413, 415, 429, 503].includes(problem.status)) {
+      if (
+        !editPlan &&
+        problem.status &&
+        [400, 403, 404, 409, 413, 415, 429, 503].includes(problem.status)
+      ) {
         setPending(null);
         remember(null);
       }
@@ -464,7 +535,13 @@ export function Automation() {
         ) : (
           <Play size={17} />
         )}
-        {submitting ? '正在提交…' : runMode === 'scheduled' ? '创建并启用计划' : '开始获客'}
+        {submitting
+          ? '正在提交…'
+          : editPlan
+            ? '保存计划修改'
+            : runMode === 'scheduled'
+              ? '创建并启用计划'
+              : '开始获客'}
         <ArrowRight size={16} />
       </button>
       {active && (
@@ -488,7 +565,7 @@ export function Automation() {
       </div>
       <nav className="acq-page-tabs" aria-label="获客任务页面">
         {[
-          ['new', '新建任务'],
+          ['new', editPlan ? '编辑计划' : '新建任务'],
           ['schedules', '定时计划'],
           ['runs', '执行记录'],
         ].map(([value, label]) => (
@@ -524,7 +601,19 @@ export function Automation() {
               </button>
             </div>
           )}
-          {pending && !submitting && (
+          {editId && (editing?.id !== editId || editError) ? (
+            <div className="acq-notice" role="status">
+              {editError || '正在读取计划…'}
+              {editError && <Link to="/automation?tab=schedules">返回定时计划</Link>}
+            </div>
+          ) : null}
+          {editPlan && (
+            <div className="acq-notice" role="status">
+              正在编辑“{editPlan.name}”。修改将在后续轮次生效，已开始的任务沿用原设置。
+              <Link to="/automation?tab=schedules">取消编辑</Link>
+            </div>
+          )}
+          {!editPlan && pending && !submitting && (
             <div className="acq-notice" role="status">
               <span>上次提交结果待核对，配置已保留。</span>
               <button className="btn secondary" onClick={() => void submit(true)}>
@@ -537,7 +626,10 @@ export function Automation() {
               {error}
             </p>
           )}
-          <div className="acq-create-layout">
+          <div
+            className="acq-create-layout"
+            style={editId && !editPlan ? { display: 'none' } : undefined}
+          >
             <form
               id="acquisition-create"
               onSubmit={(e) => {
@@ -772,24 +864,26 @@ export function Automation() {
                       </button>
                     ))}
                   </div>
-                  <div className="acq-run-mode" role="radiogroup" aria-label="执行方式">
-                    {[
-                      ['now', '立即获客'],
-                      ['scheduled', '定时获客'],
-                    ].map(([value, label]) => (
-                      <label className={runMode === value ? 'selected' : ''} key={value}>
-                        <input
-                          type="radio"
-                          name="run-mode"
-                          value={value}
-                          checked={runMode === value}
-                          onChange={() => setRunMode(value)}
-                        />
-                        {value === 'now' ? <Play size={17} /> : <CalendarDays size={17} />}
-                        {label}
-                      </label>
-                    ))}
-                  </div>
+                  {!editPlan && (
+                    <div className="acq-run-mode" role="radiogroup" aria-label="执行方式">
+                      {[
+                        ['now', '立即获客'],
+                        ['scheduled', '定时获客'],
+                      ].map(([value, label]) => (
+                        <label className={runMode === value ? 'selected' : ''} key={value}>
+                          <input
+                            type="radio"
+                            name="run-mode"
+                            value={value}
+                            checked={runMode === value}
+                            onChange={() => setRunMode(value)}
+                          />
+                          {value === 'now' ? <Play size={17} /> : <CalendarDays size={17} />}
+                          {label}
+                        </label>
+                      ))}
+                    </div>
+                  )}
                   {runMode === 'scheduled' && (
                     <div className="acq-schedule-config">
                       <div className="acq-field-label">

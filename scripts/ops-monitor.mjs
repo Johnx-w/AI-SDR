@@ -47,7 +47,7 @@ export function backupStatus(log, target = snapshotRoot) {
         line,
       );
     if (filters) job.filters = filters.slice(1);
-    if (/FULL backup completed successfully/.test(line))
+    if (/(?:FULL|INCR) backup completed successfully/.test(line))
       job.completedAt = Date.parse(/time="([^"]+)"/.exec(line)?.[1]);
     jobs.set(id, job);
   }

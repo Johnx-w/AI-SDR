@@ -122,8 +122,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   createBackup().then(
     ({ archive, completedAt, files }) =>
       console.log(JSON.stringify({ archive, completedAt, files: files.length })),
-    () => {
-      console.error('SHADEFLOW_BACKUP_FAILED：请核对目录权限、磁盘和数据库；未更新 latest.json');
+    (error) => {
+      console.error('SHADEFLOW_BACKUP_FAILED：未更新 latest.json', error);
       process.exitCode = 1;
     },
   );

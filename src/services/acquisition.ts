@@ -58,6 +58,18 @@ export const acquisitionApi = {
       headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
       body: JSON.stringify({ name, input: { ...input, target_count }, timing }),
     }),
+  updateSchedule: (
+    id: string,
+    name: string,
+    input: WorkflowInput,
+    target_count: number,
+    timing: ScheduleTiming,
+  ) =>
+    request<AcquisitionSchedule>(`/schedules/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, input: { ...input, target_count }, timing }),
+    }),
   controlSchedule: (id: string, action: 'pause' | 'resume' | 'close') =>
     request<AcquisitionSchedule>(`/schedules/${encodeURIComponent(id)}/${action}`, {
       method: 'POST',

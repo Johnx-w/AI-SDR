@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarDays, Pause, Play, X } from 'lucide-react';
+import { CalendarDays, Pause, Pencil, Play, X } from 'lucide-react';
 import { Badge, Empty } from '../components/ui';
 import { BatchProgress } from '../components/BatchProgress';
 import { acquisitionApi } from '../services/acquisition';
@@ -236,6 +236,15 @@ export function ScheduledAcquisition() {
               </p>
             )}
             <footer>
+              {['enabled', 'paused'].includes(plan.status) && (
+                <Link
+                  className="btn secondary"
+                  to={`/automation?edit=${encodeURIComponent(plan.id)}`}
+                >
+                  <Pencil size={15} />
+                  编辑计划
+                </Link>
+              )}
               {plan.status === 'enabled' && (
                 <button
                   className="btn secondary"

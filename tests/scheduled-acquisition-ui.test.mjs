@@ -105,6 +105,10 @@ test('旧轮询不能覆盖已暂停的定时计划，慢读取期间轮询不�
     assert.equal(reads.length, 1, '初次读取未结束时不再启动轮询');
     reads[0].resolve({ schedules: [plan('enabled')] });
     await flush();
+    const edit = elements(render()).find(
+      (element) => element.props.to === '/automation?edit=plan-1',
+    );
+    assert.ok(edit, '进行中的计划提供编辑入口');
 
     timer();
     timer();

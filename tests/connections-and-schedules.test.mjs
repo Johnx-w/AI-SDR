@@ -382,6 +382,68 @@ test('API 未配置时跳过该时点；暂停后恢复跳过暂停期间时间�
   }
 });
 
+test('修改计划只影响后续轮次，保留执行历史与当前任务配置', () => {
+  const { jobs, schedules, advance } = harness();
+  try {
+    const plan = schedules.create({ name: '原计划', input, timing }, 'schedule-edit-01');
+    advance('2030-01-01T09:00:00+08:00');
+    schedules.tick();
+    const first = jobs.get(schedules.get(plan.id).lastJobId);
+    const updatedInput = {
+      ...input,
+      product_scope: 'specific',
+      products: [
+        {
+          value: 'roller blinds',
+          label: '卷帘',
+          direction: 'finished',
+          group: 'indoor',
+          aliases: [],
+        },
+      ],
+      product: 'roller blinds',
+      target_count: 5,
+    };
+    const updatedTiming = { ...timing, times: ['20:00'] };
+    const updated = schedules.update(plan.id, {
+      name: '新计划',
+      input: updatedInput,
+      timing: updatedTiming,
+    });
+    assert.equal(updated.name, '新计划');
+    assert.equal(updated.runs, 1);
+    assert.equal(updated.lastJobId, first.id);
+    assert.equal(updated.nextRunAt, '2030-01-01T12:00:00.000Z');
+    assert.equal(jobs.get(first.id).input.product, input.product);
+    assert.equal(jobs.get(first.id).input.target_count, 1);
+    jobs.finish(first, 'target_reached');
+    advance('2030-01-01T14:30:00+08:00');
+    schedules.tick();
+    assert.equal(jobs.list().length, 1);
+    advance('2030-01-01T20:00:00+08:00');
+    schedules.tick();
+    const second = jobs.get(schedules.get(plan.id).lastJobId);
+    assert.equal(second.input.product_scope, 'specific');
+    assert.deepEqual(second.input.products, updatedInput.products);
+    assert.equal(second.input.product, 'roller blinds');
+    assert.equal(second.input.target_count, 5);
+    schedules.control(plan.id, 'pause');
+    const paused = schedules.update(plan.id, {
+      name: '暂停时修改',
+      input: updatedInput,
+      timing: { ...updatedTiming, times: ['21:00'] },
+    });
+    assert.equal(paused.nextRunAt, null);
+    schedules.control(plan.id, 'close');
+    assert.throws(() => schedules.update(plan.id, { name: '不可修改', input, timing }), {
+      status: 409,
+    });
+  } finally {
+    schedules.close();
+    jobs.close();
+  }
+});
+
 test('HTTP 保存连接即时生效；计划接口校验和幂等生效', async () => {
   await withApp(
     {
@@ -437,6 +499,28 @@ test('HTTP 保存连接即时生效；计划接口校验和幂等生效', async 
       assert.equal(weekly.status, 201);
       const weeklyPlan = await weekly.json();
       assert.deepEqual(weeklyPlan.timing.weekdays, [1, 3, 5]);
+      const edited = await write(
+        `/api/v1/acquisition/schedules/${weeklyPlan.id}`,
+        {
+          ...body,
+          name: '修改后的计划',
+          input: { ...input, target_count: 5 },
+          timing: weeklyPlan.timing,
+        },
+        'PUT',
+      );
+      assert.equal(edited.status, 200);
+      assert.equal((await edited.json()).input.target_count, 5);
+      assert.equal(
+        (
+          await write(
+            `/api/v1/acquisition/schedules/${weeklyPlan.id}`,
+            { ...body, input: { ...input, target_count: 0 } },
+            'PUT',
+          )
+        ).status,
+        400,
+      );
       const listed = await (await fetch(base + '/api/v1/acquisition/schedules')).json();
       assert.deepEqual(
         listed.schedules.find((item) => item.id === weeklyPlan.id).timing.weekdays,

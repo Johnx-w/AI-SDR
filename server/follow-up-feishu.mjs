@@ -235,7 +235,12 @@ export class FollowUpFeishu extends CustomerBusinessFeishu {
             if (!remote) return false;
             const readback = await this.client.record(remote.record_id, table);
             if (!sameFields(readback, expected, fields)) return false;
-            if (mapping?.version !== task.version) await saveMapping();
+            remote = readback;
+            if (
+              mapping?.version !== task.version ||
+              mapping?.displayId !== text(remote.fields.任务ID)
+            )
+              await saveMapping();
             return true;
           },
         );

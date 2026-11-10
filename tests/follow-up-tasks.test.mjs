@@ -123,6 +123,25 @@ test('T4 同步仅写九个字段，真实关联、自动编号、跨实例重�
   assert.equal(f.writes[1].fields.任务状态, '跳过');
 });
 
+test('飞书写入响应不含自动编号时从回读补齐，旧空编号映射不重复写表', async () => {
+  const f = fixture();
+  const write = f.options.client.write;
+  f.options.client.write = async (...args) => {
+    const record = await write(...args);
+    delete record.fields.任务ID;
+    return record;
+  };
+  const workspace = { tasks: [f.task], messages: [] };
+  assert.equal((await f.mirror.sync(workspace, { customers: f.customers })).status, 'synced');
+  const mapping = f.journal.findLast((row) => row.state === 'mapped');
+  assert.equal(mapping.displayId, 'NO.001');
+  f.journal.push({ ...mapping, displayId: '' });
+  const restarted = new FollowUpFeishu(f.options);
+  assert.equal((await restarted.sync(workspace, { customers: f.customers })).status, 'synced');
+  assert.equal(f.journal.findLast((row) => row.state === 'mapped').displayId, 'NO.001');
+  assert.equal(f.writes.length, 1);
+});
+
 test('关联目标不存在时留空，不创建其他表；失效模板引用阻止写入', async () => {
   const f = fixture();
   f.rows.set('t2', []);

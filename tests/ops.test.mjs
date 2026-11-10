@@ -53,6 +53,12 @@ test('backup coverage binds filters to the successful job and respects path boun
   );
   assert.equal(backupStatus(`${filters('b', '/', '/var/*')}\n${success('b')}`).covered, null);
   assert.equal(backupStatus(success('missing')).covered, null);
+  assert.equal(
+    backupStatus(
+      `${filters('incremental', '/')}\n${success('incremental').replace('FULL', 'INCR')}`,
+    ).covered,
+    true,
+  );
 });
 
 test('notifications deduplicate, remind, recover and retain retry state on SMTP failure', async () => {

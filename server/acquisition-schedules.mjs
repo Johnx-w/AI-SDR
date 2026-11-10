@@ -96,6 +96,25 @@ export class AcquisitionSchedules {
       .run(plan.id, key, hash, JSON.stringify(plan));
     return plan;
   }
+  update(id, { name, input, timing }) {
+    const plan = this.get(id);
+    if (!['enabled', 'paused'].includes(plan.status)) throw fail(409, '该计划已结束');
+    if (typeof name !== 'string' || !name.trim() || name.length > 80)
+      throw fail(400, '计划名称须为 1–80 字符');
+    this.checkInput(input);
+    validateAutoFirstTouch(input.auto_first_touch);
+    const normalized = validateTiming(timing, this.now());
+    const nextRunAt = plan.status === 'enabled' ? nextOccurrence(normalized, this.now()) : null;
+    if (plan.status === 'enabled' && !nextRunAt) throw fail(400, '所选日期已没有未到的执行时间');
+    plan.name = name.trim();
+    plan.input = input;
+    plan.timing = normalized;
+    plan.nextRunAt = nextRunAt;
+    plan.lastError = '';
+    this.save(plan);
+    this.onOutreachChange();
+    return plan;
+  }
   control(id, action) {
     const plan = this.get(id);
     if (!['pause', 'resume', 'close'].includes(action)) throw fail(400, '不支持的计划操作');

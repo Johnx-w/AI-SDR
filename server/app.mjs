@@ -504,6 +504,25 @@ export function createApp({
             );
             return json(response, 201, reviewPlan(plan));
           }
+          if (suffix.length === 1 && request.method === 'PUT') {
+            const body = await readJson(request);
+            if (!body || typeof body !== 'object' || Array.isArray(body))
+              throw new ApiError(400, '请提交有效的定时计划');
+            return json(
+              response,
+              200,
+              reviewPlan(
+                manager.update(suffix[0], {
+                  name: body.name,
+                  timing: body.timing,
+                  input: {
+                    ...validateInput(body.input),
+                    target_count: validateCount(body.input?.target_count),
+                  },
+                }),
+              ),
+            );
+          }
           if (suffix.length === 2 && suffix[1] === 'auto-first-touch' && request.method === 'POST')
             return json(
               response,
