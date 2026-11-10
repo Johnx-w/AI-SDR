@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createModuleLoader } from './helpers/modules.mjs';
 
 function notificationEffect(open) {
@@ -36,6 +40,25 @@ function notificationEffect(open) {
   load(entry).App();
   return { effect: effects[1].effect, refs, changes };
 }
+
+test('测试加载器读取当前环境与模块 URL，缓存不混用环境或改写字符串', () => {
+  const folder = mkdtempSync(join(tmpdir(), 'ui-import-meta-'));
+  const entry = pathToFileURL(join(folder, 'entry.ts'));
+  writeFileSync(
+    entry,
+    'export const dev = import.meta.env.DEV; export const url = import.meta.url; export const literal = "import.meta.env.DEV";',
+  );
+  try {
+    for (const DEV of [false, true, false]) {
+      const value = createModuleLoader(undefined, { env: { DEV } })(entry);
+      assert.equal(value.dev, DEV);
+      assert.equal(value.url, entry.href);
+      assert.equal(value.literal, 'import.meta.env.DEV');
+    }
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
 
 test('通知仅在点击外部或按 Escape 时收起，关闭和卸载后清理监听', () => {
   const listeners = new Map();
