@@ -15,6 +15,8 @@ npm run dev
 
 开发网页：[127.0.0.1:5174](http://127.0.0.1:5174)；API：[127.0.0.1:4311](http://127.0.0.1:4311)。
 
+开发端口可通过 `VITE_PORT` 调整；`VITE_API_PORT` 指定开发代理连接的后端端口，须与后端 `PORT` 一致。未配置时继续使用 5174／4311。
+
 ```powershell
 npm test
 npm run build
@@ -22,6 +24,8 @@ npm start
 ```
 
 本机 `npm start` 默认由 4311 端口提供构建页面；可通过 `PORT` 调整，云端发布脚本使用内部端口 14311。生产服务不自动加载新构建或后端改动；完成构建后在任务空闲时重启原服务并核对接口。开发模式仅前端热更新；修改后端代码或 `.env` 后，在任务空闲时手动重启，避免源码保存中断请求和后台任务。
+
+UI 测试的 TypeScript 加载器默认使用 `DEV: false`，支持 `import.meta.env` 与模块 URL；验证开发环境分支时可通过 `createModuleLoader(resolveImport, { env: { DEV: true } })` 显式注入环境，不修改页面源码的环境判断。
 
 已配置 SSH 别名 `ai-sdr` 并登录 GitHub CLI（`gh`）的发布电脑可在提交代码后运行 `npm run release`：在独立临时目录检查并构建当前提交，推送当前分支到 GitHub，等待同一提交的 Windows 检查和 Linux 发布测试全部通过后再部署云端。CI 未通过或查询失败时停止发布。`npm run release:check` 检查连接与任务状态，`npm run release:rollback` 回退上一代码版本。云端数据和配置保留，发布失败自动恢复原代码；详见[发布与回退](docs/architecture.md#一键发布与回退)。
 

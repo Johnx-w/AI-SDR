@@ -43,6 +43,30 @@ test('旧任务没有 usage 时隐藏模型指标，不伪造零请求或缓存�
   assert.doesNotMatch(html, /模型请求|结果复用|Token 输入|Token 输出/);
 });
 
+test('历史单次任务显示永久取消入口，取消后只保留状态和详情链接', () => {
+  const html = (autoFirstTouchCancelled) =>
+    renderToStaticMarkup(
+      createElement(
+        MemoryRouter,
+        null,
+        createElement(BatchProgress, {
+          job: {
+            ...job,
+            status: 'completed',
+            input: { ...job.input, auto_first_touch: true },
+            autoFirstTouchCancelled,
+          },
+          control: () => {},
+          busy: false,
+        }),
+      ),
+    );
+  assert.match(html(false), /取消自动首发/);
+  assert.match(html(true), /已取消/);
+  assert.match(html(true), /查看首发进度与缺项/);
+  assert.doesNotMatch(html(true), /取消自动首发|恢复自动首发|暂停自动首发/);
+});
+
 test('新任务明确报告零调用时显示真实 0；没有 Token 时不显示输入输出', () => {
   const html = render({ model_calls: 0, cache_hits: 0, input_chars: 0 });
   assert.match(html, /模型请求 0 次/);

@@ -503,7 +503,7 @@ export class OutreachService {
       });
       if (source.status === 'cancelled') {
         for (const delivery of this.deliveries(id, ['draft', 'queued', 'blocked'])) {
-          this.putDelivery({ ...delivery, status: 'cancelled', reason: '获客计划已关闭' });
+          this.putDelivery({ ...delivery, status: 'cancelled', reason: '获客自动首发已取消' });
           this.release(delivery.id);
         }
       }

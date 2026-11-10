@@ -15,14 +15,28 @@ function compile(path) {
         jsx: ts.JsxEmit.ReactJSX,
         esModuleInterop: true,
       },
+      transformers: {
+        before: [
+          (context) => {
+            const visit = (node) =>
+              ts.isMetaProperty(node) && node.keywordToken === ts.SyntaxKind.ImportKeyword
+                ? context.factory.createIdentifier('importMeta')
+                : ts.visitEachChild(node, visit, context);
+            return (source) => ts.visitNode(source, visit);
+          },
+        ],
+      },
     }).outputText;
-    compiledModules.set(path.href, new Function('require', 'module', 'exports', compiled));
+    compiledModules.set(
+      path.href,
+      new Function('require', 'module', 'exports', 'importMeta', compiled),
+    );
   }
   return compiledModules.get(path.href);
 }
 
 // Each loader owns its evaluated modules so test-specific imports stay isolated.
-export function createModuleLoader(resolveImport = () => undefined) {
+export function createModuleLoader(resolveImport = () => undefined, { env = { DEV: false } } = {}) {
   const cache = new Map();
   function load(path) {
     if (cache.has(path.href)) return cache.get(path.href).exports;
@@ -41,7 +55,7 @@ export function createModuleLoader(resolveImport = () => undefined) {
       }
       return normalRequire(specifier);
     };
-    compile(path)(require, module, module.exports);
+    compile(path)(require, module, module.exports, { url: path.href, env });
     return module.exports;
   }
   return load;

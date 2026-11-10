@@ -73,6 +73,7 @@ export interface AcquisitionJob {
   updatedAt?: string;
   scheduleId?: string;
   autoFirstTouchPaused?: boolean;
+  autoFirstTouchCancelled?: boolean;
   input: WorkflowInput & { target_count: number };
   id: string;
   status: 'running' | 'stopping' | 'paused' | 'completed' | 'partial';

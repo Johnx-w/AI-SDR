@@ -333,6 +333,8 @@ export function createApp({
         const allowed = new Set([
           'http://127.0.0.1:5174',
           'http://localhost:5174',
+          `http://127.0.0.1:${env.VITE_PORT || 5174}`,
+          `http://localhost:${env.VITE_PORT || 5174}`,
           `http://127.0.0.1:${env.PORT || 4311}`,
           `http://localhost:${env.PORT || 4311}`,
         ]);
@@ -754,6 +756,17 @@ export function createApp({
               response,
               200,
               reviewJob(manager.controlOutreach(suffix[0], (await readJson(request)).enabled)),
+            );
+          if (
+            suffix.length === 3 &&
+            suffix[1] === 'auto-first-touch' &&
+            suffix[2] === 'cancel' &&
+            request.method === 'POST'
+          )
+            return json(
+              response,
+              200,
+              reviewJob(manager.cancelOutreach(suffix[0], (await readJson(request)).confirmed)),
             );
           if (suffix.length === 3 && suffix[1] === 'reviews') {
             const job = manager.get(suffix[0]);
