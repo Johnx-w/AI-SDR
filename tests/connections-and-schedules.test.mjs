@@ -148,6 +148,30 @@ function harness(extra = {}) {
   };
 }
 
+test('发布维护不改计划或启动新轮次，解除后跳过错过时点且不补跑', () => {
+  let maintaining = true;
+  const h = harness({ isMaintaining: () => maintaining });
+  try {
+    const plan = h.schedules.create(
+      { name: '维护保留计划', input, timing },
+      'maintenance-schedule',
+    );
+    h.advance('2030-01-01T09:00:00+08:00');
+    h.schedules.tick();
+    assert.deepEqual(h.schedules.get(plan.id), plan);
+    assert.equal(h.jobs.list().length, 0);
+    h.advance('2030-01-01T09:02:00+08:00');
+    maintaining = false;
+    h.schedules.tick();
+    assert.equal(h.jobs.list().length, 0);
+    assert.equal(h.schedules.get(plan.id).status, 'enabled');
+    assert.equal(h.schedules.get(plan.id).nextRunAt, '2030-01-01T06:30:00.000Z');
+  } finally {
+    h.schedules.close();
+    h.jobs.close();
+  }
+});
+
 test('每周多选校验、排序，拒绝空选和非法星期', () => {
   const weekly = { ...timing, repeat: 'weekly', weekdays: [5, 1, 3] };
   assert.deepEqual(validateTiming(weekly).weekdays, [1, 3, 5]);

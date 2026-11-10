@@ -1,6 +1,7 @@
 import { recordFollowUpTask } from './outreach-follow-ups.mjs';
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { gzip } from 'node:zlib';
@@ -106,6 +107,9 @@ export function createApp({
   outreachServiceFactory,
   brandingOptions,
 } = {}) {
+  const isMaintaining = () =>
+    Boolean(env.RELEASE_MAINTENANCE_PATH && existsSync(env.RELEASE_MAINTENANCE_PATH));
+  let apiRequests = 0;
   const connections = new ApiConnections({ env, path: env.CONNECTIONS_PATH });
   let provider = createAcquisitionProvider({
     env: connections.environment(),
@@ -128,6 +132,7 @@ export function createApp({
     if (!leadLibrary) {
       const current = connections.environment();
       leadLibrary = new LeadLibrary({
+        isMaintaining,
         path: env.LEAD_LIBRARY_DB_PATH || env.BATCH_DB_PATH || ':memory:',
         scope: createHash('sha256')
           .update(
@@ -210,6 +215,7 @@ export function createApp({
   const productMirror = () =>
     new ProductKnowledgeFeishu({ env: connections.environment(), fetchImpl });
   const business = new CustomerBusinessApi({
+    isMaintaining,
     getEnv: () => connections.environment(),
     fetchImpl,
     knowledge,
@@ -227,6 +233,7 @@ export function createApp({
     (outbound ??= outreachServiceFactory
       ? outreachServiceFactory({ env })
       : new OutreachService({
+          isMaintaining,
           path: env.OUTREACH_DB_PATH || ':memory:',
           mailboxes: new OutreachMailboxes({ env }),
           loadLeads: async () =>
@@ -249,7 +256,7 @@ export function createApp({
   let operationalTimer;
   let operationalSync;
   const syncOperations = () => {
-    if (operationalSync) return;
+    if (isMaintaining() || operationalSync) return;
     const current = connections.environment();
     if (!current.FEISHU_APP_ID || !current.FEISHU_APP_SECRET || !current.FEISHU_APP_TOKEN) return;
     const service = outreach();
@@ -265,6 +272,7 @@ export function createApp({
       });
   };
   const wakeAutomaticOutreach = () => {
+    if (isMaintaining()) return;
     const service = outreach();
     service.syncAcquisition();
     service.start();
@@ -272,6 +280,7 @@ export function createApp({
   };
   const plans = () =>
     (schedules ??= new AcquisitionSchedules({
+      isMaintaining,
       path: env.SCHEDULE_DB_PATH || ':memory:',
       jobs,
       ready: () => provider.info.configured,
@@ -326,6 +335,7 @@ export function createApp({
     }
   };
   const server = createServer(async (request, response) => {
+    let admitted = false;
     try {
       const url = new URL(request.url, 'http://127.0.0.1');
       if (url.pathname.startsWith('/api/')) {
@@ -343,6 +353,43 @@ export function createApp({
           throw new ApiError(403, '不允许跨站调用');
         if (url.pathname === '/api/health' && request.method === 'GET')
           return json(response, 200, { ok: true });
+        if (url.pathname === '/api/v1/ops/maintenance' && request.method === 'GET') {
+          const pending = {
+            requests: apiRequests,
+            acquisition: Number(
+              Boolean(
+                batch?.busy ||
+                  batch?.resuming ||
+                  batch?.recovering ||
+                  batch?.list().some((job) => ['running', 'stopping'].includes(job.status)),
+              ),
+            ),
+            direct: running,
+            outreach: Number(Boolean(outbound?.running)) + (outbound?.preparing?.size || 0),
+            replies: outbound?.replies?.pending.size || 0,
+            mail: outbound?.conversations?.pending.size || 0,
+            business: business.active + (business.syncing || 0),
+            customers:
+              Number(Boolean(readingLeads)) +
+              Number(Boolean(leadLibrary?.refreshing)) +
+              Number(Boolean(provider.syncing)),
+            documents: productKnowledge?.documents.running.size || 0,
+            branding: brandingCache.pending.size,
+            mirrors: Number(Boolean(operationalSync)),
+          };
+          return json(response, 200, {
+            version: 1,
+            enabled: isMaintaining(),
+            quiet: Object.values(pending).every((value) => value === 0),
+            pending,
+          });
+        }
+        if (isMaintaining()) {
+          response.setHeader('Retry-After', '30');
+          throw new ApiError(503, '系统正在发布维护，请稍后重试');
+        }
+        apiRequests++;
+        admitted = true;
         if (url.pathname === '/api/v1/overview') {
           if (request.method !== 'GET') throw new ApiError(405, '总览仅支持读取');
           return json(
@@ -891,16 +938,28 @@ export function createApp({
       json(response, error.status || 500, {
         error: error.status ? error.message : '服务处理失败，请查看本地日志',
       });
+    } finally {
+      if (admitted) apiRequests--;
     }
   });
-  server.on('listening', () => {
+  let backgroundStarted = false;
+  let maintenanceTimer;
+  const startBackground = () => {
+    if (backgroundStarted || isMaintaining()) return;
+    backgroundStarted = true;
     plans().start();
     if (env.CUSTOMER_BUSINESS_DB_PATH || env.BATCH_DB_PATH) business.start();
     if (env.OUTREACH_DB_PATH || jobs().outreachJobs().length) outreach().start();
+  };
+  server.on('listening', () => {
+    startBackground();
+    maintenanceTimer = setInterval(startBackground, 1000);
+    maintenanceTimer.unref();
     operationalTimer = setInterval(syncOperations, 60000);
     operationalTimer.unref();
   });
   server.on('close', () => {
+    clearInterval(maintenanceTimer);
     clearInterval(operationalTimer);
     void brandingCache.close();
     if (outbound) void outbound.close();

@@ -18,6 +18,7 @@ export class AcquisitionSchedules {
     now = Date.now,
     scope = '',
     onOutreachChange = () => {},
+    isMaintaining = () => false,
   }) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
@@ -31,6 +32,7 @@ export class AcquisitionSchedules {
     this.now = now;
     this.scope = scope;
     this.onOutreachChange = onOutreachChange;
+    this.isMaintaining = isMaintaining;
   }
   list() {
     return this.db
@@ -155,6 +157,7 @@ export class AcquisitionSchedules {
     return plan;
   }
   tick() {
+    if (this.isMaintaining()) return;
     for (const plan of this.list()
       .filter((p) => p.status === 'enabled')
       .sort((a, b) => Date.parse(a.nextRunAt) - Date.parse(b.nextRunAt))) {

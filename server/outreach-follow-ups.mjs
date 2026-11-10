@@ -267,6 +267,7 @@ export class OutreachFollowUps {
   }
   async tick() {
     const s = this.service;
+    if (s.isMaintaining()) return;
     // Retry task projection without scanning mail content or resending a completed action.
     if (this.recordTask)
       for (const { data } of s.db
@@ -276,7 +277,7 @@ export class OutreachFollowUps {
         .all())
         await this.mirror(JSON.parse(data));
     for (const item of this.pending()) {
-      if (s.closed) return;
+      if (s.closed || s.isMaintaining()) return;
       const c = s.campaign(item.campaignId);
       if (!c.followUpEnabled || c.status === 'cancelled') {
         await this.mirror(
@@ -414,6 +415,7 @@ export class OutreachFollowUps {
             const changed = this.guard(current, this.detail(item));
             if (
               s.closed ||
+              s.isMaintaining() ||
               current.status !== 'sending' ||
               changed ||
               s.now() > dueTime(item) ||

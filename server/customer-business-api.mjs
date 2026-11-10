@@ -43,6 +43,7 @@ export class CustomerBusinessApi {
     syncCustomers,
     saveCustomerFields,
     communicationModel,
+    isMaintaining = () => false,
   }) {
     this.getEnv = getEnv;
     this.fetch = fetchImpl;
@@ -53,6 +54,7 @@ export class CustomerBusinessApi {
     this.syncCustomers = syncCustomers;
     this.saveCustomerFields = saveCustomerFields;
     this.communicationModel = communicationModel;
+    this.isMaintaining = isMaintaining;
     this.active = 0;
     this.current = null;
     this.syncTail = Promise.resolve();
@@ -120,7 +122,8 @@ export class CustomerBusinessApi {
   start() {
     if (this.timer) return;
     this.timer = setInterval(() => {
-      if (!this.syncing) void this.synchronize({ force: false }).catch(() => {});
+      if (!this.isMaintaining() && !this.syncing)
+        void this.synchronize({ force: false }).catch(() => {});
     }, 60000);
     this.timer.unref();
   }

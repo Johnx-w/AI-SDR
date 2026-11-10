@@ -24,6 +24,7 @@ const service = 'shadeflow.service';
 const base = 'http://127.0.0.1:14311';
 const dropIn = '/etc/systemd/system/shadeflow.service.d/release.conf';
 const dropInText = '[Service]\nWorkingDirectory=/srv/shadeflow/current\n';
+const maintenancePath = join(root, 'app', '.data', 'release-maintenance.json');
 const exec = (command, args, options = {}) =>
   execFileSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...options });
 
@@ -149,6 +150,65 @@ async function checkQuiet() {
   assertQuiet({ ...jobs, ...schedules, ...outreach });
 }
 
+export async function withMaintenance({
+  enter,
+  leave,
+  status,
+  deploy,
+  verifyCurrent,
+  now = Date.now,
+  wait = delay,
+}) {
+  await enter();
+  let resume = false;
+  try {
+    const deadline = now() + 10 * 60_000;
+    while (true) {
+      const state = await status();
+      assert(
+        state.version === 1 &&
+          state.enabled === true &&
+          typeof state.quiet === 'boolean' &&
+          state.pending &&
+          Object.values(state.pending).every((value) => Number.isSafeInteger(value) && value >= 0),
+        '应用未提供有效的维护状态，拒绝停止服务',
+      );
+      assert.equal(
+        state.quiet,
+        Object.values(state.pending).every((value) => value === 0),
+        '维护在途状态不一致',
+      );
+      if (state.quiet) break;
+      assert(now() < deadline, '等待在途任务超过10分钟，保留当前版本并解除维护');
+      await wait(1000);
+    }
+    const result = await deploy();
+    resume = true;
+    return result;
+  } catch (error) {
+    try {
+      await verifyCurrent();
+      resume = true;
+    } catch {
+      console.error('当前版本未通过验收，保留维护标记，请检查服务日志后再解除维护');
+    }
+    throw error;
+  } finally {
+    if (resume) await leave();
+  }
+}
+
+async function currentMain(revision) {
+  const response = await fetch('https://api.github.com/repos/Johnx-w/AI-SDR/git/ref/heads/main', {
+    headers: { 'User-Agent': 'AI-SDR-CD', Accept: 'application/vnd.github+json' },
+    signal: AbortSignal.timeout(10000),
+  });
+  assert(response.ok, '无法核对GitHub最新main，停止发布');
+  const ref = await response.json();
+  assert(/^[a-f0-9]{40}$/.test(ref.object?.sha), 'GitHub main提交号无效');
+  return ref.object.sha === revision;
+}
+
 async function verify(candidate) {
   let lastError;
   for (let attempt = 0; attempt < 20; attempt++) {
@@ -250,7 +310,11 @@ function checkLayout() {
 async function main([mode, revision, digest, upload]) {
   checkLayout();
   if (mode === 'check') {
-    await checkQuiet();
+    const maintenance = await getJson('/api/v1/ops/maintenance');
+    assert(
+      maintenance.version === 1 && maintenance.enabled === false,
+      '应用不支持维护或已有发布维护，请先核对',
+    );
     const candidate = existsSync(join(root, 'current'))
       ? realpathSync(join(root, 'current'))
       : join(root, 'app');
@@ -265,13 +329,14 @@ async function main([mode, revision, digest, upload]) {
     );
     return;
   }
-  assert(['deploy', 'rollback'].includes(mode), '无效发布操作');
+  assert(['deploy', 'deploy-cd', 'bootstrap', 'rollback'].includes(mode), '无效发布操作');
   const lock = join(root, '.release-lock');
   mkdirSync(lock, { mode: 0o700 });
   writeFileSync(join(lock, 'pid'), String(process.pid));
   try {
     let candidate;
-    if (mode === 'deploy') {
+    let offlineRollback = false;
+    if (mode !== 'rollback') {
       assert(/^[a-f0-9]{40}$/.test(revision) && /^[a-f0-9]{64}$/.test(digest), '无效版本或校验值');
       assert(/^[a-f0-9-]+\.tar$/.test(upload), '无效上传文件名');
       const archive = join(root, 'incoming', upload);
@@ -319,7 +384,7 @@ async function main([mode, revision, digest, upload]) {
         console.log('该提交已在云端正常运行，无需重复切换');
         return;
       }
-      await checkQuiet();
+      if (mode === 'bootstrap') await checkQuiet();
     } else {
       candidate = JSON.parse(readFileSync(join(root, 'release-state.json'), 'utf8')).previous;
       assert(candidate, '尚无可回退版本');
@@ -327,17 +392,65 @@ async function main([mode, revision, digest, upload]) {
       try {
         healthy = (await getJson('/api/health')).ok === true;
       } catch {}
-      if (healthy) await checkQuiet();
+      if (!healthy) {
+        assert.equal(
+          exec('systemctl', ['show', service, '-p', 'MainPID', '--value']).trim(),
+          '0',
+          '服务仍有进程但健康接口无响应，请先核对在途任务',
+        );
+        offlineRollback = true;
+      }
     }
-    const state = await activateRelease({
-      directory: root,
-      candidate,
-      stop: () => exec('systemctl', ['stop', service]),
-      backup: snapshot,
-      configure,
-      start: () => exec('systemctl', ['start', service]),
-      verify,
-    });
+    const activate = () =>
+      activateRelease({
+        directory: root,
+        candidate,
+        stop: () => exec('systemctl', ['stop', service]),
+        backup: snapshot,
+        configure,
+        start: () => exec('systemctl', ['start', service]),
+        verify,
+      });
+    const previous = existsSync(join(root, 'current'))
+      ? realpathSync(join(root, 'current'))
+      : join(root, 'app');
+    let state;
+    if (mode === 'bootstrap' || offlineRollback) {
+      assert(!existsSync(maintenancePath), '已存在维护标记，拒绝首次安装');
+      writeFileSync(
+        maintenancePath,
+        JSON.stringify({ at: new Date().toISOString(), bootstrap: true }),
+        { flag: 'wx', mode: 0o644 },
+      );
+      try {
+        state = await activate();
+      } finally {
+        await verify(
+          existsSync(join(root, 'current')) ? realpathSync(join(root, 'current')) : previous,
+        );
+        rmSync(maintenancePath);
+      }
+    } else {
+      if (mode === 'deploy-cd' && !(await currentMain(revision))) {
+        console.log('跳过已过时的main提交：' + revision);
+        return;
+      }
+      state = await withMaintenance({
+        enter: () =>
+          writeFileSync(maintenancePath, JSON.stringify({ at: new Date().toISOString() }), {
+            flag: 'wx',
+            mode: 0o644,
+          }),
+        leave: () => rmSync(maintenancePath),
+        status: () => getJson('/api/v1/ops/maintenance'),
+        deploy: async () => {
+          if (mode === 'deploy-cd' && !(await currentMain(revision)))
+            return { skipped: true, reason: 'main已更新' };
+          return activate();
+        },
+        verifyCurrent: () => verify(previous),
+      });
+    }
     console.log(JSON.stringify(state));
   } finally {
     rmSync(lock, { recursive: true });

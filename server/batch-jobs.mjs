@@ -91,8 +91,16 @@ export class BatchJobs {
           }
         this.save(job);
       }
-    if (this.schedule && this.provider === 'native')
-      setImmediate(() => this.resumeInterrupted().catch(() => {}));
+    if (this.schedule && this.provider === 'native') {
+      this.recovering = true;
+      setImmediate(() =>
+        this.resumeInterrupted()
+          .catch(() => {})
+          .finally(() => {
+            this.recovering = false;
+          }),
+      );
+    }
   }
   save(job, { outreachControl = false } = {}) {
     this.outreachSnapshot = null;

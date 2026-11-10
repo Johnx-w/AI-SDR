@@ -1204,6 +1204,35 @@ test('SMTP连接准备期间资料变化，最终提交前阻止旧版本，结�
   assert.equal(h.deliveries.filter((row) => row.to === h.original.to).length, 0);
 });
 
+test('SMTP提交前进入发布维护，保留原队列与计划，解除后同一封正常发送', async (t) => {
+  const h = await materialHarness(t);
+  const entered = deferred(),
+    release = deferred();
+  let maintaining = false;
+  h.service.isMaintaining = () => maintaining;
+  h.service.mailboxes.send = async (id, message, { beforeSend } = {}) => {
+    entered.resolve();
+    await release.promise;
+    beforeSend?.();
+    h.deliveries.push({ mailboxId: id, ...message });
+    return { accepted: [message.to], rejected: [], messageId: message.messageId };
+  };
+  const tick = h.service.tick();
+  await entered.promise;
+  maintaining = true;
+  release.resolve();
+  await tick;
+  assert.equal(h.service.delivery(h.original.id).status, 'queued');
+  assert.equal(h.service.campaign(h.campaign.id).status, 'active');
+  assert.equal(h.deliveries.filter((row) => row.to === h.original.to).length, 0);
+  await h.service.tick();
+  assert.equal(h.service.delivery(h.original.id).status, 'queued');
+  maintaining = false;
+  await h.service.tick();
+  assert.equal(h.service.delivery(h.original.id).status, 'accepted');
+  assert.equal(h.deliveries.filter((row) => row.to === h.original.to).length, 1);
+});
+
 test('资料重做失败保留原产品与邮箱，等待后重试不会结束计划或按余量换号', async (t) => {
   const h = await materialHarness(t);
   const generate = h.service.generator.generate;

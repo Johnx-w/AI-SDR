@@ -27,7 +27,7 @@ npm start
 
 UI 测试的 TypeScript 加载器默认使用 `DEV: false`，支持 `import.meta.env` 与模块 URL；验证开发环境分支时可通过 `createModuleLoader(resolveImport, { env: { DEV: true } })` 显式注入环境，不修改页面源码的环境判断。
 
-已配置 SSH 别名 `ai-sdr` 并登录 GitHub CLI（`gh`）的发布电脑可在提交代码后运行 `npm run release`：在独立临时目录检查并构建当前提交，推送当前分支到 GitHub，等待同一提交的 Windows 检查和 Linux 发布测试全部通过后再部署云端。CI 未通过或查询失败时停止发布。`npm run release:check` 检查连接与任务状态，`npm run release:rollback` 回退上一代码版本。云端数据和配置保留，发布失败自动恢复原代码；详见[发布与回退](docs/architecture.md#一键发布与回退)。
+自动 CD 启用后，推送 main 的同一提交通过 Windows／Linux CI 即全天自动发布。先准备版本，进入维护并等待在途任务最多 10 分钟，再备份、切换和验收；超时解除维护，启动失败回退代码并保留数据。只上传不上线时推送功能分支。首次启用、凭据及维护规则见[自动 CD](docs/architecture.md#自动-cd)。`npm run release` 是停用 CD 后的手工备用入口，`release:check` 只读检查维护能力及健康，`release:rollback` 恢复上一代码版本。
 
 ## 当前能力
 

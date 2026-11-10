@@ -130,6 +130,7 @@ export class LeadLibrary {
     idleAfterMs = 120000,
     idleIntervalMs = 300000,
     monotonicNow = () => performance.now(),
+    isMaintaining = () => false,
   }) {
     if (typeof readLeads !== 'function') throw new TypeError('readLeads must be a function');
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
@@ -144,6 +145,7 @@ export class LeadLibrary {
     this.idleIntervalMs = idleIntervalMs;
     this.lastActivityAt = now();
     this.monotonicNow = monotonicNow;
+    this.isMaintaining = isMaintaining;
     this.error = '';
     this.lastAttemptAt = null;
     this.pending = null;
@@ -595,7 +597,7 @@ export class LeadLibrary {
   }
 
   async tick() {
-    if (this.closed || !this.meta || this.pending) return false;
+    if (this.isMaintaining() || this.closed || !this.meta || this.pending) return false;
     if (this.error && this.lastAttemptAt !== null && this.now() - this.lastAttemptAt < this.retryMs)
       return false;
     const since = Math.max(this.meta.refreshed_at, this.lastAttemptAt ?? 0);

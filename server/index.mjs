@@ -8,6 +8,7 @@ const app = createApp({
     CONNECTIONS_PATH: process.env.CONNECTIONS_PATH || '.data/api-connections.json',
     SCHEDULE_DB_PATH: process.env.SCHEDULE_DB_PATH || '.data/acquisition-schedules.sqlite',
     OUTREACH_DB_PATH: process.env.OUTREACH_DB_PATH || '.data/outreach/outreach.sqlite',
+    RELEASE_MAINTENANCE_PATH: '.data/release-maintenance.json',
   },
 });
 app.listen(port, '127.0.0.1', () => console.log(`ShadeFlow API: http://127.0.0.1:${port}`));

@@ -67,6 +67,7 @@ export class OutreachService {
     now = Date.now,
     tickMs = 2000,
     acquisitionSources = () => [],
+    isMaintaining = () => false,
   } = {}) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
@@ -96,6 +97,7 @@ export class OutreachService {
       now,
       tickMs,
       acquisitionSources,
+      isMaintaining,
     });
     this.followUps = new OutreachFollowUps(this, recordFollowUp);
     this.preparing = new Map();
@@ -1157,6 +1159,7 @@ export class OutreachService {
       : current >= w.start || current < w.end;
   }
   canDispatch(c, d, m) {
+    if (this.isMaintaining()) return false;
     if (!this.acquisitionAllowed(c)) return false;
     if (!m || m.paused || m.smtpStatus !== 'connected' || !m.configured) return false;
     if (c.mode === 'internal_test') return true;
@@ -1184,7 +1187,7 @@ export class OutreachService {
     this.timer.unref?.();
   }
   tick() {
-    if (this.closed) return Promise.resolve();
+    if (this.closed || this.isMaintaining()) return Promise.resolve();
     if (this.running) return this.running;
     this.running = this.runTick()
       .catch(() => {})
@@ -1199,12 +1202,13 @@ export class OutreachService {
       this.lastMailboxSync = this.now();
       await this.conversations.sync().catch(() => {});
     }
+    if (this.isMaintaining()) return;
     this.syncAcquisition();
     this.refreshProductMaterials();
     const campaigns = this.campaigns().filter((c) => c.status === 'active');
     const used = new Set();
     for (const summary of campaigns) {
-      if (this.closed) break;
+      if (this.closed || this.isMaintaining()) break;
       const c = this.campaign(summary.id);
       if (c.status !== 'active') continue;
       if (c.mode === 'production' && c.scope !== this.getScope()) {
@@ -1222,7 +1226,7 @@ export class OutreachService {
         used.add(d.mailboxId);
         await this.dispatch(c, d, m);
       }
-      if (this.closed) break;
+      if (this.closed || this.isMaintaining()) break;
       const current = this.campaign(c.id);
       if (current.status !== 'active') continue;
       const rows = this.db
@@ -1388,6 +1392,10 @@ export class OutreachService {
         },
         {
           beforeSend: () => {
+            if (this.isMaintaining())
+              throw Object.assign(fail(503, '发布维护，邮件保留在队列中'), {
+                code: 'OUTREACH_MAINTENANCE',
+              });
             const campaign = this.campaign(c.id);
             const reason =
               (c.mode === 'production' && campaign.scope !== this.getScope()
@@ -1448,6 +1456,10 @@ export class OutreachService {
         }
       }
     } catch (error) {
+      if (error.code === 'OUTREACH_MAINTENANCE') {
+        this.putDelivery(d);
+        return;
+      }
       if (error.code === 'OUTREACH_PRE_SEND_BLOCKED') {
         this.putDelivery({
           ...d,

@@ -16,6 +16,8 @@
 | 飞书字段与数据归属                   | [飞书镜像填写规范](new-feishu-bitable-filling-spec.md)  | 正式 Base 与测试环境分开；前三条模板仍为运行代码读取源，保持停用 |
 | 自动首发检查范围                     | [测试用例与验收](acquisition-auto-first-touch-tests.md) | 当前业务预期和离线复跑入口；历史执行次数已归档                   |
 
+自动 CD 的触发、维护等待、凭据与首次启用见[架构与运行](architecture.md#自动-cd)；仓库实现、GitHub 配置和云端实际启用状态分别核验。
+
 ## 术语、开发约定与规则资产
 
 | 内容                   | 入口                                                         | 用法                                         |
