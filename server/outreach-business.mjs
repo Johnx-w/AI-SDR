@@ -186,7 +186,6 @@ export async function recordOutreachInBusiness({ store, delivery } = {}) {
     store.put('conversations', conversation);
     store.put('messages', message);
     store.putContext({ ...context, fixedEmail: account, updatedAt: now });
-    store.pauseBlockedTasks(customerId);
     store.db.exec('COMMIT');
     return { message, conversation, created: true };
   } catch (error) {

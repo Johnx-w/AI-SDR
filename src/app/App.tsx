@@ -120,10 +120,7 @@ export function App() {
     };
   }, []);
   const current = nav.find((item) => item.path === location.pathname);
-  const reminderCount =
-    (reminders?.metrics.dueTasks || 0) +
-    (reminders?.work.paused || 0) +
-    (reminders?.products.draft || 0);
+  const reminderCount = (reminders?.metrics.dueTasks || 0) + (reminders?.products.draft || 0);
   return (
     <div className="app-shell">
       {mobile && (

@@ -424,7 +424,7 @@ async function twoDemands(f) {
   return { conversation, source, first, second, sent };
 }
 
-test('一封统一回复支持两项需求，客户对其中一项的回复只暂停相关跟进', async () => {
+test('一封统一回复支持两项需求，客户对其中一项的回复只阻止相关跟进的执行', async () => {
   const f = fixture();
   try {
     const { conversation, first, second, sent } = await twoDemands(f);
@@ -437,24 +437,22 @@ test('一封统一回复支持两项需求，客户对其中一项的回复只�
       demandIds: [first.id],
     });
     const paused = f.business.get('tasks', taskA.id);
-    assert.equal(paused.status, 'paused');
-    assert(paused.audit.at(-1).reasons.some((reason) => reason.includes('已回复')));
+    assert.equal(paused.status, 'pending');
+    assert(
+      (await f.business.preflightTask(paused.id)).reasons.some((reason) =>
+        reason.includes('已回复'),
+      ),
+    );
     assert.equal(f.business.get('tasks', taskB.id).status, 'pending');
     assert.equal((await f.business.preflightTask(taskB.id)).ready, true);
-    await assert.rejects(
-      () => f.business.actTask(paused.id, { action: 'resume', expectedVersion: paused.version }),
-      (error) => error.status === 409,
-    );
+    assert.equal((await f.business.preflightTask(paused.id)).ready, false);
     const adjusted = await f.business.saveTask({
       ...paused,
       basisMessageId: reply.id,
       dueAt: f.due(),
     });
-    const resumed = await f.business.actTask(adjusted.id, {
-      action: 'resume',
-      expectedVersion: adjusted.version,
-      notes: '已处理新消息并安排下一步',
-    });
+    const resumed = adjusted;
+    assert.equal((await f.business.preflightTask(resumed.id)).ready, true);
     assert.equal(resumed.status, 'pending');
     assert.equal((await f.business.preflightTask(resumed.id)).automaticSend, false);
   } finally {
@@ -462,7 +460,7 @@ test('一封统一回复支持两项需求，客户对其中一项的回复只�
   }
 });
 
-test('自动回复不会当作客户推进，未分类的新来信保守暂停会话内跟进', async () => {
+test('自动回复不会当作客户推进，未分类的新来信在核验中阻止会话内跟进', async () => {
   const f = fixture();
   try {
     const { conversation, first, sent } = await twoDemands(f);
@@ -473,7 +471,8 @@ test('自动回复不会当作客户推进，未分类的新来信保守暂停�
     assert.equal((await f.business.preflightTask(task.id)).ready, true);
     f.advance();
     await f.message(conversation, { body: 'We have a new question.' });
-    assert.equal(f.business.get('tasks', task.id).status, 'paused');
+    assert.equal(f.business.get('tasks', task.id).status, 'pending');
+    assert.equal((await f.business.preflightTask(task.id)).ready, false);
   } finally {
     f.business.close();
   }
@@ -501,11 +500,14 @@ test('客户全局拒绝阻止其他会话与渠道的新旧任务，另一客�
     f.advance();
     await f.message(email, { classification: 'unsubscribe', body: 'Do not contact us again.' });
     assert.equal(f.business.context(email.customerId).doNotContact, true);
-    assert.equal(f.business.get('tasks', emailTask.id).status, 'paused');
-    assert.equal(f.business.get('tasks', whatsappTask.id).status, 'paused');
+    assert.equal(f.business.get('tasks', emailTask.id).status, 'pending');
+    assert.equal((await f.business.preflightTask(emailTask.id)).ready, false);
+    assert.equal(f.business.get('tasks', whatsappTask.id).status, 'pending');
+    assert.equal((await f.business.preflightTask(whatsappTask.id)).ready, false);
     assert.equal(f.business.get('tasks', otherTask.id).status, 'pending');
     const future = await f.task(whatsapp, { title: '后续 WhatsApp 联系' });
-    assert.equal(future.status, 'paused');
+    assert.equal(future.status, 'pending');
+    assert.equal((await f.business.preflightTask(future.id)).ready, false);
     assert(
       (await f.business.preflightTask(future.id)).reasons.some((reason) =>
         reason.includes('拒绝联系'),
@@ -535,7 +537,8 @@ test('仅某项需求拒绝联系时保留其他独立需求的接待', async ()
       demandIds: [first.id],
     });
     assert.equal(f.business.context(conversation.customerId).doNotContact, false);
-    assert.equal(f.business.get('tasks', firstTask.id).status, 'paused');
+    assert.equal(f.business.get('tasks', firstTask.id).status, 'pending');
+    assert.equal((await f.business.preflightTask(firstTask.id)).ready, false);
     assert.equal(f.business.get('tasks', secondTask.id).status, 'pending');
     assert.equal((await f.business.preflightTask(secondTask.id)).ready, true);
   } finally {
@@ -558,7 +561,8 @@ test('硬退信只阻止对应渠道联系入口，投诉交由整段会话人�
       from: 'mailer-daemon@provider.test',
       body: 'The original recipient address does not exist.',
     });
-    assert.equal(f.business.get('tasks', firstTask.id).status, 'paused');
+    assert.equal(f.business.get('tasks', firstTask.id).status, 'pending');
+    assert.equal((await f.business.preflightTask(firstTask.id)).ready, false);
     assert.equal(f.business.get('tasks', secondTask.id).status, 'pending');
     f.advance();
     await f.message(second, {
@@ -567,7 +571,8 @@ test('硬退信只阻止对应渠道联系入口，投诉交由整段会话人�
       body: 'We require a manager to address this serious complaint.',
     });
     assert.equal(f.business.get('conversations', second.id).ownership, 'human');
-    assert.equal(f.business.get('tasks', secondTask.id).status, 'paused');
+    assert.equal(f.business.get('tasks', secondTask.id).status, 'pending');
+    assert.equal((await f.business.preflightTask(secondTask.id)).ready, false);
     assert.equal((await f.business.preflightTask(secondTask.id)).ready, false);
   } finally {
     f.business.close();
@@ -620,17 +625,17 @@ test('执行前核对 T5 审核、版本、生效日期及 T2 人工开发状态
     f.customers.get('customer-a').fields['开发状态'] = '待开发';
     demand = await f.business.saveDemand({ ...demand, ownership: 'human' });
     task = f.business.get('tasks', task.id);
-    assert.equal(task.status, 'paused');
+    assert.equal(task.status, 'pending');
+    assert.equal((await f.business.preflightTask(task.id)).ready, false);
     demand = await f.business.saveDemand({ ...demand, ownership: 'auto' });
-    assert.equal(f.business.get('tasks', task.id).status, 'paused');
-    const resumed = await f.business.actTask(task.id, {
-      action: 'resume',
-      expectedVersion: task.version,
-    });
+    assert.equal(f.business.get('tasks', task.id).status, 'pending');
+    const resumed = f.business.get('tasks', task.id);
+    assert.equal((await f.business.preflightTask(resumed.id)).ready, true);
     assert.equal(resumed.status, 'pending');
     const currentConversation = f.business.get('conversations', conversation.id);
     await f.business.saveConversation({ ...currentConversation, status: 'closed' });
-    assert.equal(f.business.get('tasks', task.id).status, 'paused');
+    assert.equal(f.business.get('tasks', task.id).status, 'pending');
+    assert.equal((await f.business.preflightTask(task.id)).ready, false);
   } finally {
     f.business.close();
   }
@@ -821,7 +826,8 @@ test('人工接管后仍可安排人工提醒，系统计划暂停且不会自�
     assert.equal(manual.status, 'pending');
     assert.equal((await f.business.preflightTask(manual.id)).ready, true);
     const automatic = await f.task(conversation, { executionMode: 'automatic' });
-    assert.equal(automatic.status, 'paused');
+    assert.equal(automatic.status, 'pending');
+    assert.equal((await f.business.preflightTask(automatic.id)).ready, false);
     const check = await f.business.preflightTask(automatic.id);
     assert.equal(check.ready, false);
     assert(check.reasons.some((reason) => reason.includes('人工接管')));

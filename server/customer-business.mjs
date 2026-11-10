@@ -6,7 +6,12 @@ import { DatabaseSync } from 'node:sqlite';
 const kinds = { conversations: 'conv_', messages: 'msg_', demands: 'dem_', tasks: 'task_' };
 const channels = ['email', 'whatsapp', 'form', 'phone', 'other'];
 const ownerships = ['auto', 'human'];
-const communicationKinds = new Set(['first_contact', 'clarify_specs', 'quote_followup']);
+const communicationKinds = new Set([
+  'follow_up',
+  'first_contact',
+  'clarify_specs',
+  'quote_followup',
+]);
 const terminalStages = new Set(['won', 'lost', 'closed']);
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const text = (value, name, maximum = 500, required = false) => {
@@ -384,7 +389,6 @@ export class CustomerBusiness {
         )
           throw fail(409, '客户已经绑定固定邮箱，请沿用 ' + context.fixedEmail);
         if (!context.updatedAt) this.putContext({ ...context, updatedAt: record.updatedAt });
-        this.pauseBlockedTasks(record.customerId);
       },
     );
   }
@@ -614,27 +618,38 @@ export class CustomerBusiness {
           version: source.version + 1,
           updatedAt: record.updatedAt,
         });
-      this.pauseBlockedTasks(record.customerId);
     });
   }
   async normalizeTask(value, prior) {
     const customerId = text(value.customerId, '客户编号', 180, true);
     await this.actualCustomer(customerId);
     if (prior && prior.customerId !== customerId) throw fail(409, '任务不能更换所属企业');
-    const conversationId = text(value.conversationId, '会话编号', 180);
-    if (prior?.conversationId && prior.conversationId !== conversationId)
-      throw fail(409, '已有会话的任务不能转移到其他会话');
+    const selectedMessages = ids(value.messageIds, '关联消息').map((id) =>
+      this.required('messages', id, '沟通记录'),
+    );
+    const conversations = [...new Set(selectedMessages.map((message) => message.conversationId))];
+    const conversationId =
+      text(value.conversationId, '会话编号', 180) ||
+      (conversations.length === 1 ? conversations[0] : '');
     const conversation = conversationId
       ? this.required('conversations', conversationId, '会话')
       : null;
     if (conversation) this.sameCustomer(conversation, customerId, '会话');
     const kind = choice(
       value.kind,
-      ['first_contact', 'clarify_specs', 'quote_followup', 'sample', 'manual_review', 'other'],
-      'other',
+      [
+        'follow_up',
+        'first_contact',
+        'clarify_specs',
+        'quote_followup',
+        'sample',
+        'manual_review',
+        'other',
+      ],
+      'follow_up',
       '任务类型',
     );
-    if (communicationKinds.has(kind) && kind !== 'first_contact' && !conversation)
+    if (['clarify_specs', 'quote_followup'].includes(kind) && !conversation)
       throw fail(400, '后续沟通任务需要关联会话');
     const demandIds = ids(value.demandIds, '关联需求');
     const linkedDemands = demandIds.map((id) => this.required('demands', id, '需求'));
@@ -647,7 +662,7 @@ export class CustomerBusiness {
     for (const id of messageIds) {
       const message = this.required('messages', id, '沟通记录');
       this.sameCustomer(message, customerId, '沟通记录');
-      if (!conversationId || message.conversationId !== conversationId)
+      if (conversationId && message.conversationId !== conversationId)
         throw fail(409, '任务消息必须属于所选会话');
     }
     let basisMessageId = text(value.basisMessageId, '跟进依据消息', 180);
@@ -665,15 +680,22 @@ export class CustomerBusiness {
     }
     const status = choice(
       value.status,
-      ['pending', 'paused', 'completed', 'cancelled'],
+      ['pending', 'completed', 'skipped', 'cancelled'],
       prior?.status || 'pending',
       '任务状态',
     );
-    if ((!prior && !['pending', 'paused'].includes(status)) || (prior && status !== prior.status))
-      throw fail(409, '请通过任务完成、暂停、恢复或取消操作更改状态');
-    if (prior && ['completed', 'cancelled'].includes(prior.status))
-      throw fail(409, '已完成或取消的任务保留执行记录，不能覆盖');
-    const channel = choice(value.channel, channels, conversation?.channel || 'email', '任务渠道');
+    if ((!prior && status !== 'pending') || (prior && status !== prior.status))
+      throw fail(409, '请通过完成、跳过或终止操作更改任务状态');
+    if (prior && ['completed', 'skipped', 'cancelled'].includes(prior.status))
+      throw fail(409, '已完成、跳过或终止的任务保留执行记录，不能覆盖');
+    const channel = choice(
+      value.channel,
+      ['email', 'whatsapp', 'form', 'phone'],
+      conversation?.channel || 'email',
+      '任务类型',
+    );
+    if (selectedMessages.some((message) => message.channel !== channel))
+      throw fail(409, '关联沟通记录与任务类型不一致');
     if (conversation && communicationKinds.has(kind) && conversation.channel !== channel)
       throw fail(409, '沟通任务渠道与会话不一致');
     const productIds = [
@@ -690,14 +712,21 @@ export class CustomerBusiness {
       messageIds,
       productIds,
       productVersions: products.productVersions,
-      title: text(value.title, '下一步行动', 240, true),
+      title:
+        text(value.title, '下一步行动', 240) ||
+        text(value.notes, '任务说明', 3000).slice(0, 240) ||
+        { email: '邮件触达', whatsapp: 'WhatsApp触达', form: '网站留言', phone: '人工电话外呼' }[
+          channel
+        ],
       kind,
       executionMode: choice(value.executionMode, ['manual', 'automatic'], 'manual', '执行方式'),
       channel,
       dueAt: date(value.dueAt, '执行时间'),
       status,
       owner: text(value.owner, '负责人', 120),
-      notes: text(value.notes, '任务备注', 3000),
+      ownerIds: ids(value.ownerIds, '负责业务员'),
+      templateIds: ids(value.templateIds, '使用模板'),
+      notes: text(value.notes, '任务说明', 3000),
       basisMessageId,
       audit: prior?.audit || [],
       completedAt: prior?.completedAt || '',
@@ -705,9 +734,7 @@ export class CustomerBusiness {
     };
   }
   saveTask(value, options = {}) {
-    return this.save('tasks', value, options, this.normalizeTask, function (record) {
-      this.pauseBlockedTasks(record.customerId);
-    });
+    return this.save('tasks', value, options, this.normalizeTask);
   }
   taskIncludes(task, message) {
     if (message.customerId !== task.customerId) return false;
@@ -806,26 +833,6 @@ export class CustomerBusiness {
       reasons.push('客户已有真实沟通，请改为对应的后续行动');
     return [...new Set(reasons)];
   }
-  pauseBlockedTasks(customerId) {
-    for (const task of this.all('tasks').filter(
-      (record) =>
-        record.customerId === customerId &&
-        record.status === 'pending' &&
-        communicationKinds.has(record.kind),
-    )) {
-      const reasons = this.localReasons(task);
-      if (reasons.length) {
-        const now = this.timestamp();
-        this.put('tasks', {
-          ...task,
-          status: 'paused',
-          version: task.version + 1,
-          updatedAt: now,
-          audit: [...task.audit, { action: 'auto_pause', at: now, reasons }],
-        });
-      }
-    }
-  }
   applyIncoming(message) {
     if (message.classification === 'unsubscribe' && !message.demandIds.length)
       this.putContext({
@@ -847,16 +854,10 @@ export class CustomerBusiness {
         ],
       });
     }
-    if (
-      isActualReply(message) ||
-      ['unsubscribe', 'hard_bounce', 'complaint'].includes(message.classification)
-    )
-      this.pauseBlockedTasks(message.customerId);
   }
-  async checkTask(task, { resuming = false } = {}) {
+  async checkTask(task) {
     const reasons = this.localReasons(task);
-    if (task.status !== 'pending' && !(resuming && task.status === 'paused'))
-      reasons.unshift('任务当前状态为 ' + task.status);
+    if (task.status !== 'pending') reasons.unshift('任务当前状态为 ' + task.status);
     let customer;
     try {
       customer = await this.actualCustomer(task.customerId);
@@ -922,9 +923,9 @@ export class CustomerBusiness {
     await this.actualCustomer(task.customerId);
     if (!Number.isInteger(expectedVersion) || expectedVersion !== task.version)
       throw fail(409, '任务已更新，请刷新后再操作');
-    if (!['complete', 'pause', 'resume', 'cancel'].includes(action))
-      throw fail(400, '任务操作不正确');
-    if (['completed', 'cancelled'].includes(task.status)) throw fail(409, '任务已经完成或取消');
+    if (!['complete', 'skip', 'cancel'].includes(action)) throw fail(400, '任务操作不正确');
+    if (['completed', 'skipped', 'cancelled'].includes(task.status))
+      throw fail(409, '任务已经完成、跳过或终止');
     const actionNotes = text(
       notes,
       '执行说明',
@@ -938,8 +939,12 @@ export class CustomerBusiness {
       if (
         (task.conversationId && result.conversationId !== task.conversationId) ||
         result.channel !== task.channel ||
-        result.direction !== 'outbound' ||
-        result.deliveryStatus !== 'sent' ||
+        !(
+          (result.direction === 'outbound' && result.deliveryStatus === 'sent') ||
+          (task.channel === 'phone' &&
+            result.direction === 'note' &&
+            result.deliveryStatus === 'recorded')
+        ) ||
         !result.actualConfirmed ||
         Date.parse(result.occurredAt) < Date.parse(task.createdAt) ||
         !task.demandIds.every((demandId) => result.demandIds.includes(demandId))
@@ -949,26 +954,14 @@ export class CustomerBusiness {
           '完成沟通任务需要同一客户、会话及相关需求的实际已发送消息，不能用草稿、失败或结果未知消息证明',
         );
     }
-    if (action === 'pause' && task.status !== 'pending') throw fail(409, '只有待执行任务可以暂停');
-    if (action === 'resume') {
-      if (task.status !== 'paused') throw fail(409, '只有暂停任务可以恢复');
-      const check = await this.checkTask(task, { resuming: true });
-      if (!check.ready) throw fail(409, check.reasons.join('；'));
-    }
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const current = this.required('tasks', id, '跟进任务');
       if (current.version !== expectedVersion) throw fail(409, '任务已更新，请刷新后再操作');
-      if (action === 'resume') {
-        const reasons = this.localReasons(current);
-        if (reasons.length) throw fail(409, reasons.join('；'));
-      }
       const now = this.timestamp();
       const record = {
         ...current,
-        status: { complete: 'completed', pause: 'paused', resume: 'pending', cancel: 'cancelled' }[
-          action
-        ],
+        status: { complete: 'completed', skip: 'skipped', cancel: 'cancelled' }[action],
         conversationId: current.conversationId || result?.conversationId || '',
         version: current.version + 1,
         updatedAt: now,

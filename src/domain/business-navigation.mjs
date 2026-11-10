@@ -12,7 +12,7 @@ const states = {
     'lost',
     'closed',
   ],
-  tasks: ['pending', 'paused', 'completed', 'cancelled'],
+  tasks: ['pending', 'completed', 'skipped', 'cancelled'],
   messages: ['inbound', 'outbound', 'note'],
 };
 
@@ -20,7 +20,7 @@ export function businessNavigation(params, now = Date.now()) {
   const tab = Object.hasOwn(states, params.get('tab')) ? params.get('tab') : 'demands';
   const state = states[tab].includes(params.get('state')) ? params.get('state') : 'all';
   const bucket =
-    tab === 'tasks' && ['overdue', 'today', 'paused', 'due'].includes(params.get('bucket'))
+    tab === 'tasks' && ['overdue', 'today', 'due'].includes(params.get('bucket'))
       ? params.get('bucket')
       : '';
   const requestedAt = params.get('asOf');

@@ -55,6 +55,7 @@ const inquirySources = {
   other: '人工录入',
 };
 const taskTypes = {
+  follow_up: '跟进触达',
   first_contact: '首次联系',
   clarify_specs: '补问规格',
   quote_followup: '报价跟进',
@@ -64,9 +65,9 @@ const taskTypes = {
 };
 const taskStatuses = {
   pending: '待执行',
-  paused: '已暂停',
   completed: '已完成',
-  cancelled: '已取消',
+  skipped: '跳过',
+  cancelled: '终止',
 };
 const messageDirections = { inbound: '收到', outbound: '发出', note: '纪要' };
 const messageStatuses = {
@@ -266,7 +267,7 @@ const locks = new Map();
 const recordOrder = (records) =>
   [...records].sort((left, right) => left.record_id.localeCompare(right.record_id));
 
-function sameFields(record, expected, definitions) {
+export function sameFields(record, expected, definitions) {
   return Object.entries(expected).every(([name, value]) => {
     const definition = definitions.find((field) => field.field_name === name);
     assert(definition, '镜像字段不存在：' + name);
@@ -281,7 +282,7 @@ function sameFields(record, expected, definitions) {
   });
 }
 
-async function safeWrite({ journal, checkpoint, retry = false }, key, write, confirm) {
+export async function safeWrite({ journal, checkpoint, retry = false }, key, write, confirm) {
   const previous = journal.filter((event) => event.key === key).at(-1);
   const save = async (state) => {
     journal.push({ at: new Date().toISOString(), key, state });
@@ -576,17 +577,17 @@ export class CustomerBusinessFeishu {
     assert(result.configured, result.error || '业务表结构读回失败');
     return { ...result, createdRecords: 0 };
   }
-  async sync(workspace, { products = [] } = {}) {
+  async sync(workspace, { products = [], customers = [] } = {}) {
     let snapshot;
     try {
-      snapshot = structuredClone({ workspace, products });
+      snapshot = structuredClone({ workspace, products, customers });
     } catch {
       return pending('本地业务记录无效，尚不能同步');
     }
     const previous = locks.get(this.scope) || Promise.resolve();
     const operation = previous
       .catch(() => {})
-      .then(() => this.syncCurrent(snapshot.workspace, snapshot.products));
+      .then(() => this.syncCurrent(snapshot.workspace, snapshot.products, snapshot.customers));
     locks.set(this.scope, operation);
     try {
       return await operation;
@@ -850,14 +851,9 @@ export class CustomerBusinessFeishu {
               任务说明: nullable(entry.notes || entry.description),
               执行前检查: entry.preflight
                 ? (entry.preflight.reasons || []).join('；') || '当前检查通过'
-                : entry.status === 'paused'
-                  ? [...(entry.audit || [])]
-                      .reverse()
-                      .find((event) => event.action === 'auto_pause')
-                      ?.reasons?.join('；') || '任务已暂停，恢复前需核对当前会话与资料'
-                  : entry.status === 'completed'
-                    ? '已登记执行结果，详见关联沟通和实际执行记录'
-                    : '执行前需重新核对当前会话与产品资料',
+                : entry.status === 'completed'
+                  ? '已登记执行结果，详见关联沟通和实际执行记录'
+                  : '执行前需重新核对当前会话与产品资料',
               完成时间: date(entry.completedAt),
               实际执行记录:
                 (entry.audit || [])

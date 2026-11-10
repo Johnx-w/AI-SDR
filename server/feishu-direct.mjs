@@ -94,7 +94,7 @@ export class FeishuClient {
       if (cursor) query.set('page_token', cursor);
       if (filter) query.set('filter', filter);
       const data = await this.request(this.tablePath(tableId) + '/' + resource + '?' + query);
-      if (data?.items === undefined && data?.total === 0 && data?.has_more === false) return rows;
+      if (data?.items == null && data?.total === 0 && data?.has_more === false) return rows;
       if (!Array.isArray(data?.items)) throw fail('飞书分页响应异常');
       rows.push(...data.items);
       if (!data.has_more) return rows;

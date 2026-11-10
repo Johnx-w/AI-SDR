@@ -24,7 +24,7 @@ export interface OverviewData {
     activeDemands: number | null;
     dueTasks: number | null;
   };
-  work: { overdue: number | null; today: number | null; paused: number | null };
+  work: { overdue: number | null; today: number | null };
   links: {
     companies: string;
     newCompanies: string;
@@ -32,7 +32,6 @@ export interface OverviewData {
     dueTasks: string;
     overdue: string;
     today: string;
-    paused: string;
   };
   priority: {
     customerId: string;

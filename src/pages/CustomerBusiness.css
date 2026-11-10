@@ -664,3 +664,19 @@
     font-size: 14px;
   }
 }
+
+.business-task-table {
+  min-width: 1450px;
+}
+.business-task-table th {
+  white-space: nowrap;
+}
+.business-task-table td {
+  min-width: 120px;
+}
+.business-task-notes {
+  white-space: pre-wrap;
+  max-height: 110px;
+  overflow: auto;
+  min-width: 180px;
+}

@@ -16,7 +16,7 @@ const tasks = [
   task('at-cutoff', at),
   task('later-today', '2026-10-25T15:59:59.999Z'),
   task('tomorrow', '2026-10-25T16:00:00.000Z'),
-  task('paused', '2026-10-20T00:00:00.000Z', 'paused'),
+  task('skipped', '2026-10-20T00:00:00.000Z', 'skipped'),
   task('done', '2026-10-20T00:00:00.000Z', 'completed'),
 ];
 
@@ -30,7 +30,12 @@ test('total due drilldown uses the overview cutoff and disjoint overdue/today bu
   assert.deepEqual(ids('overdue'), ['yesterday', 'earlier-today']);
   assert.deepEqual(ids('today'), ['at-cutoff', 'later-today']);
   assert.deepEqual(ids('due'), ['yesterday', 'earlier-today', 'at-cutoff', 'later-today']);
-  assert.deepEqual(ids('paused'), ['paused']);
+  assert.deepEqual(
+    tasks
+      .filter((row) => matchesTaskNavigation(row, navigation('tab=tasks&state=skipped')))
+      .map((row) => row.id),
+    ['skipped'],
+  );
 });
 
 test('a frozen link is stable as the operator opens it later and crosses Beijing midnight', () => {
@@ -72,10 +77,10 @@ test('active demand drilldown counts demands and excludes won, lost and closed',
 });
 
 test('specific task or demand links identify one record without changing its editability or status', () => {
-  const taskFilter = navigation('tab=tasks&task=paused');
+  const taskFilter = navigation('tab=tasks&task=skipped');
   assert.deepEqual(
     tasks.filter((row) => matchesTaskNavigation(row, taskFilter)).map((row) => row.id),
-    ['paused'],
+    ['skipped'],
   );
   assert.equal(
     matchesDemandNavigation(

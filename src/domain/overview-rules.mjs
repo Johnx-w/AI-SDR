@@ -20,7 +20,6 @@ export function overviewRange(period = '7d', at = Date.now()) {
 }
 
 export function taskBucket(task, range) {
-  if (task.status === 'paused') return 'paused';
   if (task.status !== 'pending') return '';
   const due = Date.parse(task.dueAt);
   if (!Number.isFinite(due)) return '';

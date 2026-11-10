@@ -30,14 +30,14 @@ test('business deep links immediately render the linked task bucket and frozen c
   assert.match(html, /清除筛选/);
 });
 
-test('active demand and paused task links retain their status selection on initial render', () => {
+test('active demand and skipped task links retain their status selection on initial render', () => {
   assert.match(
     renderAt(CustomerBusiness, '/business?tab=demands&state=active'),
     /<option value="active" selected="">进行中需求<\/option>/,
   );
   assert.match(
-    renderAt(CustomerBusiness, '/business?tab=tasks&state=paused'),
-    /<option value="paused" selected="">已暂停<\/option>/,
+    renderAt(CustomerBusiness, '/business?tab=tasks&state=skipped'),
+    /<option value="skipped" selected="">跳过<\/option>/,
   );
 });
 

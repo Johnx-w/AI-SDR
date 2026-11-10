@@ -16,7 +16,6 @@ export function OverviewReminders({
     ? [
         { title: '逾期跟进', count: data.work.overdue, to: data.links.overdue },
         { title: '今日待跟进', count: data.work.today, to: data.links.today },
-        { title: '暂停待核对', count: data.work.paused, to: data.links.paused },
         { title: '产品资料待审核', count: data.products.draft, to: data.products.to },
       ]
     : [];

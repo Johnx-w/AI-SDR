@@ -20,7 +20,7 @@ test('总览按北京时间自然日统计，近7天包括今天且不包含未�
   assert.deepEqual(JSON.parse(processResult.stdout), range);
 });
 
-test('逾期和今日互斥，暂停、已完成、取消和未来任务不计入催办', () => {
+test('逾期和今日互斥，跳过、已完成、终止和未来任务不计入催办', () => {
   const range = overviewRange('7d', '2026-10-25T02:00:00Z');
   const bucket = (dueAt, status = 'pending') => taskBucket({ dueAt, status }, range);
   assert.equal(bucket('2026-10-24T02:00:00Z'), 'overdue');
@@ -28,7 +28,7 @@ test('逾期和今日互斥，暂停、已完成、取消和未来任务不计�
   assert.equal(bucket('2026-10-25T02:00:00Z'), 'today');
   assert.equal(bucket('2026-10-25T15:59:59Z'), 'today');
   assert.equal(bucket('2026-10-25T16:00:00Z'), '');
-  assert.equal(bucket('2026-10-24T02:00:00Z', 'paused'), 'paused');
+  assert.equal(bucket('2026-10-24T02:00:00Z', 'skipped'), '');
   assert.equal(bucket('2026-10-24T02:00:00Z', 'completed'), '');
   assert.equal(bucket('2026-10-24T02:00:00Z', 'cancelled'), '');
   assert.equal(bucket('not-a-date'), '');

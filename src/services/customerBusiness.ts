@@ -81,17 +81,27 @@ export interface BusinessDemand extends BusinessRecord {
   evidenceQuote: string;
 }
 export interface BusinessTask extends BusinessRecord {
+  displayId?: string;
+  ownerIds: string[];
+  templateIds: string[];
   conversationId?: string;
   demandIds: string[];
   messageIds: string[];
   productIds: string[];
   productVersions?: Record<string, number>;
   title: string;
-  kind: 'first_contact' | 'clarify_specs' | 'quote_followup' | 'sample' | 'manual_review' | 'other';
+  kind:
+    | 'follow_up'
+    | 'first_contact'
+    | 'clarify_specs'
+    | 'quote_followup'
+    | 'sample'
+    | 'manual_review'
+    | 'other';
   executionMode?: 'manual' | 'automatic';
   channel: BusinessChannel;
   dueAt: string;
-  status: 'pending' | 'paused' | 'completed' | 'cancelled';
+  status: 'pending' | 'completed' | 'skipped' | 'cancelled';
   owner: string;
   notes: string;
   basisMessageId?: string;
@@ -102,6 +112,7 @@ export interface BusinessTask extends BusinessRecord {
 export interface BusinessFeishu {
   status?: string;
   configured?: boolean;
+  tasksOnly?: boolean;
   error?: string;
   tables?: Record<string, unknown>;
 }
@@ -113,6 +124,18 @@ export interface BusinessWorkspace {
   demands: BusinessDemand[];
   tasks: BusinessTask[];
   customerContexts: { customerId: string; fixedEmail?: string; doNotContact?: boolean }[];
+  taskReferences?: {
+    owners: { id: string; name: string; accountType: string; account: string; status: string }[];
+    templates: {
+      id: string;
+      name: string;
+      type: string;
+      status: string;
+      scenario: string;
+      body: string;
+    }[];
+    error?: string;
+  };
   customerError?: string;
   feishu?: BusinessFeishu;
 }
@@ -181,7 +204,7 @@ export const customerBusinessApi = {
   taskAction: (
     id: string,
     value: {
-      action: 'complete' | 'pause' | 'resume' | 'cancel';
+      action: 'complete' | 'skip' | 'cancel';
       expectedVersion: number;
       resultMessageId?: string;
       notes?: string;

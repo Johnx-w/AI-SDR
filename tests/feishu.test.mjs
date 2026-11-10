@@ -117,6 +117,24 @@ test('飞书直连遍历全部分页，仅向官方接口发送Bearer认证，�
   );
   assert.ok(!JSON.stringify(result).includes(env.FEISHU_APP_SECRET));
 });
+test('飞书空表允许省略 items 或返回 null，非空或未完分页仍拒绝缺失列表', async () => {
+  for (const items of [undefined, null]) {
+    for (const [total, has_more, valid] of [
+      [0, false, true],
+      [1, false, false],
+      [0, true, false],
+    ]) {
+      const client = new FeishuClient({
+        env,
+        fetchImpl: withFeishuAuth(async () =>
+          Response.json({ code: 0, data: { items, total, has_more } }),
+        ),
+      });
+      if (valid) assert.deepEqual(await client.records(), []);
+      else await assert.rejects(client.records(), /分页响应异常/);
+    }
+  }
+});
 test('缺少飞书参数、上游错误和不完整分页均不会伪造成功', async () => {
   await assert.rejects(
     new FeishuClient({ env: {}, fetchImpl: () => assert.fail('no remote request') }).readLeads(),

@@ -35,7 +35,7 @@ function fixture(overrides = {}) {
     tasks: [
       task('t1', '1', '2026-10-24T23:00:00.000Z'),
       task('t2', '1', '2026-10-25T03:00:00.000Z'),
-      task('t3', '2', '2026-10-24T00:00:00.000Z', 'paused', ['d2']),
+      task('t3', '2', '2026-10-24T00:00:00.000Z', 'skipped', ['d2']),
       task('t4', '3', '2026-10-24T00:00:00.000Z', 'completed'),
       task('t5', '3', '2026-10-25T16:00:00.000Z'),
       task('t6', '3', '2026-10-24T00:00:00.000Z', 'cancelled'),
@@ -96,7 +96,7 @@ test('总览按实际收录时间统计新增，待办不随成果范围改变�
     activeDemands: 2,
     dueTasks: 2,
   });
-  assert.deepEqual(result.work, { overdue: 1, today: 1, paused: 1 });
+  assert.deepEqual(result.work, { overdue: 1, today: 1 });
   assert.equal(result.trend.length, 7);
   assert.equal(
     result.trend.reduce((sum, row) => sum + row.count, 0),
@@ -111,8 +111,8 @@ test('总览按实际收录时间统计新增，待办不随成果范围改变�
   assert.equal(result.priority.filter((row) => row.customerId === '1').length, 1);
   assert.equal(
     result.priority.some((row) => row.customerId === '2'),
-    false,
-    '暂停任务已安排下一步，不能再次推为无安排需求',
+    true,
+    '已跳过的任务不算后续安排，仍需处理未完成需求',
   );
   const today = await service.read({ period: 'today' });
   assert.deepEqual(today.work, result.work);

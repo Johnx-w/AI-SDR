@@ -10,7 +10,6 @@ import {
   Clock3,
   FileCheck2,
   ListTodo,
-  PauseCircle,
   RefreshCw,
   Target,
 } from 'lucide-react';
@@ -392,13 +391,6 @@ export function Dashboard() {
       detail: '今天尚未到时的待执行行动',
       icon: CalendarDays,
       className: 'today',
-    },
-    {
-      key: 'paused' as const,
-      title: '暂停待核对',
-      detail: '查看暂停原因，核对后再安排',
-      icon: PauseCircle,
-      className: 'paused',
     },
   ];
   const anySourceFailure = Object.values(data.sources).some((source) => source.state !== 'ready');

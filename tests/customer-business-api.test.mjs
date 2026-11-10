@@ -308,7 +308,7 @@ test('业务HTTP串联一封真实来信、两个需求和一个任务，关联T
   }
 });
 
-test('新增回复暂停原跟进，完成任务必须关联同会话及全部需求的真实已发送消息', async () => {
+test('新增回复阻止原跟进执行，完成任务必须关联同会话及全部需求的真实已发送消息', async () => {
   const folder = mkdtempSync(join(tmpdir(), 'business-api-followup-'));
   const remote = remoteFixture();
   let server;
@@ -344,7 +344,7 @@ test('新增回复暂停原跟进，完成任务必须关联同会话及全部�
       'followup-reply-001',
     );
     task = (await server.call('/api/v1/business/tasks/' + task.id)).body.record;
-    assert.equal(task.status, 'paused');
+    assert.equal(task.status, 'pending');
     const blocked = await server.call('/api/v1/business/tasks/' + task.id + '/preflight', {
       method: 'POST',
     });

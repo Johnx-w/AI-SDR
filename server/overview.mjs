@@ -146,9 +146,7 @@ export class OverviewService {
         name: customerMap.get(row.customerId)?.name || row.domain,
         available: results.customers.data ? customerMap.has(row.customerId) : null,
       }));
-    const work = graph
-      ? { overdue: 0, today: 0, paused: 0 }
-      : { overdue: null, today: null, paused: null };
+    const work = graph ? { overdue: 0, today: 0 } : { overdue: null, today: null };
     if (graph)
       for (const task of graph.tasks) {
         const bucket = taskBucket(task, range);
@@ -195,7 +193,7 @@ export class OverviewService {
           owner: task.owner || '',
           to: businessLink('tasks', { customerId: task.customerId, task: task.id }),
         });
-      const openTasks = graph.tasks.filter((task) => ['pending', 'paused'].includes(task.status));
+      const openTasks = graph.tasks.filter((task) => task.status === 'pending');
       for (const demand of activeDemands.sort(
         (a, b) => (a.createdAt || '').localeCompare(b.createdAt || '') || a.id.localeCompare(b.id),
       )) {
@@ -327,7 +325,6 @@ export class OverviewService {
         dueTasks: taskLink('due'),
         overdue: taskLink('overdue'),
         today: taskLink('today'),
-        paused: taskLink('paused'),
       },
       priority: priority.slice(0, 8),
       jobs,

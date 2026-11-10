@@ -299,7 +299,7 @@ function originalTaskTable(f) {
       field_name: '任务状态',
       type: 3,
       property: {
-        options: ['待执行', '已完成', '跳过', '终止', '已暂停', '已取消'].map((name) => ({ name })),
+        options: ['待执行', '已完成', '跳过', '终止'].map((name) => ({ name })),
       },
     },
     { field_name: '使用模板', type: 18, property: { table_id: 't10', multiple: true } },

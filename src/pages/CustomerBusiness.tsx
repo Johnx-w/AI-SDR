@@ -27,7 +27,7 @@ import './CustomerBusiness.css';
 
 type Tab = 'demands' | 'messages' | 'tasks';
 type FormValue = Record<string, string | string[] | boolean>;
-type Action = 'complete' | 'pause' | 'resume' | 'cancel';
+type Action = 'complete' | 'skip' | 'cancel';
 interface Editor {
   entity: BusinessEntity | 'action' | 'message-links';
   value: FormValue;
@@ -64,17 +64,15 @@ const stages = {
 };
 const taskStates = {
   pending: '待执行',
-  paused: '已暂停',
+  skipped: '跳过',
   completed: '已完成',
-  cancelled: '已取消',
+  cancelled: '终止',
 };
-const taskKinds = {
-  first_contact: '首次联系',
-  clarify_specs: '补问规格',
-  quote_followup: '报价跟进',
-  sample: '样品推进',
-  manual_review: '人工审核',
-  other: '其他行动',
+const taskChannels = {
+  email: '邮件触达',
+  whatsapp: 'WhatsApp触达',
+  form: '网站留言',
+  phone: '人工电话外呼',
 };
 const ownership = { auto: '自动接待', human: '人工接管' };
 const delivery = {
@@ -94,9 +92,8 @@ const classifications = {
 };
 const actionLabels: Record<Action, string> = {
   complete: '记录完成结果',
-  pause: '暂停任务',
-  resume: '恢复任务',
-  cancel: '取消任务',
+  skip: '跳过任务',
+  cancel: '终止任务',
 };
 const tabLabels: Record<Tab, string> = {
   demands: '采购需求',
@@ -133,7 +130,7 @@ const demandSource = (message: BusinessMessage) =>
       message.deliveryStatus === 'recorded' &&
       message.actualConfirmed === true));
 const communicationTask = (task: BusinessTask) =>
-  ['first_contact', 'clarify_specs', 'quote_followup'].includes(task.kind);
+  ['follow_up', 'first_contact', 'clarify_specs', 'quote_followup'].includes(task.kind);
 const linkToCustomer = (id: string) => `/leads?dataset=real&lead=${encodeURIComponent(id)}`;
 const dateText = (value?: string) =>
   value && Number.isFinite(Date.parse(value))
@@ -378,8 +375,10 @@ export function CustomerBusiness() {
         customerId: baseCustomer,
         conversationId: '',
         title: '',
-        kind: 'other',
+        kind: 'follow_up',
         executionMode: 'manual',
+        ownerIds: [],
+        templateIds: [],
         channel: 'email',
         dueAt: '',
         status: 'pending',
@@ -640,20 +639,7 @@ export function CustomerBusiness() {
           );
         else
           payload = {
-            ...pick(
-              'customerId',
-              'conversationId',
-              'title',
-              'kind',
-              'executionMode',
-              'channel',
-              'owner',
-              'notes',
-              'demandIds',
-              'messageIds',
-              'productIds',
-              'basisMessageId',
-            ),
+            ...pick('customerId', 'channel', 'notes', 'messageIds', 'ownerIds', 'templateIds'),
             dueAt: isoDate(text(value, 'dueAt')),
             status: text(value, 'status') || 'pending',
           };
@@ -741,8 +727,9 @@ export function CustomerBusiness() {
   const eligibleMessages = data.messages.filter(
     (message) =>
       message.customerId === formCustomer &&
-      !!formConversation &&
-      message.conversationId === formConversation,
+      (editor?.entity === 'tasks'
+        ? message.channel === text(editor.value, 'channel')
+        : !!formConversation && message.conversationId === formConversation),
   );
   const selectedSource =
     editor && data.messages.find((message) => message.id === text(editor.value, 'sourceMessageId'));
@@ -853,7 +840,7 @@ export function CustomerBusiness() {
           刷新
         </button>
         <button className="btn secondary" disabled={loading || saving} onClick={() => void sync()}>
-          核对飞书同步
+          {data.feishu?.tasksOnly ? '同步跟进任务' : '核对飞书同步'}
         </button>
       </PageHeading>
       {data.feishu?.error && (
@@ -915,22 +902,24 @@ export function CustomerBusiness() {
               ))}
             </select>
           </label>
-          <label>
-            产品资料
-            <select
-              aria-label="按产品资料筛选"
-              value={productId}
-              onChange={(event) => filter('productId', event.target.value)}
-            >
-              <option value="">全部产品</option>
-              {data.products.map((product) => (
-                <option key={product.id} value={product.id}>
-                  {product.name}
-                  {product.status !== 'approved' ? '（待审核或已归档）' : ''}
-                </option>
-              ))}
-            </select>
-          </label>
+          {tab !== 'tasks' && (
+            <label>
+              产品资料
+              <select
+                aria-label="按产品资料筛选"
+                value={productId}
+                onChange={(event) => filter('productId', event.target.value)}
+              >
+                <option value="">全部产品</option>
+                {data.products.map((product) => (
+                  <option key={product.id} value={product.id}>
+                    {product.name}
+                    {product.status !== 'approved' ? '（待审核或已归档）' : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {selectedCustomer && tab !== 'messages' && (
             <Link className="text-link" to={linkToCustomer(selectedCustomer.id)}>
               查看企业档案
@@ -951,7 +940,11 @@ export function CustomerBusiness() {
               value={query}
               onChange={(event) => filter('q', event.target.value)}
               placeholder={
-                tab === 'messages' ? '搜索客户、会话或消息内容' : '搜索标题、正文、客户或负责人'
+                tab === 'messages'
+                  ? '搜索客户、会话或消息内容'
+                  : tab === 'tasks'
+                    ? '搜索客户、任务说明或业务员'
+                    : '搜索标题、正文、客户或负责人'
               }
             />
           </div>
@@ -977,19 +970,20 @@ export function CustomerBusiness() {
               <option value="due">当前到期跟进</option>
               <option value="overdue">逾期待执行</option>
               <option value="today">今日待执行</option>
-              <option value="paused">暂停待核对</option>
             </select>
           )}
-          <button
-            className="btn secondary"
-            disabled={
-              loading || saving || !!error || !!data.customerError || !data.customers.length
-            }
-            onClick={() => newEditor('conversations')}
-          >
-            <Plus size={14} />
-            新建会话
-          </button>
+          {tab !== 'tasks' && (
+            <button
+              className="btn secondary"
+              disabled={
+                loading || saving || !!error || !!data.customerError || !data.customers.length
+              }
+              onClick={() => newEditor('conversations')}
+            >
+              <Plus size={14} />
+              新建会话
+            </button>
+          )}
           <button
             className="btn primary"
             disabled={
@@ -1029,8 +1023,7 @@ export function CustomerBusiness() {
                     due: '到期跟进',
                     overdue: '逾期待执行',
                     today: '今日待执行',
-                    paused: '暂停待核对',
-                  }[bucket as 'due' | 'overdue' | 'today' | 'paused']
+                  }[bucket as 'due' | 'overdue' | 'today']
                 : state !== 'all'
                   ? stateOptions[state]
                   : '指定记录'}
@@ -1249,148 +1242,141 @@ export function CustomerBusiness() {
                 )}
               />
             )}
-            {tab === 'tasks' &&
-              (tasks.length ? (
-                <div className="table-scroll">
-                  <table className="business-table">
-                    <thead>
-                      <tr>
-                        <th>任务与客户</th>
-                        <th>下一步行动</th>
-                        <th>执行时间与状态</th>
-                        <th>关联与结果</th>
-                        <th>操作</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {tasks.map((task) => (
-                        <tr
-                          key={task.id}
-                          id={`business-record-${task.id}`}
-                          tabIndex={focusedId === task.id ? -1 : undefined}
-                          className={focusedId === task.id ? 'business-focused-record' : undefined}
-                        >
-                          <td>
-                            <strong>{task.title}</strong>
-                            <Link to={linkToCustomer(task.customerId)}>
-                              {customerName(task.customerId)}
-                            </Link>
-                            <small>{task.owner || '负责人待分配'}</small>
-                          </td>
-                          <td>
-                            {taskKinds[task.kind]} · {channels[task.channel]}
-                            <span>
-                              <Badge>
-                                {task.executionMode === 'automatic' ? '系统计划' : '人工执行'}
-                              </Badge>
-                            </span>
-                            <span>{task.notes || '尚无执行说明'}</span>
-                          </td>
-                          <td>
-                            {dateText(task.dueAt)}
-                            <span>
-                              <Badge>{taskStates[task.status]}</Badge>
-                            </span>
-                          </td>
-                          <td>
-                            <small>
-                              {task.demandIds
-                                .map(
-                                  (id) =>
-                                    data.demands.find((demand) => demand.id === id)?.title || id,
-                                )
-                                .join('；') || '企业级跟进'}
-                            </small>
-                            {task.productIds.map((id) => (
-                              <Link key={id} to={`/materials?product=${encodeURIComponent(id)}`}>
-                                {productName(id)}
-                                {productWarning(id, task.productVersions) &&
-                                  `（${productWarning(id, task.productVersions)}）`}
-                              </Link>
-                            ))}
-                            {task.resultMessageId && <small>已关联实际沟通结果</small>}
-                            {task.completionNotes && <small>{task.completionNotes}</small>}
-                            {!!task.audit?.length && (
-                              <details className="business-audit">
-                                <summary>执行留痕（{task.audit.length}）</summary>
-                                <ol>
-                                  {task.audit.map((event, index) => (
-                                    <li key={index}>
-                                      {actionLabels[event.action as Action] || event.action} ·{' '}
-                                      {dateText(event.at)}
-                                      {event.notes && <span>{event.notes}</span>}
-                                    </li>
-                                  ))}
-                                </ol>
-                              </details>
-                            )}
-                          </td>
-                          <td>
-                            <div className="business-row-actions">
-                              {!['completed', 'cancelled'].includes(task.status) && (
-                                <>
-                                  <button
-                                    className="btn secondary small"
-                                    disabled={saving}
-                                    onClick={() => newEditor('tasks', task)}
-                                  >
-                                    编辑任务
-                                  </button>
-                                  <button
-                                    className="btn secondary small"
-                                    disabled={saving}
-                                    onClick={() => void preflight(task)}
-                                  >
-                                    执行前核验
-                                  </button>
-                                  <button
-                                    className="btn secondary small"
-                                    disabled={saving}
-                                    onClick={() => action(task, 'complete')}
-                                  >
-                                    记录完成结果
-                                  </button>
-                                  <button
-                                    className="btn secondary small"
-                                    disabled={saving}
-                                    onClick={() =>
-                                      action(task, task.status === 'paused' ? 'resume' : 'pause')
-                                    }
-                                  >
-                                    {task.status === 'paused' ? '恢复' : '暂停'}
-                                  </button>
-                                  <button
-                                    className="btn secondary small"
-                                    disabled={saving}
-                                    onClick={() => action(task, 'cancel')}
-                                  >
-                                    取消任务
-                                  </button>
-                                </>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
+            {tab === 'tasks' && (
+              <div className="table-scroll">
+                <table className="business-table business-task-table">
+                  <thead>
+                    <tr>
+                      {[
+                        '关联客户',
+                        '关联沟通记录',
+                        '任务类型',
+                        '计划执行时间',
+                        '任务状态',
+                        '使用模板',
+                        '任务说明',
+                        '负责业务员',
+                        '任务ID',
+                        '操作',
+                      ].map((label) => (
+                        <th key={label}>{label}</th>
                       ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <Empty
-                  title={
-                    focusedId
-                      ? '指定跟进任务当前不可见'
-                      : bucket || state !== 'all'
-                        ? '没有符合筛选的跟进任务'
-                        : '暂无跟进任务'
-                  }
-                  detail={
-                    focusedId || bucket || state !== 'all'
-                      ? '可清除上方筛选，核对当前客户和任务状态；已完成或已暂停的任务不会继续计入到期催办。'
-                      : '从企业或具体采购需求安排下一步行动，并明确执行时间、负责人和实际结果。'
-                  }
-                />
-              ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tasks.map((task) => (
+                      <tr
+                        key={task.id}
+                        id={`business-record-${task.id}`}
+                        tabIndex={focusedId === task.id ? -1 : undefined}
+                        className={focusedId === task.id ? 'business-focused-record' : undefined}
+                      >
+                        <td>
+                          <Link to={linkToCustomer(task.customerId)}>
+                            {customerName(task.customerId)}
+                          </Link>
+                        </td>
+                        <td>
+                          {[
+                            ...new Set([
+                              ...task.messageIds,
+                              ...(task.resultMessageId ? [task.resultMessageId] : []),
+                            ]),
+                          ].map((id) => {
+                            const message = data.messages.find((item) => item.id === id);
+                            return message ? (
+                              <Link
+                                key={id}
+                                to={`/business?tab=messages&conversation=${encodeURIComponent(message.conversationId)}&message=${encodeURIComponent(id)}`}
+                              >
+                                {message.subject || '无主题沟通'}
+                              </Link>
+                            ) : (
+                              <span key={id}>关联记录暂不可用</span>
+                            );
+                          })}
+                          {!task.messageIds.length && !task.resultMessageId && '—'}
+                        </td>
+                        <td>{taskChannels[task.channel as keyof typeof taskChannels]}</td>
+                        <td>{dateText(task.dueAt)}</td>
+                        <td>
+                          <Badge>{taskStates[task.status]}</Badge>
+                        </td>
+                        <td>
+                          {task.templateIds
+                            ?.map(
+                              (id) =>
+                                data.taskReferences?.templates.find((r) => r.id === id)?.name ||
+                                '模板暂不可用',
+                            )
+                            .join('、') || '—'}
+                        </td>
+                        <td>
+                          <div className="business-task-notes">{task.notes || '—'}</div>
+                        </td>
+                        <td>{task.owner || '未分配'}</td>
+                        <td>{task.displayId || '待生成'}</td>
+                        <td>
+                          {task.status === 'pending' && (
+                            <div className="business-row-actions">
+                              <button
+                                className="btn secondary small"
+                                disabled={saving}
+                                onClick={() => newEditor('tasks', task)}
+                              >
+                                编辑
+                              </button>
+                              <button
+                                className="btn secondary small"
+                                disabled={saving}
+                                onClick={() => void preflight(task)}
+                              >
+                                执行前核验
+                              </button>
+                              <button
+                                className="btn secondary small"
+                                disabled={saving}
+                                onClick={() => action(task, 'complete')}
+                              >
+                                完成
+                              </button>
+                              <button
+                                className="btn secondary small"
+                                disabled={saving}
+                                onClick={() => action(task, 'skip')}
+                              >
+                                跳过
+                              </button>
+                              <button
+                                className="btn secondary small"
+                                disabled={saving}
+                                onClick={() => action(task, 'cancel')}
+                              >
+                                终止
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                    {!tasks.length && (
+                      <tr>
+                        <td colSpan={10}>
+                          <Empty
+                            title={
+                              focusedId || bucket || state !== 'all'
+                                ? '没有符合筛选的跟进任务'
+                                : '暂无跟进任务'
+                            }
+                            detail="选择关联客户，安排联系类型、计划时间及负责业务员。"
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </>
         )}
       </section>
@@ -1401,7 +1387,7 @@ export function CustomerBusiness() {
           onClose={closeEditor}
         >
           <form className="modal-body business-form" onSubmit={(event) => void save(event)}>
-            {editor.id && (
+            {editor.id && editor.entity !== 'tasks' && (
               <p className="business-form-meta">
                 记录 {editor.id} · 第 {editor.version} 版
               </p>
@@ -1415,7 +1401,7 @@ export function CustomerBusiness() {
               <div className="business-fields">
                 {editor.entity !== 'action' && editor.entity !== 'message-links' && (
                   <label className="business-field">
-                    客户 *
+                    {editor.entity === 'tasks' ? '关联客户 *' : '客户 *'}
                     <select
                       required
                       value={text(editor.value, 'customerId')}
@@ -1671,79 +1657,83 @@ export function CustomerBusiness() {
                 )}
                 {editor.entity === 'tasks' && (
                   <>
-                    {field('title', '下一步行动 *', { required: true })}
-                    {select('kind', '行动类型', taskKinds)}
                     <label className="business-field">
-                      执行方式
-                      <input
-                        readOnly
-                        value={
-                          text(editor.value, 'executionMode') === 'automatic'
-                            ? '系统计划'
-                            : '人工执行'
-                        }
-                      />
+                      任务ID
+                      <input readOnly value={text(editor.value, 'displayId') || '由飞书自动生成'} />
                     </label>
-                    {select('channel', '执行渠道', channels)}
                     <label className="business-field">
-                      关联会话
+                      任务类型 *
                       <select
-                        value={formConversation}
-                        onChange={(event) => {
-                          if (event.target.value) chooseConversation(event.target.value);
-                          else change('conversationId', '');
-                        }}
+                        value={text(editor.value, 'channel')}
+                        onChange={(event) =>
+                          setEditor({
+                            ...editor,
+                            value: {
+                              ...editor.value,
+                              channel: event.target.value,
+                              messageIds: [],
+                              conversationId: '',
+                              basisMessageId: '',
+                            },
+                          })
+                        }
                       >
-                        <option value="">企业级行动，暂不关联会话</option>
-                        {eligibleConversations.map((conversation) => (
-                          <option key={conversation.id} value={conversation.id}>
-                            {conversation.title}
+                        {Object.entries(taskChannels).map(([key, label]) => (
+                          <option key={key} value={key}>
+                            {label}
                           </option>
                         ))}
                       </select>
                     </label>
-                    {field('dueAt', '执行时间（北京时间） *', {
-                      type: 'datetime-local',
-                      required: true,
-                    })}
-                    {field('owner', '负责人')}
-                    {field('notes', '行动说明', { multiline: true, full: true })}
-                    <MultiChoice
-                      label="关联采购需求"
-                      options={eligibleDemands.map((demand) => ({
-                        id: demand.id,
-                        label: demand.title,
-                      }))}
-                      selected={list(editor.value, 'demandIds')}
-                      onChange={(value) => change('demandIds', value)}
-                    />
-                    {productChoices}
                     <MultiChoice
                       label="关联沟通记录"
-                      options={eligibleMessages.map((message) => ({
-                        id: message.id,
-                        label: `${message.subject || '无主题'} · ${dateText(message.occurredAt)}`,
+                      options={eligibleMessages.map((m) => ({
+                        id: m.id,
+                        label: `${m.subject || '无主题沟通'} · ${dateText(m.occurredAt)}`,
                       }))}
                       selected={list(editor.value, 'messageIds')}
                       onChange={(value) => change('messageIds', value)}
                     />
-                    <label className="business-field business-full">
-                      安排任务的依据消息
-                      <select
-                        value={text(editor.value, 'basisMessageId')}
-                        onChange={(event) => change('basisMessageId', event.target.value)}
-                      >
-                        <option value="">暂不关联</option>
-                        {eligibleMessages.map((message) => (
-                          <option key={message.id} value={message.id}>
-                            {message.subject || '无主题'} · {dateText(message.occurredAt)}
-                          </option>
-                        ))}
-                      </select>
+                    {field('dueAt', '计划执行时间（北京时间） *', {
+                      type: 'datetime-local',
+                      required: true,
+                    })}
+                    <label className="business-field">
+                      任务状态
+                      <input
+                        readOnly
+                        value={
+                          taskStates[
+                            (text(editor.value, 'status') || 'pending') as keyof typeof taskStates
+                          ]
+                        }
+                      />
+                      <small>保存后可记录完成结果、跳过或终止任务。</small>
                     </label>
-                    <p className="business-form-note business-full">
-                      按实际需要选择执行时间。执行前可核验客户回复、拒绝联系、人工接管和产品资料状态。
-                    </p>
+                    {data.taskReferences?.error && (
+                      <p className="business-alert error business-full">
+                        {data.taskReferences.error}
+                      </p>
+                    )}
+                    <MultiChoice
+                      label="使用模板"
+                      options={(data.taskReferences?.templates || []).map((r) => ({
+                        id: r.id,
+                        label: [r.name, r.type, r.status].filter(Boolean).join(' · '),
+                      }))}
+                      selected={list(editor.value, 'templateIds')}
+                      onChange={(value) => change('templateIds', value)}
+                    />
+                    {field('notes', '任务说明', { multiline: true, full: true, maxLength: 3000 })}
+                    <MultiChoice
+                      label="负责业务员"
+                      options={(data.taskReferences?.owners || []).map((r) => ({
+                        id: r.id,
+                        label: [r.name, r.account, r.status].filter(Boolean).join(' · '),
+                      }))}
+                      selected={list(editor.value, 'ownerIds')}
+                      onChange={(value) => change('ownerIds', value)}
+                    />
                   </>
                 )}
                 {editor.entity === 'action' && editor.task && (
@@ -1754,21 +1744,25 @@ export function CustomerBusiness() {
                     {text(editor.value, 'action') === 'complete' &&
                       communicationTask(editor.task) && (
                         <label className="business-field business-full">
-                          实际已发出的结果消息 *
+                          实际沟通结果 *
                           <select
                             required
                             value={text(editor.value, 'resultMessageId')}
                             onChange={(event) => change('resultMessageId', event.target.value)}
                           >
-                            <option value="">请选择实际发送成功的消息</option>
+                            <option value="">请选择已实际发生的沟通记录</option>
                             {data.messages
                               .filter(
                                 (message) =>
                                   message.customerId === editor.task!.customerId &&
                                   (!editor.task!.conversationId ||
                                     message.conversationId === editor.task!.conversationId) &&
-                                  message.direction === 'outbound' &&
-                                  message.deliveryStatus === 'sent',
+                                  message.channel === editor.task!.channel &&
+                                  ((message.direction === 'outbound' &&
+                                    message.deliveryStatus === 'sent') ||
+                                    (message.channel === 'phone' &&
+                                      message.direction === 'note' &&
+                                      message.deliveryStatus === 'recorded')),
                               )
                               .map((message) => (
                                 <option key={message.id} value={message.id}>
