@@ -25,6 +25,8 @@
 
 ## 现有接口
 
+网页 HTML、JavaScript、CSS 和 SVG 在浏览器接受 gzip 时压缩传输，减少完整刷新时的静态资源下载量；保留原内容类型、HEAD 读取及未接受压缩的兼容响应。业务 API 和二进制文件保持原有传输方式。
+
 获客列表 `GET /api/v1/acquisition/jobs?summary=1` 与 `GET /api/v1/acquisition/schedules?summary=1` 返回首屏摘要；任务带 `summary: true`、空 `rows`，不含搜索明细和研究队列。网页仅在展开任务时通过 `GET /api/v1/acquisition/jobs/:id` 读取完整详情，并按 `updatedAt` 刷新；不带摘要参数的原接口保持兼容。响应 JSON 或列表结构无效时显示读取错误，不将其当作空列表或传给页面渲染。
 
 以下列出接口入口和关键约束，字段以对应 server 路由及现有测试为准。

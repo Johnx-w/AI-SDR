@@ -3,6 +3,8 @@ import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { createHash } from 'node:crypto';
+import { gzip } from 'node:zlib';
+import { promisify } from 'node:util';
 import { decorateLeadDevelopment } from './lead-development.mjs';
 import { isDevelopmentCustomer } from './customer-eligibility.mjs';
 import { BrandingCache } from './branding-cache.mjs';
@@ -51,6 +53,7 @@ const types = {
   '.ico': 'image/x-icon',
 };
 const maxJsonBytes = 32768;
+const compress = promisify(gzip);
 export function validateInput(input) {
   const target = validateTarget(input);
   if (input.auto_first_touch !== undefined)
@@ -849,8 +852,24 @@ export function createApp({
       } catch {
         throw new ApiError(404, '请先运行 npm run build，或使用 npm run dev');
       }
+      const compressed =
+        ['.html', '.js', '.css', '.svg'].includes(extname(target)) &&
+        (request.headers['accept-encoding'] || '').split(',').some((value) => {
+          const [encoding, ...parameters] = value.trim().toLowerCase().split(';');
+          return (
+            encoding === 'gzip' &&
+            parameters.every((parameter) => {
+              const [name, quality] = parameter.trim().split('=');
+              return name === 'q' && Number(quality) > 0 && Number(quality) <= 1;
+            })
+          );
+        });
+      if (compressed) content = await compress(content);
       response.writeHead(200, {
         'Content-Type': types[extname(target)] || 'application/octet-stream',
+        'Content-Length': content.length,
+        Vary: 'Accept-Encoding',
+        ...(compressed ? { 'Content-Encoding': 'gzip' } : {}),
         'X-Content-Type-Options': 'nosniff',
         'Referrer-Policy': 'same-origin',
       });
