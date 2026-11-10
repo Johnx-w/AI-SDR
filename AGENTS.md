@@ -21,7 +21,7 @@
 
 ## 飞书 Base 目标
 
-- 云端正式数据同步到领导原建的 Base `Xat4bgUFuaL6tBsXqRccnYaknEf`；本机配置的飞书 Base 属于个人测试环境。操作 T7、T8、T10 前读取运行环境的有效连接配置与数据路径，核对 Base 和真实表 ID；用云端数据库补写正式表，不把本机测试记录或其关联 ID 搬入正式表。
+- 云端正式数据同步到领导原建的 Base `Xat4bgUFuaL6tBsXqRccnYaknEf`；本机配置的飞书 Base 属于个人测试环境。操作 T7、T8、T10、T11 前读取运行环境的有效连接配置与数据路径，核对 Base 和真实表 ID；用云端数据库补写正式表，不把本机测试记录或其关联 ID 搬入正式表。
 
 ## Agent skills
 
