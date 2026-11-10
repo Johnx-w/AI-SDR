@@ -245,6 +245,8 @@ test('T8 仅导出业务字段，今日成功数排除失败和未知；T10 只�
   assert(!JSON.stringify(rows).includes('must-not-export'));
   assert.equal(rows.templates.length, 3);
   assert(
-    rows.templates.every((r) => r.启用状态 === '停用' && r.沟通场景.startsWith('首次开发邮件-')),
+    rows.templates.every(
+      (r) => r.启用状态 === '停用' && r.沟通场景 === '首次开发邮件' && r.适用客户等级 === '全部',
+    ),
   );
 });

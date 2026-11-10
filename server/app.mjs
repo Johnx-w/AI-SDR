@@ -34,6 +34,7 @@ import { LeadLibrary } from './lead-library.mjs';
 import { LeadPerformance } from './lead-performance.mjs';
 import { OverviewService } from './overview.mjs';
 import { websiteScope } from './website-metadata.mjs';
+import { acquisitionJobs, syncOperationalFeishu } from './operational-feishu.mjs';
 
 class ApiError extends Error {
   constructor(status, message) {
@@ -241,6 +242,24 @@ export function createApp({
           recordCommunication: (detail) =>
             recordMailConversation({ store: business.state().store, ...detail }),
         }));
+  let operationalTimer;
+  let operationalSync;
+  const syncOperations = () => {
+    if (operationalSync) return;
+    const current = connections.environment();
+    if (!current.FEISHU_APP_ID || !current.FEISHU_APP_SECRET || !current.FEISHU_APP_TOKEN) return;
+    const service = outreach();
+    operationalSync = syncOperationalFeishu({
+      env: current,
+      jobs: acquisitionJobs(jobs().db, acquisitionScope()),
+      mailboxes: service.mailboxes.list(),
+      deliveries: service.deliveries(),
+    })
+      .catch((error) => console.error('T7/T8/T10 飞书同步失败：' + error.message))
+      .finally(() => {
+        operationalSync = null;
+      });
+  };
   const wakeAutomaticOutreach = () => {
     const service = outreach();
     service.syncAcquisition();
@@ -838,8 +857,11 @@ export function createApp({
     plans().start();
     if (env.CUSTOMER_BUSINESS_DB_PATH || env.BATCH_DB_PATH) business.start();
     if (env.OUTREACH_DB_PATH || jobs().outreachJobs().length) outreach().start();
+    operationalTimer = setInterval(syncOperations, 60000);
+    operationalTimer.unref();
   });
   server.on('close', () => {
+    clearInterval(operationalTimer);
     void brandingCache.close();
     if (outbound) void outbound.close();
     const cleanup = () => {

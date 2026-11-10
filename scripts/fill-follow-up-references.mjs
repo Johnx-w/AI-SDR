@@ -31,7 +31,7 @@ export function referenceRows(mailboxes, deliveries, markdown, day) {
       每日发送额度: mailbox.dailyLimit,
       今日已发送数量: sent,
       账号状态: mailbox.paused ? '暂停' : mailbox.verification?.smtpVerified ? '正常' : null,
-      备注: `本地邮箱配置；品牌：${mailbox.brandName || ''}。今日已发送数量为 ${day} 北京时间本地留存的成功发送数。`,
+      备注: `系统邮箱配置；品牌：${mailbox.brandName || ''}。今日已发送数量为 ${day} 北京时间系统留存的成功发送数。`,
     };
   });
   const templates = markdown
@@ -43,10 +43,7 @@ export function referenceRows(mailboxes, deliveries, markdown, day) {
         .slice(1, -1)
         .map((cell) => cell.trim());
       const [scenario, grade] = cells[2].split('／');
-      assert(
-        /^首次开发邮件-[ABC]类客户$/.test(scenario) && ['A', 'B', 'C'].includes(grade),
-        '首次开发模板场景不符',
-      );
+      assert(scenario === '首次开发邮件' && grade === '全部', '首次开发模板场景不符');
       return {
         模板名称: cells[1],
         沟通场景: scenario,
@@ -57,7 +54,7 @@ export function referenceRows(mailboxes, deliveries, markdown, day) {
         启用状态: '停用',
         模板类型: '邮件模板',
         适用开发阶段: '首封开发',
-        备注: '2026-11-06 用户确认的模板草稿；本次从本地填写，初始停用。',
+        备注: '用户确认的首封开发模板；初始停用。',
       };
     });
   assert(templates.length === 3, '应找到三条已确认的首次开发模板');
