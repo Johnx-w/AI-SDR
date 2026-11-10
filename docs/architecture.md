@@ -129,7 +129,9 @@ main push 的 CI 完成后触发 CD：要求同一完整 SHA 最新一次 push C
 
 GitHub 使用 `production` environment，全天发布不配置人工审批。仓库 secrets：`CD_SSH_KEY` 为独立 Ed25519 私钥，`CD_SSH_HOST` 为服务器，`CD_KNOWN_HOSTS` 从已核对主机记录配置。root 的 `authorized_keys` 对该公钥设置 `restrict,command="/srv/shadeflow/ops/node /srv/shadeflow/ops/cd-gateway.mjs"`，只允许 `deploy <40位SHA> <64位SHA256>` 与标准输入发布包，不开放 shell、转发或 SCP。固定入口和发布脚本由 root 安装到 `/srv/shadeflow/ops/`，不从上传包执行 root 脚本，依赖安装与应用使用 `shadeflow` 用户。固定入口变更按运维安装流程单独核对哈希。
 
-首次启用：保持 `CD_ENABLED` 未启用，验证并推送 main，等待同 SHA CI 成功；按旧流程完成一次受控首发安装维护能力；安装固定入口、独立公钥与 GitHub secrets，确认业务恢复后设置 `CD_ENABLED=true`，重跑该 main CI，跟进 CD 和云端验收。同 SHA 已运行时只验收，不重复重启。旧版尚不识别维护标记，首发须协调停止新操作、暂停计划并确认没有在途任务，完成后恢复原先启用的计划；不能暂停并中断正在跑的获客批次。
+现有 22 端口只允许家庭／办公白名单，GitHub 托管 runner 无法直连。CD 使用独立的 `shadeflow-cd-ssh.service` 监听 IPv4 443，原 22 监听及云安全组规则保持。独立配置为 `/etc/ssh/shadeflow-cd-ssh.conf`，仅从 `/etc/ssh/shadeflow_cd_authorized_keys` 读取 CD 公钥，关闭密码、交互终端及全部转发，并强制固定部署命令。沿用服务器已有 Ed25519 主机密钥；`CD_KNOWN_HOSTS` 按 `[服务器]:443` 保存已核对记录。源配置和 unit 位于 `scripts/systemd/`，与固定入口一并独立安装及核对哈希。443 当前用于该专用 SSH 入口，将来在本机提供公网 HTTPS 前须先迁移此入口。
+
+首次启用：保持 `CD_ENABLED` 未启用，验证并推送 main，等待同 SHA CI 成功；按旧流程完成一次受控首发安装维护能力；安装固定入口、独立公钥、443 专用 SSH 服务及 GitHub secrets，核验有效 SSH 配置、密码及交互命令拒绝、22 入口保留和业务恢复后，设置 `CD_ENABLED=true`。随后重跑该 main CI，跟进 CD 和云端验收；同 SHA 已运行时只验收，不重复重启。旧版尚不识别维护标记，首发须协调停止新操作、暂停计划并确认没有在途任务，完成后恢复原先启用的计划；不能暂停并中断正在跑的获客批次。
 
 发布结果及回退日志在 GitHub Actions 查看，原云端运维告警继续。只上传不上线使用功能分支；暂停自动上线时将 `CD_ENABLED` 设为 `false`。在线备份及运维定时器保持现行配置。
 

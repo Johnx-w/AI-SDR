@@ -44,7 +44,7 @@ jobs:
           install -d -m 700 ~/.ssh
           printf '%s\n' "$CD_SSH_KEY" > ~/.ssh/id_cd
           printf '%s\n' "$CD_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          printf 'Host ai-sdr-cd\n  HostName %s\n  User root\n  IdentityFile ~/.ssh/id_cd\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n' "$CD_SSH_HOST" > ~/.ssh/config
+          printf 'Host ai-sdr-cd\n  HostName %s\n  Port 443\n  User root\n  IdentityFile ~/.ssh/id_cd\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n' "$CD_SSH_HOST" > ~/.ssh/config
           chmod 600 ~/.ssh/id_cd ~/.ssh/known_hosts ~/.ssh/config
       - name: Deploy verified latest main
         env:

@@ -1,0 +1,12 @@
+[Unit]
+Description=ShadeFlow restricted CD SSH endpoint
+After=network.target
+
+[Service]
+ExecStartPre=/usr/sbin/sshd -t -f /etc/ssh/shadeflow-cd-ssh.conf
+ExecStart=/usr/sbin/sshd -D -e -f /etc/ssh/shadeflow-cd-ssh.conf
+Restart=on-failure
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
