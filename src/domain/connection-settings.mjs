@@ -30,7 +30,9 @@ function defaultValue(key, fields, state) {
   if (key === 'WEB_SEARCH_BASE_URL')
     return providerFor(fields, state, 'WEB_SEARCH_PROVIDER') === 'tavily'
       ? 'https://api.tavily.com'
-      : '';
+      : providerFor(fields, state, 'WEB_SEARCH_PROVIDER') === 'deepseek'
+        ? 'https://api.deepseek.com'
+        : '';
   if (key === 'RESEARCH_MODEL_BASE_URL')
     return providerFor(fields, state, 'RESEARCH_MODEL_PROVIDER') === 'deepseek'
       ? 'https://api.deepseek.com'
@@ -51,12 +53,7 @@ export function createConnectionForm() {
 export function connectionFormFields(settings, state) {
   const fields = fieldMap(settings);
   return settings.fields
-    .filter(
-      (field) =>
-        !/^(TAVILY_|DEEPSEEK_)/.test(field.key) &&
-        (providerFor(fields, state, 'WEB_SEARCH_PROVIDER') !== 'deepseek' ||
-          !['WEB_SEARCH_API_KEY', 'WEB_SEARCH_BASE_URL'].includes(field.key)),
-    )
+    .filter((field) => !/^(TAVILY_|DEEPSEEK_)/.test(field.key))
     .map((field) => {
       const legacyKey = fallbackKey(field.key, fields, state);
       const legacy = legacyKey && fields.get(legacyKey);
@@ -112,7 +109,7 @@ export function updateConnectionForm(settings, state, action) {
     next.editingSecrets = next.editingSecrets.filter((item) => !members.includes(item));
     if (provider !== storedProvider(fields, key)) {
       next.values[key] = provider;
-      if (provider !== 'deepseek') next.reset.push(...group.fields);
+      next.reset.push(...group.fields);
     }
   } else if (action.type === 'change') {
     const field = fields.get(key);

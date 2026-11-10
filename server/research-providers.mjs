@@ -38,7 +38,7 @@ export function createResearchProviders({ env = {}, fetchImpl = fetch } = {}) {
     requireConfigured(config.web, '网页检索');
     return platformJson(
       fetchImpl,
-      new URL('/v1/tools/' + path, config.web.baseUrl).href,
+      config.web.baseUrl.replace(/\/v1$/, '') + '/v1/tools/' + path,
       {
         method: 'POST',
         headers: {

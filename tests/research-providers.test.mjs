@@ -208,14 +208,16 @@ test('HTTP 网页适配器提供 search/extract、过滤无效官网地址并统
   ]);
 });
 
-test('DeepSeek 搜索与逐页获取复用模型密钥，并保留现有网页结果格式', async () => {
+test('DeepSeek 搜索与逐页获取使用网页检索字段，并保留现有网页结果格式', async () => {
   const calls = [];
   const providers = createResearchProviders({
     env: {
       ...legacyEnv,
       WEB_SEARCH_PROVIDER: 'deepseek',
-      RESEARCH_MODEL_API_KEY: 'shared-key',
-      RESEARCH_MODEL_BASE_URL: 'https://api.deepseek.com/v1',
+      WEB_SEARCH_API_KEY: 'search-key',
+      WEB_SEARCH_BASE_URL: 'https://api.deepseek.com/v1',
+      RESEARCH_MODEL_API_KEY: 'model-key',
+      RESEARCH_MODEL_BASE_URL: 'https://models.example.org/v1',
     },
     fetchImpl: async (url, options) => {
       calls.push({ url, body: JSON.parse(options.body), auth: options.headers.Authorization });
@@ -259,15 +261,51 @@ test('DeepSeek 搜索与逐页获取复用模型密钥，并保留现有网页�
     calls.at(-1).body.query,
     'Roman blinds supplier Australia -site:buyer.example.org -site:old.example.org',
   );
-  assert.ok(calls.every((call) => call.auth === 'Bearer shared-key'));
+  assert.ok(calls.every((call) => call.auth === 'Bearer search-key'));
   assert.equal(
-    acquisitionConfig({ ...legacyEnv, WEB_SEARCH_PROVIDER: 'deepseek' }).nativeReady,
+    acquisitionConfig({ ...legacyEnv, WEB_SEARCH_PROVIDER: 'deepseek' }).missing.includes(
+      'WEB_SEARCH_API_KEY',
+    ),
     true,
   );
-  assert.throws(
-    () => acquisitionConfig({ ...genericEnv, WEB_SEARCH_PROVIDER: 'deepseek' }),
-    /DeepSeek 网页检索需要/,
+  assert.equal(
+    acquisitionConfig({
+      ...genericEnv,
+      WEB_SEARCH_PROVIDER: 'deepseek',
+      WEB_SEARCH_API_KEY: '',
+    }).missing.includes('WEB_SEARCH_API_KEY'),
+    true,
   );
+});
+
+test('DeepSeek 网页检索可独立配置地址和密钥，不依赖研究模型提供方', async () => {
+  let request;
+  const env = {
+    ...genericEnv,
+    WEB_SEARCH_PROVIDER: 'deepseek',
+    WEB_SEARCH_BASE_URL: 'https://search.example.org/gateway',
+    WEB_SEARCH_API_KEY: 'search-only-secret',
+  };
+  const providers = createResearchProviders({
+    env,
+    fetchImpl: async (url, options) => {
+      request = { url, auth: options.headers.Authorization };
+      return Response.json({ results: [] });
+    },
+  });
+  assert.deepEqual(await providers.web.search({ query: 'fabric', max_results: 5 }), {
+    results: [],
+  });
+  assert.deepEqual(request, {
+    url: 'https://search.example.org/gateway/v1/tools/search',
+    auth: 'Bearer search-only-secret',
+  });
+  const view = new ApiConnections({ env }).view();
+  assert.equal(
+    view.fields.find((field) => field.key === 'WEB_SEARCH_BASE_URL').effectiveValue,
+    'https://search.example.org/gateway',
+  );
+  assert.equal(JSON.stringify(view).includes('search-only-secret'), false);
 });
 
 test('OpenAI compatible 模型使用独立配置并输出现有证据解析器可读取的完成结果', async () => {

@@ -177,14 +177,55 @@ test('切换模型服务重置共享地址、模型、密钥，不携带旧服�
   assert.equal(payload.clear.includes('DEEPSEEK_API_KEY'), false);
 });
 
-test('选择 DeepSeek 搜索复用模型连接，不清除原有 Tavily 凭证', () => {
-  const snapshot = settings();
+test('选择 DeepSeek 搜索复用网页检索字段，清除旧搜索值但保留 Tavily 凭证', () => {
+  const snapshot = settings({
+    WEB_SEARCH_API_KEY: { configured: true, maskedValue: 'prev********tail' },
+    WEB_SEARCH_BASE_URL: {
+      configured: true,
+      value: 'https://old-search.example.org',
+      effectiveValue: 'https://old-search.example.org',
+    },
+  });
   const state = change(snapshot, createConnectionForm(), 'WEB_SEARCH_PROVIDER', 'deepseek');
-  assert.equal(view(snapshot, state, 'WEB_SEARCH_API_KEY'), undefined);
-  assert.equal(view(snapshot, state, 'WEB_SEARCH_BASE_URL'), undefined);
+  assert.equal(view(snapshot, state, 'WEB_SEARCH_API_KEY').configured, false);
+  assert.equal(view(snapshot, state, 'WEB_SEARCH_BASE_URL').value, 'https://api.deepseek.com');
   assert.deepEqual(connectionFormPayload(snapshot, state), {
     values: { WEB_SEARCH_PROVIDER: 'deepseek' },
+    clear: ['WEB_SEARCH_API_KEY', 'WEB_SEARCH_BASE_URL'],
+  });
+});
+
+test('DeepSeek 网页检索可填写独立地址和密钥，切回原提供方撤销草稿', () => {
+  const snapshot = settings();
+  let state = change(snapshot, createConnectionForm(), 'WEB_SEARCH_PROVIDER', 'deepseek');
+  state = change(snapshot, state, 'WEB_SEARCH_BASE_URL', 'https://search.example.org');
+  state = change(snapshot, state, 'WEB_SEARCH_API_KEY', 'independent-search-key');
+  assert.deepEqual(connectionFormPayload(snapshot, state), {
+    values: {
+      WEB_SEARCH_PROVIDER: 'deepseek',
+      WEB_SEARCH_BASE_URL: 'https://search.example.org',
+      WEB_SEARCH_API_KEY: 'independent-search-key',
+    },
     clear: [],
+  });
+  state = change(snapshot, state, 'WEB_SEARCH_PROVIDER', 'tavily');
+  assert.deepEqual(connectionFormPayload(snapshot, state), { values: {}, clear: [] });
+});
+
+test('修改研究模型地址不会改动 DeepSeek 网页检索地址', () => {
+  const snapshot = settings({
+    WEB_SEARCH_PROVIDER: { value: 'deepseek' },
+    WEB_SEARCH_BASE_URL: { effectiveValue: 'https://api.deepseek.com' },
+  });
+  const state = change(
+    snapshot,
+    createConnectionForm(),
+    'RESEARCH_MODEL_BASE_URL',
+    'https://gateway.example.org/v1',
+  );
+  assert.equal(view(snapshot, state, 'WEB_SEARCH_BASE_URL').value, 'https://api.deepseek.com');
+  assert.deepEqual(connectionFormPayload(snapshot, state).values, {
+    RESEARCH_MODEL_BASE_URL: 'https://gateway.example.org/v1',
   });
 });
 
