@@ -333,6 +333,8 @@ export function createApp({
         const allowed = new Set([
           'http://127.0.0.1:5174',
           'http://localhost:5174',
+          `http://127.0.0.1:${env.VITE_PORT || 5174}`,
+          `http://localhost:${env.VITE_PORT || 5174}`,
           `http://127.0.0.1:${env.PORT || 4311}`,
           `http://localhost:${env.PORT || 4311}`,
         ]);

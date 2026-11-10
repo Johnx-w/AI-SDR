@@ -15,6 +15,8 @@ npm run dev
 
 开发网页：[127.0.0.1:5174](http://127.0.0.1:5174)；API：[127.0.0.1:4311](http://127.0.0.1:4311)。
 
+开发端口可通过 `VITE_PORT` 调整；`VITE_API_PORT` 指定开发代理连接的后端端口，须与后端 `PORT` 一致。未配置时继续使用 5174／4311。
+
 ```powershell
 npm test
 npm run build

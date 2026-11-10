@@ -86,6 +86,23 @@ test('未配置直连凭证时明确报告缺项，不能伪造运行成功', as
     assert.equal((await post(base)).status, 503);
   });
 });
+test('自定义开发端口只允许明确的本机来源，其他来源继续拒绝', async () => {
+  await withApp({ env: { VITE_PORT: '5175' } }, async (base) => {
+    for (const [origin, status] of [
+      ['http://127.0.0.1:5175', 200],
+      ['http://localhost:5175', 200],
+      ['http://127.0.0.1:5174', 200],
+      ['http://127.0.0.1:5176', 403],
+      ['https://example.com', 403],
+    ]) {
+      const response = await fetch(`${base}/api/v1/acquisition/status`, {
+        headers: { Origin: origin },
+      });
+      assert.equal(response.status, status, origin);
+    }
+  });
+});
+
 test('拒绝跨站、无效JSON、非JSON类型及超量请求', async () => {
   await withApp({ env: configured }, async (base) => {
     assert.equal(
