@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import type { AcquisitionJob } from '../domain/types';
 import { acquisitionApi } from '../services/acquisition';
+import { Modal } from './ui';
 
 const states = {
   running: '正在收录',
@@ -235,9 +236,15 @@ function DetailRows({
 }
 function AutomaticFirstTouchProgress({ job }: { job: AcquisitionJob }) {
   const [paused, setPaused] = useState(job.autoFirstTouchPaused === true);
+  const [cancelled, setCancelled] = useState(job.autoFirstTouchCancelled === true);
+  const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   useEffect(() => setPaused(job.autoFirstTouchPaused === true), [job.id, job.autoFirstTouchPaused]);
+  useEffect(
+    () => setCancelled(job.autoFirstTouchCancelled === true),
+    [job.id, job.autoFirstTouchCancelled],
+  );
   async function toggle() {
     setBusy(true);
     setError('');
@@ -254,18 +261,64 @@ function AutomaticFirstTouchProgress({ job }: { job: AcquisitionJob }) {
       setBusy(false);
     }
   }
+  async function cancel() {
+    setBusy(true);
+    setError('');
+    try {
+      const updated = await acquisitionApi.cancelAutomaticFirstTouch(job.id);
+      setCancelled(updated.autoFirstTouchCancelled === true);
+      setConfirming(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '自动首发取消失败');
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <div className="result-actions">
-      <span>获客后自动首发{!job.scheduleId && paused ? ' · 已暂停' : ''}</span>
+      <span>
+        获客后自动首发{cancelled ? ' · 已取消' : !job.scheduleId && paused ? ' · 已暂停' : ''}
+      </span>
       <Link to={`/inbox?tab=campaigns&campaignId=acquisition-${job.id}`}>查看首发进度与缺项</Link>
       {job.scheduleId ? (
         <Link to="/automation?tab=schedules">管理获客计划</Link>
-      ) : (
-        <button className="btn secondary" disabled={busy} onClick={() => void toggle()}>
-          {paused ? '恢复自动首发' : '暂停自动首发'}
-        </button>
+      ) : !cancelled ? (
+        <>
+          <button className="btn secondary" disabled={busy} onClick={() => void toggle()}>
+            {paused ? '恢复自动首发' : '暂停自动首发'}
+          </button>
+          <button className="btn danger" disabled={busy} onClick={() => setConfirming(true)}>
+            取消自动首发
+          </button>
+        </>
+      ) : null}
+      {confirming && (
+        <Modal title="取消本轮自动首发" onClose={() => !busy && setConfirming(false)}>
+          <div className="modal-body">
+            <p>
+              确认永久取消本轮自动首发？未发送安排和后续追信会停止；已发送记录保留，取消后不能恢复。
+            </p>
+            {error && (
+              <p role="alert" className="error-message">
+                {error}
+              </p>
+            )}
+            <div className="result-actions">
+              <button
+                className="btn secondary"
+                disabled={busy}
+                onClick={() => setConfirming(false)}
+              >
+                保留自动首发
+              </button>
+              <button className="btn danger" disabled={busy} onClick={() => void cancel()}>
+                {busy ? '正在取消…' : '确认取消自动首发'}
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
-      {error && (
+      {error && !confirming && (
         <p role="alert" className="error-message">
           {error}
         </p>

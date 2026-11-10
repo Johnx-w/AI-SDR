@@ -100,10 +100,13 @@ export class BatchJobs {
     if (job.input.auto_first_touch && !outreachControl) {
       const current = this.db
         .prepare(
-          "SELECT json_extract(data,'$.autoFirstTouchPaused') AS paused FROM jobs WHERE id=?",
+          "SELECT json_extract(data,'$.autoFirstTouchPaused') AS paused, json_extract(data,'$.autoFirstTouchCancelled') AS cancelled FROM jobs WHERE id=?",
         )
         .get(job.id);
-      if (current) job.autoFirstTouchPaused = current.paused === 1;
+      if (current) {
+        job.autoFirstTouchPaused = current.paused === 1;
+        job.autoFirstTouchCancelled = current.cancelled === 1;
+      }
     }
     job.updatedAt = new Date(this.now()).toISOString();
     this.db.prepare('UPDATE jobs SET data=? WHERE id=?').run(JSON.stringify(job), job.id);
@@ -180,7 +183,19 @@ export class BatchJobs {
     const job = this.get(id);
     if (!job.input.auto_first_touch || job.scheduleId)
       throw fail(409, '请在所属获客计划中管理自动首发');
+    if (job.autoFirstTouchCancelled) throw fail(409, '自动首发已取消，不能恢复');
     job.autoFirstTouchPaused = !validateAutoFirstTouch(enabled);
+    this.save(job, { outreachControl: true });
+    this.onOutreachChange();
+    return job;
+  }
+  cancelOutreach(id, confirmed) {
+    if (confirmed !== true) throw fail(400, '请确认取消本轮自动首发');
+    const job = this.get(id);
+    if (!job.input.auto_first_touch || job.scheduleId)
+      throw fail(409, '请在所属获客计划中管理自动首发');
+    if (job.autoFirstTouchCancelled) return job;
+    job.autoFirstTouchCancelled = true;
     this.save(job, { outreachControl: true });
     this.onOutreachChange();
     return job;

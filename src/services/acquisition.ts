@@ -55,6 +55,12 @@ export const acquisitionApi = {
         body: JSON.stringify({ enabled }),
       },
     ),
+  cancelAutomaticFirstTouch: (id: string) =>
+    request<AcquisitionJob>(`/jobs/${encodeURIComponent(id)}/auto-first-touch/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmed: true }),
+    }),
   createSchedule: (
     name: string,
     input: WorkflowInput,

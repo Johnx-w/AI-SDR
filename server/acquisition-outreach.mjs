@@ -3,15 +3,17 @@ export function acquisitionOutreachSources(jobs, plans) {
   const schedules = new Map(plans.list().map((plan) => [plan.id, plan]));
   return jobs.outreachJobs().map((job) => {
     const plan = job.scheduleId ? schedules.get(job.scheduleId) : null;
-    const status = job.scheduleId
-      ? !plan || plan.status === 'closed'
-        ? 'cancelled'
-        : plan.status === 'paused' || !plan.input.auto_first_touch
+    const status = job.autoFirstTouchCancelled
+      ? 'cancelled'
+      : job.scheduleId
+        ? !plan || plan.status === 'closed'
+          ? 'cancelled'
+          : plan.status === 'paused' || !plan.input.auto_first_touch
+            ? 'paused'
+            : 'active'
+        : job.autoFirstTouchPaused
           ? 'paused'
-          : 'active'
-      : job.autoFirstTouchPaused
-        ? 'paused'
-        : 'active';
+          : 'active';
     return {
       jobId: job.id,
       followUpEnabled: Boolean((plan?.input || job.input).auto_follow_up),

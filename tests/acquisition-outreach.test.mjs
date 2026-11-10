@@ -235,10 +235,10 @@ async function smtpHarness(t) {
   return h;
 }
 
-for (const action of ['单次暂停', '计划暂停', '关闭首发', '关闭计划']) {
+for (const action of ['单次暂停', '单次取消', '计划暂停', '关闭首发', '关闭计划']) {
   test(`A06 SMTP连接准备期间${action}，尚未提交的邮件必须停止`, { timeout: 5000 }, async (t) => {
     const h = await smtpHarness(t);
-    const plan = action === '单次暂停' ? null : h.plan();
+    const plan = ['单次暂停', '单次取消'].includes(action) ? null : h.plan();
     const job = h.create({}, plan?.id);
     await h.capture(job.id, buyer('before-smtp'));
     await h.service.tick();
@@ -253,6 +253,7 @@ for (const action of ['单次暂停', '计划暂停', '关闭首发', '关闭计
     try {
       await entered.promise;
       if (action === '单次暂停') h.jobs.controlOutreach(job.id, false);
+      if (action === '单次取消') h.jobs.cancelOutreach(job.id, true);
       if (action === '计划暂停') h.plans.control(plan.id, 'pause');
       if (action === '关闭首发') h.plans.controlOutreach(plan.id, false);
       if (action === '关闭计划') h.plans.control(plan.id, 'close');
@@ -268,7 +269,7 @@ for (const action of ['单次暂停', '计划暂停', '关闭首发', '关闭计
     if (action === '计划暂停') h.plans.control(plan.id, 'resume');
     if (action === '关闭首发') h.plans.controlOutreach(plan.id, true);
     await h.pump();
-    assert.equal(h.state.sent.length, action === '关闭计划' ? 0 : 1);
+    assert.equal(h.state.sent.length, ['单次取消', '关闭计划'].includes(action) ? 0 : 1);
   });
 }
 
@@ -642,6 +643,38 @@ test('生成期间暂停，不提交邮件；单次任务可独立恢复首发',
   }
 });
 
+test('历史单次获客可永久取消自动首发，保留已发送记录且不能恢复', async () => {
+  const h = harness();
+  try {
+    const job = h.create({ auto_follow_up: true });
+    await h.capture(job.id, buyer('already-sent'));
+    await h.capture(job.id, { ...buyer('missing-email'), email: '' });
+    h.jobs.finish(h.jobs.get(job.id), 'target_reached');
+    await h.pump();
+    assert.equal(h.service.deliveries(undefined, ['accepted']).length, 1);
+    assert.equal(h.service.deliveries(undefined, ['blocked']).length, 1);
+    assert.equal(h.service.followUps.pending().length, 2);
+
+    const stale = h.jobs.get(job.id);
+    assert.throws(() => h.jobs.cancelOutreach(job.id, false), { status: 400 });
+    h.jobs.cancelOutreach(job.id, true);
+    h.jobs.save(stale);
+    assert.equal(h.jobs.get(job.id).autoFirstTouchCancelled, true);
+    assert.throws(() => h.jobs.controlOutreach(job.id, true), { status: 409 });
+    h.service.syncAcquisition();
+    assert.equal(h.service.campaign(`acquisition-${job.id}`).status, 'cancelled');
+    assert.equal(h.service.deliveries(undefined, ['accepted']).length, 1);
+    assert.equal(h.service.deliveries(undefined, ['cancelled']).length, 1);
+    assert.equal(h.service.deliveries(undefined, ['cancelled'])[0].reason, '获客自动首发已取消');
+    await h.pump();
+    assert.equal(h.state.sent.length, 1);
+    assert.equal(h.service.followUps.pending().length, 0);
+    assert.equal(h.service.followUps.all().filter((row) => row.status === 'cancelled').length, 2);
+  } finally {
+    await h.close();
+  }
+});
+
 test('发送前异步读取期间暂停，即使尚未同步触达状态也不提交邮件', async () => {
   const h = harness();
   let release;
@@ -749,6 +782,21 @@ test('HTTP开关校验、查询及原计划控制贯通，未开启的历史计�
           body: JSON.stringify({ revision: 1 }),
         });
         assert.equal(manualStart.status, 409, '不能绕过获客计划单独启动托管的发送');
+        assert.equal((await post(`/jobs/${job.id}/auto-first-touch/cancel`, {})).status, 400);
+        const cancelled = await post(`/jobs/${job.id}/auto-first-touch/cancel`, {
+          confirmed: true,
+        });
+        assert.equal((await cancelled.json()).autoFirstTouchCancelled, true);
+        const ended = await (await fetch(`${base}/api/v1/outreach/campaigns/${campaignId}`)).json();
+        assert.equal(ended.campaign.status, 'cancelled');
+        assert.equal(
+          (await post(`/jobs/${job.id}/auto-first-touch`, { enabled: true })).status,
+          409,
+        );
+        assert.equal(
+          (await post(`/jobs/${job.id}/auto-first-touch/cancel`, { confirmed: true })).status,
+          200,
+        );
       },
     );
   } finally {

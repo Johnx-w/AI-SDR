@@ -754,6 +754,17 @@ export function createApp({
               200,
               reviewJob(manager.controlOutreach(suffix[0], (await readJson(request)).enabled)),
             );
+          if (
+            suffix.length === 3 &&
+            suffix[1] === 'auto-first-touch' &&
+            suffix[2] === 'cancel' &&
+            request.method === 'POST'
+          )
+            return json(
+              response,
+              200,
+              reviewJob(manager.cancelOutreach(suffix[0], (await readJson(request)).confirmed)),
+            );
           if (suffix.length === 3 && suffix[1] === 'reviews') {
             const job = manager.get(suffix[0]);
             if (job.scope !== manager.scope) throw new ApiError(409, '执行记录所属客户库已变化');
