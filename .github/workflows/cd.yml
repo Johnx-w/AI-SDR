@@ -1,0 +1,55 @@
+name: CD
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      vars.CD_ENABLED == 'true' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: production
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - run: npm ci
+      - run: npm run build
+      - name: Configure deployment SSH
+        env:
+          CD_SSH_KEY: ${{ secrets.CD_SSH_KEY }}
+          CD_SSH_HOST: ${{ secrets.CD_SSH_HOST }}
+          CD_KNOWN_HOSTS: ${{ secrets.CD_KNOWN_HOSTS }}
+        run: |
+          test -n "$CD_SSH_KEY" && test -n "$CD_SSH_HOST" && test -n "$CD_KNOWN_HOSTS"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$CD_SSH_KEY" > ~/.ssh/id_cd
+          printf '%s\n' "$CD_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf 'Host ai-sdr-cd\n  HostName %s\n  User root\n  IdentityFile ~/.ssh/id_cd\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n' "$CD_SSH_HOST" > ~/.ssh/config
+          chmod 600 ~/.ssh/id_cd ~/.ssh/known_hosts ~/.ssh/config
+      - name: Deploy verified latest main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release-cd.mjs
+      - name: Remove deployment key
+        if: always()
+        run: rm -f ~/.ssh/id_cd
