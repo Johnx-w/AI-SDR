@@ -397,6 +397,7 @@ export function createApp({
             provider.close();
             batch?.close();
             batch = undefined;
+            acquisitionReviews = undefined;
             provider = createAcquisitionProvider({
               env: connections.environment(),
               fetchImpl,

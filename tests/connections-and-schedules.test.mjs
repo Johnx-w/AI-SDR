@@ -578,6 +578,19 @@ test('HTTP 读取已执行计划及最近任务，保留核实结果并可关闭
       const closed = await fetch(base + `${path}/${plan.id}/close`, { method: 'POST' });
       assert.equal(closed.status, 200);
       assert.equal((await closed.json()).lastJob.queued, 0);
+      const changed = await fetch(base + '/api/v1/connections', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values: { WEB_SEARCH_PROVIDER: 'deepseek' } }),
+      });
+      assert.equal(changed.status, 200);
+      const after = await fetch(base + path);
+      assert.equal(after.status, 200);
+      assert.equal(
+        (await after.json()).schedules.find((item) => item.id === plan.id).lastJob.rows[0]
+          .review_resolution.status,
+        'inserted',
+      );
     });
   } finally {
     rmSync(folder, { recursive: true, force: true });
