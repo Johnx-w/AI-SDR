@@ -177,6 +177,17 @@ test('切换模型服务重置共享地址、模型、密钥，不携带旧服�
   assert.equal(payload.clear.includes('DEEPSEEK_API_KEY'), false);
 });
 
+test('选择 DeepSeek 搜索复用模型连接，不清除原有 Tavily 凭证', () => {
+  const snapshot = settings();
+  const state = change(snapshot, createConnectionForm(), 'WEB_SEARCH_PROVIDER', 'deepseek');
+  assert.equal(view(snapshot, state, 'WEB_SEARCH_API_KEY'), undefined);
+  assert.equal(view(snapshot, state, 'WEB_SEARCH_BASE_URL'), undefined);
+  assert.deepEqual(connectionFormPayload(snapshot, state), {
+    values: { WEB_SEARCH_PROVIDER: 'deepseek' },
+    clear: [],
+  });
+});
+
 test('切换服务后可填写新通用密钥和地址，清除请求不会覆盖新输入', () => {
   const snapshot = settings({
     RESEARCH_MODEL_API_KEY: { configured: true, maskedValue: 'gene********tail' },

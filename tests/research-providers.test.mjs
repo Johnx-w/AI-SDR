@@ -208,6 +208,68 @@ test('HTTP 网页适配器提供 search/extract、过滤无效官网地址并统
   ]);
 });
 
+test('DeepSeek 搜索与逐页获取复用模型密钥，并保留现有网页结果格式', async () => {
+  const calls = [];
+  const providers = createResearchProviders({
+    env: {
+      ...legacyEnv,
+      WEB_SEARCH_PROVIDER: 'deepseek',
+      RESEARCH_MODEL_API_KEY: 'shared-key',
+      RESEARCH_MODEL_BASE_URL: 'https://api.deepseek.com/v1',
+    },
+    fetchImpl: async (url, options) => {
+      calls.push({ url, body: JSON.parse(options.body), auth: options.headers.Authorization });
+      if (url.endsWith('/search'))
+        return Response.json({
+          results: [
+            { url: 'https://buyer.example.org', title: 'Buyer', summary: 'Window fabric' },
+            { url: 'http://invalid.example.org', title: 'Invalid' },
+          ],
+        });
+      if (JSON.parse(options.body).url.endsWith('/missing'))
+        return new Response('', { status: 404 });
+      return Response.json({ title: 'Buyer', content: '# Buyer\nWindow fabric' });
+    },
+  });
+  assert.deepEqual(await providers.web.search({ query: 'x'.repeat(130), max_results: 20 }), {
+    results: [{ url: 'https://buyer.example.org/', title: 'Buyer', content: 'Window fabric' }],
+  });
+  assert.deepEqual(
+    await providers.web.extract({
+      urls: ['https://buyer.example.org/', 'https://buyer.example.org/missing'],
+      extract_depth: 'basic',
+    }),
+    { results: [{ url: 'https://buyer.example.org/', raw_content: '# Buyer\nWindow fabric' }] },
+  );
+  assert.deepEqual(
+    calls.map((call) => call.url),
+    [
+      'https://api.deepseek.com/v1/tools/search',
+      'https://api.deepseek.com/v1/tools/fetch',
+      'https://api.deepseek.com/v1/tools/fetch',
+    ],
+  );
+  assert.deepEqual(calls[0].body, { query: 'x'.repeat(128), count: 20, need_content: false });
+  await providers.web.search({
+    query: 'Roman blinds supplier Australia',
+    max_results: 20,
+    exclude_domains: ['old.example.org', 'buyer.example.org'],
+  });
+  assert.equal(
+    calls.at(-1).body.query,
+    'Roman blinds supplier Australia -site:buyer.example.org -site:old.example.org',
+  );
+  assert.ok(calls.every((call) => call.auth === 'Bearer shared-key'));
+  assert.equal(
+    acquisitionConfig({ ...legacyEnv, WEB_SEARCH_PROVIDER: 'deepseek' }).nativeReady,
+    true,
+  );
+  assert.throws(
+    () => acquisitionConfig({ ...genericEnv, WEB_SEARCH_PROVIDER: 'deepseek' }),
+    /DeepSeek 网页检索需要/,
+  );
+});
+
 test('OpenAI compatible 模型使用独立配置并输出现有证据解析器可读取的完成结果', async () => {
   let call;
   const providers = createResearchProviders({

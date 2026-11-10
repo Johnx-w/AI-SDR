@@ -8,7 +8,7 @@ import {
 } from './acquisition-config.mjs';
 
 const fields = [
-  ['WEB_SEARCH_PROVIDER', '网页检索提供方', false, ['tavily', 'http']],
+  ['WEB_SEARCH_PROVIDER', '网页检索提供方', false, ['tavily', 'deepseek', 'http']],
   ['WEB_SEARCH_BASE_URL', '网页检索 API 基础地址', false],
   ['WEB_SEARCH_API_KEY', '网页检索 API Key', true],
   ['TAVILY_API_KEY', 'Tavily API Key', true],

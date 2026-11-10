@@ -51,7 +51,12 @@ export function createConnectionForm() {
 export function connectionFormFields(settings, state) {
   const fields = fieldMap(settings);
   return settings.fields
-    .filter((field) => !/^(TAVILY_|DEEPSEEK_)/.test(field.key))
+    .filter(
+      (field) =>
+        !/^(TAVILY_|DEEPSEEK_)/.test(field.key) &&
+        (providerFor(fields, state, 'WEB_SEARCH_PROVIDER') !== 'deepseek' ||
+          !['WEB_SEARCH_API_KEY', 'WEB_SEARCH_BASE_URL'].includes(field.key)),
+    )
     .map((field) => {
       const legacyKey = fallbackKey(field.key, fields, state);
       const legacy = legacyKey && fields.get(legacyKey);
@@ -107,7 +112,7 @@ export function updateConnectionForm(settings, state, action) {
     next.editingSecrets = next.editingSecrets.filter((item) => !members.includes(item));
     if (provider !== storedProvider(fields, key)) {
       next.values[key] = provider;
-      next.reset.push(...group.fields);
+      if (provider !== 'deepseek') next.reset.push(...group.fields);
     }
   } else if (action.type === 'change') {
     const field = fields.get(key);

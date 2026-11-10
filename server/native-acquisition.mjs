@@ -516,9 +516,9 @@ export class NativeAcquisition {
     // Supplement failed or dynamically rendered pages, bounded to the same five URLs.
     const attempted = { basic: new Set(), advanced: new Set() };
     for (;;) {
-      const depth = ['basic', 'advanced'].find((level) =>
-        [...failures].some((url) => !attempted[level].has(url)),
-      );
+      const depth = (
+        this.providers.web.provider === 'deepseek' ? ['basic'] : ['basic', 'advanced']
+      ).find((level) => [...failures].some((url) => !attempted[level].has(url)));
       if (!depth) break;
       const selected = [...failures].filter((url) => !attempted[depth].has(url));
       for (const url of selected) attempted[depth].add(url);

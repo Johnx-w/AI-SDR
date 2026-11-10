@@ -31,7 +31,7 @@ Start editing
 Loading
 Cancel`;
 
-function fixture({ html = selectShell, readPage, extract, modelData } = {}) {
+function fixture({ html = selectShell, readPage, extract, modelData, webProvider } = {}) {
   const calls = { reads: [], extracts: [], models: [], writes: 0 };
   const store = new AcquisitionStore(':memory:', 'collection-regression');
   const service = new NativeAcquisition({
@@ -50,6 +50,7 @@ function fixture({ html = selectShell, readPage, extract, modelData } = {}) {
     },
     providers: {
       web: {
+        provider: webProvider,
         extract: async (body) => {
           calls.extracts.push(body);
           return extract ? extract(body) : assert.fail('Unexpected extract');
@@ -78,6 +79,16 @@ function fixture({ html = selectShell, readPage, extract, modelData } = {}) {
   });
   return { service, calls, store };
 }
+
+test('DeepSeek Fetch 失败后不重复请求相同网址', async () => {
+  const f = fixture({ webProvider: 'deepseek', extract: async () => ({ results: [] }) });
+  try {
+    await assert.rejects(f.service.collect(site), /官网页面均未取得有效正文/);
+    assert.equal(f.calls.extracts.length, 1);
+  } finally {
+    f.service.close();
+  }
+});
 
 for (const [name, html] of [
   ['历史 SelectBlinds 订单加载空壳', selectShell],

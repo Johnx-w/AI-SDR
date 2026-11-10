@@ -34,6 +34,23 @@ function normalizeWebResults(data, label) {
 // No response/error text is ever copied into transport failures or logs.
 export function createResearchProviders({ env = {}, fetchImpl = fetch } = {}) {
   const config = researchProviderConfig(env);
+  const deepseekCall = (path, body) => {
+    requireConfigured(config.web, '网页检索');
+    return platformJson(
+      fetchImpl,
+      new URL('/v1/tools/' + path, config.web.baseUrl).href,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer ' + config.web.apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(path === 'fetch' ? 60000 : 30000),
+      },
+      'DeepSeek',
+    );
+  };
   const webCall = async (path, body) => {
     requireConfigured(config.web, '网页检索');
     const label = config.web.provider === 'tavily' ? 'Tavily' : '网页检索';
@@ -62,8 +79,44 @@ export function createResearchProviders({ env = {}, fetchImpl = fetch } = {}) {
   return {
     web: {
       provider: config.web.provider,
-      search: (body) => webCall('search', body),
-      extract: (body) => webCall('extract', body),
+      search: async (body) => {
+        if (config.web.provider !== 'deepseek') return webCall('search', body);
+        let query = body.query.slice(0, 128);
+        // shortcut: only exclusions fitting 128 characters reach DeepSeek, upgrade if repeats starve discovery.
+        for (const domain of [...(body.exclude_domains || [])].reverse()) {
+          const exclusion = ' -site:' + domain;
+          if (query.length + exclusion.length <= 128) query += exclusion;
+        }
+        const data = await deepseekCall('search', {
+          query,
+          count: body.max_results,
+          need_content: false,
+        });
+        return normalizeWebResults(
+          {
+            results: Array.isArray(data.results)
+              ? data.results.map((row) => ({
+                  url: row?.url,
+                  title: row?.title,
+                  content: row?.summary || row?.snippet,
+                }))
+              : data.results,
+          },
+          'DeepSeek',
+        );
+      },
+      extract: async (body) => {
+        if (config.web.provider !== 'deepseek') return webCall('extract', body);
+        const pages = await Promise.allSettled(
+          body.urls.map(async (url) => {
+            const page = await deepseekCall('fetch', { url });
+            return { url, raw_content: page.content || '' };
+          }),
+        );
+        return {
+          results: pages.filter((page) => page.status === 'fulfilled').map((page) => page.value),
+        };
+      },
     },
     model: {
       provider: config.model.provider,

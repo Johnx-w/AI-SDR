@@ -27,10 +27,12 @@ export function providerBaseUrl(value, name) {
 export function researchProviderConfig(env = {}) {
   const webProvider = env.WEB_SEARCH_PROVIDER?.trim() || 'tavily';
   const modelProvider = env.RESEARCH_MODEL_PROVIDER?.trim() || 'deepseek';
-  if (!['tavily', 'http'].includes(webProvider))
-    throw configError('WEB_SEARCH_PROVIDER 只能是 tavily 或 http');
+  if (!['tavily', 'deepseek', 'http'].includes(webProvider))
+    throw configError('WEB_SEARCH_PROVIDER 只能是 tavily、deepseek 或 http');
   if (!['deepseek', 'openai_compatible'].includes(modelProvider))
     throw configError('RESEARCH_MODEL_PROVIDER 只能是 deepseek 或 openai_compatible');
+  if (webProvider === 'deepseek' && modelProvider !== 'deepseek')
+    throw configError('DeepSeek 网页检索需要使用 DeepSeek 研究模型连接');
   const webKeyName =
     webProvider === 'tavily' && !configured(env.WEB_SEARCH_API_KEY)
       ? 'TAVILY_API_KEY'
@@ -67,9 +69,17 @@ export function researchProviderConfig(env = {}) {
   return {
     web: {
       provider: webProvider,
-      baseUrl: webBase ? providerBaseUrl(webBase, 'WEB_SEARCH_BASE_URL') : '',
-      apiKey: env[webKeyName]?.trim() || '',
-      requirements: [webKeyName, ...(webProvider === 'http' ? ['WEB_SEARCH_BASE_URL'] : [])],
+      baseUrl:
+        webProvider === 'deepseek'
+          ? providerBaseUrl(modelBase, 'RESEARCH_MODEL_BASE_URL')
+          : webBase
+            ? providerBaseUrl(webBase, 'WEB_SEARCH_BASE_URL')
+            : '',
+      apiKey: env[webProvider === 'deepseek' ? modelKeyName : webKeyName]?.trim() || '',
+      requirements: [
+        webProvider === 'deepseek' ? modelKeyName : webKeyName,
+        ...(webProvider === 'http' ? ['WEB_SEARCH_BASE_URL'] : []),
+      ],
     },
     model: {
       provider: modelProvider,

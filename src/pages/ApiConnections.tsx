@@ -44,6 +44,7 @@ const groups = [
 const providerOptions: Record<string, { value: string; label: string }[]> = {
   WEB_SEARCH_PROVIDER: [
     { value: 'tavily', label: 'Tavily' },
+    { value: 'deepseek', label: 'DeepSeek' },
     { value: 'http', label: '兼容 HTTP 服务' },
   ],
   RESEARCH_MODEL_PROVIDER: [
