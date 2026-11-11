@@ -406,6 +406,67 @@ test('API 未配置时跳过该时点；暂停后恢复跳过暂停期间时间�
   }
 });
 
+test('关闭计划恢复后保留历史且只执行未来时点', () => {
+  const { jobs, schedules, advance } = harness();
+  try {
+    const plan = schedules.create({ name: '可恢复计划', input, timing }, 'restore-plan-history');
+    schedules.save({
+      ...plan,
+      status: 'closed',
+      nextRunAt: null,
+      lastJobId: 'archived-job',
+      lastRunAt: '2030-01-01T01:00:00.000Z',
+      runs: 3,
+    });
+    advance('2030-01-02T15:00:00+08:00');
+    const restored = schedules.control(plan.id, 'resume');
+    assert.equal(restored.status, 'enabled');
+    assert.equal(restored.nextRunAt, '2030-01-02T10:00:00.000Z');
+    assert.equal(restored.timing.repeat, 'weekly');
+    assert.deepEqual(restored.timing.weekdays, timing.weekdays);
+    assert.equal(restored.lastJobId, 'archived-job');
+    assert.equal(restored.runs, 3);
+    assert.equal(restored.lastRunAt, '2030-01-01T01:00:00.000Z');
+    schedules.tick();
+    assert.equal(jobs.list().length, 0, '恢复不补跑或重启旧任务');
+    schedules.control(plan.id, 'close');
+  } finally {
+    schedules.close();
+    jobs.close();
+  }
+});
+
+test('过期单次计划和已达上限的关闭计划恢复失败，保持关闭状态', () => {
+  const { jobs, schedules, advance } = harness();
+  try {
+    const once = schedules.create(
+      {
+        name: '单次计划',
+        input,
+        timing: {
+          ...timing,
+          repeat: 'once',
+          times: ['09:00'],
+        },
+      },
+      'restore-expired-once',
+    );
+    schedules.control(once.id, 'close');
+    advance('2030-01-02T15:00:00+08:00');
+    assert.throws(() => schedules.control(once.id, 'resume'), /没有未到的执行时间/);
+    assert.equal(schedules.get(once.id).status, 'closed');
+    const closed = schedules.create({ name: '关闭计划', input, timing }, 'restore-limit-closed');
+    schedules.control(closed.id, 'close');
+    for (let i = 0; i < 100; i++)
+      schedules.create({ name: `计划${i}`, input, timing }, `restore-limit-${i}`);
+    assert.throws(() => schedules.control(closed.id, 'resume'), /最多保留 100/);
+    assert.equal(schedules.get(closed.id).status, 'closed');
+  } finally {
+    schedules.close();
+    jobs.close();
+  }
+});
+
 test('修改计划只影响后续轮次，保留执行历史与当前任务配置', () => {
   const { jobs, schedules, advance } = harness();
   try {
@@ -602,6 +663,12 @@ test('HTTP 读取已执行计划及最近任务，保留核实结果并可关闭
       const closed = await fetch(base + `${path}/${plan.id}/close`, { method: 'POST' });
       assert.equal(closed.status, 200);
       assert.equal((await closed.json()).lastJob.queued, 0);
+      const resumed = await fetch(base + `${path}/${plan.id}/resume`, { method: 'POST' });
+      assert.equal(resumed.status, 200);
+      const restored = await resumed.json();
+      assert.equal(restored.status, 'enabled');
+      assert.equal(restored.runs, 1);
+      assert.equal(restored.lastJob.rows[0].review_resolution.status, 'inserted');
       const changed = await fetch(base + '/api/v1/connections', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },

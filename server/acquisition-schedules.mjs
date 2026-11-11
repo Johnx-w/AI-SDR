@@ -122,11 +122,20 @@ export class AcquisitionSchedules {
   control(id, action) {
     const plan = this.get(id);
     if (!['pause', 'resume', 'close'].includes(action)) throw fail(400, '不支持的计划操作');
-    if (plan.status === 'closed' || (plan.status === 'completed' && action !== 'close'))
+    if (
+      (plan.status === 'closed' && action !== 'resume') ||
+      (plan.status === 'completed' && action !== 'close')
+    )
       throw fail(409, '该计划已结束');
     if (action === 'resume') {
-      if (plan.status !== 'paused') throw fail(409, '只有暂停的计划可以恢复');
+      if (!['paused', 'closed'].includes(plan.status))
+        throw fail(409, '只有暂停或关闭的计划可以恢复');
       this.checkInput(plan.input);
+      if (
+        plan.status === 'closed' &&
+        this.list().filter((p) => !['closed', 'completed'].includes(p.status)).length >= 100
+      )
+        throw fail(409, '最多保留 100 个未结束的定时计划，请先关闭不需要的计划');
       plan.nextRunAt = nextOccurrence(plan.timing, this.now());
       if (!plan.nextRunAt) throw fail(409, '所选日期已没有未到的执行时间，请重新创建计划');
       plan.status = 'enabled';

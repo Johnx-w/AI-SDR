@@ -112,12 +112,13 @@ export function ScheduledAcquisition() {
       setBusy('');
     }
   }
-  const visible = plans.filter(
-    (plan) =>
-      filter === 'all' ||
-      !['closed', 'completed'].includes(plan.status) ||
-      Boolean(plan.lastJob && ['running', 'stopping', 'paused'].includes(plan.lastJob.status)),
-  );
+  const visible = plans.filter((plan) => {
+    const active =
+      plan.status !== 'closed' &&
+      (plan.status !== 'completed' ||
+        Boolean(plan.lastJob && ['running', 'stopping', 'paused'].includes(plan.lastJob.status)));
+    return filter === 'closed' ? !active : active;
+  });
   return (
     <>
       <div className="acq-list-toolbar">
@@ -127,12 +128,12 @@ export function ScheduledAcquisition() {
         </Link>
       </div>
       <p className="muted schedule-help">
-        按北京时间执行，每个时间点各运行一轮；上轮未结束或停机错过的时点跳过，不补跑。重复计划持续运行直到暂停或关闭；暂停或关闭会停止后续触发和待发首封，本轮在当前企业处理结束后停止。
+        按北京时间执行，每个时间点各运行一轮；上轮未结束或停机错过的时点跳过，不补跑。重复计划持续运行直到暂停或关闭；暂停或关闭会停止后续触发和待发首封，本轮在当前企业处理结束后停止。恢复计划后从未来时点继续，并按当前条件重新核对未发客户。
       </p>
       <div className="filter-chips">
         {[
           ['active', '进行中的计划'],
-          ['all', '全部计划'],
+          ['closed', '已关闭计划'],
         ].map(([value, label]) => (
           <button
             key={value}
@@ -152,8 +153,12 @@ export function ScheduledAcquisition() {
         <p className="muted">正在读取计划…</p>
       ) : !visible.length && !error ? (
         <Empty
-          title="暂无定时获客计划"
-          detail="在获客任务页设置市场、客户条件及执行时间，保存后会显示在这里。"
+          title={filter === 'closed' ? '暂无已关闭计划' : '暂无定时获客计划'}
+          detail={
+            filter === 'closed'
+              ? '已关闭的计划和已结束的单次计划会显示在这里，可恢复仍有未来执行时间的已关闭计划。'
+              : '在获客任务页设置市场、客户条件及执行时间，保存后会显示在这里。'
+          }
         />
       ) : null}
       <div className="schedule-list">
@@ -255,7 +260,7 @@ export function ScheduledAcquisition() {
                   暂停计划
                 </button>
               )}
-              {plan.status === 'paused' && (
+              {['paused', 'closed'].includes(plan.status) && (
                 <button
                   className="btn secondary"
                   disabled={Boolean(busy)}

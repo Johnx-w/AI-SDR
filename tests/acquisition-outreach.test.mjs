@@ -609,6 +609,44 @@ test('暂停与关闭获客计划阻止待发邮件；恢复时重新检查最�
   }
 });
 
+test('关闭获客计划恢复后重新核对未发客户，不重复首发或恢复永久取消的单次首发', async () => {
+  const h = harness();
+  try {
+    const plan = h.plan();
+    const first = h.create({}, plan.id);
+    await h.capture(first.id, buyer('already-sent'));
+    await h.pump();
+    assert.equal(h.state.sent.length, 1);
+    h.jobs.finish(h.jobs.get(first.id), 'target_reached');
+    const pending = h.create({}, plan.id);
+    await h.capture(pending.id, buyer('still-eligible'));
+    await h.capture(pending.id, buyer('now-replied'));
+    await h.service.tick();
+    await Promise.all([...h.service.preparing.values()]);
+    h.plans.control(plan.id, 'close');
+    await h.pump();
+    assert.equal(h.state.sent.length, 1, '关闭期间没有提交待发邮件');
+    h.state.leads.find((lead) => lead.id === 'now-replied').status = '已回复';
+    h.plans.control(plan.id, 'resume');
+    await h.pump();
+    await h.pump();
+    assert.deepEqual(h.state.sent.map((mail) => mail.to).sort(), [
+      'info@already-sent.example.org',
+      'info@still-eligible.example.org',
+    ]);
+    h.jobs.finish(h.jobs.get(pending.id), 'target_reached');
+    const cancelled = h.create();
+    await h.capture(cancelled.id, buyer('permanently-cancelled'));
+    h.jobs.cancelOutreach(cancelled.id, true);
+    h.plans.control(plan.id, 'close');
+    h.plans.control(plan.id, 'resume');
+    await h.pump();
+    assert.equal(h.state.sent.length, 2, '计划恢复不撤销轮次的永久取消');
+  } finally {
+    await h.close();
+  }
+});
+
 test('生成期间暂停，不提交邮件；单次任务可独立恢复首发', async () => {
   const h = harness();
   let release;

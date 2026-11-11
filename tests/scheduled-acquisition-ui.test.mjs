@@ -43,6 +43,73 @@ const words = (node) =>
         : '';
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
+test('已关闭计划独立筛选并复用恢复操作', async () => {
+  const closedPlan = {
+    ...plan('closed'),
+    id: 'closed-plan',
+    name: '已关闭每日计划',
+  };
+  const ended = { ...plan('completed'), id: 'ended', name: '已结束单次计划', lastJob: null };
+  const states = [[plan('enabled'), closedPlan, ended], false];
+  const actions = [];
+  let index = 0;
+  const load = createModuleLoader((specifier, path) => {
+    if (path.href !== entry.href) return;
+    if (specifier === 'react')
+      return {
+        ...React,
+        useState(initial) {
+          const current = index++;
+          if (!(current in states)) states[current] = initial;
+          return [
+            states[current],
+            (next) => {
+              states[current] = typeof next === 'function' ? next(states[current]) : next;
+            },
+          ];
+        },
+        useRef: (current) => ({ current }),
+        useEffect() {},
+      };
+    if (specifier === '../services/acquisition')
+      return {
+        acquisitionApi: {
+          async controlSchedule(id, action) {
+            actions.push({ id, action });
+            return { ...closedPlan, status: 'enabled' };
+          },
+        },
+      };
+  });
+  const { ScheduledAcquisition } = load(entry);
+  const render = () => {
+    index = 0;
+    return ScheduledAcquisition();
+  };
+  const cards = (tree) => elements(tree).filter((element) => element.type === 'section');
+  assert.equal(cards(render()).length, 1, '进行中列表不混入已关闭计划，即使旧轮次仍在运行');
+  const history = elements(render()).find(
+    (element) => element.type === 'button' && words(element) === '已关闭计划',
+  );
+  history.props.onClick();
+  const closed = render();
+  assert.equal(words(history), '已关闭计划');
+  assert.equal(cards(closed).length, 2, '历史入口保留关闭计划及已结束单次计划');
+  assert.ok(words(closed).includes('每天'));
+  const restore = elements(closed).find(
+    (element) => element.type === 'button' && words(element).includes('恢复计划'),
+  );
+  assert.ok(restore);
+  restore.props.onClick();
+  await flush();
+  assert.deepEqual(actions, [{ id: closedPlan.id, action: 'resume' }]);
+  assert.equal(cards(render()).length, 1, '恢复成功的计划移出关闭列表');
+  elements(render())
+    .find((element) => element.type === 'button' && words(element) === '进行中的计划')
+    .props.onClick();
+  assert.equal(cards(render()).length, 2, '恢复成功的计划回到进行中列表');
+});
+
 test('旧轮询不能覆盖已暂停的定时计划，慢读取期间轮询不重叠', async () => {
   const states = [];
   const refs = [];
