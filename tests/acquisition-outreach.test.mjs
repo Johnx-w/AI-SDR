@@ -493,7 +493,7 @@ test('默认关闭且拒绝非布尔授权；空名单不扫描全库，新增�
   }
 });
 
-test('缺项客户列明原因，后续补齐自动发送；处理超过200家且没有累计发送目标', async () => {
+test('无邮箱客户本轮跳过，补齐及同轮更新不恢复，新轮可首发；处理超过200家', async () => {
   const h = harness();
   try {
     const job = h.create();
@@ -503,9 +503,20 @@ test('缺项客户列明原因，后续补齐自动发送；处理超过200家�
     await h.pump();
     const campaign = h.service.campaigns()[0];
     assert.equal(campaign.customerIds.length, 205);
-    assert.equal(h.service.deliveries(campaign.id, ['blocked']).length, 205);
-    assert.ok(h.service.deliveries(campaign.id, ['blocked']).every((row) => row.reason));
+    assert.equal(h.service.deliveries(campaign.id, ['skipped']).length, 205);
+    assert.ok(
+      h.service.deliveries(campaign.id, ['skipped']).every((row) => row.reason && row.skippedAt),
+    );
+    assert.equal(campaign.deliveryGroups.attention, 0);
+    assert.equal(campaign.lastError, '');
+    assert.equal(h.state.generated.length, 0);
     h.state.leads[204].email = 'info@missing-204.example.org';
+    await h.capture(job.id, h.state.leads[204], true);
+    await h.pump();
+    assert.equal(h.state.sent.length, 0);
+    assert.equal(h.service.deliveries(campaign.id).length, 205);
+    const next = h.create();
+    await h.capture(next.id, h.state.leads[204], true);
     await h.pump();
     assert.equal(h.state.sent.length, 1);
     assert.equal(h.state.sent[0].to, 'info@missing-204.example.org');
@@ -691,7 +702,7 @@ test('历史单次获客可永久取消自动首发，保留已发送记录且�
     h.jobs.finish(h.jobs.get(job.id), 'target_reached');
     await h.pump();
     assert.equal(h.service.deliveries(undefined, ['accepted']).length, 1);
-    assert.equal(h.service.deliveries(undefined, ['blocked']).length, 1);
+    assert.equal(h.service.deliveries(undefined, ['skipped']).length, 1);
     assert.equal(h.service.followUps.pending().length, 2);
 
     const stale = h.jobs.get(job.id);
@@ -703,8 +714,8 @@ test('历史单次获客可永久取消自动首发，保留已发送记录且�
     h.service.syncAcquisition();
     assert.equal(h.service.campaign(`acquisition-${job.id}`).status, 'cancelled');
     assert.equal(h.service.deliveries(undefined, ['accepted']).length, 1);
-    assert.equal(h.service.deliveries(undefined, ['cancelled']).length, 1);
-    assert.equal(h.service.deliveries(undefined, ['cancelled'])[0].reason, '获客自动首发已取消');
+    assert.equal(h.service.deliveries(undefined, ['cancelled']).length, 0);
+    assert.equal(h.service.deliveries(undefined, ['skipped']).length, 1);
     await h.pump();
     assert.equal(h.state.sent.length, 1);
     assert.equal(h.service.followUps.pending().length, 0);

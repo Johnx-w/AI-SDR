@@ -517,7 +517,7 @@ export function Automation() {
           <strong>{input.auto_first_touch ? '获客后自动首发' : '仅获客'}</strong>
           <small>
             {input.auto_first_touch
-              ? '符合条件的未首发客户自动发送；缺项等待处理'
+              ? '符合条件的未首发客户自动发送；无可用商务邮箱跳过本次'
               : '仅收录客户和研究资料'}
           </small>
           {input.auto_first_touch && input.auto_follow_up && (
@@ -1066,7 +1066,9 @@ export function Automation() {
                       />
                       <span>
                         <strong>获客后自动首发</strong>
-                        <small>符合条件、尚未首发的客户自动发送；缺项客户等待处理。</small>
+                        <small>
+                          符合条件、尚未首发的客户自动发送；无可用商务邮箱跳过本次，其他缺项保留原因。
+                        </small>
                       </span>
                     </label>
                   </div>

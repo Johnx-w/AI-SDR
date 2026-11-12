@@ -74,6 +74,7 @@ const labels: Record<string, string> = {
   failed: '发送失败',
   unknown: '结果待核实',
   blocked: '待处理',
+  skipped: '已跳过',
   cancelled: '已取消',
   connected: '连接正常',
   verified: '连接正常',
@@ -91,7 +92,9 @@ const campaignStatusLabel = (campaign: OutreachCampaign) =>
   !campaign.stats?.draft &&
   !campaign.stats?.queued &&
   !campaign.stats?.accepted
-    ? '待补齐条件'
+    ? campaign.stats?.skipped && !campaign.stats?.blocked
+      ? '本次客户已跳过'
+      : '待补齐条件'
     : campaign.status === 'draft'
       ? '未启动'
       : campaign.status === 'preparing'
@@ -823,11 +826,28 @@ function CampaignEditor({
 
 function MessagePreview({
   delivery,
+  campaignName,
   onSuppress,
 }: {
   delivery: OutreachDelivery;
+  campaignName?: string;
   onSuppress?: (delivery: OutreachDelivery) => void;
 }) {
+  if (delivery.status === 'skipped')
+    return (
+      <article className="outreach-message">
+        <div className="outreach-message-top">
+          <Badge tone="neutral">已跳过</Badge>
+          <span>{formatTime(delivery.skippedAt || delivery.createdAt)}</span>
+        </div>
+        <h3>{delivery.companyName}</h3>
+        <p>所属计划：{campaignName || delivery.campaignId}</p>
+        <p>跳过原因：{delivery.reason || '无可用商务邮箱'}</p>
+        <p className="outreach-hint">
+          本次首发已结束。补齐邮箱后，可通过新一轮获客或新的触达计划重新评估。
+        </p>
+      </article>
+    );
   return (
     <article className="outreach-message">
       <div className="outreach-message-top">
@@ -1529,6 +1549,9 @@ export function OutreachCommunication() {
                                     : campaign.targetCount}
                                 </strong>
                                 {campaign.acquisitionSource && <small>已发送 / 本轮收录客户</small>}
+                                {!!campaign.stats?.skipped && (
+                                  <small>已跳过 {campaign.stats.skipped} 家</small>
+                                )}
                                 <div className="outreach-progress-track" aria-hidden="true">
                                   <span
                                     style={{
@@ -1844,7 +1867,7 @@ export function OutreachCommunication() {
                         setRecordPage(1);
                       }}
                     >
-                      <option value="all">全部（不含已取消）</option>
+                      <option value="all">全部（不含已取消、已跳过）</option>
                       {Object.entries(deliveryGroupLabels).map(([status, label]) => (
                         <option value={status} key={status}>
                           {label}
@@ -1924,9 +1947,9 @@ export function OutreachCommunication() {
                           <tr>
                             <th>客户与收件邮箱</th>
                             <th>发件邮箱</th>
-                            <th>主题</th>
+                            <th>主题 / 跳过原因</th>
                             <th>状态</th>
-                            <th>发送 / 创建时间</th>
+                            <th>发送 / 跳过 / 创建时间</th>
                             <th>
                               <span className="outreach-sr-only">详情</span>
                             </th>
@@ -1939,10 +1962,16 @@ export function OutreachCommunication() {
                                 <strong>{delivery.companyName || '公司自有测试邮箱'}</strong>
                                 <small>{delivery.to}</small>
                               </td>
-                              <td>{delivery.from || '待分配'}</td>
+                              <td>
+                                {delivery.status === 'skipped' ? '—' : delivery.from || '待分配'}
+                              </td>
                               <td className="outreach-subject-cell">
-                                {delivery.subject || '尚未生成'}
-                                {delivery.reason && <small>{delivery.reason}</small>}
+                                {delivery.status === 'skipped'
+                                  ? delivery.reason
+                                  : delivery.subject || '尚未生成'}
+                                {delivery.status !== 'skipped' && delivery.reason && (
+                                  <small>{delivery.reason}</small>
+                                )}
                               </td>
                               <td>
                                 <Badge tone={tone(deliveryGroup(delivery))}>
@@ -1957,12 +1986,14 @@ export function OutreachCommunication() {
                                 {delivery.recordError && <small>{delivery.recordError}</small>}
                               </td>
                               <td className="outreach-time-cell">
-                                {formatTime(delivery.sentAt || delivery.createdAt)}
+                                {formatTime(
+                                  delivery.sentAt || delivery.skippedAt || delivery.createdAt,
+                                )}
                               </td>
                               <td>
                                 <button
                                   className="icon-button"
-                                  aria-label={`查看 ${delivery.companyName || delivery.to} 的邮件`}
+                                  aria-label={`查看 ${delivery.companyName || delivery.to} 的${delivery.status === 'skipped' ? '跳过记录' : '邮件'}`}
                                   onClick={() => setDeliveryPreview(delivery)}
                                 >
                                   <ChevronRight size={17} />
@@ -2053,8 +2084,12 @@ export function OutreachCommunication() {
                   </Badge>
                   <span>
                     {shownDetail.campaign.acquisitionSource
-                      ? `本轮收录 ${shownDetail.campaign.customerIds?.length || 0} 家 · 持续检查缺项`
+                      ? `本轮收录 ${shownDetail.campaign.customerIds?.length || 0} 家`
                       : `目标 ${shownDetail.campaign.targetCount} 封`}
+                  </span>
+                  <span>
+                    已发送 {shownDetail.campaign.stats?.accepted || 0} 家 · 已跳过{' '}
+                    {shownDetail.campaign.stats?.skipped || 0} 家
                   </span>
                   <span>版本 {shownDetail.campaign.revision}</span>
                   <span>LLM 自动生成 · 固定签名</span>
@@ -2172,7 +2207,7 @@ export function OutreachCommunication() {
                                 ? '包含现有未开发客户'
                                 : '仅计划创建后新增客户'}
                             {shownDetail.campaign.acquisitionSource
-                              ? '；缺项补齐后自动重新检查'
+                              ? '；无可用商务邮箱跳过本次，其他缺项补齐后重新检查'
                               : shownDetail.campaign.continuous
                                 ? '；持续加入符合条件的新客户'
                                 : '；固定批次'}
@@ -2217,7 +2252,11 @@ export function OutreachCommunication() {
                           onClick={() => setSampleId(delivery.id)}
                         >
                           <strong>{delivery.companyName || delivery.to}</strong>
-                          <span>{delivery.subject || '尚未生成'}</span>
+                          <span>
+                            {delivery.status === 'skipped'
+                              ? delivery.reason
+                              : delivery.subject || '尚未生成'}
+                          </span>
                           <small>{deliveryDetailLabel(delivery)}</small>
                         </button>
                       ))}
@@ -2226,6 +2265,7 @@ export function OutreachCommunication() {
                       <MessagePreview
                         key={samplePreview.delivery.id}
                         delivery={samplePreview.delivery}
+                        campaignName={shownDetail.campaign.name}
                         onSuppress={(delivery) => {
                           setSuppressionReason('人工标记不再联系');
                           setSuppressionTarget(delivery);
@@ -2378,10 +2418,18 @@ export function OutreachCommunication() {
         </Modal>
       )}
       {currentDeliveryPreview && (
-        <Modal wide title="邮件详情" onClose={() => setDeliveryPreview(null)}>
+        <Modal
+          wide
+          title={currentDeliveryPreview.status === 'skipped' ? '首发跳过记录' : '邮件详情'}
+          onClose={() => setDeliveryPreview(null)}
+        >
           <div className="modal-body">
             <MessagePreview
               delivery={currentDeliveryPreview}
+              campaignName={
+                campaigns.find((campaign) => campaign.id === currentDeliveryPreview.campaignId)
+                  ?.name
+              }
               onSuppress={(delivery) => {
                 setSuppressionReason('人工标记不再联系');
                 setSuppressionTarget(delivery);

@@ -4,11 +4,11 @@ import { OutreachService } from '../server/outreach-service.mjs';
 import { handleOutreach } from '../server/outreach-api.mjs';
 import { deliveryGroup } from '../src/domain/outreach-status.mjs';
 
-test('默认发送记录和总数排除已取消，历史详情及显式取消筛选仍可查阅', async (t) => {
+test('默认发送记录和总数排除已取消及已跳过，历史详情及显式筛选仍可查阅', async (t) => {
   const service = new OutreachService({ mailboxes: { list: () => [] } });
   t.after(() => service.close());
   service.putCampaign({ id: 'cancelled-plan', status: 'cancelled' });
-  for (const status of ['accepted', 'unknown', 'failed', 'cancelled'])
+  for (const status of ['accepted', 'unknown', 'failed', 'cancelled', 'skipped'])
     service.putDelivery({ id: status, campaignId: 'cancelled-plan', status, companyName: 'Buyer' });
   assert.equal(service.listDeliveries().total, 3);
   assert.equal(service.listDeliveries({ campaignId: 'cancelled-plan', q: 'Buyer' }).total, 3);
@@ -18,10 +18,12 @@ test('默认发送记录和总数排除已取消，历史详情及显式取消�
     ['cancelled'],
   );
   assert.equal(service.listDeliveries({ status: 'cancelled' }).total, 1);
-  assert.equal(service.detail('cancelled-plan').deliveries.length, 4);
+  assert.equal(service.listDeliveries({ status: 'skipped' }).total, 1);
+  assert.equal(service.listDeliveries({ group: 'skipped', q: 'Buyer' }).total, 1);
+  assert.equal(service.detail('cancelled-plan').deliveries.length, 5);
 });
 
-test('四类发送状态先跨记录筛选再分页，生成与人工确认分开且统计一致', async (t) => {
+test('五类发送状态先跨记录筛选再分页，生成与人工确认分开且统计一致', async (t) => {
   const service = new OutreachService({ mailboxes: { list: () => [] } });
   t.after(() => service.close());
   service.putCampaign({ id: 'one', name: 'Plan' });
@@ -35,6 +37,7 @@ test('四类发送状态先跨记录筛选再分页，生成与人工确认分�
     ['failed', 'Rejected', 'attention'],
     ['unknown', 'Uncertain', 'attention'],
     ['cancelled', 'Cancelled', 'cancelled'],
+    ['skipped', '', 'skipped'],
   ];
   for (let i = 0; i < 12; i++) {
     for (const [status, subject, group] of cases) {
@@ -43,7 +46,7 @@ test('四类发送状态先跨记录筛选再分页，生成与人工确认分�
       service.putDelivery(delivery);
     }
   }
-  const expected = { pending: 36, sent: 12, attention: 48, cancelled: 12 };
+  const expected = { pending: 36, sent: 12, attention: 48, skipped: 12, cancelled: 12 };
   assert.deepEqual((await service.state()).deliveryGroups, expected);
   assert.deepEqual(service.detail('one').campaign.deliveryGroups, expected);
   for (const [group, total] of Object.entries(expected)) {

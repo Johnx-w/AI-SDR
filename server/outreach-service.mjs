@@ -21,7 +21,7 @@ const text = (value, max = 200) => (typeof value === 'string' ? value.trim().sli
 const list = (value) =>
   Array.isArray(value) ? [...new Set(value.map((v) => text(v)).filter(Boolean))].slice(0, 200) : [];
 const iso = (now) => new Date(now()).toISOString();
-const terminal = new Set(['accepted', 'failed', 'unknown', 'blocked', 'cancelled']);
+const terminal = new Set(['accepted', 'failed', 'unknown', 'blocked', 'skipped', 'cancelled']);
 const senderVersion = (m) =>
   hash([
     m.id,
@@ -214,6 +214,7 @@ export class OutreachService {
     const where = [],
       params = [];
     if (group !== 'cancelled' && status !== 'cancelled') where.push("state != 'cancelled'");
+    if (group !== 'skipped' && status !== 'skipped') where.push("state != 'skipped'");
     if (campaignId !== 'all') {
       where.push('campaign_id = ?');
       params.push(campaignId);
@@ -265,7 +266,7 @@ export class OutreachService {
     return d;
   }
   withStats(c) {
-    const deliveryGroups = { pending: 0, sent: 0, attention: 0, cancelled: 0 };
+    const deliveryGroups = { pending: 0, sent: 0, attention: 0, skipped: 0, cancelled: 0 };
     const stats = {
       draft: 0,
       queued: 0,
@@ -273,6 +274,7 @@ export class OutreachService {
       failed: 0,
       unknown: 0,
       blocked: 0,
+      skipped: 0,
       sending: 0,
     };
     for (const row of this.db
@@ -301,7 +303,7 @@ export class OutreachService {
   async state() {
     const mailboxes = this.mailboxes.list().map(({ signatureDesign, ...mailbox }) => mailbox);
     const campaigns = this.campaigns();
-    const deliveryGroups = { pending: 0, sent: 0, attention: 0, cancelled: 0 };
+    const deliveryGroups = { pending: 0, sent: 0, attention: 0, skipped: 0, cancelled: 0 };
     const deliveryStats = {
       total: 0,
       draft: 0,
@@ -312,11 +314,12 @@ export class OutreachService {
       unknown: 0,
       blocked: 0,
       cancelled: 0,
+      skipped: 0,
     };
     for (const row of this.db
       .prepare('SELECT state, count(*) AS count FROM outreach_deliveries GROUP BY state')
       .all()) {
-      if (row.state !== 'cancelled') deliveryStats.total += row.count;
+      if (!['cancelled', 'skipped'].includes(row.state)) deliveryStats.total += row.count;
       if (row.state in deliveryStats) deliveryStats[row.state] += row.count;
       deliveryGroups[deliveryGroup({ status: row.state })] += row.count;
     }
@@ -536,6 +539,18 @@ export class OutreachService {
   release(id) {
     this.db.prepare('DELETE FROM outreach_reservations WHERE delivery_id=?').run(id);
   }
+  skipDelivery(delivery, reason) {
+    this.transaction(() => {
+      this.putDelivery({
+        ...delivery,
+        status: 'skipped',
+        reason,
+        reasonCode: 'contact_unverified',
+        skippedAt: iso(this.now),
+      });
+      this.release(delivery.id);
+    });
+  }
   contactState(ignoreDelivery) {
     const identities = new Set(
       this.db
@@ -623,6 +638,8 @@ export class OutreachService {
     let eligibleLeads = c.includeExisting
       ? leads
       : leads.filter((l) => !c.baselineCustomerIds.includes(l.id));
+    const skipped = new Set(this.deliveries(c.id, ['skipped']).map((d) => d.customerId));
+    eligibleLeads = eligibleLeads.filter((lead) => !skipped.has(lead.id));
     if (c.acquisitionSource) {
       const members = new Set(c.customerIds);
       const prepared = this.deliveries(c.id, ['blocked']).filter(
@@ -758,8 +775,38 @@ export class OutreachService {
       return;
     let slots =
       (c.acquisitionSource ? Infinity : c.targetCount) -
-      this.deliveries(id).filter((d) => !['blocked', 'cancelled'].includes(d.status)).length;
+      this.deliveries(id).filter((d) => !['blocked', 'cancelled', 'skipped'].includes(d.status))
+        .length;
     for (const candidate of result.blocked.slice(0, c.acquisitionSource ? undefined : 200)) {
+      if (candidate.reasonCode === 'contact_unverified') {
+        const prior = this.deliveries(id).find(
+          (d) => d.customerId === candidate.customerId && d.status !== 'cancelled',
+        );
+        if (
+          !prior ||
+          (['draft', 'queued', 'blocked'].includes(prior.status) &&
+            !prior.attemptedAt &&
+            !prior.messageId &&
+            !prior.sentAt)
+        )
+          this.skipDelivery(
+            prior || {
+              id: randomUUID(),
+              campaignId: id,
+              mode: 'production',
+              customerId: candidate.customerId,
+              companyName: candidate.companyName,
+              to: '',
+              mailboxId: '',
+              from: '',
+              subject: '',
+              bodyText: '',
+              createdAt: iso(this.now),
+            },
+            candidate.reason,
+          );
+        continue;
+      }
       const priorBlocked = this.deliveries(id).find(
         (d) =>
           d.customerId === candidate.customerId && d.status === 'blocked' && !d.materialRefresh,
@@ -982,7 +1029,9 @@ export class OutreachService {
           ? ''
           : summary
             ? `暂未生成邮件。${summary}。请打开“执行详情”查看。`
-            : '当前没有可加入的未开发客户',
+            : deliveries.some((d) => d.status === 'skipped')
+              ? ''
+              : '当前没有可加入的未开发客户',
       });
     }
   }
@@ -1269,12 +1318,17 @@ export class OutreachService {
         !rows.some((d) => ['draft', 'queued', 'sending'].includes(d.status)) &&
         !rows.some((d) => d.status === 'blocked' && d.materialRefresh) &&
         !this.preparing.has(c.id)
-      )
+      ) {
+        const skippedWithoutBlockers =
+          rows.some((d) => d.status === 'skipped') && !rows.some((d) => d.status === 'blocked');
         this.putCampaign({
           ...current,
           status: 'paused',
-          lastError: `本轮已提交 ${consumed} / ${c.targetCount} 封，剩余客户或邮件条件待处理，请查看执行详情。`,
+          lastError: skippedWithoutBlockers
+            ? ''
+            : `本轮已提交 ${consumed} / ${c.targetCount} 封，剩余客户或邮件条件待处理，请查看执行详情。`,
         });
+      }
     }
     await this.followUps.tick();
   }
@@ -1332,6 +1386,13 @@ export class OutreachService {
           v.productVersion === d.productVersion,
       );
       if (!candidate || hash(candidate.leadSnapshot) !== hash(d.candidate.leadSnapshot)) {
+        const missingContact = result.blocked.find(
+          (row) => row.customerId === d.customerId && row.reasonCode === 'contact_unverified',
+        );
+        if (missingContact) {
+          this.skipDelivery(d, missingContact.reason);
+          return;
+        }
         const materialReason = this.materialReason(d, latest);
         this.putDelivery({
           ...d,

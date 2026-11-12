@@ -14,7 +14,7 @@ test('idle outreach ticks count history without loading historical message bodie
     lastRefreshAt: now,
     targetCount: 100,
   });
-  for (const status of ['accepted', 'cancelled', 'unknown', 'blocked'])
+  for (const status of ['accepted', 'cancelled', 'unknown', 'blocked', 'skipped'])
     service.putDelivery({
       id: status,
       campaignId: 'history',
@@ -49,6 +49,7 @@ test('idle outreach ticks count history without loading historical message bodie
       failed: 0,
       unknown: 1,
       blocked: 1,
+      skipped: 1,
       sending: 0,
     });
     assert.equal(

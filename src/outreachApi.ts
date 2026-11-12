@@ -70,6 +70,7 @@ export interface OutreachCampaign {
     failed: number;
     unknown: number;
     blocked: number;
+    skipped: number;
   };
 }
 
@@ -81,6 +82,7 @@ export type OutreachDeliveryStatus =
   | 'failed'
   | 'unknown'
   | 'blocked'
+  | 'skipped'
   | 'cancelled';
 
 export interface OutreachDelivery {
@@ -100,6 +102,7 @@ export interface OutreachDelivery {
   matchReason?: string | null;
   createdAt: string;
   sentAt?: string | null;
+  skippedAt?: string;
   messageId?: string | null;
   receivedVerifiedAt?: string | null;
   recordError?: string | null;

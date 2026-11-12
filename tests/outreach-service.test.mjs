@@ -142,6 +142,64 @@ async function prepare(h, overrides = {}) {
   return h.service.campaign(campaign.id);
 }
 
+test('无邮箱跳过持久化，重启、恢复及旧计划重扫不恢复，新手动计划可纳入且不消耗名额', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'outreach-skip-'));
+  const h = harness({ path: join(directory, 'outreach.sqlite') });
+  try {
+    h.state.leads = [{ ...buyer(), email: '', contactEvidence: [] }];
+    const campaign = await prepare(h, { continuous: true, targetCount: 1 });
+    const skipped = h.service.deliveries(campaign.id)[0];
+    assert.equal(skipped.status, 'skipped');
+    assert.equal(skipped.reasonCode, 'contact_unverified');
+    assert.equal(
+      h.service.db.prepare('SELECT count(*) AS n FROM outreach_reservations').get().n,
+      0,
+    );
+    await h.service.close();
+    h.service = new OutreachService(h.serviceOptions);
+    h.state.leads = [buyer()];
+    h.service.activate(campaign.id, campaign.revision);
+    await h.service.preparing.get(campaign.id);
+    await h.service.tick();
+    h.service.pause(campaign.id);
+    h.service.activate(campaign.id, campaign.revision);
+    await h.service.preparing.get(campaign.id);
+    await h.service.tick();
+    assert.equal(h.deliveries.length, 0);
+    assert.deepEqual(h.service.deliveries(campaign.id), [skipped]);
+    h.state.leads.push(buyer('new-customer'));
+    h.service.prepare(campaign.id);
+    await h.service.preparing.get(campaign.id);
+    await h.service.tick();
+    assert.equal(h.deliveries.length, 1);
+    assert.equal(h.deliveries[0].to, buyer('new-customer').email);
+    const next = await prepare(h, { targetCount: 1 });
+    h.service.activate(next.id, next.revision);
+    await h.service.tick();
+    assert.equal(h.deliveries.length, 2);
+    assert.equal(h.deliveries[1].to, buyer().email);
+    assert.equal(h.service.delivery(skipped.id).status, 'skipped');
+  } finally {
+    await h.service.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('发送前收件邮箱变为非商务地址时跳过，释放占用且不提交邮件', async (t) => {
+  const h = harness();
+  t.after(() => h.service.close());
+  const campaign = await prepare(h);
+  const draft = h.service.deliveries(campaign.id)[0];
+  h.state.leads = [{ ...buyer(), email: 'privacy@buyer-one.example.org', contactEvidence: [] }];
+  h.service.activate(campaign.id, campaign.revision);
+  await h.service.tick();
+  assert.equal(h.service.delivery(draft.id).status, 'skipped');
+  assert.equal(h.service.isReserved(draft.candidate), false);
+  assert.equal(h.deliveries.length, 0);
+  assert.equal(h.service.campaign(campaign.id).status, 'paused');
+  assert.equal(h.service.campaign(campaign.id).lastError, '');
+});
+
 async function internalTest(h, key = 'internal-test-unique-key') {
   const result = h.service.internalTest({
     confirmed: true,
@@ -748,20 +806,22 @@ test('连续计划生成失败重试18轮只更新原记录，取消后不再重
   assert.equal(h.deliveries[0].to, 'info@ready-buyer.example.org');
 });
 
-test('客户库补充邮箱后重新准备样稿，旧待处理记录不再占用当前待处理计数', async (t) => {
+test('客户库补充邮箱后旧计划重新准备仍保留跳过，且不占用待处理计数', async (t) => {
   const h = harness();
   t.after(() => h.service.close());
   const email = h.state.leads[0].email;
   h.state.leads[0].email = '';
   h.state.leads[0].contactEvidence = [];
   const campaign = await prepare(h);
-  assert.equal(h.service.detail(campaign.id).campaign.stats.blocked, 1);
+  assert.equal(h.service.detail(campaign.id).campaign.stats.skipped, 1);
   h.state.leads[0].email = email;
   h.service.prepare(campaign.id);
   await h.service.preparing.get(campaign.id);
   const detail = h.service.detail(campaign.id);
   assert.equal(detail.campaign.stats.blocked, 0);
-  assert.equal(detail.campaign.stats.draft, 1);
+  assert.equal(detail.campaign.stats.draft, 0);
+  assert.equal(detail.campaign.stats.skipped, 1);
+  assert.equal(detail.campaign.deliveryGroups.attention, 0);
   assert.equal(detail.deliveries.length, 1);
 });
 

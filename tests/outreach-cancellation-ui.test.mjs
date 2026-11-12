@@ -567,7 +567,7 @@ test('计划表格默认只列当前正式计划，搜索筛选先于分页且�
   assert.deepEqual(h.writes(), []);
 });
 
-test('发送记录只提供四类筛选，未知结果详情保留先核对且不重发的说明', async () => {
+test('发送记录提供五类筛选，未知结果详情保留先核对且不重发的说明', async () => {
   const h = setup('active', { tab: 'deliveries', deliveryStatus: 'unknown' });
   await h.ready();
   h.render();
@@ -577,7 +577,7 @@ test('发送记录只提供四类筛选，未知结果详情保留先核对且�
     allElements(filter)
       .filter((node) => node.type === 'option')
       .map(textContent),
-    ['全部（不含已取消）', '待发送', '已发送', '需处理', '已取消'],
+    ['全部（不含已取消、已跳过）', '待发送', '已发送', '需处理', '已跳过', '已取消'],
   );
   h.change('按发送状态筛选', 'attention');
   h.render();
@@ -588,6 +588,27 @@ test('发送记录只提供四类筛选，未知结果详情保留先核对且�
     .find((node) => node.props['aria-label'] === '查看 Buyer company 的邮件')
     .props.onClick();
   assert.match(h.html(), /结果待核实；请先核对原邮箱，系统不会自动重发/);
+  assert.deepEqual(h.writes(), []);
+});
+
+test('已跳过详情只显示客户、计划、原因与时间，不显示空邮件或人工处理按钮', async () => {
+  const h = setup('active', { tab: 'deliveries', deliveryStatus: 'skipped' });
+  await h.ready();
+  h.change('按发送状态筛选', 'skipped');
+  h.render();
+  await flush();
+  assert.ok(h.requests.some(({ path }) => path.includes('group=skipped')));
+  h.elements()
+    .find((node) => node.props['aria-label'] === '查看 Buyer company 的跳过记录')
+    .props.onClick();
+  const html = h.html();
+  assert.match(html, /所属计划：Australia first outreach/);
+  assert.match(html, /跳过原因：无可用商务邮箱/);
+  assert.match(html, /本次首发已结束/);
+  assert.doesNotMatch(
+    html,
+    /邮件内容尚未生成|尚未生成主题|标记不再联系|Original submitted message/,
+  );
   assert.deepEqual(h.writes(), []);
 });
 

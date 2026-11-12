@@ -233,7 +233,7 @@ export function ScheduledAcquisition() {
               获客后自动首发
             </label>
             <p className="muted">
-              开启后续轮次的自动首发；按最新已审核产品和可用邮箱匹配，缺项客户保留原因。关闭开关同时停止待发邮件。
+              开启后续轮次的自动首发；按最新已审核产品和可用邮箱匹配，无可用商务邮箱跳过本次，其他缺项保留原因。关闭开关同时停止待发邮件。
             </p>
             {plan.lastError && (
               <p className="schedule-wait" role="status">
