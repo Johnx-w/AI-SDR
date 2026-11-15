@@ -107,6 +107,12 @@ export function createApp({
   outreachServiceFactory,
   brandingOptions,
 } = {}) {
+  const publicOrigin = env.PUBLIC_ORIGIN;
+  if (publicOrigin) {
+    const parsed = URL.parse(publicOrigin);
+    if (parsed?.protocol !== 'https:' || parsed.origin !== publicOrigin)
+      throw new Error('PUBLIC_ORIGIN 只接受不带路径的 HTTPS 来源');
+  }
   const isMaintaining = () =>
     Boolean(env.RELEASE_MAINTENANCE_PATH && existsSync(env.RELEASE_MAINTENANCE_PATH));
   let apiRequests = 0;
@@ -348,6 +354,7 @@ export function createApp({
           `http://127.0.0.1:${env.PORT || 4311}`,
           `http://localhost:${env.PORT || 4311}`,
         ]);
+        if (publicOrigin) allowed.add(publicOrigin);
         if (origin && !allowed.has(origin)) throw new ApiError(403, '该来源无权调用本地接口');
         if (request.headers['sec-fetch-site'] === 'cross-site')
           throw new ApiError(403, '不允许跨站调用');

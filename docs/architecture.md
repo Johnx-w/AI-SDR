@@ -89,7 +89,15 @@ T1/T3 与独立 T4 目标分别同步，共享同一份去重日志，避免多�
 
 关闭网页保留后端任务；服务中断后，获客任务按原操作核对，发送结果不明先检查渠道记录。定时计划错过时点与人工暂停的恢复规则不同，见获客说明；自动发信、人工回复和未来自动接待分别检查授权。
 
-Node.js 后端仅监听 127.0.0.1，API 保留本机来源及跨站请求限制；云端发布由 `shadeflow.service` 管理，内部端口 14311。应用尚无团队登录与角色权限，公网入口的鉴权及 HTTPS 需由部署环境提供，不能仅改监听地址。服务端凭证不返回浏览器，连接配置与进程环境的优先级见获客说明。仓库实现说明不代替对云端实际版本及入口配置的核验。
+Node.js 后端仅监听 127.0.0.1，API 保留本机来源及跨站请求限制；云端发布由 `shadeflow.service` 管理，内部端口 14311。应用尚无团队登录与角色权限，公网入口的鉴权及 HTTPS 由下述网关提供，不能仅改监听地址。服务端凭证不返回浏览器，连接配置与进程环境的优先级见获客说明。仓库实现说明不代替对云端实际版本及入口配置的核验。
+
+### 公网受控入口
+
+公网入口使用 `https://47.76.84.114:8443/`。Nginx 配置源为 `scripts/shadeflow-public.nginx.conf`，在 8443 为**所有路径**（包括 `/api/`、首页和静态资源）验证浏览器原生用户名／密码，再代理到回环地址 14311；转发时清除 Basic `Authorization`，不把入口密码交给应用，失败认证响应延迟一秒。密码文件 `/etc/nginx/shadeflow.htpasswd` 只存哈希，不入仓库；入口用户名 `root` 仅是网页认证账号，与系统 root 无关。在已配置 `ai-sdr` SSH 别名的 Windows 本机运行 `scripts/set-public-password.ps1`，交互输入两次 6–72 位密码即可创建或更换哈希，不在命令行或仓库传递明文。单一共享账号不提供逐人权限或审计。
+
+80 端口只提供 `/.well-known/acme-challenge/` 的证书验证文件，其余请求返回 404；443 保留给自动 CD 的专用 SSH，22 仍只允许管理 IP，14311 不对公网开放。应用环境文件配置精确的 `PUBLIC_ORIGIN=https://47.76.84.114:8443`，只允许这个 HTTPS 来源调用 API，原有跨站阻断仍生效。此入口与本机 SSH 隧道互不依赖，启用状态以服务器实际监听和安全组为准。
+
+公网 IP 证书由 Certbot 5.4+ 通过 HTTP-01 申请，使用约六天有效的 shortlived 证书；自动续期成功后必须重载 Nginx。核对 `certbot renew --dry-run`、证书到期时间、续期定时器及站点证书链。验收时从公网确认未认证的首页和 API 均为 401，正确密码可读取页面与 API，浏览器同源写请求不因 Origin 被拒绝，且公网无法直连 14311。依据：[Let's Encrypt IP 证书说明](https://letsencrypt.org/2026/03/11/shorter-certs-certbot)、[HTTP-01 验证端口](https://letsencrypt.org/docs/challenge-types/)、[Nginx HTTP Basic Auth](https://nginx.org/en/docs/http/ngx_http_auth_basic_module.html)。
 
 ## 标准交付流程（Codex执行入口）
 

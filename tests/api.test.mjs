@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateInput } from '../server/app.mjs';
+import { createApp, validateInput } from '../server/app.mjs';
 import { withApp } from './helpers/http.mjs';
 import { feishuEnv } from './helpers/feishu.mjs';
 const configured = {
@@ -101,6 +101,37 @@ test('自定义开发端口只允许明确的本机来源，其他来源继续�
       assert.equal(response.status, status, origin);
     }
   });
+});
+
+test('只允许配置的 HTTPS 公网来源，跨站请求仍拒绝', async () => {
+  const publicOrigin = 'https://47.76.84.114:8443';
+  await withApp({ env: { PUBLIC_ORIGIN: publicOrigin } }, async (base) => {
+    for (const [origin, site, status] of [
+      [publicOrigin, 'same-origin', 200],
+      [publicOrigin, 'cross-site', 403],
+      ['https://47.76.84.114:8444', 'same-origin', 403],
+      ['http://47.76.84.114:8443', 'same-origin', 403],
+    ]) {
+      const response = await fetch(`${base}/api/v1/acquisition/status`, {
+        headers: { Origin: origin, 'Sec-Fetch-Site': site },
+      });
+      assert.equal(response.status, status, `${origin} ${site}`);
+    }
+    const write = await fetch(`${base}/api/v1/connections`, {
+      method: 'PUT',
+      headers: { Origin: publicOrigin, 'Content-Type': 'application/json' },
+      body: '{',
+    });
+    assert.equal(write.status, 400);
+  });
+  for (const invalid of [
+    'http://example.com',
+    'https://example.com/path',
+    'https://user:secret@example.com',
+    'https://example.com?query=1',
+  ]) {
+    assert.throws(() => createApp({ env: { PUBLIC_ORIGIN: invalid } }), /PUBLIC_ORIGIN/);
+  }
 });
 
 test('拒绝跨站、无效JSON、非JSON类型及超量请求', async () => {
