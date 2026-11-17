@@ -85,12 +85,14 @@ export class FeishuClient {
     }
     return data.data;
   }
-  async list(resource, tableId, filter) {
+  async list(resource, tableId, filter, pageSize) {
     const rows = [],
       seen = new Set();
     let cursor = '';
     for (let page = 0; page < 10000; page++) {
-      const query = new URLSearchParams({ page_size: resource === 'fields' ? '100' : '500' });
+      const query = new URLSearchParams({
+        page_size: String(pageSize ?? (resource === 'fields' ? 100 : 500)),
+      });
       if (cursor) query.set('page_token', cursor);
       if (filter) query.set('filter', filter);
       const data = await this.request(this.tablePath(tableId) + '/' + resource + '?' + query);
@@ -104,8 +106,8 @@ export class FeishuClient {
     }
     throw fail('飞书分页超过安全上限，未使用不完整结果');
   }
-  records(tableId, filter) {
-    return this.list('records', tableId, filter);
+  records(tableId, filter, pageSize) {
+    return this.list('records', tableId, filter, pageSize);
   }
   fields(tableId) {
     return this.list('fields', tableId);

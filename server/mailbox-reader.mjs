@@ -362,6 +362,7 @@ export function createMailboxReader({
       }
       return {
         path: folder.path,
+        sent: folder.sent,
         uidValidity: current.uidValidity,
         nextUid: selected.length
           ? selected.at(-1) + 1

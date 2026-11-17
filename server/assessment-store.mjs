@@ -31,6 +31,12 @@ export class AssessmentStore {
       .get(this.scope, recordId);
     return row ? JSON.parse(row.data) : null;
   }
+  current() {
+    return this.db
+      .prepare('SELECT data FROM customer_assessments WHERE scope=? ORDER BY record_id')
+      .all(this.scope)
+      .map((row) => JSON.parse(row.data));
+  }
   saveCurrent(snapshot, recordId) {
     if (!snapshot.id || !recordId || !Number.isFinite(Date.parse(snapshot.evaluatedAt)))
       throw conflict('评估编号、客户或评估时间无效');

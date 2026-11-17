@@ -163,6 +163,26 @@ test('邻近产品、仅安装、身份冲突与明确无关仍限制初评', ()
   }
 });
 
+test('副线与邻近品类并存不构成事实冲突，明确无关与经营证据仍冲突', () => {
+  const related = evaluate([
+    fact('secondary_product', 'Blinds and curtains supplied alongside shutters'),
+    fact('adjacent_product', 'Roller blinds and zebra blinds compared/supplied'),
+    fact('specialist_supply', 'We supply and install blinds and curtains'),
+  ]);
+  assert.equal(related.dimensions.P.score, 30);
+  assert.equal(related.dimensions.P.conflict, undefined);
+  assert.equal(related.grade, 'B');
+  assert.deepEqual(related.missing, []);
+
+  const contradictory = evaluate([
+    fact('secondary_product', 'Roman blinds'),
+    fact('unrelated_product', 'We do not sell Roman blinds'),
+    fact('specialist_supply'),
+  ]);
+  assert.equal(contradictory.dimensions.P.conflict, true);
+  assert.equal(contradictory.status, '待核实');
+});
+
 test('明确市场不匹配不能因主营和供货角色被评为A', () => {
   const result = evaluate(
     ['core_product', 'specialist_supply'].map((kind) => fact(kind)),

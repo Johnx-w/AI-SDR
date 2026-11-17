@@ -98,6 +98,38 @@ export class MailConversations {
     };
   }
 
+  sentEvidence(delivery) {
+    if (!messageId(delivery.messageId)) return null;
+    const mailbox = this.mailboxes.list().find((item) => item.id === delivery.mailboxId);
+    if (!mailbox) return null;
+    const rows = this.db
+      .prepare(
+        "SELECT data FROM mailbox_thread_messages WHERE account_key=? AND json_extract(data,'$.messageId')=?",
+      )
+      .all(keyFor(mailbox), delivery.messageId);
+    const expectedFrom = address(delivery.from);
+    const expectedTo = address(delivery.to);
+    for (const row of rows) {
+      const message = JSON.parse(row.data);
+      const recipients = Array.isArray(message.toAddresses) ? message.toAddresses.map(address) : [];
+      if (
+        message.source === 'imap' &&
+        message.direction === 'outbound' &&
+        message.deliveryStatus === 'sent' &&
+        address(message.from) === expectedFrom &&
+        (recipients.includes(expectedTo) || address(message.to) === expectedTo) &&
+        message.sourceLocator?.sent === true
+      )
+        return {
+          messageId: message.messageId,
+          occurredAt: message.occurredAt,
+          folder: message.sourceLocator.folder,
+          uid: message.sourceLocator.uid,
+        };
+    }
+    return null;
+  }
+
   saveState(key, state) {
     this.db
       .prepare(
@@ -151,6 +183,7 @@ export class MailConversations {
     const accountKey = keyFor(mailbox);
     const externalId = messageId(input.messageId);
     const from = address(input.from);
+    const to = text(input.to, 4000).trim();
     const id = 'email_' + hash([accountKey, externalId || input.identity, from]);
     const prior = this.db
       .prepare('SELECT thread_id,data FROM mailbox_thread_messages WHERE id=?')
@@ -176,6 +209,8 @@ export class MailConversations {
     };
     // Enrich old cached mail without replacing original text or local read decisions.
     if (prior) {
+      // The same Message-ID in another folder cannot lend sent-folder proof to different recipients.
+      if (old.to.toLowerCase() !== to.toLowerCase()) return 0;
       let enriched = { ...old };
       if (input.source === 'imap' && input.bodyFormatVersion === 2) {
         enriched = {
@@ -198,7 +233,6 @@ export class MailConversations {
       this.rebuild(prior.thread_id, mailbox, extra);
       return 0;
     }
-    const to = text(input.to, 4000).trim();
     const occurredAt = Number.isFinite(Date.parse(input.occurredAt)) ? iso(input.occurredAt) : null;
     if (!from || !to || !occurredAt || !['inbound', 'outbound'].includes(input.direction)) {
       throw Object.assign(fail(502, '邮件数据不完整，未推进同步位置'), {
@@ -483,6 +517,7 @@ export class MailConversations {
               identity: [folder.path, folder.uidValidity, message.uid],
               sourceLocator: {
                 folder: folder.path,
+                sent: folder.sent === true,
                 uidValidity: String(folder.uidValidity),
                 uid: message.uid,
               },

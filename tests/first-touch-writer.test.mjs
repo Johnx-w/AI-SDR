@@ -360,6 +360,9 @@ test('没有获准产品或双方产品不匹配时不产生可写作候选', ()
       campaign: input.campaign,
     });
     assert.equal(result.eligible.length, 0);
-    assert.equal(result.blocked[0].reasonCode, 'product_match_unconfirmed');
+    assert.equal(
+      result.blocked[0].reasonCode,
+      products.length ? 'product_match_unconfirmed' : 'product_scope_unconfirmed',
+    );
   }
 });

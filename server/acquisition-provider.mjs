@@ -47,6 +47,7 @@ export function createAcquisitionProvider({
       const data = await feishu.readLeads();
       return service().decorateLeads ? service().decorateLeads(data) : data;
     },
+    currentAssessments: () => service().assessments.current(),
     assessmentInfo: () => service().assessmentInfo(),
     assessRecord: (...args) => service().assessRecord(...args),
     updateContacts: async (...args) => {

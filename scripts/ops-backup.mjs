@@ -19,6 +19,15 @@ import { pathToFileURL } from 'node:url';
 
 export const digest = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
 
+export function configurationHashes(stage) {
+  const configuration = {};
+  for (const name of ['.env', '.env.local', 'shadeflow.service.txt', 'release-state.json']) {
+    if (existsSync(join(stage, name))) configuration[name] = digest(join(stage, name));
+  }
+  assert(configuration['shadeflow.service.txt'] && configuration['release-state.json']);
+  return configuration;
+}
+
 export async function copyData(source, destination) {
   mkdirSync(destination, { recursive: true, mode: 0o700 });
   const files = [];
@@ -96,12 +105,18 @@ export async function createBackup() {
       execFileSync('systemctl', ['cat', 'shadeflow.service']),
     );
     copyFileSync('/srv/shadeflow/release-state.json', join(stage, 'release-state.json'));
+    assert.equal(
+      digest('/srv/shadeflow/release-state.json'),
+      digest(join(stage, 'release-state.json')),
+      '备份期间发布状态发生变化',
+    );
     const manifest = {
       startedAt,
       completedAt: new Date().toISOString(),
       release: realpathSync('/srv/shadeflow/current'),
       consistency: '每个 SQLite 数据库独立一致；多个数据库不构成同一全局事务快照',
       files,
+      configuration: configurationHashes(stage),
     };
     writeFileSync(join(stage, 'manifest.json'), JSON.stringify(manifest, null, 2));
     const archive = join(root, `${name}.tar.gz`);

@@ -63,9 +63,8 @@ function dimensionScore(opportunity, at) {
     '该品类经营角色尚未取得充分依据',
   );
   const productConflict =
-    (of('unrelated_product').length &&
-      of('core_product', 'secondary_product', 'adjacent_product').length) ||
-    (of('adjacent_product').length && of('core_product', 'secondary_product').length);
+    of('unrelated_product').length &&
+    of('core_product', 'secondary_product', 'adjacent_product').length;
   const roleConflict =
     (of('no_supply_role').length &&
       of('specialist_supply', 'general_supply', 'installation_only').length) ||

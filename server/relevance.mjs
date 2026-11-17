@@ -124,7 +124,7 @@ const categories = [
   ['pergola', /pergola|凉亭|凉棚/i],
   ['cassette', /full\s+cassette|全盒曲臂/i],
   ['awning', /awning|shade\s*sail|天幕|遮阳[篷棚]/i],
-  ['roman', /roman\s+(?:blind|shade)|罗马帘/i],
+  ['roman', /roman\s+(?:window\s+)?(?:blind|shade)|罗马帘/i],
   ['zebra', /zebra\s+(?:blind|shade)|斑马帘/i],
   ['cellular', /(?:cellular|honeycomb)\s+(?:blind|shade)|蜂巢帘/i],
   ['venetian', /venetian\s+blind|百叶帘|威尼斯百叶/i],
@@ -236,7 +236,7 @@ const specificProductPatterns = new Map([
     'woven wood shades',
     /woven\s+wood\s+(?:shades?|blinds?)|bamboo\s+(?:shades?|blinds?)|竹木帘|竹帘/i,
   ],
-  ['panel track blinds', /panel\s+track\s+(?:blinds?|shades?)|推拉板帘|板帘/i],
+  ['panel track blinds', /panel\s+track\s+(?:window\s+)?(?:blinds?|shades?)|推拉板帘|板帘/i],
 ]);
 function productCategories(text) {
   // Catalogs often coordinate two styles before the shared noun.
@@ -247,7 +247,11 @@ function productCategories(text) {
   let found = categories.filter(([, pattern]) => pattern.test(text)).map(([id]) => id);
   if (/roller\s+shutter|rolling\s+shutter|卷闸|卷门/i.test(text))
     found = found.filter((id) => id !== 'shutter');
-  if (/outdoor|exterior|external|室外|户外/i.test(text))
+  if (
+    /\b(?:outdoor|exterior|external)\s+(?:(?:roller|roman|zebra|cellular|venetian|fabric|panel\s+track|solar)\s+)?(?:blinds?|shades?|curtains?|shutters?)\b|(?:室外|户外)\s*(?:卷帘|百叶帘|窗帘|遮阳帘|百叶窗)/i.test(
+      text,
+    )
+  )
     found = found.filter((id) => !['roller', 'fabric', 'venetian', 'shutter'].includes(id));
   // Specific names override generic substrings in bilingual descriptions.
   if (found.includes('zip')) return ['zip'];

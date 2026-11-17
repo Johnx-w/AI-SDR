@@ -35,6 +35,10 @@ test('最新评估替换旧快照，重启仍能读取证据，旧操作恢复�
     service.close();
     service = new AssessmentService({ env: settings });
     assert.equal(service.latest(customer.record_id).id, 'second');
+    assert.deepEqual(
+      service.current().map((entry) => entry.id),
+      ['second'],
+    );
     assert.equal(
       service.store.db.prepare('SELECT count(*) AS n FROM customer_assessments').get().n,
       1,
@@ -101,6 +105,10 @@ test('不同飞书表范围下同名客户相互隔离，不能占用其他范�
     );
     assert.equal(a.latest('same-customer').id, 'a-id');
     assert.equal(b.latest('same-customer').id, 'b-id');
+    assert.deepEqual(
+      a.current().map((entry) => entry.id),
+      ['a-id'],
+    );
   } finally {
     a.close();
     b.close();

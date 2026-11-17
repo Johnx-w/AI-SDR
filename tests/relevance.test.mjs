@@ -184,6 +184,37 @@ test('按目标品类而非整个窗饰行业匹配，兼容中英文别名', ()
   assert.equal(productsRelevant(['vehicle awnings'], { product: 'awnings' }), 'not_matched');
 });
 
+test('原文含 window 的室内细分品类可匹配，环境中的 outdoor 不把室内窗帘排除', () => {
+  assert.equal(
+    productsRelevant(['Roman window blinds that bring luxury to your glazing'], {
+      product: 'Roman blinds',
+    }),
+    'matched',
+  );
+  assert.equal(
+    productsRelevant(['Custom panel track window blinds for patio doors'], {
+      product: 'panel track blinds',
+    }),
+    'matched',
+  );
+  assert.equal(
+    productsRelevant(['Smart blackout curtains reduce outdoor heat in your home'], {
+      product: 'fabric curtains',
+    }),
+    'matched',
+  );
+  assert.equal(
+    productsRelevant(['outdoor curtains for patios'], { product: 'fabric curtains' }),
+    'not_matched',
+  );
+  assert.equal(
+    productsRelevant(['beautifully engineered electric shaped blind system'], {
+      product: 'cellular blinds',
+    }),
+    'not_matched',
+  );
+});
+
 test('半成品按室内外配件比较，不混入成品窗帘', () => {
   const outdoor = { product: 'outdoor blinds awnings components and parts' };
   const indoor = { product: 'indoor blinds curtains components and parts' };

@@ -982,6 +982,13 @@
   font-size: 10px;
   overflow-wrap: anywhere;
 }
+.outreach-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 20px;
+}
 .outreach-suppress {
   margin-top: 22px;
   font-size: 11px;

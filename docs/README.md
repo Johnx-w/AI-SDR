@@ -2,21 +2,23 @@
 
 2026-11-10 逐篇对照当前工作区代码整理。设计新功能先按主题读取下表，再按需读取有效 ADR。实现说明描述仓库代码；待实现设计保留已确认的目标，不能当作功能已经接通。云端实际版本、连接和业务数量须从运行环境核验。
 
-2026-11-12 新增无可用商务邮箱跳过首发：见[邮件沟通与历史积压整理](outreach-first-touch.md#历史无邮箱积压的一次性整理)、[获客](acquisition.md#获客后自动首发)及 [ADR-0023](adr/0023-acquisition-scoped-automatic-first-touch.md)。代码与隔离测试已实现；GitHub、云端版本及历史数据处理结果以同一提交的发布验收和整理报告为准。
+2026-11-17 本次版本整合客户条件不足跳过首发、发送结果核实及产品判断修正，见[邮件沟通](outreach-first-touch.md)、[获客](acquisition.md)及 [ADR-0023](adr/0023-acquisition-scoped-automatic-first-touch.md)。历史八条首发记录暂缓处理。
+
+T12 自动同步随本次版本交付，使用运行环境有效飞书连接和云端当前评估快照。正式 Base 与表 ID 校验见[镜像填写规范](new-feishu-bitable-filling-spec.md)。部署状态以同一提交的发布验收为准。
 
 ## 当前业务与运行入口
 
-| 需要了解的内容                       | 文档                                                    | 范围与状态                                                       |
-| ------------------------------------ | ------------------------------------------------------- | ---------------------------------------------------------------- |
-| 定位、开发启动与检查                 | [项目 README](../README.md)                             | 本机开发、云端发布入口及运行限制                                 |
-| 获客、搜索、预算、定时计划与自动首发 | [获客](acquisition.md)                                  | 官网唯一自动获客来源；SQLite 主库先保存、飞书后台同步            |
-| 客户、产品、自动需求及只读追信任务   | [客户与产品数据](customer-data.md)                      | T1/T3/T4 自动记录；正式原 T5 不再接收网页产品镜像                |
-| 当前评级与客户档案                   | [客户评级](assessment.md)                               | `acquisition-v5.0`；A/B/C 按方向取证，普通缺项不作为人工补档门槛 |
-| 首封、收信、阅读、人工回复及发送事实 | [邮件沟通](outreach-first-touch.md)                     | 后台收信及 72／168 小时追信已实现；正式自动回信待接入            |
-| AI 业务员与自动接待                  | [当前实现与待实现设计](ai-sales-agent-design.md)        | 四品类正式配置、授权与自动回信待实现                             |
-| 模块、接口、存储、部署、备份与恢复   | [架构与运行](architecture.md)                           | 标准交付流程入口；文档整理不执行发布或真实业务                   |
-| 飞书字段与数据归属                   | [飞书镜像填写规范](new-feishu-bitable-filling-spec.md)  | 正式 Base 与测试环境分开；前三条模板仍为运行代码读取源，保持停用 |
-| 自动首发检查范围                     | [测试用例与验收](acquisition-auto-first-touch-tests.md) | 当前业务预期和离线复跑入口；历史执行次数已归档                   |
+| 需要了解的内容                       | 文档                                                    | 范围与状态                                                        |
+| ------------------------------------ | ------------------------------------------------------- | ----------------------------------------------------------------- |
+| 定位、开发启动与检查                 | [项目 README](../README.md)                             | 本机开发、云端发布入口及运行限制                                  |
+| 获客、搜索、预算、定时计划与自动首发 | [获客](acquisition.md)                                  | 官网唯一自动获客来源；SQLite 主库先保存、飞书后台同步             |
+| 客户、产品、自动需求及只读追信任务   | [客户与产品数据](customer-data.md)                      | T1/T3/T4 自动记录；正式原 T5 不再接收网页产品镜像                 |
+| 当前评级与客户档案                   | [客户评级](assessment.md)                               | `acquisition-v5.0`；A/B/C 按方向取证，普通缺项不作为人工补档门槛  |
+| 首封、收信、阅读、人工回复及发送事实 | [邮件沟通](outreach-first-touch.md)                     | 后台收信及 72／168 小时追信已实现；正式自动回信待接入             |
+| AI 业务员与自动接待                  | [当前实现与待实现设计](ai-sales-agent-design.md)        | 四品类正式配置、授权与自动回信待实现                              |
+| 模块、接口、存储、部署、备份与恢复   | [架构与运行](architecture.md)                           | 标准交付流程入口；文档整理不执行发布或真实业务                    |
+| 飞书字段与数据归属                   | [飞书镜像填写规范](new-feishu-bitable-filling-spec.md)  | T2/T12 最新评估镜像；正式 Base 与测试环境分开，前三条模板保持停用 |
+| 自动首发检查范围                     | [测试用例与验收](acquisition-auto-first-touch-tests.md) | 当前业务预期和离线复跑入口；历史执行次数已归档                    |
 
 自动 CD 的触发、维护等待、凭据与首次启用见[架构与运行](architecture.md#自动-cd)；仓库实现、GitHub 配置和云端实际启用状态分别核验。
 
@@ -39,7 +41,7 @@
 
 | 决定                                                                        | 主题与当前边界                                 |
 | --------------------------------------------------------------------------- | ---------------------------------------------- |
-| [ADR-0001](adr/0001-separate-company-and-supply-opportunities.md)           | 企业与供货方向分别判断，最新评估不设 T12       |
+| [ADR-0001](adr/0001-separate-company-and-supply-opportunities.md)           | 企业与供货方向分别判断，T12 只镜像最新评估     |
 | [ADR-0002](adr/0002-web-primary-operational-interface.md)                   | 网页操作、服务器主库和飞书协作镜像             |
 | [ADR-0003](adr/0003-category-demands-with-shared-conversations.md)          | 四品类与统一回信，正式接待待实现               |
 | [ADR-0004](adr/0004-reviewed-drawing-facts-and-versioned-assets.md)         | 候选准备已有；参数级批准及自动附图待实现       |
@@ -53,7 +55,7 @@
 | [ADR-0018](adr/0018-simple-llm-outreach-with-fixed-signatures.md)           | 独立首封写作；旧专业模式及审批链已移除         |
 | [ADR-0019](adr/0019-ai-sales-agents-with-controlled-mail-reception.md)      | 正式接待独立授权；配置及运行链路待实现         |
 | [ADR-0020](adr/0020-website-only-acquisition.md)                            | 官网为唯一自动获客来源                         |
-| [ADR-0022](adr/0022-unified-abc-customer-grades.md)                         | 当前统一 A/B/C，实际回填另行核验               |
+| [ADR-0022](adr/0022-unified-abc-customer-grades.md)                         | 当前统一 A/B/C，正式 T12 已按快照回填          |
 | [ADR-0023](adr/0023-acquisition-scoped-automatic-first-touch.md)            | 获客范围内逐家自动首发及计划控制               |
 | [ADR-0024](adr/0024-align-feishu-business-mirrors.md)                       | 当前评级与真实沟通镜像，正式原 T5 停止产品镜像 |
 | [ADR-0025](adr/0025-automatic-business-records-with-read-only-followups.md) | 自动需求、真实往来与只读追信任务               |

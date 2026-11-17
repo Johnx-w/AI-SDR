@@ -15,8 +15,7 @@ const publicEntry = (entry) =>
       }
     : null;
 
-// The current evaluation belongs to the local customer dossier. Feishu only
-// stores the customer's current rating; evaluation persistence has no T12 I/O.
+// The current evaluation belongs to the local customer dossier.
 export class AssessmentService {
   constructor({ env, store } = {}) {
     this.scope = String(env.FEISHU_APP_TOKEN) + '/' + String(env.FEISHU_TABLE_ID);
@@ -32,6 +31,9 @@ export class AssessmentService {
   }
   latest(recordId) {
     return publicEntry(this.store.latest(recordId));
+  }
+  current() {
+    return this.store.current().map(publicEntry).filter(Boolean);
   }
   save(snapshot, customer) {
     assertAssessmentIdentity(snapshot, customer);

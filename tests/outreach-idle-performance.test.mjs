@@ -20,6 +20,7 @@ test('idle outreach ticks count history without loading historical message bodie
       campaignId: 'history',
       mode: 'production',
       status,
+      ...(status === 'unknown' ? { reconciliation: { at: now, result: 'unconfirmed' } } : {}),
       bodyText: status === 'blocked' ? 'Pending review' : 'HISTORICAL_MESSAGE_BODY',
     });
   const db = service.db;

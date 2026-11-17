@@ -38,6 +38,7 @@ import { LeadPerformance } from './lead-performance.mjs';
 import { OverviewService } from './overview.mjs';
 import { websiteScope } from './website-metadata.mjs';
 import { acquisitionJobs, syncOperationalFeishu } from './operational-feishu.mjs';
+import { syncAssessmentFeishu } from './assessment-feishu.mjs';
 
 class ApiError extends Error {
   constructor(status, message) {
@@ -267,16 +268,26 @@ export function createApp({
     const current = connections.environment();
     if (!current.FEISHU_APP_ID || !current.FEISHU_APP_SECRET || !current.FEISHU_APP_TOKEN) return;
     const service = outreach();
-    operationalSync = syncOperationalFeishu({
-      env: current,
-      jobs: acquisitionJobs(jobs().db, acquisitionScope()),
-      mailboxes: service.mailboxes.list(),
-      deliveries: service.deliveries(),
-    })
-      .catch((error) => console.error('T7/T8/T10 飞书同步失败：' + error.message))
-      .finally(() => {
-        operationalSync = null;
-      });
+    operationalSync = Promise.all([
+      syncOperationalFeishu({
+        env: current,
+        jobs: acquisitionJobs(jobs().db, acquisitionScope()),
+        mailboxes: service.mailboxes.list(),
+        deliveries: service.deliveries(),
+      }).catch((error) => console.error('T7/T8/T10 飞书同步失败：' + error.message)),
+      (async () => {
+        await provider.syncCustomers?.();
+        return syncAssessmentFeishu({
+          env: current,
+          assessments: provider.currentAssessments(),
+          customers: library().snapshot(true).leads,
+          customerRemoteId: (id) => provider.customerRemoteId(id),
+          apply: true,
+        });
+      })().catch((error) => console.error('T12 飞书同步失败：' + error.message)),
+    ]).finally(() => {
+      operationalSync = null;
+    });
   };
   const wakeAutomaticOutreach = () => {
     if (isMaintaining()) return;
@@ -445,6 +456,7 @@ export function createApp({
               readingLeads ||
               leadLibrary?.refreshing ||
               provider.syncing ||
+              operationalSync ||
               productKnowledge?.documents.running.size ||
               batch?.recovering ||
               batch?.resuming ||

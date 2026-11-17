@@ -23,6 +23,8 @@ import { pathToFileURL } from 'node:url';
 const HOUR = 3600000;
 const statePath = '/var/lib/shadeflow-monitor/state.json';
 const snapshotRoot = '/var/backups/shadeflow';
+const beijingDay = (time) => new Date(time + 8 * HOUR).toISOString().slice(0, 10);
+const beijingEight = (time) => Date.parse(`${beijingDay(time)}T00:00:00Z`);
 
 function tail(path) {
   const fd = openSync(path, 'r');
@@ -42,6 +44,11 @@ export function backupStatus(log, target = snapshotRoot) {
     const id = /\btskid=(\S+)/.exec(line)?.[1];
     if (!id) continue;
     const job = jobs.get(id) || {};
+    if (line.includes('msg="lock id is ')) {
+      const startedAt = Date.parse(/time="([^"]+)"/.exec(line)?.[1]);
+      if (Number.isFinite(startedAt))
+        job.startedAt = Math.min(job.startedAt ?? Infinity, startedAt);
+    }
     const filters =
       /first target item \[([^\]]*)\], include filter : \[([^\]]*)\], exclude filter : \[([^\]]*)\]/.exec(
         line,
@@ -54,7 +61,8 @@ export function backupStatus(log, target = snapshotRoot) {
   const latest = [...jobs.values()]
     .filter((job) => Number.isFinite(job.completedAt))
     .sort((a, b) => b.completedAt - a.completedAt)[0];
-  if (!latest?.filters) return { completedAt: latest?.completedAt, covered: null };
+  if (!latest?.filters)
+    return { startedAt: latest?.startedAt, completedAt: latest?.completedAt, covered: null };
   const [source, includes, excludes] = latest.filters;
   const contains = (parent, child) =>
     parent === '/' ||
@@ -62,25 +70,52 @@ export function backupStatus(log, target = snapshotRoot) {
     child.startsWith(`${parent.replace(/\/$/, '')}/`);
   // shortcut: only the observed HBR absolute-directory format is accepted; recheck after plan/client changes.
   if (includes || !source.startsWith('/') || /[*?\[\],]/.test(source + excludes))
-    return { completedAt: latest.completedAt, covered: null };
+    return { startedAt: latest.startedAt, completedAt: latest.completedAt, covered: null };
   const excluded = excludes
     .split(/\s+/)
     .filter(Boolean)
     .some((path) => contains(path, target) || contains(target, path));
-  return { completedAt: latest.completedAt, covered: contains(source, target) && !excluded };
+  return {
+    startedAt: latest.startedAt,
+    completedAt: latest.completedAt,
+    covered: contains(source, target) && !excluded,
+  };
 }
 
 export async function notifyChanges(previous, issues, send, now = Date.now()) {
-  const ids = Object.keys(issues).sort();
+  const serviceFailures = Object.hasOwn(issues, 'service')
+    ? Math.min(2, (previous.serviceFailures || 0) + 1)
+    : 0;
+  const visibleIssues = { ...issues };
+  if (serviceFailures === 1 && !(previous.ids || []).includes('service'))
+    delete visibleIssues.service;
+  const ids = Object.keys(visibleIssues).sort();
   const changed = JSON.stringify(ids) !== JSON.stringify(previous.ids || []);
   const reminder = ids.length > 0 && now - (previous.notifiedAt || 0) >= 24 * HOUR;
-  if (!changed && !reminder) return { state: previous, sent: false };
+  if (!changed && !reminder) return { state: { ...previous, serviceFailures }, sent: false };
   const recovered = (previous.ids || []).filter((id) => !ids.includes(id));
   await send({
     subject: ids.length ? '[AI-SDR 运维告警] 需要检查' : '[AI-SDR 运维恢复] 检查项已恢复',
-    text: `检查时间：${new Date(now).toISOString()}\n\n${ids.length ? ids.map((id) => `${id}：${issues[id]}`).join('\n') : '此前告警项已恢复。'}${recovered.length ? `\n\n已恢复：${recovered.join('、')}` : ''}\n\n同一异常每24小时提醒一次，状态变化立即通知。此邮件不包含业务记录或密钥。`,
+    text: `检查时间：${new Date(now).toISOString()}\n\n${ids.length ? ids.map((id) => `${id}：${visibleIssues[id]}`).join('\n') : '此前告警项已恢复。'}${recovered.length ? `\n\n已恢复：${recovered.join('、')}` : ''}\n\n同一异常每24小时提醒一次；服务异常连续两轮确认后通知，恢复及其他状态变化立即通知。此邮件不包含业务记录或密钥。`,
   });
-  return { state: { ids, notifiedAt: now }, sent: true };
+  return { state: { ids, notifiedAt: now, serviceFailures }, sent: true };
+}
+
+export async function retryServiceCheck(check) {
+  try {
+    await check();
+  } catch {
+    await check();
+  }
+}
+
+export function cloudBackupPending(snapshot, startedAt, now = Date.now()) {
+  const backupAt = Date.parse(snapshot?.completedAt);
+  return (
+    Number.isFinite(backupAt) &&
+    (!Number.isFinite(startedAt) || startedAt <= backupAt) &&
+    (beijingDay(backupAt) !== beijingDay(now) || now >= beijingEight(now))
+  );
 }
 
 export async function inspect(config) {
@@ -93,18 +128,20 @@ export async function inspect(config) {
       issues[id] = '检查失败，需检查服务日志或文件权限';
     }
   };
-  await probe('service', async () => {
-    const active = execFileSync('systemctl', ['is-active', 'shadeflow.service'], {
-      encoding: 'utf8',
-      timeout: 5000,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    }).trim();
-    const response = await fetch('http://127.0.0.1:14311/api/health', {
-      signal: AbortSignal.timeout(5000),
-    });
-    assert(active === 'active' && response.ok && (await response.json()).ok === true);
-    observations.service = 'healthy';
-  });
+  await probe('service', () =>
+    retryServiceCheck(async () => {
+      const active = execFileSync('systemctl', ['is-active', 'shadeflow.service'], {
+        encoding: 'utf8',
+        timeout: 5000,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }).trim();
+      const response = await fetch('http://127.0.0.1:14311/api/health', {
+        signal: AbortSignal.timeout(5000),
+      });
+      assert(active === 'active' && response.ok && (await response.json()).ok === true);
+      observations.service = 'healthy';
+    }),
+  );
   await probe('disk', () => {
     const disk = statfsSync('/var/backups');
     const used = 1 - disk.bavail / disk.blocks;
@@ -142,13 +179,11 @@ export async function inspect(config) {
     if (result.covered !== true)
       issues['cloud-backup'] =
         '无法确认云备份日志覆盖 /var/backups/shadeflow，请检查计划和排除目录';
+    if (result.covered === true && !Number.isFinite(result.startedAt))
+      issues['cloud-backup'] = '无法确认最近成功云备份任务的开始记录，请检查 HBR 日志';
     if (!result.completedAt || Date.now() - result.completedAt > 30 * HOUR)
       issues['cloud-backup'] = '超过30小时没有成功云备份记录';
-    if (
-      snapshot &&
-      result.completedAt < Date.parse(snapshot.startedAt) &&
-      !existsSync('/var/lib/shadeflow-monitor/cloud-restore-verified.json')
-    )
+    if (!issues['cloud-backup'] && cloudBackupPending(snapshot, result.startedAt))
       issues['cloud-backup'] = '新备份副本尚未进入成功云备份；原 /srv 数据被基础版排除';
   });
   await probe('cloud-restore', () => {

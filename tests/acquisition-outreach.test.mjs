@@ -450,7 +450,11 @@ for (const change of ['已回复', '勿联系', '产品撤回审核', '发件身
       JSON.stringify(h.state.sent.map(({ from, to }) => ({ from, to }))),
     );
     assert.equal(h.service.deliveries(undefined, ['accepted', 'unknown']).length, 0);
-    assert.ok(h.service.deliveries(undefined, ['blocked']).some((row) => row.reason));
+    assert.ok(
+      h.service
+        .deliveries(undefined, [change === '已回复' || change === '勿联系' ? 'skipped' : 'blocked'])
+        .some((row) => row.reason),
+    );
     if (change === '发件身份变化') {
       h.jobs.finish(h.jobs.get(job.id), 'target_reached');
       const next = h.create({}, plan.id);
@@ -554,7 +558,7 @@ for (const missing of ['邮箱启用', '产品审核', '邮箱产品授权', '�
     }
   });
 
-test('同轮自动纳入新增产品与邮箱，补处理旧缺项客户；已经准备的首封保持原产品和邮箱', async () => {
+test('同轮新增产品与邮箱只接纳新客户，已跳过客户不恢复；已准备首封保持原身份', async () => {
   const h = harness();
   try {
     const plan = h.plan();
@@ -582,8 +586,13 @@ test('同轮自动纳入新增产品与邮箱，补处理旧缺项客户；已�
     assert.equal(preserved.status, 'accepted');
     assert.equal(preserved.mailboxId, 'box');
     assert.equal(preserved.candidate.productId, 'pvc');
-    assert.ok(
-      h.state.sent.some((mail) => mail.to === 'info@waiting.example.org' && mail.id === 'new-box'),
+    assert.equal(
+      h.state.sent.some((mail) => mail.to === 'info@waiting.example.org'),
+      false,
+    );
+    assert.equal(
+      h.service.deliveries(undefined, ['skipped']).some((row) => row.customerId === 'waiting'),
+      true,
     );
     assert.ok(
       h.state.sent.some(
@@ -610,7 +619,7 @@ test('暂停与关闭获客计划阻止待发邮件；恢复时重新检查最�
     h.plans.control(plan.id, 'resume');
     await h.pump();
     assert.equal(h.state.sent.length, 0);
-    assert.ok(h.service.deliveries().some((row) => row.status === 'blocked'));
+    assert.ok(h.service.deliveries().some((row) => row.status === 'skipped'));
     h.plans.control(plan.id, 'close');
     await h.pump();
     assert.equal(h.service.campaigns()[0].status, 'cancelled');

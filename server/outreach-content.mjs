@@ -453,6 +453,10 @@ export function selectOutreachCandidates({
       reject('duplicate_company', '同一企业或收件地址已在本次首封名单中');
       continue;
     }
+    if (!availableProducts.length) {
+      reject('product_scope_unconfirmed', '计划中暂无已审核且生效的产品，请核对产品配置');
+      continue;
+    }
     const matches = [];
     let missingScope = false;
     for (const product of availableProducts) {

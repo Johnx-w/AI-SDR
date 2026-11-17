@@ -632,6 +632,7 @@ test('直连候选排除目录、社媒、招聘、私网、已收录域名，�
 test('Feishu 直连缓存令牌并完整遍历分页；重复游标报错', async () => {
   let auth = 0,
     page = 0;
+  const urls = [];
   const client = new FeishuClient({
     env,
     fetchImpl: async (url) => {
@@ -639,6 +640,7 @@ test('Feishu 直连缓存令牌并完整遍历分页；重复游标报错', asyn
         auth++;
         return json({ code: 0, tenant_access_token: 'token', expire: 7200 });
       }
+      urls.push(url);
       page++;
       return json({
         code: 0,
@@ -651,6 +653,9 @@ test('Feishu 直连缓存令牌并完整遍历分页；重复游标报错', asyn
     },
   });
   assert.equal((await client.records()).length, 2);
+  page = 0;
+  assert.equal((await client.records(undefined, undefined, 200)).length, 2);
+  assert(urls.at(-2).includes('page_size=200'));
   assert.equal(auth, 1);
   const bad = new FeishuClient({
     env,

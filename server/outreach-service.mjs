@@ -22,6 +22,17 @@ const list = (value) =>
   Array.isArray(value) ? [...new Set(value.map((v) => text(v)).filter(Boolean))].slice(0, 200) : [];
 const iso = (now) => new Date(now()).toISOString();
 const terminal = new Set(['accepted', 'failed', 'unknown', 'blocked', 'skipped', 'cancelled']);
+const customerSkipCodes = new Set([
+  'match_unverified',
+  'assessment_conflict',
+  'identity_incomplete',
+  'suppressed',
+  'already_contacted_or_unknown',
+  'business_unverified',
+  'contact_unverified',
+  'duplicate_company',
+  'product_match_unconfirmed',
+]);
 const senderVersion = (m) =>
   hash([
     m.id,
@@ -75,8 +86,11 @@ export class OutreachService {
     this.db.function('outreach_lower', { deterministic: true }, (value) =>
       String(value ?? '').toLowerCase(),
     );
-    this.db.function('outreach_delivery_group', { deterministic: true }, (status, subject) =>
-      deliveryGroup({ status, subject }),
+    this.db.function(
+      'outreach_delivery_group',
+      { deterministic: true },
+      (status, subject, outcome) =>
+        deliveryGroup({ status, subject, resolution: outcome ? { outcome } : null }),
     );
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
       CREATE TABLE IF NOT EXISTS outreach_campaigns(id TEXT PRIMARY KEY,data TEXT NOT NULL);
@@ -226,7 +240,7 @@ export class OutreachService {
     if (group !== 'all') {
       if (!Object.hasOwn(deliveryGroupLabels, group)) throw fail(400, '请选择有效的发送状态');
       where.push(
-        "outreach_delivery_group(state, CASE WHEN state='draft' THEN json_extract(data, '$.subject') END) = ?",
+        "outreach_delivery_group(state, CASE WHEN state='draft' THEN json_extract(data, '$.subject') END, json_extract(data, '$.resolution.outcome')) = ?",
       );
       params.push(group);
     }
@@ -258,6 +272,12 @@ export class OutreachService {
     return JSON.parse(row.data);
   }
   putDelivery(d) {
+    if (d.status === 'unknown' && !d.reconciliation) {
+      const previous = this.db
+        .prepare('SELECT state FROM outreach_deliveries WHERE id=?')
+        .get(d.id);
+      if (previous?.state === 'sending') d = { ...d, autoReconcilePending: true };
+    }
     this.db
       .prepare(
         'INSERT INTO outreach_deliveries VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,data=excluded.data',
@@ -266,7 +286,14 @@ export class OutreachService {
     return d;
   }
   withStats(c) {
-    const deliveryGroups = { pending: 0, sent: 0, attention: 0, skipped: 0, cancelled: 0 };
+    const deliveryGroups = {
+      pending: 0,
+      sent: 0,
+      attention: 0,
+      resolved: 0,
+      skipped: 0,
+      cancelled: 0,
+    };
     const stats = {
       draft: 0,
       queued: 0,
@@ -279,11 +306,12 @@ export class OutreachService {
     };
     for (const row of this.db
       .prepare(
-        'SELECT state, count(*) AS count FROM outreach_deliveries WHERE campaign_id=? GROUP BY state',
+        "SELECT state, json_extract(data, '$.resolution.outcome') AS outcome, count(*) AS count FROM outreach_deliveries WHERE campaign_id=? GROUP BY state,outcome",
       )
       .all(c.id)) {
       if (row.state in stats) stats[row.state] += row.count;
-      deliveryGroups[deliveryGroup({ status: row.state })] += row.count;
+      deliveryGroups[deliveryGroup({ status: row.state, resolution: { outcome: row.outcome } })] +=
+        row.count;
     }
     const readyDrafts = this.db
       .prepare(
@@ -303,7 +331,14 @@ export class OutreachService {
   async state() {
     const mailboxes = this.mailboxes.list().map(({ signatureDesign, ...mailbox }) => mailbox);
     const campaigns = this.campaigns();
-    const deliveryGroups = { pending: 0, sent: 0, attention: 0, skipped: 0, cancelled: 0 };
+    const deliveryGroups = {
+      pending: 0,
+      sent: 0,
+      attention: 0,
+      resolved: 0,
+      skipped: 0,
+      cancelled: 0,
+    };
     const deliveryStats = {
       total: 0,
       draft: 0,
@@ -317,11 +352,14 @@ export class OutreachService {
       skipped: 0,
     };
     for (const row of this.db
-      .prepare('SELECT state, count(*) AS count FROM outreach_deliveries GROUP BY state')
+      .prepare(
+        "SELECT state, json_extract(data, '$.resolution.outcome') AS outcome, count(*) AS count FROM outreach_deliveries GROUP BY state,outcome",
+      )
       .all()) {
       if (!['cancelled', 'skipped'].includes(row.state)) deliveryStats.total += row.count;
       if (row.state in deliveryStats) deliveryStats[row.state] += row.count;
-      deliveryGroups[deliveryGroup({ status: row.state })] += row.count;
+      deliveryGroups[deliveryGroup({ status: row.state, resolution: { outcome: row.outcome } })] +=
+        row.count;
     }
     const readyDrafts = this.db
       .prepare(
@@ -539,13 +577,27 @@ export class OutreachService {
   release(id) {
     this.db.prepare('DELETE FROM outreach_reservations WHERE delivery_id=?').run(id);
   }
-  skipDelivery(delivery, reason) {
+  skipDelivery(delivery, reason, reasonCode = 'contact_unverified') {
     this.transaction(() => {
+      const current = this.db
+        .prepare('SELECT data FROM outreach_deliveries WHERE id=?')
+        .get(delivery.id);
+      if (current) {
+        const saved = JSON.parse(current.data);
+        if (saved.status === 'skipped') return;
+        if (
+          !['draft', 'queued', 'blocked'].includes(saved.status) ||
+          saved.attemptedAt ||
+          saved.messageId ||
+          saved.sentAt
+        )
+          throw fail(409, '邮件已尝试发送，不能跳过本次首发');
+      }
       this.putDelivery({
         ...delivery,
         status: 'skipped',
         reason,
-        reasonCode: 'contact_unverified',
+        reasonCode,
         skippedAt: iso(this.now),
       });
       this.release(delivery.id);
@@ -638,7 +690,14 @@ export class OutreachService {
     let eligibleLeads = c.includeExisting
       ? leads
       : leads.filter((l) => !c.baselineCustomerIds.includes(l.id));
-    const skipped = new Set(this.deliveries(c.id, ['skipped']).map((d) => d.customerId));
+    const skipped = new Set(
+      this.deliveries(c.id)
+        .filter(
+          (d) =>
+            d.status === 'skipped' || (d.status === 'failed' && d.resolution?.outcome === 'failed'),
+        )
+        .map((d) => d.customerId),
+    );
     eligibleLeads = eligibleLeads.filter((lead) => !skipped.has(lead.id));
     if (c.acquisitionSource) {
       const members = new Set(c.customerIds);
@@ -686,11 +745,7 @@ export class OutreachService {
       leads: eligibleLeads,
       mailboxes: automaticSenders,
       products: c.acquisitionSource
-        ? this.products().filter(
-            (product) =>
-              c.filters.products.includes(product.id) &&
-              (existing || automaticSenders.some((box) => box.productIds?.includes(product.id))),
-          )
+        ? this.products().filter((product) => c.filters.products.includes(product.id))
         : this.products(),
       // Once a draft is reviewed its sender stays fixed. Workload only allocates
       // new customers; it must not move a queued email between accounts.
@@ -719,7 +774,11 @@ export class OutreachService {
       blocked = [...result.blocked];
     for (const candidate of result.eligible) {
       if (this.isReserved(candidate, ignoreDelivery))
-        blocked.push({ ...candidate, reason: '已有发送安排、沟通记录或停止联系标记' });
+        blocked.push({
+          ...candidate,
+          reasonCode: 'already_contacted_or_unknown',
+          reason: '已有发送安排、沟通记录或停止联系标记',
+        });
       else eligible.push(candidate);
     }
     return { eligible, blocked };
@@ -777,8 +836,9 @@ export class OutreachService {
       (c.acquisitionSource ? Infinity : c.targetCount) -
       this.deliveries(id).filter((d) => !['blocked', 'cancelled', 'skipped'].includes(d.status))
         .length;
+    const configurationIssues = new Map();
     for (const candidate of result.blocked.slice(0, c.acquisitionSource ? undefined : 200)) {
-      if (candidate.reasonCode === 'contact_unverified') {
+      if (customerSkipCodes.has(candidate.reasonCode)) {
         const prior = this.deliveries(id).find(
           (d) => d.customerId === candidate.customerId && d.status !== 'cancelled',
         );
@@ -804,7 +864,27 @@ export class OutreachService {
               createdAt: iso(this.now),
             },
             candidate.reason,
+            candidate.reasonCode,
           );
+        continue;
+      }
+      // Account configuration and capacity are plan-level conditions, not customer tasks.
+      if (candidate.reasonCode) {
+        configurationIssues.set(
+          candidate.reason,
+          (configurationIssues.get(candidate.reason) || 0) + 1,
+        );
+        for (const old of this.deliveries(id, ['blocked']).filter(
+          (delivery) =>
+            delivery.customerId === candidate.customerId &&
+            !delivery.subject &&
+            !delivery.bodyText &&
+            !delivery.attemptedAt &&
+            !delivery.materialRefresh,
+        )) {
+          this.putDelivery({ ...old, status: 'cancelled', reason: '发件或产品配置待修复，未提交' });
+          this.release(old.id);
+        }
         continue;
       }
       const priorBlocked = this.deliveries(id).find(
@@ -865,22 +945,16 @@ export class OutreachService {
             delivery.materialRefresh,
         );
         if (!mailbox?.signature?.trim()) {
-          this.putDelivery({
-            id: unfinished?.id || randomUUID(),
-            campaignId: id,
-            mode: 'production',
-            customerId: candidate.customerId,
-            companyName: candidate.companyName,
-            to: candidate.to,
-            mailboxId: mailbox?.id || '',
-            from: mailbox?.email || '',
-            subject: '',
-            bodyText: '',
-            status: 'blocked',
-            reason: '请先配置并确认该邮箱的发件签名',
-            matchReason: candidate.matchReason,
-            createdAt: unfinished?.createdAt || iso(this.now),
-          });
+          const reason = '请先配置并确认该邮箱的发件签名';
+          configurationIssues.set(reason, (configurationIssues.get(reason) || 0) + 1);
+          if (unfinished?.reason === reason) {
+            this.putDelivery({
+              ...unfinished,
+              status: 'cancelled',
+              reason: '发件配置待修复，未提交',
+            });
+            this.release(unfinished.id);
+          }
           continue;
         }
         const d = {
@@ -1016,6 +1090,8 @@ export class OutreachService {
         const reason = delivery.reason || '条件尚未补齐';
         reasons.set(reason, (reasons.get(reason) || 0) + 1);
       }
+      for (const [reason, count] of configurationIssues)
+        reasons.set(reason, (reasons.get(reason) || 0) + count);
       const summary = [...reasons]
         .sort((a, b) => b[1] - a[1])
         .slice(0, 3)
@@ -1025,6 +1101,7 @@ export class OutreachService {
         ...current,
         status: wasActive ? 'active' : 'ready',
         preparedAt: iso(this.now),
+        waitingReason: configurationIssues.size ? summary : '',
         lastError: pending
           ? ''
           : summary
@@ -1252,6 +1329,13 @@ export class OutreachService {
       await this.conversations.sync().catch(() => {});
     }
     if (this.isMaintaining()) return;
+    const unchecked = this.db
+      .prepare(
+        "SELECT id FROM outreach_deliveries WHERE state='unknown' AND json_extract(data,'$.mode')='production' AND json_extract(data,'$.autoReconcilePending')=1 AND json_extract(data,'$.reconciliation') IS NULL LIMIT 1",
+      )
+      .get();
+    if (unchecked) await this.reconcileDelivery(unchecked.id);
+    if (this.isMaintaining()) return;
     this.syncAcquisition();
     this.refreshProductMaterials();
     const campaigns = this.campaigns().filter((c) => c.status === 'active');
@@ -1301,7 +1385,7 @@ export class OutreachService {
         this.putCampaign({ ...current, status: 'completed' });
       else if (
         c.mode === 'production' &&
-        c.continuous &&
+        (c.continuous || c.waitingReason) &&
         !this.preparing.has(c.id) &&
         (!current.lastRefreshAt || this.now() - Date.parse(current.lastRefreshAt) > 60000)
       ) {
@@ -1317,6 +1401,7 @@ export class OutreachService {
         !c.continuous &&
         !rows.some((d) => ['draft', 'queued', 'sending'].includes(d.status)) &&
         !rows.some((d) => d.status === 'blocked' && d.materialRefresh) &&
+        !c.waitingReason &&
         !this.preparing.has(c.id)
       ) {
         const skippedWithoutBlockers =
@@ -1386,11 +1471,11 @@ export class OutreachService {
           v.productVersion === d.productVersion,
       );
       if (!candidate || hash(candidate.leadSnapshot) !== hash(d.candidate.leadSnapshot)) {
-        const missingContact = result.blocked.find(
-          (row) => row.customerId === d.customerId && row.reasonCode === 'contact_unverified',
+        const customerBlock = result.blocked.find(
+          (row) => row.customerId === d.customerId && customerSkipCodes.has(row.reasonCode),
         );
-        if (missingContact) {
-          this.skipDelivery(d, missingContact.reason);
+        if (customerBlock) {
+          this.skipDelivery(d, customerBlock.reason, customerBlock.reasonCode);
           return;
         }
         const materialReason = this.materialReason(d, latest);
@@ -1542,6 +1627,104 @@ export class OutreachService {
       if (!definite || /AUTH|LIMIT|RATE/.test(error.code || ''))
         await this.mailboxes.save({ id: m.id, paused: true });
     }
+  }
+  async reconcileDelivery(id) {
+    const delivery = this.delivery(id);
+    if (delivery.status !== 'unknown' || delivery.mode !== 'production')
+      throw fail(409, '只能核实正式发送中结果未知的记录');
+    let syncError = '';
+    if (typeof this.mailboxes.readMailbox === 'function') {
+      try {
+        const result = await this.conversations.sync({ mailboxId: delivery.mailboxId });
+        syncError =
+          result.mailboxes.find((mailbox) => mailbox.mailboxId === delivery.mailboxId)?.error || '';
+      } catch (error) {
+        syncError = safeError(error);
+      }
+    }
+    const { result, acceptedNow } = this.transaction(() => {
+      const current = this.delivery(id);
+      if (current.status !== 'unknown') return { result: current, acceptedNow: false };
+      const evidence = this.conversations.sentEvidence(current);
+      const reconciliation = {
+        at: iso(this.now),
+        result: evidence ? 'sent' : 'unconfirmed',
+        evidence: evidence
+          ? `原邮箱已发送：${evidence.folder}，UID ${evidence.uid}，Message-ID ${evidence.messageId}`
+          : syncError || '未找到足以确认发送结果的证据',
+      };
+      const result = this.putDelivery({
+        ...current,
+        ...(evidence
+          ? {
+              status: 'accepted',
+              reason: '',
+              sentAt: evidence.occurredAt || current.attemptedAt,
+              resolution: {
+                outcome: 'accepted',
+                source: 'imap',
+                evidence: reconciliation.evidence,
+                at: reconciliation.at,
+              },
+            }
+          : {}),
+        reconciliation,
+      });
+      return { result, acceptedNow: !!evidence };
+    });
+    if (acceptedNow && this.recordAccepted) {
+      try {
+        await this.recordAccepted(result);
+        return this.putDelivery({ ...result, businessRecordedAt: iso(this.now), recordError: '' });
+      } catch (error) {
+        return this.putDelivery({
+          ...result,
+          recordError: '发送已核实，客户业务记录待核对：' + safeError(error),
+        });
+      }
+    }
+    return result;
+  }
+  async resolveDelivery(id, { outcome, evidence, operator } = {}) {
+    if (!['accepted', 'failed'].includes(outcome)) throw fail(400, '请选择核实结果');
+    if (typeof evidence !== 'string' || !evidence.trim() || evidence.length > 2000)
+      throw fail(400, '请填写核实依据（最多 2000 字）');
+    if (typeof operator !== 'string' || !operator.trim() || operator.length > 100)
+      throw fail(400, '请填写操作人（最多 100 字）');
+    const result = this.transaction(() => {
+      const current = this.delivery(id);
+      if (current.status !== 'unknown' || current.mode !== 'production')
+        throw fail(409, '只能处理正式发送中结果未知的记录');
+      if (outcome === 'failed' && this.conversations.sentEvidence(current))
+        throw fail(409, '原邮箱已有已发送证据，不能确认未提交');
+      const resolved = this.putDelivery({
+        ...current,
+        status: outcome,
+        reason: outcome === 'accepted' ? '' : '人工核实未成功提交，本次首发已结束',
+        sentAt: outcome === 'accepted' ? current.attemptedAt : null,
+        resolution: {
+          outcome,
+          source: 'manual',
+          evidence: evidence.trim(),
+          operator: operator.trim(),
+          at: iso(this.now),
+        },
+      });
+      if (outcome === 'failed') this.release(id);
+      return resolved;
+    });
+    if (outcome === 'accepted' && this.recordAccepted) {
+      try {
+        await this.recordAccepted(result);
+        return this.putDelivery({ ...result, businessRecordedAt: iso(this.now), recordError: '' });
+      } catch (error) {
+        return this.putDelivery({
+          ...result,
+          recordError: '发送已核实，客户业务记录待核对：' + safeError(error),
+        });
+      }
+    }
+    return result;
   }
   confirmInternalReceipt(id) {
     const d = this.delivery(id);

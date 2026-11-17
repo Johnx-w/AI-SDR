@@ -182,6 +182,35 @@ test('成品卷帘的用料描述不应被误判为只经营材料配件', () =>
   assert.equal(result.eligible.length, 1, JSON.stringify(result.blocked.map((b) => b.reason)));
 });
 
+test('室内窗饰别名必须由原文支持，允许 window 插词但不放宽到泛称智能帘', () => {
+  for (const [value, quote, allowed] of [
+    ['Roman blinds', 'Transform your home with Roman window blinds for your glazing.', true],
+    [
+      'Panel Track Blinds',
+      'Custom panel track window blinds bring tailored coverage to sliding doors.',
+      true,
+    ],
+    [
+      'Smart cellular blinds',
+      'SonaCell is our high performance automated blind for any window.',
+      false,
+    ],
+  ]) {
+    const input = fixture();
+    Object.assign(input.products[0], {
+      name: '室内遮阳帘',
+      englishName: 'Indoor Blinds and Shades',
+      category: 'indoor',
+      aliases: ['Roman blinds', 'panel track blinds', 'cellular blinds'],
+    });
+    input.campaign.productScopes = input.products.map(outreachProductScope);
+    Object.assign(input.leads[0].facts[1], { value, quote });
+    const result = selectOutreachCandidates(input);
+    assert.equal(result.eligible.length, allowed ? 1 : 0, value);
+    if (!allowed) assert.equal(result.blocked[0].reasonCode, 'product_match_unconfirmed');
+  }
+});
+
 test('直接使用客户库当前邮箱，不要求官网来源且不恢复旧证据中的已移除地址', () => {
   const input = fixture();
   input.leads[0].email = 'new-address@buyer.example.org';

@@ -200,6 +200,70 @@ test('发送前收件邮箱变为非商务地址时跳过，释放占用且不�
   assert.equal(h.service.campaign(campaign.id).lastError, '');
 });
 
+test('固定计划因当日额度等待，不产生客户待办，次日仍可按原授权发送', async (t) => {
+  const h = harness();
+  t.after(() => h.service.close());
+  h.boxes[0].dailyLimit = 1;
+  h.boxes[1].productIds = [];
+  h.boxes[2].productIds = [];
+  const first = await prepare(h, { targetCount: 1 });
+  h.service.activate(first.id, first.revision);
+  await h.service.tick();
+  h.state.leads = [buyer('next-day')];
+  const second = await prepare(h, { targetCount: 1 });
+  assert.equal(h.service.deliveries(second.id).length, 0);
+  assert.match(h.service.campaign(second.id).waitingReason, /额度/);
+  h.service.activate(second.id, second.revision);
+  await h.service.tick();
+  assert.equal(h.service.campaign(second.id).status, 'active');
+  assert.equal(h.service.withStats(h.service.campaign(second.id)).deliveryGroups.attention, 0);
+  h.state.clock += 86400000;
+  await h.service.tick();
+  await h.service.preparing.get(second.id);
+  await h.service.tick();
+  await h.service.tick();
+  assert.equal(h.deliveries.filter((mail) => mail.to === buyer('next-day').email).length, 1);
+});
+
+test('生成前签名配置变化集中显示计划异常，不建立客户需处理记录', async (t) => {
+  const h = harness();
+  t.after(() => h.service.close());
+  const campaign = h.service.saveCampaign(h.campaignInput());
+  const originalGet = h.service.mailboxes.get;
+  h.service.mailboxes.get = (id) => ({ ...originalGet(id), signature: '' });
+  h.service.prepare(campaign.id);
+  await h.service.preparing.get(campaign.id);
+  assert.equal(h.service.deliveries(campaign.id).length, 0);
+  assert.match(h.service.campaign(campaign.id).waitingReason, /签名/);
+  assert.equal(h.service.withStats(h.service.campaign(campaign.id)).deliveryGroups.attention, 0);
+  h.service.mailboxes.get = originalGet;
+  h.service.prepare(campaign.id);
+  await h.service.preparing.get(campaign.id);
+  assert.equal(h.service.deliveries(campaign.id, ['draft']).length, 1);
+});
+
+test('计划配置异常不会保留旧版空白客户待办', async (t) => {
+  const h = harness();
+  t.after(() => h.service.close());
+  h.boxes.forEach((box) => (box.paused = true));
+  const campaign = h.service.saveCampaign(h.campaignInput());
+  h.service.putDelivery({
+    id: 'old-empty-block',
+    campaignId: campaign.id,
+    customerId: 'buyer-one',
+    mode: 'production',
+    status: 'blocked',
+    reason: '该产品对应的邮箱已暂停或尚未通过连接验证',
+    subject: '',
+    bodyText: '',
+  });
+  h.service.prepare(campaign.id);
+  await h.service.preparing.get(campaign.id);
+  assert.equal(h.service.delivery('old-empty-block').status, 'cancelled');
+  assert.equal(h.service.withStats(h.service.campaign(campaign.id)).deliveryGroups.attention, 0);
+  assert.match(h.service.campaign(campaign.id).waitingReason, /邮箱/);
+});
+
 async function internalTest(h, key = 'internal-test-unique-key') {
   const result = h.service.internalTest({
     confirmed: true,
@@ -511,7 +575,7 @@ test('另一计划、客户业务既有沟通和勿再联系状态不能绕过�
   await h.service.tick();
   const second = await prepare(h, { name: 'Second campaign' });
   assert.equal(h.service.detail(second.id).campaign.stats.draft, 0);
-  assert.equal(h.service.detail(second.id).campaign.stats.blocked, 1);
+  assert.equal(h.service.detail(second.id).campaign.stats.skipped, 1);
   h.state.leads = [buyer('known-contact'), buyer('suppressed-company'), buyer('manual-contact')];
   h.state.business = {
     messages: [{ customerId: 'known-contact', deliveryStatus: 'sent' }],
@@ -520,7 +584,7 @@ test('另一计划、客户业务既有沟通和勿再联系状态不能绕过�
   h.service.suppress({ domain: 'suppressed-company.example.org', reason: 'Do not contact' });
   const third = await prepare(h, { name: 'Known business contact campaign' });
   assert.equal(h.service.detail(third.id).campaign.stats.draft, 0);
-  assert.equal(h.service.detail(third.id).campaign.stats.blocked, 3);
+  assert.equal(h.service.detail(third.id).campaign.stats.skipped, 3);
   assert.equal(h.deliveries.filter((row) => !row.subject.startsWith('[ShadeFlow-Test:')).length, 1);
 });
 
@@ -635,9 +699,10 @@ test('跨计划分配计入已保留草稿，但待发草稿复核不因邮箱�
     ['brand-b', 'brand-c'],
   );
   assert.equal(
-    h.service.deliveries(second.id).find((row) => row.customerId === 'fourth-buyer').status,
-    'blocked',
+    h.service.deliveries(second.id).some((row) => row.customerId === 'fourth-buyer'),
+    false,
   );
+  assert.match(h.service.campaign(second.id).waitingReason, /额度/);
   // Website metadata and priority do not change an already prepared sender.
   h.boxes[0].priority = 999;
   h.boxes[0].website = 'https://legacy.example.org';
@@ -743,17 +808,15 @@ test('已启动计划自动接入之后入库的待开发客户，并在目标�
   );
 });
 
-test('没有样稿时显示实际拦截原因，已有样稿重新准备不误报无人符合条件', async (t) => {
+test('产品匹配不足跳过本次，新计划可重新评估，已有样稿不误报', async (t) => {
   const h = harness();
   t.after(() => h.service.close());
   h.state.leads.push(buyer('buyer-two'));
   h.products[0].englishName = '';
   const campaign = await prepare(h);
   assert.equal(h.service.detail(campaign.id).campaign.stats.draft, 0);
-  assert.match(
-    h.service.campaign(campaign.id).lastError,
-    /2 家：尚无已审核且有客户经营证据支持的产品匹配/,
-  );
+  assert.equal(h.service.detail(campaign.id).campaign.stats.skipped, 2);
+  assert.equal(h.service.campaign(campaign.id).lastError, '');
   assert.doesNotMatch(h.service.campaign(campaign.id).lastError, /没有符合条件/);
   h.products[0].englishName = 'PVC shutters';
   const updated = h.service.saveCampaign(
@@ -762,7 +825,10 @@ test('没有样稿时显示实际拦截原因，已有样稿重新准备不误�
   );
   h.service.prepare(updated.id);
   await h.service.preparing.get(updated.id);
-  assert.equal(h.service.detail(updated.id).campaign.stats.draft, 2);
+  assert.equal(h.service.detail(updated.id).campaign.stats.draft, 0);
+  assert.equal(h.service.detail(updated.id).campaign.stats.skipped, 2);
+  const next = await prepare(h, { name: 'New campaign' });
+  assert.equal(h.service.detail(next.id).campaign.stats.draft, 2);
   h.service.prepare(updated.id);
   await h.service.preparing.get(updated.id);
   assert.equal(h.service.campaign(updated.id).lastError, '');

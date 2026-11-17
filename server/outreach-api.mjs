@@ -11,6 +11,16 @@ export async function handleOutreach({ request, url, service, readJson, idempote
     const { candidate, ...result } = service.delivery(delivery[1]);
     return result;
   }
+  const deliveryAction = path.match(/^\/deliveries\/([\w-]+)\/(reconcile|resolve)$/);
+  if (deliveryAction && method === 'POST') {
+    const [, id, action] = deliveryAction;
+    const result =
+      action === 'reconcile'
+        ? await service.reconcileDelivery(id)
+        : await service.resolveDelivery(id, await readJson(request));
+    const { candidate, ...publicResult } = result;
+    return publicResult;
+  }
   if (path === '/conversations' && method === 'GET')
     return service.conversations.list({
       mailboxId: url.searchParams.get('mailboxId') || 'all',

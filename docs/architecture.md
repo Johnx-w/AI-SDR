@@ -1,6 +1,6 @@
 # 架构与运行
 
-当前口径：2026-11-11。React／TypeScript 网页通过同源 Node.js HTTP 接口操作后端，业务执行不依赖开发用 MCP 或 Codex OAuth。阿里云服务器持久库采用 Node.js 内置 SQLite，修改先写数据库，再由后台每分钟同步飞书；当前为单用户、单进程版本。
+当前口径：2026-11-11。React／TypeScript 网页通过同源 Node.js HTTP 接口操作后端，业务执行不依赖开发用 MCP 或 Codex OAuth。阿里云服务器持久库采用 Node.js 内置 SQLite，修改先写数据库，再由后台每分钟同步飞书，包含 T2 当前评级和 T12 当前评估；当前为单用户、单进程版本。
 
 业务行为分别见 [获客](acquisition.md)、[客户与产品数据](customer-data.md)、[评分](assessment.md)、[邮件沟通](outreach-first-touch.md)。[AI 业务员设计](ai-sales-agent-design.md) 区分已实现的首封追信与待实现的来信自动接待。
 
@@ -176,13 +176,13 @@ npm run release:rollback
 
 云端使用 `scripts/ops-backup.mjs` 和 `scripts/ops-monitor.mjs`，独立安装到 `/srv/shadeflow/ops/`，不随应用发布自动更新。对应 systemd service/timer 源文件在 `scripts/systemd/`。运维脚本更新后重新复制；更改 unit 才执行 `systemctl daemon-reload`，无需重启 `shadeflow.service`。`/srv/shadeflow/ops/node` 链接到服务器实际 Node.js 可执行文件，Node 升级时核对该链接。
 
-每日北京时间 04:30 运行在线备份，先于现有云备份的 05:15。逐个使用 SQLite 在线备份 API 获取包含已提交 WAL 数据的副本，通过完整性和外键检查后，与 `.data` 中的其他文件、存在的 `.env`／`.env.local`、systemd 配置和发布状态一起打包。数据包括邮箱加密文件及 `.credential-key`；备份目录仅 root 可访问。源数据库只读，临时副本校验后才发布到 `/var/backups/shadeflow/backup-*.tar.gz`，`latest.json` 只指向已完成的副本。失败不覆盖上次成功结果。
+每日北京时间 04:30 运行在线备份，先于现有云备份的 05:15。逐个使用 SQLite 在线备份 API 获取包含已提交 WAL 数据的副本，通过完整性和外键检查后，与 `.data` 中的其他文件、存在的 `.env`／`.env.local`、systemd 配置和发布状态一起打包。清单记录 `.data` 文件及存在的环境配置、systemd 配置和发布状态的 SHA-256。数据包括邮箱加密文件及 `.credential-key`；备份目录仅 root 可访问。源数据库只读，临时副本校验后才发布到 `/var/backups/shadeflow/backup-*.tar.gz`，`latest.json` 只指向已完成的副本。失败不覆盖上次成功结果。
 
 每个数据库各自一致，多个数据库不是同一时刻的全局事务快照。恢复后须核对跨库业务关系与发送结果，不能直接重跑结果不明的邮件。所有本机副本仍在同一块云盘；只有云备份成功收录并通过隔离恢复后，才算已验证的离机备份。副本暂不自动删除，磁盘到阈值会告警，清理前先确认云端已有可恢复版本。
 
 阿里云文件备份基础版默认排除 `/srv/`，因此原 `/srv/shadeflow/backups` 中的发布备份不在当前云备份覆盖范围。新副本放在未被排除的 `/var/backups/shadeflow`。查看“全部目录备份成功”不能代替浏览实际备份文件；每次更换计划或排除规则，应再次核实目录并隔离恢复。依据：[云备份默认排除规则](https://help.aliyun.com/zh/cloud-backup/user-guide/back-up-files-from-an-ecs-instance)。
 
-监控每 5 分钟检查应用 systemd 状态及健康接口、磁盘可用空间与 inode、在线备份任务结果与 30 小时新鲜度、HBR 客户端及最近成功备份日志、云端隔离恢复验收记录。空间不足 15% 或 inode 不足 10% 报警。相同异常每天提醒一次，异常集合变化及恢复立即通知；SMTP 失败不记为已通知，下次重试。告警不包含业务记录、配置值或密钥。
+监控每 5 分钟检查应用 systemd 状态及健康接口、磁盘可用空间与 inode、在线备份任务结果与 30 小时新鲜度、HBR 客户端及最近成功备份日志、云端隔离恢复验收记录。服务探测首次失败时立即重试一次；连续两轮检查均失败才发送服务告警，恢复立即通知。新归档完成时间不早于成功云备份任务的首条 lock 日志时，视为尚未确认入云；当天正常等待窗口宽限至北京时间 08:00，之后人工生成的新归档立即提示。任务起始日志缺失、目录覆盖未知或超过 30 小时无成功记录仍立即告警。空间不足 15% 或 inode 不足 10% 报警。相同异常每天提醒一次，其他异常集合变化立即通知；SMTP 失败不记为已通知，下次重试。告警不包含业务记录、配置值或密钥。
 
 配置存放在 `/srv/shadeflow/ops/monitor.json`，权限 0600，格式为：
 
@@ -195,7 +195,7 @@ npm run release:rollback
 }
 ```
 
-发件复用现有已验证邮箱，不更改业务邮箱配置或调用获客／客户发信任务；使用 `expectedAccount` 检查邮箱身份。共享凭证读取器会设置密钥文件权限，因此监控在 systemd 私有临时目录使用配置副本，发信后删除。生产目录在两个运维 service 中都为只读。监控状态放在 `/var/lib/shadeflow-monitor`，与业务库分开。更改发件邮箱、停用账号或撤销 SMTP 凭证后，必须重新发送测试邮件；邮件服务器接受不等于收件箱已投递。
+发件复用现有已验证邮箱，不更改业务邮箱配置或调用获客／客户发信任务；使用 `expectedAccount` 检查邮箱身份。共享凭证读取器会设置密钥文件权限，因此监控在 systemd 私有临时目录使用配置副本，发信后删除。监控 service 对生产目录只读；备份 service 对整个 `.data` 目录开放写权限，以供 SQLite 建立 WAL 旁文件，数据库连接仍为只读。监控状态放在 `/var/lib/shadeflow-monitor`，与业务库分开。更改发件邮箱、停用账号或撤销 SMTP 凭证后，必须重新发送测试邮件；邮件服务器接受不等于收件箱已投递。
 
 ```sh
 systemctl list-timers shadeflow-backup.timer shadeflow-monitor.timer

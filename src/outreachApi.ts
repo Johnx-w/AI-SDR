@@ -102,8 +102,21 @@ export interface OutreachDelivery {
   matchReason?: string | null;
   createdAt: string;
   sentAt?: string | null;
+  attemptedAt?: string | null;
   skippedAt?: string;
   messageId?: string | null;
+  resolution?: {
+    outcome: 'accepted' | 'failed';
+    evidence: string;
+    source: 'imap' | 'manual';
+    at: string;
+    operator?: string;
+  };
+  reconciliation?: {
+    at: string;
+    result: 'sent' | 'unconfirmed';
+    evidence?: string;
+  };
   receivedVerifiedAt?: string | null;
   recordError?: string | null;
   productClaimIds?: string[];

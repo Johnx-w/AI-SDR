@@ -86,7 +86,11 @@ const labels: Record<string, string> = {
 };
 const statusLabel = (value: string) => labels[value] || value || '待配置';
 const deliveryDetailLabel = (delivery: OutreachDelivery) =>
-  delivery.status === 'draft' && !delivery.subject ? '正在生成' : statusLabel(delivery.status);
+  delivery.status === 'failed' && delivery.resolution?.outcome === 'failed'
+    ? '已核实未发出'
+    : delivery.status === 'draft' && !delivery.subject
+      ? '正在生成'
+      : statusLabel(delivery.status);
 const campaignStatusLabel = (campaign: OutreachCampaign) =>
   campaign.status === 'ready' &&
   !campaign.stats?.draft &&
@@ -828,11 +832,20 @@ function MessagePreview({
   delivery,
   campaignName,
   onSuppress,
+  onReconcile,
+  onResolve,
+  verifying = false,
 }: {
   delivery: OutreachDelivery;
   campaignName?: string;
   onSuppress?: (delivery: OutreachDelivery) => void;
+  onReconcile?: (delivery: OutreachDelivery) => void;
+  onResolve?: (delivery: OutreachDelivery) => void;
+  verifying?: boolean;
 }) {
+  const customerLink = delivery.customerId
+    ? `/leads?${new URLSearchParams({ lead: delivery.customerId })}`
+    : null;
   if (delivery.status === 'skipped')
     return (
       <article className="outreach-message">
@@ -842,10 +855,9 @@ function MessagePreview({
         </div>
         <h3>{delivery.companyName}</h3>
         <p>所属计划：{campaignName || delivery.campaignId}</p>
-        <p>跳过原因：{delivery.reason || '无可用商务邮箱'}</p>
-        <p className="outreach-hint">
-          本次首发已结束。补齐邮箱后，可通过新一轮获客或新的触达计划重新评估。
-        </p>
+        <p>跳过原因：{delivery.reason || '首发条件未满足'}</p>
+        <p className="outreach-hint">本次首发已结束，旧计划不会恢复发送。新一轮获客可重新评估。</p>
+        {customerLink && <Link to={customerLink}>查看客户资料</Link>}
       </article>
     );
   return (
@@ -861,6 +873,9 @@ function MessagePreview({
         {delivery.status === 'accepted' && '；尚未确认客户收件或阅读。'}
         {delivery.status === 'unknown' && '；请先核对原邮箱，系统不会自动重发。'}
       </p>
+      {delivery.status === 'unknown' && (
+        <p className="outreach-hint">结果待核实期间不会重复首发；请依据原邮箱或服务商记录确认。</p>
+      )}
       <dl>
         <div>
           <dt>发件人</dt>
@@ -875,6 +890,7 @@ function MessagePreview({
           <dd>{delivery.companyName || '公司自有测试邮箱'}</dd>
         </div>
       </dl>
+      {customerLink && <Link to={customerLink}>查看客户资料</Link>}
       {!!delivery.productFacts?.length && (
         <details className="outreach-hint">
           <summary>引用的供货资料 · {delivery.productFacts.length} 条</summary>
@@ -893,11 +909,15 @@ function MessagePreview({
           <span>{delivery.matchReason}</span>
         </div>
       )}
-      <h3>{delivery.subject || '尚未生成主题'}</h3>
-      {delivery.bodyText || delivery.bodyHtml ? (
-        <MailMessageBody message={{ ...delivery, source: 'outreach' }} />
-      ) : (
-        <div className="outreach-message-body">邮件内容尚未生成。</div>
+      {(delivery.subject || delivery.bodyText || delivery.bodyHtml) && (
+        <>
+          <h3>{delivery.subject || '尚未生成主题'}</h3>
+          {delivery.bodyText || delivery.bodyHtml ? (
+            <MailMessageBody message={{ ...delivery, source: 'outreach' }} />
+          ) : (
+            <div className="outreach-message-body">邮件内容尚未生成。</div>
+          )}
+        </>
       )}
       {delivery.reason && <div className="outreach-alert">{delivery.reason}</div>}
       {delivery.mode === 'internal_test' && delivery.receivedVerifiedAt && (
@@ -908,6 +928,49 @@ function MessagePreview({
       )}
       {delivery.recordError && <div className="outreach-alert">{delivery.recordError}</div>}
       {delivery.messageId && <p className="outreach-message-id">邮件编号：{delivery.messageId}</p>}
+      {delivery.attemptedAt && <p>尝试提交：{formatTime(delivery.attemptedAt)}</p>}
+      {delivery.reconciliation && (
+        <p className="outreach-hint">
+          最近核实：{formatTime(delivery.reconciliation.at)} ·{' '}
+          {delivery.reconciliation.result === 'sent' ? '找到原邮箱已发送证据' : '仍无法确认'}
+          {delivery.reconciliation.evidence && ` · ${delivery.reconciliation.evidence}`}
+        </p>
+      )}
+      {delivery.resolution && (
+        <p className="outreach-hint">
+          核实结论：{delivery.resolution.outcome === 'accepted' ? '已提交成功' : '未成功提交'}
+          {delivery.resolution.source === 'manual' ? '（人工确认）' : '（邮箱证据）'} ·{' '}
+          {delivery.resolution.evidence} · {formatTime(delivery.resolution.at)}
+          {delivery.resolution.operator && ` · ${delivery.resolution.operator}`}
+        </p>
+      )}
+      {delivery.status === 'unknown' && (
+        <div className="outreach-actions">
+          {onReconcile && (
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={verifying}
+              onClick={() => onReconcile(delivery)}
+            >
+              <BusyIcon busy={verifying}>
+                <RefreshCw size={15} />
+              </BusyIcon>
+              {verifying ? '正在核实…' : '核实发送结果'}
+            </button>
+          )}
+          {onResolve && (
+            <button
+              type="button"
+              className="text-link"
+              disabled={verifying}
+              onClick={() => onResolve(delivery)}
+            >
+              人工记录核实结论
+            </button>
+          )}
+        </div>
+      )}
       {delivery.mode === 'production' && onSuppress && (
         <button
           type="button"
@@ -971,6 +1034,12 @@ export function OutreachCommunication() {
   } | null>(null);
   const [sampleRetry, setSampleRetry] = useState(0);
   const [deliveryPreview, setDeliveryPreview] = useState<OutreachDelivery | null>(null);
+  const [deliveryFull, setDeliveryFull] = useState<OutreachDelivery | null>(null);
+  const [resolutionTarget, setResolutionTarget] = useState<OutreachDelivery | null>(null);
+  const [resolutionOutcome, setResolutionOutcome] = useState<'accepted' | 'failed'>('accepted');
+  const [resolutionEvidence, setResolutionEvidence] = useState('');
+  const [resolutionOperator, setResolutionOperator] = useState('');
+  const [verificationError, setVerificationError] = useState<string | null>(null);
   const [suppressionTarget, setSuppressionTarget] = useState<OutreachDelivery | null>(null);
   const [suppressionReason, setSuppressionReason] = useState('人工标记不再联系');
   const [query, setQuery] = useState('');
@@ -1239,9 +1308,61 @@ export function OutreachCommunication() {
     return () => controller.abort();
   }, [sampleKey, sampleRetry]);
   const samplePreview = sampleBody?.key === sampleKey ? sampleBody : null;
+  useEffect(() => {
+    setDeliveryFull(null);
+    if (!deliveryPreview) return;
+    const controller = new AbortController();
+    void outreachApi<OutreachDelivery>(pathFor('deliveries', deliveryPreview.id), {
+      signal: controller.signal,
+    })
+      .then((delivery) => {
+        if (!controller.signal.aborted) setDeliveryFull(delivery);
+      })
+      .catch((reason: unknown) => {
+        if (!controller.signal.aborted) setVerificationError(message(reason));
+      });
+    return () => controller.abort();
+  }, [deliveryPreview?.id]);
   const currentDeliveryPreview = deliveryPreview
-    ? recordData?.items.find((delivery) => delivery.id === deliveryPreview.id) || deliveryPreview
+    ? deliveryFull?.id === deliveryPreview.id
+      ? deliveryFull
+      : recordData?.items.find((delivery) => delivery.id === deliveryPreview.id) || deliveryPreview
     : null;
+
+  async function verifyDelivery(
+    delivery: OutreachDelivery,
+    outcome?: 'accepted' | 'failed',
+    evidence?: string,
+    operator?: string,
+  ) {
+    const key = `verify-${delivery.id}`;
+    setBusy(key);
+    setVerificationError(null);
+    try {
+      const result = await outreachApi<OutreachDelivery>(
+        pathFor('deliveries', delivery.id, outcome ? 'resolve' : 'reconcile'),
+        {
+          method: 'POST',
+          body: JSON.stringify(outcome ? { outcome, evidence, operator } : {}),
+        },
+      );
+      setDeliveryFull(result);
+      if (sampleBody?.delivery?.id === result.id)
+        setSampleBody({ key: sampleBody.key, delivery: result });
+      if (detailId) await refreshDetail(detailId);
+      await refresh();
+      setNotice(
+        result.status === 'unknown'
+          ? '仍无法确认发送结果，请核对原邮箱或服务商日志。'
+          : '发送结果已记录。',
+      );
+      if (outcome) setResolutionTarget(null);
+    } catch (reason) {
+      setVerificationError(message(reason));
+    } finally {
+      setBusy(null);
+    }
+  }
 
   return (
     <div className="outreach-page">
@@ -1343,7 +1464,7 @@ export function OutreachCommunication() {
                     {
                       label: '已发送',
                       value: deliveryStats?.accepted || 0,
-                      detail: '含公司试发 · 服务商已接受',
+                      detail: '含公司试发及已核实发送',
                       icon: CheckCircle2,
                     },
                     {
@@ -1947,9 +2068,9 @@ export function OutreachCommunication() {
                           <tr>
                             <th>客户与收件邮箱</th>
                             <th>发件邮箱</th>
-                            <th>主题 / 跳过原因</th>
+                            <th>邮件主题 / 处理原因</th>
                             <th>状态</th>
-                            <th>发送 / 跳过 / 创建时间</th>
+                            <th>记录时间</th>
                             <th>
                               <span className="outreach-sr-only">详情</span>
                             </th>
@@ -1987,14 +2108,21 @@ export function OutreachCommunication() {
                               </td>
                               <td className="outreach-time-cell">
                                 {formatTime(
-                                  delivery.sentAt || delivery.skippedAt || delivery.createdAt,
+                                  delivery.resolution?.at ||
+                                    delivery.sentAt ||
+                                    delivery.attemptedAt ||
+                                    delivery.skippedAt ||
+                                    delivery.createdAt,
                                 )}
                               </td>
                               <td>
                                 <button
                                   className="icon-button"
-                                  aria-label={`查看 ${delivery.companyName || delivery.to} 的${delivery.status === 'skipped' ? '跳过记录' : '邮件'}`}
-                                  onClick={() => setDeliveryPreview(delivery)}
+                                  aria-label={`查看 ${delivery.companyName || delivery.to} 的首发记录`}
+                                  onClick={() => {
+                                    setVerificationError(null);
+                                    setDeliveryPreview(delivery);
+                                  }}
                                 >
                                   <ChevronRight size={17} />
                                 </button>
@@ -2207,7 +2335,7 @@ export function OutreachCommunication() {
                                 ? '包含现有未开发客户'
                                 : '仅计划创建后新增客户'}
                             {shownDetail.campaign.acquisitionSource
-                              ? '；无可用商务邮箱跳过本次，其他缺项补齐后重新检查'
+                              ? '；客户首发条件不足时跳过本次，旧计划不恢复发送'
                               : shownDetail.campaign.continuous
                                 ? '；持续加入符合条件的新客户'
                                 : '；固定批次'}
@@ -2262,15 +2390,27 @@ export function OutreachCommunication() {
                       ))}
                     </div>
                     {samplePreview?.delivery ? (
-                      <MessagePreview
-                        key={samplePreview.delivery.id}
-                        delivery={samplePreview.delivery}
-                        campaignName={shownDetail.campaign.name}
-                        onSuppress={(delivery) => {
-                          setSuppressionReason('人工标记不再联系');
-                          setSuppressionTarget(delivery);
-                        }}
-                      />
+                      <>
+                        <InlineError value={verificationError} />
+                        <MessagePreview
+                          key={samplePreview.delivery.id}
+                          delivery={samplePreview.delivery}
+                          campaignName={shownDetail.campaign.name}
+                          onReconcile={(delivery) => void verifyDelivery(delivery)}
+                          onResolve={(delivery) => {
+                            setResolutionTarget(delivery);
+                            setResolutionOutcome('accepted');
+                            setResolutionEvidence('');
+                            setResolutionOperator('');
+                            setVerificationError(null);
+                          }}
+                          verifying={busy === `verify-${samplePreview.delivery.id}`}
+                          onSuppress={(delivery) => {
+                            setSuppressionReason('人工标记不再联系');
+                            setSuppressionTarget(delivery);
+                          }}
+                        />
+                      </>
                     ) : samplePreview?.error ? (
                       <div>
                         <InlineError value={samplePreview.error} />
@@ -2420,10 +2560,20 @@ export function OutreachCommunication() {
       {currentDeliveryPreview && (
         <Modal
           wide
-          title={currentDeliveryPreview.status === 'skipped' ? '首发跳过记录' : '邮件详情'}
-          onClose={() => setDeliveryPreview(null)}
+          title={
+            currentDeliveryPreview.subject ||
+            currentDeliveryPreview.bodyText ||
+            currentDeliveryPreview.bodyHtml
+              ? '邮件详情'
+              : '首发记录详情'
+          }
+          onClose={() => {
+            setDeliveryPreview(null);
+            setVerificationError(null);
+          }}
         >
           <div className="modal-body">
+            <InlineError value={verificationError} />
             <MessagePreview
               delivery={currentDeliveryPreview}
               campaignName={
@@ -2434,8 +2584,83 @@ export function OutreachCommunication() {
                 setSuppressionReason('人工标记不再联系');
                 setSuppressionTarget(delivery);
               }}
+              onReconcile={(delivery) => void verifyDelivery(delivery)}
+              onResolve={(delivery) => {
+                setResolutionTarget(delivery);
+                setResolutionOutcome('accepted');
+                setResolutionEvidence('');
+                setResolutionOperator('');
+                setVerificationError(null);
+              }}
+              verifying={busy === `verify-${currentDeliveryPreview.id}`}
             />
           </div>
+        </Modal>
+      )}
+      {resolutionTarget && (
+        <Modal
+          title="记录发送核实结论"
+          onClose={() => {
+            if (!busy) setResolutionTarget(null);
+          }}
+        >
+          <form
+            className="modal-body outreach-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void verifyDelivery(
+                resolutionTarget,
+                resolutionOutcome,
+                resolutionEvidence.trim(),
+                resolutionOperator.trim(),
+              );
+            }}
+          >
+            <p>请依据原发件邮箱或服务商日志核实。未找到已发送邮件，不能证明邮件没有发出。</p>
+            <label>
+              核实结论
+              <select
+                value={resolutionOutcome}
+                onChange={(event) =>
+                  setResolutionOutcome(event.target.value as 'accepted' | 'failed')
+                }
+              >
+                <option value="accepted">确认服务商已接受发送</option>
+                <option value="failed">确认未成功提交</option>
+              </select>
+            </label>
+            <label>
+              操作人（请填写姓名或标识）
+              <input
+                value={resolutionOperator}
+                onChange={(event) => setResolutionOperator(event.target.value)}
+                maxLength={100}
+                required
+              />
+            </label>
+            <label>
+              证据说明
+              <textarea
+                value={resolutionEvidence}
+                onChange={(event) => setResolutionEvidence(event.target.value)}
+                rows={4}
+                maxLength={1000}
+                required
+                placeholder="例如原邮箱已发送记录的邮件编号、服务商日志的查询时间与结果"
+              />
+            </label>
+            <InlineError value={verificationError} />
+            <button
+              className="btn primary"
+              type="submit"
+              disabled={!!busy || !resolutionEvidence.trim() || !resolutionOperator.trim()}
+            >
+              <BusyIcon busy={busy === `verify-${resolutionTarget.id}`}>
+                <Check size={15} />
+              </BusyIcon>
+              保存核实结论
+            </button>
+          </form>
         </Modal>
       )}
       {suppressionTarget && (

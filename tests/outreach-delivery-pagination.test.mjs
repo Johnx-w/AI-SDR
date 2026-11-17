@@ -23,7 +23,7 @@ test('默认发送记录和总数排除已取消及已跳过，历史详情及�
   assert.equal(service.detail('cancelled-plan').deliveries.length, 5);
 });
 
-test('五类发送状态先跨记录筛选再分页，生成与人工确认分开且统计一致', async (t) => {
+test('六类发送状态先跨记录筛选再分页，已核实未发出不再计需处理', async (t) => {
   const service = new OutreachService({ mailboxes: { list: () => [] } });
   t.after(() => service.close());
   service.putCampaign({ id: 'one', name: 'Plan' });
@@ -35,18 +35,32 @@ test('五类发送状态先跨记录筛选再分页，生成与人工确认分�
     ['accepted', 'Accepted', 'sent'],
     ['blocked', 'Blocked', 'attention'],
     ['failed', 'Rejected', 'attention'],
+    ['failed', 'Checked', 'resolved'],
     ['unknown', 'Uncertain', 'attention'],
     ['cancelled', 'Cancelled', 'cancelled'],
     ['skipped', '', 'skipped'],
   ];
   for (let i = 0; i < 12; i++) {
     for (const [status, subject, group] of cases) {
-      const delivery = { id: `${i}-${status}-${group}`, campaignId: 'one', status, subject };
+      const delivery = {
+        id: `${i}-${status}-${group}`,
+        campaignId: 'one',
+        status,
+        subject,
+        ...(group === 'resolved' ? { resolution: { outcome: 'failed' } } : {}),
+      };
       assert.equal(deliveryGroup(delivery), group);
       service.putDelivery(delivery);
     }
   }
-  const expected = { pending: 36, sent: 12, attention: 48, skipped: 12, cancelled: 12 };
+  const expected = {
+    pending: 36,
+    sent: 12,
+    attention: 48,
+    resolved: 12,
+    skipped: 12,
+    cancelled: 12,
+  };
   assert.deepEqual((await service.state()).deliveryGroups, expected);
   assert.deepEqual(service.detail('one').campaign.deliveryGroups, expected);
   for (const [group, total] of Object.entries(expected)) {
