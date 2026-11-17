@@ -241,7 +241,13 @@ test('每条实际搜索词记录发现、去重、待核实和评级产出', as
         { source_url: 'https://accepted.example/' },
       ],
       skipped_existing: [{ url: 'https://known.example/' }],
-      filtered_sources: [{ url: 'https://www.cpsc.gov/safety', reason: '监管或统计资料' }],
+      filtered_sources: [
+        { url: 'https://www.cpsc.gov/safety', reason: '监管或统计资料' },
+        {
+          url: 'https://www.mydeal.com.au/seller/window-coverings',
+          reason: '第三方平台或目录',
+        },
+      ],
     }),
     research: async (_target, item) => {
       if (item.domain === 'review.example')
@@ -275,6 +281,7 @@ test('每条实际搜索词记录发现、去重、待核实和评级产出', as
         discovered: job.searchStats[0].discovered,
         filtered: job.searchStats[0].filtered,
         filterReasons: job.searchStats[0].filterReasons,
+        filteredSources: job.searchStats[0].filteredSources,
         duplicates: job.searchStats[0].duplicates,
         queued: job.searchStats[0].queued,
         researched: job.searchStats[0].researched,
@@ -283,9 +290,13 @@ test('每条实际搜索词记录发现、去重、待核实和评级产出', as
         ratings: job.searchStats[0].ratings,
       },
       {
-        discovered: 4,
-        filtered: 1,
-        filterReasons: { 监管或统计资料: 1 },
+        discovered: 5,
+        filtered: 2,
+        filterReasons: { 监管或统计资料: 1, 第三方平台或目录: 1 },
+        filteredSources: [
+          { domain: 'cpsc.gov', reason: '监管或统计资料' },
+          { domain: 'mydeal.com.au', reason: '第三方平台或目录' },
+        ],
         duplicates: 1,
         queued: 2,
         researched: 2,

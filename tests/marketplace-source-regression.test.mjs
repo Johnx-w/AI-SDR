@@ -19,7 +19,7 @@ const env = {
 test('真实ExportHub产品卡片及同类B2B市场域名不是商家独立官网', () => {
   const found = selectWebsiteCandidates([
     { url: fixture.source_url, title: fixture.source_title },
-    ...['globalsources.com', 'tradeindia.com', 'indiamart.com'].map((host) => ({
+    ...['globalsources.com', 'tradeindia.com', 'indiamart.com', 'mydeal.com.au'].map((host) => ({
       url: `https://${host}/product/roller-fabrics`,
       title: 'Roller blind fabric manufacturer',
     })),
@@ -32,6 +32,33 @@ test('真实ExportHub产品卡片及同类B2B市场域名不是商家独立官�
     found.candidates.map((row) => row.domain),
     ['exporthub-blinds.example.org'],
   );
+});
+
+test('MyDeal卖家页在网页采集和模型研究前停止', async () => {
+  const source = 'https://www.mydeal.com.au/seller/consol-blinds-and-homes?productid=199290';
+  const service = new NativeAcquisition({
+    env,
+    readPage: async () => assert.fail('第三方平台不应进入网页采集'),
+    feishu: {
+      records: async () => [],
+      write: async () => assert.fail('第三方平台不应写入客户库'),
+    },
+    providers: {
+      web: { extract: async () => assert.fail('第三方平台不应进入网页提取') },
+      model: { research: async () => assert.fail('第三方平台不应进入模型研究') },
+    },
+    fetchImpl: async () => assert.fail('第三方平台不应发起外部请求'),
+  });
+  try {
+    const result = await service.research(
+      { country: 'Australia', product: 'roller blinds' },
+      { source_url: source, operation_id: 'mydeal-pre-collection-filter' },
+    );
+    assert.equal(result.outcome, 'review');
+    assert.match(result.reason, /第三方|独立官网|平台/);
+  } finally {
+    service.close();
+  }
 });
 
 test('真实产品页商家名不能因逐字出现在供应商卡片就成为平台域名经营者', () => {

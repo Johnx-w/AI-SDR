@@ -381,6 +381,11 @@ export function BatchProgress(props: BatchProgressProps) {
 }
 
 function BatchProgressDetail({ job, control, busy }: BatchProgressProps) {
+  const filteredPlatforms = (job.searchStats || []).flatMap((metric) =>
+    (metric.filteredSources || [])
+      .filter((source) => source.reason === '第三方平台或目录')
+      .map((source) => ({ ...source, query: metric.query })),
+  );
   return (
     <section className="batch-progress" aria-label="批量任务进度">
       <div className="result-title">
@@ -517,6 +522,31 @@ function BatchProgressDetail({ job, control, busy }: BatchProgressProps) {
             新增目标只统计去重后实际写入并由飞书读回确认的企业。A/B/C 表示初始开发顺序，
             不表示企业已采购、会回复或资料完整。
           </p>
+        </details>
+      )}
+      {filteredPlatforms.length > 0 && (
+        <details className="batch-details">
+          <summary>第三方平台已过滤 {filteredPlatforms.length} 条</summary>
+          <div className="table-scroll" role="region" aria-label="第三方平台过滤明细" tabIndex={0}>
+            <table className="keyword-effect-table">
+              <thead>
+                <tr>
+                  <th>域名</th>
+                  <th>搜索词</th>
+                  <th>过滤原因</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredPlatforms.map((source, index) => (
+                  <tr key={`${source.domain}-${source.query}-${index}`}>
+                    <td>{source.domain}</td>
+                    <td>{source.query}</td>
+                    <td>{source.reason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </details>
       )}
       {(() => {

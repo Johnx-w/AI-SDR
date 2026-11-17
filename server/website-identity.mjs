@@ -61,6 +61,7 @@ export function thirdPartyCompanySource({ url = '', title = '', text = '' } = {}
     'globalsources.com',
     'tradeindia.com',
     'indiamart.com',
+    'mydeal.com.au',
     'etsy.com',
     'tracxn.com',
   ];

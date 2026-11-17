@@ -609,6 +609,7 @@ export class BatchJobs {
             discovered: 0,
             filtered: 0,
             filterReasons: {},
+            filteredSources: [],
             duplicates: 0,
             queued: 0,
             researched: 0,
@@ -651,6 +652,10 @@ export class BatchJobs {
             (found.review_candidates || []).length +
             (found.filtered_sources || []).length;
           metric.filtered = (found.filtered_sources || []).length;
+          metric.filteredSources = (found.filtered_sources || []).map((item) => ({
+            domain: domainKey(item.url),
+            reason: item.reason,
+          }));
           for (const item of found.filtered_sources || [])
             metric.filterReasons[item.reason] = (metric.filterReasons[item.reason] || 0) + 1;
           const fresh = this.get(id);

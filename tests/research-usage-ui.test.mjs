@@ -142,3 +142,60 @@ test('批次结果只展示 A/B/C，不展示旧评级或评分数字', () => {
   assert.doesNotMatch(html, /旧记录|旧版/);
   assert.doesNotMatch(html, /已支持70分|已支持65分|\/100/);
 });
+
+test('第三方平台过滤结果可展开查看域名、搜索词和原因，旧任务不伪造明细', () => {
+  const metric = {
+    id: 'search-mydeal',
+    query: 'roller blinds supplier Australia',
+    country: 'Australia',
+    status: 'completed',
+    discovered: 3,
+    filtered: 3,
+    filterReasons: { 第三方平台或目录: 2, 监管或统计资料: 1 },
+    filteredSources: [
+      { domain: 'mydeal.com.au', reason: '第三方平台或目录' },
+      { domain: 'seller.example.org', reason: '第三方平台或目录' },
+      { domain: 'statistics.example.gov', reason: '监管或统计资料' },
+    ],
+    duplicates: 0,
+    queued: 0,
+    researched: 0,
+    inserted: 0,
+    updated: 0,
+    rejected: 0,
+    review: 0,
+    failed: 0,
+    ratings: {},
+  };
+  const renderMetrics = (searchStats) =>
+    renderToStaticMarkup(
+      createElement(
+        MemoryRouter,
+        null,
+        createElement(BatchProgress, {
+          job: { ...job, searchStats },
+          control: () => {},
+          busy: false,
+        }),
+      ),
+    );
+  const html = renderMetrics([metric]);
+  assert.match(html, /第三方平台已过滤 2 条/);
+  assert.match(html, /mydeal\.com\.au/);
+  assert.match(html, /seller\.example\.org/);
+  assert.match(html, /roller blinds supplier Australia/);
+  assert.match(html, /第三方平台或目录/);
+  assert.doesNotMatch(html, /statistics\.example\.gov/);
+
+  const old = renderMetrics([
+    {
+      ...metric,
+      id: 'old-search',
+      query: 'legacy query',
+      filtered: 1,
+      filterReasons: { 第三方平台或目录: 1 },
+      filteredSources: undefined,
+    },
+  ]);
+  assert.doesNotMatch(old, /第三方平台已过滤/);
+});
