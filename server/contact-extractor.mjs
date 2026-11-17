@@ -312,8 +312,19 @@ export function extractContacts({ content, sourceUrl, country = '' }) {
     } catch {
       continue;
     }
+    const wpformsId = attrs['data-formid'];
+    const elementorId = [...form[2].matchAll(/<input\b([^>]*)>/gi)]
+      .map((input) => attributes(input[1]))
+      .find((input) => input.type === 'hidden' && input.name === 'form_id')?.value;
+    const formId =
+      /\bwpforms-form\b/.test(attrs.class || '') && /^\d+$/.test(wpformsId || '')
+        ? 'wpforms:' + wpformsId
+        : /\belementor-form\b/.test(attrs.class || '') && /^[a-z\d]+$/i.test(elementorId || '')
+          ? 'elementor:' + elementorId
+          : undefined;
     found.push({
       kind: 'form',
+      ...(formId ? { form_id: formId } : {}),
       value: source.href,
       normalized: action.href,
       action_url: action.href,
@@ -323,9 +334,10 @@ export function extractContacts({ content, sourceUrl, country = '' }) {
       status: '公开未验证',
     });
   }
-  return [...new Map(found.map((c) => [c.kind + ':' + c.normalized, c])).values()]
+  const contactKey = (contact) => contact.kind + ':' + (contact.form_id || contact.normalized);
+  return [...new Map(found.map((c) => [contactKey(c), c])).values()]
     .map((c) => {
-      const first = found.find((f) => f.kind === c.kind && f.normalized === c.normalized);
+      const first = found.find((f) => contactKey(f) === contactKey(c));
       return first;
     })
     .slice(0, 40);

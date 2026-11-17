@@ -111,7 +111,13 @@ export interface AcquisitionJob {
       ready: boolean;
       reasons: string[];
       contact_verified?: boolean;
-      contacts?: { kind: string; value: string; source_url: string; quote: string }[];
+      contacts?: {
+        kind: string;
+        value: string;
+        source_url: string;
+        quote: string;
+        form_id?: string;
+      }[];
     };
     review_resolution?: {
       key: string;

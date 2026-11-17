@@ -106,7 +106,13 @@ export function calculateHandoffReadiness({
             !thirdPartyContact(contact),
         )
         .map((contact) => [
-          contact.kind + ':' + (contact.normalized || contact.value || contact.url),
+          contact.kind +
+            ':' +
+            (contact.kind === 'form'
+              ? contact.source_url +
+                ':' +
+                (contact.form_id || contact.normalized || contact.value || contact.url)
+              : contact.normalized || contact.value || contact.url),
           contact,
         ]),
     ).values(),

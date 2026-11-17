@@ -260,12 +260,64 @@ test('执行详情归组同来源表单，并区分任务暂停与独立补录',
 
   assert.match(html, /已暂停 · 执行结果待确认/);
   assert.match(html, /确认执行结果并继续/);
-  assert.match(html, /业务联系表单（2 个）/);
+  assert.equal((html.match(/<summary>业务联系表单<\/summary>/g) || []).length, 1);
+  assert.match(html, /来源页（未保存表单编号）/);
   assert.equal((html.match(/https:\/\/buyer\.example\/contact/g) || []).length, 1);
   assert.match(html, /https:\/\/buyer\.example\/request-quote/);
   assert.doesNotMatch(html, /javascript:|Unsafe form/);
-  assert.match(html, /企业独立官网（请人工核对或更正）/);
+  assert.match(html, /企业独立官网/);
   assert.match(html, /第三方平台或目录页请替换为企业独立官网/);
   assert.match(html, /本操作独立补录，不改变原任务统计/);
-  assert.match(html, /按此官网重新核实并尝试入库/);
+  assert.match(html, /核实并尝试入库/);
+});
+
+test('Dandoush 五个历史来源只显示一个折叠入口，编号按同站归组', () => {
+  const paths = [
+    '/indoor/blinds/zebra-blinds-2/',
+    '/',
+    '/contact/',
+    '/about-our-custom-made-window-coverings/',
+    '/terms-conditions/',
+  ];
+  const sources = paths.map((path) => 'https://ccblinds.com.au' + path);
+  const renderContacts = (contacts) =>
+    renderToStaticMarkup(
+      createElement(
+        MemoryRouter,
+        null,
+        createElement(BatchProgress, {
+          job: {
+            ...job,
+            rows: [
+              {
+                name: 'Dandoush Pty Ltd',
+                result: 'inserted',
+                handoff: { ready: true, reasons: [], contacts },
+              },
+            ],
+          },
+          control: () => {},
+          busy: false,
+        }),
+      ),
+    );
+  const contacts = sources.map((source_url) => ({
+    kind: 'form',
+    value: source_url,
+    source_url,
+    quote: 'Saved form evidence',
+  }));
+  const historical = renderContacts(contacts);
+  assert.equal((historical.match(/<summary>业务联系表单<\/summary>/g) || []).length, 1);
+  assert.match(historical, /来源页（未保存表单编号）/);
+  for (const source of sources) assert.ok(historical.includes(`href="${source}"`));
+  const identified = renderContacts([
+    ...contacts.map((contact) => ({ ...contact, form_id: 'wpforms:5450' })),
+    { ...contacts[2], form_id: 'elementor:add9249' },
+    { ...contacts[0], source_url: 'https://other.example/contact/', form_id: 'wpforms:5450' },
+  ]);
+  assert.equal((identified.match(/<summary>业务联系表单<\/summary>/g) || []).length, 1);
+  assert.equal((identified.match(/表单编号 wpforms:5450/g) || []).length, 2);
+  assert.equal((identified.match(/表单编号 elementor:add9249/g) || []).length, 1);
+  assert.doesNotMatch(identified, /<details class="handoff-forms" open/);
 });

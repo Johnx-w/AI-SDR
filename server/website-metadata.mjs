@@ -459,7 +459,13 @@ export function combineWebsiteEvidence(pages, country = '') {
       (x) => [x.country, x.region, x.city, x.street].join('|'),
     ).sort((a, b) => addressRank(b) - addressRank(a)),
     service_areas: unique(serviceAreas, (x) => x.name),
-    contacts: unique(contacts, (x) => x.kind + ':' + x.normalized),
+    contacts: unique(
+      contacts,
+      (x) =>
+        x.kind +
+        ':' +
+        (x.kind === 'form' ? x.source_url + ':' + (x.form_id || x.normalized) : x.normalized),
+    ),
     snippets: unique(snippets, (x) => x.text),
     checked_urls: [...new Set(pages.filter((p) => p.content).map((p) => p.url))],
     checked_at: Date.now(),
@@ -485,7 +491,12 @@ export function enrichmentFields(profile, evidence, existing = {}) {
   );
   const contacts = unique(
     [...(profile.latest_research?.contact_evidence || []), ...evidence.contacts],
-    (x) => x.kind + ':' + (x.normalized || x.value),
+    (x) =>
+      x.kind +
+      ':' +
+      (x.kind === 'form'
+        ? x.source_url + ':' + (x.form_id || x.normalized || x.value)
+        : x.normalized || x.value),
   );
   const address = evidence.addresses[0] || old.addresses?.[0];
   const areas = unique(

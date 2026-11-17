@@ -3109,6 +3109,30 @@ main {
   overflow: auto;
   overscroll-behavior: contain;
 }
+.batch-result-list .lead-table {
+  table-layout: fixed;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.batch-result-list .lead-table th:last-child {
+  width: 100px;
+}
+.website-correction-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+  margin-top: 10px;
+}
+.website-correction-form label {
+  display: grid;
+  gap: 6px;
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.website-correction-form .btn {
+  white-space: normal;
+}
 .batch-details td small {
   display: block;
   max-width: 480px;

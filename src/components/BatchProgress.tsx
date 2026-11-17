@@ -38,26 +38,52 @@ function safeUrl(value?: string | null) {
 }
 type ReviewRow = AcquisitionJob['rows'][number];
 type HandoffContact = NonNullable<NonNullable<ReviewRow['handoff']>['contacts']>[number];
-function presentHandoffContacts(contacts: HandoffContact[] = []) {
-  const presented: { contact: HandoffContact; href: string; count: number }[] = [];
-  const forms = new Map<string, (typeof presented)[number]>();
+function HandoffContacts({ contacts = [] }: { contacts?: HandoffContact[] }) {
+  const presented: { contact: HandoffContact; href: string }[] = [];
+  const forms = new Map<string, { id?: string; sources: Set<string> }>();
   for (const contact of contacts) {
     const href = safeUrl(contact.source_url);
     if (!href) continue;
     if (contact.kind !== 'form') {
-      presented.push({ contact, href, count: 1 });
+      presented.push({ contact, href });
       continue;
     }
-    const existing = forms.get(href);
-    if (existing) {
-      existing.count += 1;
-      continue;
-    }
-    const item = { contact, href, count: 1 };
-    forms.set(href, item);
-    presented.push(item);
+    const key = contact.form_id ? new URL(href).origin + ':' + contact.form_id : 'legacy';
+    const group = forms.get(key) || { id: contact.form_id, sources: new Set<string>() };
+    group.sources.add(href);
+    forms.set(key, group);
   }
-  return presented;
+  return (
+    <>
+      {presented.map(({ contact, href }, index) => (
+        <small key={`${contact.kind}-${contact.value}-${index}`}>
+          <a href={href} target="_blank" rel="noopener noreferrer">
+            {contact.kind === 'email' ? '邮箱' : '电话'}：{contact.value}
+          </a>
+        </small>
+      ))}
+      {forms.size > 0 && (
+        <details className="handoff-forms">
+          <summary>业务联系表单</summary>
+          {[...forms.values()].map((group, index) => (
+            <div key={index}>
+              <small>{group.id ? `表单编号 ${group.id}` : '来源页（未保存表单编号）'}</small>
+              {[...group.sources].map((href) => (
+                <small key={href}>
+                  <a href={href} target="_blank" rel="noopener noreferrer">
+                    {new URL(href).hostname}
+                    {new URL(href).pathname}
+                    {new URL(href).search}
+                    {new URL(href).hash}
+                  </a>
+                </small>
+              ))}
+            </div>
+          ))}
+        </details>
+      )}
+    </>
+  );
 }
 function ReviewAction({ jobId, index, row }: { jobId: string; index: number; row: ReviewRow }) {
   const [sourceUrl, setSourceUrl] = useState(
@@ -160,9 +186,9 @@ function ReviewAction({ jobId, index, row }: { jobId: string; index: number; row
           )}
         </small>
       ) : (
-        <form onSubmit={(event) => void submit(event)}>
+        <form className="website-correction-form" onSubmit={(event) => void submit(event)}>
           <label>
-            企业独立官网（请人工核对或更正）
+            企业独立官网
             <input
               type="url"
               required
@@ -173,7 +199,7 @@ function ReviewAction({ jobId, index, row }: { jobId: string; index: number; row
             />
           </label>
           <button type="submit" className="btn secondary" disabled={busy}>
-            {busy ? '核实中…' : uncertain ? '核对上次结果' : '按此官网重新核实并尝试入库'}
+            {busy ? '核实中…' : uncertain ? '核对上次结果' : '核实并尝试入库'}
           </button>
         </form>
       )}
@@ -222,15 +248,7 @@ function DetailRows({
                 </small>
               )}
               {row.search_query && <small>发现词：{row.search_query}</small>}
-              {presentHandoffContacts(row.handoff?.contacts).map(({ contact, href, count }, i) => (
-                <small key={`handoff-contact-${contact.kind}-${contact.value}-${href}-${i}`}>
-                  <a href={href} target="_blank" rel="noopener noreferrer">
-                    {contact.kind === 'form'
-                      ? `业务联系表单${count > 1 ? `（${count} 个）` : ''}`
-                      : `${contact.kind === 'email' ? '邮箱' : '电话'}：${contact.value}`}
-                  </a>
-                </small>
-              ))}
+              <HandoffContacts contacts={row.handoff?.contacts} />
               {row.result === 'review' && (
                 <ReviewAction jobId={jobId} index={allRows.indexOf(row)} row={row} />
               )}

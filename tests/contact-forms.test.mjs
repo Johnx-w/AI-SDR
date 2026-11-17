@@ -11,6 +11,25 @@ const form = (
 ) =>
   `<form ${attrs}><label>Email<input type="email" name="contact[email]" required></label><label>Message<textarea name="message"></textarea></label>${extra}<button type="submit">${button}</button></form>`;
 
+test('同页不同表单编号即使提交地址相同也保留，重复挂件去重', () => {
+  const wpforms = form('class="wpforms-form" data-formid="5450" method="post"');
+  const elementor = form(
+    'class="elementor-form" method="post"',
+    'Send My Enquiry',
+    '<input type="hidden" name="form_id" value="add9249">',
+  );
+  const contacts = extractContacts({ content: wpforms + wpforms + elementor, sourceUrl });
+  assert.deepEqual(
+    contacts.map((contact) => contact.form_id),
+    ['wpforms:5450', 'elementor:add9249'],
+  );
+  const evidence = combineWebsiteEvidence([
+    { url: sourceUrl, content: wpforms + elementor },
+    { url: 'https://buyer.example.org/about', content: wpforms },
+  ]);
+  assert.equal(evidence.contacts.filter((contact) => contact.kind === 'form').length, 3);
+});
+
 test('真实业务form保留官网来源、提交地址与可逐字核对的完整HTML证据', () => {
   const html = form();
   const [contact] = extractContacts({ content: html, sourceUrl });
