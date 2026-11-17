@@ -7,7 +7,7 @@ import { Modal } from './ui';
 const states = {
   running: '正在收录',
   stopping: '正在停止',
-  paused: '已暂停 · 待核对',
+  paused: '已暂停 · 执行结果待确认',
   completed: '目标已完成',
   partial: '部分完成',
 };
@@ -37,6 +37,28 @@ function safeUrl(value?: string | null) {
   }
 }
 type ReviewRow = AcquisitionJob['rows'][number];
+type HandoffContact = NonNullable<NonNullable<ReviewRow['handoff']>['contacts']>[number];
+function presentHandoffContacts(contacts: HandoffContact[] = []) {
+  const presented: { contact: HandoffContact; href: string; count: number }[] = [];
+  const forms = new Map<string, (typeof presented)[number]>();
+  for (const contact of contacts) {
+    const href = safeUrl(contact.source_url);
+    if (!href) continue;
+    if (contact.kind !== 'form') {
+      presented.push({ contact, href, count: 1 });
+      continue;
+    }
+    const existing = forms.get(href);
+    if (existing) {
+      existing.count += 1;
+      continue;
+    }
+    const item = { contact, href, count: 1 };
+    forms.set(href, item);
+    presented.push(item);
+  }
+  return presented;
+}
 function ReviewAction({ jobId, index, row }: { jobId: string; index: number; row: ReviewRow }) {
   const [sourceUrl, setSourceUrl] = useState(
     row.review_resolution?.source_url || row.source_url || '',
@@ -97,7 +119,7 @@ function ReviewAction({ jobId, index, row }: { jobId: string; index: number; row
   }
   return (
     <details onToggle={(event) => event.currentTarget.open && void loadEvidence()}>
-      <summary>{recorded ? '核实结果' : '核实并尝试入库'}</summary>
+      <summary>{recorded ? '核实结果' : '更正企业官网并重新核实'}</summary>
       {evidence ? (
         <div>
           <small>
@@ -108,8 +130,9 @@ function ReviewAction({ jobId, index, row }: { jobId: string; index: number; row
           </small>
           {evidence.facts.map((fact, i) => (
             <small key={`${fact.field}-${i}`}>
-              {fact.field === 'company_name' ? '名称' : fact.field === 'products' ? '产品' : '主体'}
-              依据：
+              {fact.field === 'products'
+                ? `产品依据${fact.value ? `（${fact.value}）` : ''}：`
+                : `${fact.field === 'company_name' ? '名称' : '主体'}依据：`}
               {fact.quote}（
               {safeUrl(fact.source_url) ? (
                 <a href={safeUrl(fact.source_url)} target="_blank" rel="noopener noreferrer">
@@ -123,7 +146,9 @@ function ReviewAction({ jobId, index, row }: { jobId: string; index: number; row
           ))}
         </div>
       ) : (
-        <small>打开官网核对主体与经营产品；无已保存证据时重新采集。</small>
+        <small>
+          第三方平台或目录页请替换为企业独立官网；无已保存证据时重新采集。本操作独立补录，不改变原任务统计。
+        </small>
       )}
       {resolution?.reason && <small>{resolution.reason}</small>}
       {recorded ? (
@@ -137,7 +162,7 @@ function ReviewAction({ jobId, index, row }: { jobId: string; index: number; row
       ) : (
         <form onSubmit={(event) => void submit(event)}>
           <label>
-            已核对的企业官网
+            企业独立官网（请人工核对或更正）
             <input
               type="url"
               required
@@ -148,7 +173,7 @@ function ReviewAction({ jobId, index, row }: { jobId: string; index: number; row
             />
           </label>
           <button type="submit" className="btn secondary" disabled={busy}>
-            {busy ? '核实中…' : uncertain ? '核对上次结果' : '重新核实并尝试入库'}
+            {busy ? '核实中…' : uncertain ? '核对上次结果' : '按此官网重新核实并尝试入库'}
           </button>
         </form>
       )}
@@ -197,22 +222,15 @@ function DetailRows({
                 </small>
               )}
               {row.search_query && <small>发现词：{row.search_query}</small>}
-              {row.handoff?.contacts?.map(
-                (contact, i) =>
-                  safeUrl(contact.source_url) && (
-                    <small key={`handoff-contact-${i}`}>
-                      <a
-                        href={safeUrl(contact.source_url)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        {contact.kind === 'form'
-                          ? '业务联系表单'
-                          : `${contact.kind === 'email' ? '邮箱' : '电话'}：${contact.value}`}
-                      </a>
-                    </small>
-                  ),
-              )}
+              {presentHandoffContacts(row.handoff?.contacts).map(({ contact, href, count }, i) => (
+                <small key={`handoff-contact-${contact.kind}-${contact.value}-${href}-${i}`}>
+                  <a href={href} target="_blank" rel="noopener noreferrer">
+                    {contact.kind === 'form'
+                      ? `业务联系表单${count > 1 ? `（${count} 个）` : ''}`
+                      : `${contact.kind === 'email' ? '邮箱' : '电话'}：${contact.value}`}
+                  </a>
+                </small>
+              ))}
               {row.result === 'review' && (
                 <ReviewAction jobId={jobId} index={allRows.indexOf(row)} row={row} />
               )}
@@ -445,7 +463,7 @@ function BatchProgressDetail({ job, control, busy }: BatchProgressProps) {
               disabled={busy}
               onClick={() => control('resume')}
             >
-              核对并继续
+              确认执行结果并继续
             </button>
             <button
               type="button"

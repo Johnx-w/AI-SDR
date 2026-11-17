@@ -186,6 +186,7 @@ export function createApp({
       research: (...args) => provider.research(...args),
       status: (id) => provider.status(id),
       readLeads: verifiedLeads,
+      isMaintaining,
       onOutreachChange: () => wakeAutomaticOutreach(),
     }));
   let acquisitionReviews;
@@ -445,6 +446,8 @@ export function createApp({
               leadLibrary?.refreshing ||
               provider.syncing ||
               productKnowledge?.documents.running.size ||
+              batch?.recovering ||
+              batch?.resuming ||
               jobs().active()
             )
               throw new ApiError(409, '请先完成或核对当前任务，再修改 API 连接');
@@ -454,8 +457,8 @@ export function createApp({
             leadPerformance = new LeadPerformance();
             overview.reset();
             business.reset();
+            await batch?.close();
             provider.close();
-            batch?.close();
             batch = undefined;
             acquisitionReviews = undefined;
             provider = createAcquisitionProvider({
@@ -860,7 +863,7 @@ export function createApp({
                 if (['inserted', 'updated'].includes(resolution.status)) library().invalidate();
                 return json(response, 200, { resolution });
               }
-              if (result?.reason?.includes('操作记录不存在'))
+              if (result?.missing === true)
                 return json(response, 200, {
                   resolution: reviews().settle(job.id, index, {
                     outcome: 'failed',
@@ -978,11 +981,10 @@ export function createApp({
       productKnowledge?.close();
       if (!batch?.busy && !running) provider.close();
     };
-    const businessSync = business.close();
-    if (businessSync) void businessSync.finally(cleanup);
+    const pending = [batch && !batch.busy ? batch.close() : null, business.close()].filter(Boolean);
+    if (pending.length) void Promise.allSettled(pending).then(cleanup);
     else cleanup();
     schedules?.close();
-    if (batch && !batch.busy) batch.close();
   });
   return server;
 }

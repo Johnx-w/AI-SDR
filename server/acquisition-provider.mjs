@@ -66,24 +66,28 @@ export function createAcquisitionProvider({
     reviewEvidence: (id) => {
       const operation = id ? service().store?.get(id) : null;
       const research = operation?.research || {};
-      return operation
-        ? {
-            company_name: research.company_name || null,
-            identity_status: research.company_identity?.status || 'unverified',
-            product_match: research.product_match || 'unknown',
-            products: (research.products || []).slice(0, 20),
-            checked_urls: (operation.checked_urls || []).slice(0, 5),
-            facts: (research.facts || [])
-              .filter((fact) => ['company_name', 'products', 'entity_type'].includes(fact.field))
-              .slice(0, 15)
-              .map(({ field, value, quote, source_url }) => ({
-                field,
-                value,
-                quote,
-                source_url,
-              })),
-          }
-        : null;
+      if (!operation) return null;
+      const groupedFacts = new Map();
+      for (const { field, value, quote, source_url } of research.facts || []) {
+        if (!['company_name', 'products', 'entity_type'].includes(field)) continue;
+        const key = JSON.stringify([field, quote, source_url]);
+        const fact = groupedFacts.get(key) || { field, quote, source_url, values: [] };
+        const normalizedValue = String(value ?? '').trim();
+        if (normalizedValue && !fact.values.includes(normalizedValue)) {
+          fact.values.push(normalizedValue);
+        }
+        groupedFacts.set(key, fact);
+      }
+      return {
+        company_name: research.company_name || null,
+        identity_status: research.company_identity?.status || 'unverified',
+        product_match: research.product_match || 'unknown',
+        products: (research.products || []).slice(0, 20),
+        checked_urls: (operation.checked_urls || []).slice(0, 5),
+        facts: [...groupedFacts.values()]
+          .slice(0, 15)
+          .map(({ values, ...fact }) => ({ ...fact, value: values.join('、') })),
+      };
     },
     status: (id) => service().status(id),
     close: () => {

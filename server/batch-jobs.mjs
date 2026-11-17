@@ -59,6 +59,8 @@ export class BatchJobs {
     provider = 'native',
     scope = '',
     onOutreachChange = () => {},
+    recoveryIntervalMs = 15000,
+    isMaintaining = () => false,
   }) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
@@ -78,7 +80,9 @@ export class BatchJobs {
     this.provider = provider;
     this.scope = scope || provider;
     this.onOutreachChange = onOutreachChange;
+    this.isMaintaining = isMaintaining;
     this.busy = false;
+    this.closed = false;
     for (const job of this.list())
       if (['running', 'stopping'].includes(job.status)) {
         job.status = 'paused';
@@ -92,14 +96,9 @@ export class BatchJobs {
         this.save(job);
       }
     if (this.schedule && this.provider === 'native') {
-      this.recovering = true;
-      setImmediate(() =>
-        this.resumeInterrupted()
-          .catch(() => {})
-          .finally(() => {
-            this.recovering = false;
-          }),
-      );
+      this.recoveryTimer = setInterval(() => void this.recoverInterrupted(), recoveryIntervalMs);
+      this.recoveryTimer.unref();
+      void this.recoverInterrupted();
     }
   }
   save(job, { outreachControl = false } = {}) {
@@ -267,15 +266,29 @@ export class BatchJobs {
     return job;
   }
   kick(id) {
-    if (this.schedule)
-      setImmediate(() =>
+    if (this.schedule && !this.closed)
+      setImmediate(() => {
+        if (this.closed) return;
+        if (this.isMaintaining()) {
+          const j = this.get(id);
+          if (j.status === 'stopping') {
+            this.finish(j, 'stopped');
+          } else if (j.status === 'running') {
+            j.status = 'paused';
+            j.reason = j.current ? 'uncertain' : 'interrupted';
+            j.pending = j.current ? 1 : 0;
+            this.save(j);
+          }
+          return;
+        }
         this.work(id).catch(() => {
+          if (this.closed) return;
           const j = this.get(id);
           j.status = 'paused';
           j.reason = 'uncertain';
           this.save(j);
-        }),
-      );
+        });
+      });
   }
   finish(job, reason) {
     job.reason = reason;
@@ -336,8 +349,10 @@ export class BatchJobs {
     );
     return { newRecord: true, reason: 'new_business_record' };
   }
-  async resume(id) {
-    if (this.busy || this.resuming) throw fail(409, '当前企业仍在处理中');
+  async resume(id, { automatic = false } = {}) {
+    if (this.closed) throw fail(409, '服务已关闭');
+    if (this.busy || this.resuming || (this.recovering && !automatic))
+      throw fail(409, '当前企业仍在处理中');
     this.resuming = true;
     try {
       let job = this.get(id);
@@ -347,13 +362,20 @@ export class BatchJobs {
         throw fail(409, '该获客渠道已停用');
       if (job.provider !== this.provider)
         throw fail(409, '该任务由其他执行引擎创建，已停止支持，请核对历史结果');
+      if (automatic && this.isMaintaining()) return job;
       await this.reconcile(job);
+      if (automatic && (this.closed || this.isMaintaining())) return job;
       job = this.get(id);
       // Reconcile any prior write first, then forbid new work in retired markets.
       locationOptions(job.input.country, job.input.region);
       job.status = 'running';
       job.reason = '';
       this.save(job);
+      if (automatic && this.isMaintaining()) {
+        job.status = 'paused';
+        job.reason = 'interrupted';
+        return this.save(job);
+      }
       if (job.input.auto_first_touch) this.onOutreachChange();
       this.kick(id);
       return job;
@@ -361,42 +383,68 @@ export class BatchJobs {
       this.resuming = false;
     }
   }
+  recoverInterrupted() {
+    if (this.closed || this.recovering || this.isMaintaining()) return this.recoveryPromise;
+    this.recovering = true;
+    const recovery = this.resumeInterrupted()
+      .catch(() => {})
+      .finally(() => {
+        this.recovering = false;
+        if (this.recoveryPromise === recovery) this.recoveryPromise = undefined;
+      });
+    this.recoveryPromise = recovery;
+    return recovery;
+  }
   async resumeInterrupted() {
     const job = this.active();
     if (
+      this.closed ||
+      this.isMaintaining() ||
+      this.busy ||
+      this.resuming ||
       this.provider !== 'native' ||
       job?.status !== 'paused' ||
-      job.reason !== 'interrupted' ||
+      !['interrupted', 'uncertain'].includes(job.reason) ||
       job.provider !== this.provider ||
       job.scope !== this.scope
     )
       return;
     if (job.current) {
       const result = await this.remoteStatus(job.current.operation_id);
+      if (this.closed || this.isMaintaining()) return;
       const latest = this.get(job.id);
       if (
         latest.status !== 'paused' ||
-        latest.reason !== 'interrupted' ||
-        latest.current?.operation_id !== job.current.operation_id ||
-        !result?.settled ||
-        !result.output
+        latest.reason !== job.reason ||
+        latest.current?.operation_id !== job.current.operation_id
       )
         return;
-      if (
-        result.output.retryable_before_write === true &&
-        result.output.outcome === 'failed' &&
-        ['extract', 'research'].includes(result.output.stage) &&
-        (latest.current.interruptionRetries || 0) < 1 &&
-        latest.researched < latest.limits.research
-      ) {
-        latest.queue.unshift({
-          ...latest.current,
-          interruptionRetries: (latest.current.interruptionRetries || 0) + 1,
+      if (result?.missing === true) {
+        await this.accept(latest, {
+          stage: 'status',
+          outcome: 'failed',
+          reason: result.reason || '操作记录不存在，未重放当前企业',
         });
-        this.save(latest);
+      } else {
+        if (!result?.settled || !result.output) return;
+        if (
+          result.output.retryable_before_write === true &&
+          result.output.outcome === 'failed' &&
+          ['extract', 'research'].includes(result.output.stage) &&
+          (latest.current.interruptionRetries || 0) < 1 &&
+          latest.researched < latest.limits.research
+        ) {
+          latest.queue.unshift({
+            ...latest.current,
+            interruptionRetries: (latest.current.interruptionRetries || 0) + 1,
+          });
+          this.save(latest);
+        }
+        await this.accept(latest, result.output);
       }
     }
-    await this.resume(job.id);
+    if (this.closed || this.isMaintaining()) return;
+    await this.resume(job.id, { automatic: true });
   }
   stop(id) {
     const j = this.get(id);
@@ -739,6 +787,13 @@ export class BatchJobs {
     };
   }
   close() {
+    if (this.closed) return this.closePromise;
+    this.closed = true;
+    clearInterval(this.recoveryTimer);
+    if (this.recoveryPromise) {
+      this.closePromise = this.recoveryPromise.finally(() => this.db.close());
+      return this.closePromise;
+    }
     this.db.close();
   }
 }

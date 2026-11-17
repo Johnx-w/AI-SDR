@@ -1286,7 +1286,7 @@ export class NativeAcquisition {
   }
   async status(id) {
     const op = this.store.get(id);
-    if (!op) return { settled: false, reason: '操作记录不存在，未自动重放' };
+    if (!op) return { settled: false, missing: true, reason: '操作记录不存在，未自动重放' };
     if (op.state === 'completed') return { settled: true, output: op.output };
     if (this.active.has(id)) return { settled: false, reason: '仍在执行' };
     if (['persist', 'assessment'].includes(op.stage)) {

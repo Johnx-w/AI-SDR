@@ -114,7 +114,7 @@ test('待核实企业改正官网后走研究写入、刷新后保留结果且�
       statusCalls++;
       return outputs.has(id)
         ? { settled: true, output: outputs.get(id) }
-        : { settled: false, reason: '操作记录不存在，未自动重放' };
+        : { settled: false, missing: true, reason: '操作记录不存在，未自动重放' };
     },
     close() {},
   };
@@ -219,6 +219,7 @@ test('结果不明只能核对原操作，换编号不会重复写入', async ()
   manager.close();
   let calls = 0;
   let settled = false;
+  let missing = false;
   const app = createApp({
     env: settings,
     nativeImpl: {
@@ -227,6 +228,7 @@ test('结果不明只能核对原操作，换编号不会重复写入', async ()
         throw new Error('remote outcome unknown');
       },
       async status() {
+        if (missing) return { settled: false, missing: true, reason: 'provider operation missing' };
         return settled
           ? { settled: true, output: { outcome: 'review', reason: '仍缺少证据' } }
           : { settled: false, reason: '写入尚未确认' };
@@ -268,6 +270,13 @@ test('结果不明只能核对原操作，换编号不会重复写入', async ()
     assert.equal(calls, 1);
     assert.equal((await post('uncertain-two')).status, 409);
     assert.equal(calls, 2);
+    missing = true;
+    const failed = await post('uncertain-two');
+    assert.equal(failed.status, 200);
+    assert.equal((await failed.json()).resolution.status, 'failed');
+    assert.equal(calls, 2);
+    assert.equal((await post('uncertain-three')).status, 409);
+    assert.equal(calls, 3);
   } finally {
     await new Promise((resolve) => app.close(resolve));
     rmSync(folder, { recursive: true, force: true });

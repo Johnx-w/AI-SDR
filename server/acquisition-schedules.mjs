@@ -189,7 +189,9 @@ export class AcquisitionSchedules {
             : !this.ready()
               ? 'API 连接尚未配置'
               : !this.available() || manager.active()
-                ? '当前任务尚未完成或待核对'
+                ? manager.active()?.status === 'paused'
+                  ? '当前任务执行结果待确认'
+                  : '当前任务尚未完成'
                 : '';
           if (skipped) {
             plan.lastError = `${skipped}，已跳过本次执行，不补跑`;

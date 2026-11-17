@@ -37,7 +37,7 @@ const dateText = (value?: string | null) =>
 const jobStates: Record<string, string> = {
   running: '运行中',
   stopping: '正在停止',
-  paused: '待核对',
+  paused: '执行结果待确认',
   completed: '已完成',
   partial: '部分完成',
 };

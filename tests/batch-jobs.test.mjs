@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BatchJobs, validateCount } from '../server/batch-jobs.mjs';
+import { acquisitionOutreachSources } from '../server/acquisition-outreach.mjs';
 import { domainKey } from '../server/website-identity.mjs';
 import { searchPlan } from '../server/search-plan.mjs';
 const input = {
@@ -642,7 +643,7 @@ test('读阶段服务中断经核对后自动重试一次并继续下一候选',
     assert.equal(attempts[0].interruptionRetries, 1);
     assert.equal(recovered.queue.length, 0);
   } finally {
-    manager?.close();
+    await manager?.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -687,8 +688,368 @@ test('原生任务重启时自动恢复写入前中断，无需人工点继续',
     assert.equal(resumed.inserted, 1);
     assert.equal(resumed.rows.length, 2);
   } finally {
-    manager?.close();
+    await manager?.close();
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('运行时结果不明由后台按原操作编号自动核对并继续，无需人工点击', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'shade-batch-auto-reconcile-'));
+  const path = join(dir, 'jobs.sqlite');
+  let manager;
+  try {
+    manager = harness({ path, provider: 'native' }).manager;
+    const job = manager.create({ ...input, target_count: 1 }, 'auto-reconcile-uncertain');
+    const operationId = `${job.id}-1`;
+    job.status = 'paused';
+    job.reason = 'uncertain';
+    job.current = {
+      source_url: 'https://uncertain.example.com/',
+      domain: 'uncertain.example.com',
+      operation_id: operationId,
+    };
+    job.researched = 1;
+    job.queue = [{ source_url: 'https://next.example.com/', domain: 'next.example.com' }];
+    manager.save(job);
+    manager.close();
+    const statusIds = [];
+    const leads = [];
+    manager = harness({
+      path,
+      provider: 'native',
+      schedule: true,
+      recoveryIntervalMs: 5,
+      status: async (id) => {
+        statusIds.push(id);
+        return statusIds.length === 1
+          ? { settled: false, reason: '写入尚未确认，未自动重试' }
+          : {
+              settled: true,
+              output: { stage: 'select', outcome: 'failed', reason: '原操作已确认失败' },
+            };
+      },
+      research: async (_target, item) => {
+        leads.push({ id: 'next', name: 'Next', website: item.source_url });
+        return {
+          新增: 1,
+          明细: [{ source_url: item.source_url, result: 'inserted', record_id: 'next' }],
+        };
+      },
+      readLeads: async () => leads,
+    }).manager;
+    for (let i = 0; i < 100 && manager.get(job.id).status !== 'completed'; i++)
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    const resumed = manager.get(job.id);
+    assert.equal(resumed.status, 'completed');
+    assert.ok(statusIds.length >= 2);
+    assert.ok(statusIds.every((id) => id === operationId));
+    assert.deepEqual(
+      resumed.rows.map((row) => row.result),
+      ['failed', 'inserted'],
+    );
+  } finally {
+    await manager?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('操作记录缺失时不重放当前企业，记为失败并自动继续剩余队列', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'shade-batch-missing-operation-'));
+  const path = join(dir, 'jobs.sqlite');
+  let manager;
+  try {
+    manager = harness({ path, provider: 'native' }).manager;
+    const job = manager.create(
+      { ...input, target_count: 1, auto_first_touch: true, auto_follow_up: false },
+      'missing-operation-resume',
+    );
+    const operationId = `${job.id}-1`;
+    job.current = {
+      source_url: 'https://missing.example.com/',
+      domain: 'missing.example.com',
+      operation_id: operationId,
+    };
+    job.researched = 1;
+    job.queue = [{ source_url: 'https://next.example.com/', domain: 'next.example.com' }];
+    manager.save(job);
+    manager.close();
+    const researched = [];
+    const leads = [];
+    manager = harness({
+      path,
+      provider: 'native',
+      schedule: true,
+      recoveryIntervalMs: 5,
+      status: async (id) => ({
+        settled: false,
+        missing: id === operationId,
+        reason: '操作记录不存在，未自动重放',
+      }),
+      research: async (_target, item) => {
+        researched.push(item.source_url);
+        leads.push({ id: 'next', name: 'Next', website: item.source_url });
+        return {
+          新增: 1,
+          明细: [{ source_url: item.source_url, result: 'inserted', record_id: 'next' }],
+        };
+      },
+      readLeads: async () => leads,
+    }).manager;
+    for (let i = 0; i < 100 && manager.get(job.id).status !== 'completed'; i++)
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    const resumed = manager.get(job.id);
+    assert.equal(resumed.status, 'completed');
+    assert.deepEqual(researched, ['https://next.example.com/']);
+    assert.equal(resumed.failed, 1);
+    assert.equal(resumed.rows.filter((row) => row.operation_id === operationId).length, 1);
+    assert.equal(resumed.rows[0].operation_id, operationId);
+    assert.equal(resumed.rows[0].result, 'failed');
+    assert.match(resumed.rows[0].reason, /操作记录不存在|未重放/);
+    assert.deepEqual(acquisitionOutreachSources(manager, { list: () => [] })[0].customerIds, [
+      'next',
+    ]);
+  } finally {
+    await manager?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('真正写入未确认时后台只轮询原操作，保持暂停且不研究其他企业', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'shade-batch-write-unconfirmed-'));
+  const path = join(dir, 'jobs.sqlite');
+  let manager;
+  try {
+    manager = harness({ path, provider: 'native' }).manager;
+    const job = manager.create(
+      { ...input, target_count: 1, auto_first_touch: true, auto_follow_up: false },
+      'write-unconfirmed-poll',
+    );
+    const operationId = `${job.id}-1`;
+    job.status = 'paused';
+    job.reason = 'uncertain';
+    job.current = {
+      source_url: 'https://uncertain.example.com/',
+      domain: 'uncertain.example.com',
+      operation_id: operationId,
+    };
+    job.researched = 1;
+    job.queue = [{ source_url: 'https://next.example.com/', domain: 'next.example.com' }];
+    manager.save(job);
+    manager.close();
+    const statusIds = [];
+    let researchCalls = 0;
+    manager = harness({
+      path,
+      provider: 'native',
+      schedule: true,
+      recoveryIntervalMs: 5,
+      status: async (id) => {
+        statusIds.push(id);
+        return { settled: false, reason: '写入尚未确认，未自动重试' };
+      },
+      research: async () => {
+        researchCalls++;
+        assert.fail('写入未确认时不得研究下一企业');
+      },
+    }).manager;
+    for (let i = 0; i < 20 && statusIds.length < 2; i++)
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    const paused = manager.get(job.id);
+    assert.equal(paused.status, 'paused');
+    assert.equal(paused.current.operation_id, operationId);
+    assert.ok(statusIds.length >= 2);
+    assert.ok(statusIds.every((id) => id === operationId));
+    assert.equal(researchCalls, 0);
+    assert.deepEqual(acquisitionOutreachSources(manager, { list: () => [] })[0].customerIds, []);
+  } finally {
+    await manager?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('后台核对保持单飞，关闭时等待慢状态查询且不再改写任务', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'shade-batch-recovery-close-'));
+  const path = join(dir, 'jobs.sqlite');
+  let manager;
+  try {
+    manager = harness({ path, provider: 'native' }).manager;
+    const job = manager.create({ ...input, target_count: 1 }, 'recovery-close-safety');
+    const operationId = `${job.id}-1`;
+    job.status = 'paused';
+    job.reason = 'uncertain';
+    job.current = {
+      source_url: 'https://uncertain.example.com/',
+      domain: 'uncertain.example.com',
+      operation_id: operationId,
+    };
+    job.researched = 1;
+    manager.save(job);
+    manager.close();
+
+    let active = 0;
+    let calls = 0;
+    let maximumActive = 0;
+    let releaseStatus;
+    manager = harness({
+      path,
+      provider: 'native',
+      schedule: true,
+      recoveryIntervalMs: 5,
+      status: async (id) => {
+        calls++;
+        active++;
+        maximumActive = Math.max(maximumActive, active);
+        const result = await new Promise((resolve) => {
+          releaseStatus = resolve;
+        });
+        active--;
+        assert.equal(id, operationId);
+        return result;
+      },
+    }).manager;
+
+    for (let i = 0; i < 50 && calls < 1; i++)
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(calls, 1);
+    assert.equal(maximumActive, 1);
+
+    releaseStatus({ settled: false, reason: '写入尚未确认，未自动重试' });
+    for (let i = 0; i < 50 && calls < 2; i++)
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    assert.equal(calls, 2);
+    const closing = manager.close();
+    releaseStatus({ settled: false, missing: true, reason: '操作记录不存在，未自动重放' });
+    await closing;
+    manager = harness({ path, provider: 'native' }).manager;
+    const unchanged = manager.get(job.id);
+    assert.equal(unchanged.status, 'paused');
+    assert.equal(unchanged.current.operation_id, operationId);
+    assert.equal(unchanged.failed, 0);
+    assert.deepEqual(unchanged.rows, []);
+  } finally {
+    await manager?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('发布维护期间不发起核对，维护在查询中开启也不恢复任务', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'shade-batch-recovery-maintenance-'));
+  const path = join(dir, 'jobs.sqlite');
+  let manager;
+  try {
+    manager = harness({ path, provider: 'native' }).manager;
+    const job = manager.create({ ...input, target_count: 1 }, 'recovery-maintenance-safety');
+    const operationId = `${job.id}-1`;
+    job.status = 'paused';
+    job.reason = 'uncertain';
+    job.current = {
+      source_url: 'https://uncertain.example.com/',
+      domain: 'uncertain.example.com',
+      operation_id: operationId,
+    };
+    job.researched = 1;
+    job.queue = [{ source_url: 'https://next.example.com/', domain: 'next.example.com' }];
+    manager.save(job);
+    manager.close();
+
+    let maintaining = false;
+    let calls = 0;
+    let releaseFirst;
+    const leads = [];
+    manager = harness({
+      path,
+      provider: 'native',
+      schedule: true,
+      recoveryIntervalMs: 5,
+      isMaintaining: () => maintaining,
+      status: async (id) => {
+        calls++;
+        assert.equal(id, operationId);
+        if (calls === 1) await new Promise((resolve) => (releaseFirst = resolve));
+        return {
+          settled: true,
+          output: { stage: 'select', outcome: 'failed', reason: '原操作已确认失败' },
+        };
+      },
+      research: async (_target, item) => {
+        leads.push({ id: 'next', name: 'Next', website: item.source_url });
+        return {
+          新增: 1,
+          明细: [{ source_url: item.source_url, result: 'inserted', record_id: 'next' }],
+        };
+      },
+      readLeads: async () => leads,
+    }).manager;
+
+    for (let i = 0; i < 50 && calls < 1; i++)
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    assert.equal(calls, 1);
+    maintaining = true;
+    releaseFirst();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const paused = manager.get(job.id);
+    assert.equal(calls, 1);
+    assert.equal(paused.status, 'paused');
+    assert.equal(paused.current.operation_id, operationId);
+    assert.deepEqual(paused.rows, []);
+
+    maintaining = false;
+    for (let i = 0; i < 100 && manager.get(job.id).status !== 'completed'; i++)
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.equal(manager.get(job.id).status, 'completed');
+    assert.ok(calls >= 2);
+  } finally {
+    await manager?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('kick 前进入维护会暂停新研究，用户已停止的任务不会在维护后复活', async () => {
+  const leads = [];
+  let maintaining = true;
+  let researchCalls = 0;
+  const { manager } = harness({
+    schedule: true,
+    recoveryIntervalMs: 5,
+    isMaintaining: () => maintaining,
+    research: async (_target, item) => {
+      researchCalls++;
+      const id = `rec-${researchCalls}`;
+      leads.push({ id, name: item.domain, website: item.source_url });
+      return {
+        新增: 1,
+        明细: [{ source_url: item.source_url, result: 'inserted', record_id: id }],
+      };
+    },
+    readLeads: async () => leads,
+  });
+  try {
+    const paused = manager.create({ ...input, target_count: 1 }, 'maintenance-before-kick');
+    for (let i = 0; i < 50 && manager.get(paused.id).status === 'running'; i++)
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    assert.equal(manager.get(paused.id).status, 'paused');
+    assert.equal(researchCalls, 0);
+
+    maintaining = false;
+    for (let i = 0; i < 100 && manager.get(paused.id).status !== 'completed'; i++)
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.equal(manager.get(paused.id).status, 'completed');
+    assert.equal(researchCalls, 1);
+
+    maintaining = true;
+    const stopping = manager.create({ ...input, target_count: 1 }, 'maintenance-after-stop');
+    manager.stop(stopping.id);
+    for (let i = 0; i < 50 && manager.get(stopping.id).status === 'stopping'; i++)
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    maintaining = false;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const stopped = manager.get(stopping.id);
+    assert.equal(stopped.status, 'partial');
+    assert.equal(stopped.reason, 'stopped');
+    assert.equal(researchCalls, 1);
+  } finally {
+    await manager.close();
   }
 });
 
@@ -736,7 +1097,7 @@ test('已结算的 select 阶段操作自动对账并继续队列', async () => 
     );
     assert.equal(resumed.researched, 2);
   } finally {
-    manager?.close();
+    await manager?.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });

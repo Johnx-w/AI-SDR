@@ -199,3 +199,73 @@ test('第三方平台过滤结果可展开查看域名、搜索词和原因，�
   ]);
   assert.doesNotMatch(old, /第三方平台已过滤/);
 });
+
+test('执行详情归组同来源表单，并区分任务暂停与独立补录', () => {
+  const html = renderToStaticMarkup(
+    createElement(
+      MemoryRouter,
+      null,
+      createElement(BatchProgress, {
+        job: {
+          ...job,
+          status: 'paused',
+          rows: [
+            {
+              domain: 'buyer.example',
+              result: 'inserted',
+              handoff: {
+                ready: true,
+                reasons: [],
+                contact_verified: true,
+                contacts: [
+                  {
+                    kind: 'form',
+                    value: 'sales',
+                    source_url: 'https://buyer.example/contact',
+                    quote: 'Sales enquiry',
+                  },
+                  {
+                    kind: 'form',
+                    value: 'trade',
+                    source_url: 'https://buyer.example/contact',
+                    quote: 'Trade enquiry',
+                  },
+                  {
+                    kind: 'form',
+                    value: 'quote',
+                    source_url: 'https://buyer.example/request-quote',
+                    quote: 'Request a quote',
+                  },
+                  {
+                    kind: 'form',
+                    value: 'unsafe',
+                    source_url: 'javascript:alert(1)',
+                    quote: 'Unsafe form',
+                  },
+                ],
+              },
+            },
+            {
+              domain: 'directory.example',
+              source_url: 'https://directory.example/listing',
+              result: 'review',
+            },
+          ],
+        },
+        control: () => {},
+        busy: false,
+      }),
+    ),
+  );
+
+  assert.match(html, /已暂停 · 执行结果待确认/);
+  assert.match(html, /确认执行结果并继续/);
+  assert.match(html, /业务联系表单（2 个）/);
+  assert.equal((html.match(/https:\/\/buyer\.example\/contact/g) || []).length, 1);
+  assert.match(html, /https:\/\/buyer\.example\/request-quote/);
+  assert.doesNotMatch(html, /javascript:|Unsafe form/);
+  assert.match(html, /企业独立官网（请人工核对或更正）/);
+  assert.match(html, /第三方平台或目录页请替换为企业独立官网/);
+  assert.match(html, /本操作独立补录，不改变原任务统计/);
+  assert.match(html, /按此官网重新核实并尝试入库/);
+});

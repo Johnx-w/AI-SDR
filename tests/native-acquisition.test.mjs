@@ -1006,6 +1006,18 @@ test('重启核对仅把未写入的抓取中断标为可重试', async () => {
   }
 });
 
+test('不存在的操作返回结构化缺失状态，不依赖中文原因判断', async () => {
+  const f = fixture(),
+    svc = f.make();
+  try {
+    const missing = await svc.status('missing-operation-status');
+    assert.equal(missing.settled, false);
+    assert.equal(missing.missing, true);
+  } finally {
+    svc.close();
+  }
+});
+
 test('读回字段不一致不宣称成功；跨域跳转与缺少正文不调用模型', async () => {
   const f = fixture({ corruptReadback: true }),
     svc = f.make();

@@ -549,7 +549,7 @@ export function Automation() {
       </button>
       {active && (
         <Link className="acq-active-link" to={'/automation?tab=runs&job=' + active.id}>
-          已有任务{active.status === 'paused' ? '待核对' : '进行中'} · 查看进度{' '}
+          已有任务{active.status === 'paused' ? '执行结果待确认' : '进行中'} · 查看进度{' '}
           <ArrowRight size={14} />
         </Link>
       )}
