@@ -30,6 +30,7 @@ function setup(
     tab = 'campaigns',
     detailResponse,
     deliveryResponse,
+    recordsResponse,
     extraDeliveries = [],
   } = {},
 ) {
@@ -143,14 +144,16 @@ function setup(
             if (mailbox instanceof Error) throw mailbox;
             return structuredClone(mailbox);
           }
-          if (path.startsWith('/deliveries?'))
-            return {
+          if (path.startsWith('/deliveries?')) {
+            const data = {
               items: structuredClone(deliveries),
               total: 1,
               page: 1,
               pageSize: 20,
               totalPages: 1,
             };
+            return recordsResponse ? recordsResponse(path, data) : data;
+          }
           if (path === '/campaigns/campaign-one' || path === '/campaigns/campaign-one?summary=1') {
             const result = structuredClone({ campaign, deliveries });
             if (path.endsWith('?summary=1'))
@@ -567,7 +570,7 @@ test('计划表格默认只列当前正式计划，搜索筛选先于分页且�
   assert.deepEqual(h.writes(), []);
 });
 
-test('发送记录提供四类筛选且分页置底，未知结果详情保留核对说明', async () => {
+test('发送记录只按状态筛选且分页置底，未知结果详情保留核对说明', async () => {
   const h = setup('active', { tab: 'deliveries', deliveryStatus: 'unknown' });
   await h.ready();
   h.render();
@@ -577,9 +580,10 @@ test('发送记录提供四类筛选且分页置底，未知结果详情保留�
     allElements(filter)
       .filter((node) => node.type === 'option')
       .map(textContent),
-    ['全部', '已发送', '发送失败', '有回复'],
+    ['全部', '已发送', '发送失败', '有回复', '已跳过'],
   );
   const elements = h.elements();
+  assert.ok(!elements.some((node) => node.props['aria-label'] === '按计划筛选'));
   assert.ok(
     elements.findIndex((node) => node.type === 'table') <
       elements.findIndex((node) => node.props['aria-label'] === '发送记录分页'),
@@ -592,11 +596,37 @@ test('发送记录提供四类筛选且分页置底，未知结果详情保留�
   h.render();
   await flush();
   assert.ok(h.requests.some(({ path }) => path.includes('group=replied')));
+  assert.ok(h.requests.every(({ path }) => !path.includes('campaignId=')));
   h.elements()
     .find((node) => node.props['aria-label'] === '查看 Buyer company 的首发记录')
     .props.onClick();
   assert.match(h.html(), /结果待核实；请先核对原邮箱，系统不会自动重发/);
   assert.deepEqual(h.writes(), []);
+});
+
+test('后台状态刷新不会取消发送记录筛选的慢请求', async () => {
+  let finish;
+  const h = setup('active', {
+    tab: 'deliveries',
+    recordsResponse: (path, data) =>
+      path.includes('group=sent')
+        ? new Promise((resolve) => {
+            finish = () => resolve(data);
+          })
+        : data,
+  });
+  await h.ready();
+  h.change('按发送状态筛选', 'sent');
+  h.render();
+  const request = h.requests.find(({ path }) => path.includes('group=sent'));
+  h.tick(10000);
+  await flush();
+  h.render();
+  assert.equal(request.init.signal.aborted, false);
+  assert.equal(h.requests.filter(({ path }) => path.includes('group=sent')).length, 1);
+  finish();
+  await flush();
+  assert.match(h.html(), /Buyer company/);
 });
 
 test('已跳过详情只显示客户、计划、原因与时间，不显示空邮件或人工处理按钮', async () => {

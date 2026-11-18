@@ -14,6 +14,22 @@ const ok = (data) => Response.json({ code: 0, data });
 const time = (offset = 0) => new Date(Date.now() + offset).toISOString();
 const beforeTime = time(-60000);
 
+test('业务首页冷启动只读数据库，独立结构检查才连接飞书', async (t) => {
+  const folder = mkdtempSync(join(tmpdir(), 'business-local-read-'));
+  const remote = remoteFixture();
+  const server = await serve(folder, remote);
+  t.after(async () => {
+    await server.close();
+    rmSync(folder, { recursive: true, force: true });
+  });
+  const workspace = await server.call();
+  assert.equal(workspace.status, 200);
+  assert.deepEqual(workspace.body.customers, []);
+  assert.deepEqual(remote.calls, []);
+  assert.equal((await server.call('/api/v1/business/schema')).body.feishu.configured, true);
+  assert.ok(remote.calls.length > 0);
+});
+
 function remoteFixture() {
   const tables = [
     { table_id: 't2', name: 'T2 客户主表' },

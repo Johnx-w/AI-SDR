@@ -225,7 +225,7 @@ export class CustomerBusinessApi {
     return operation;
   }
   async workspace(url) {
-    const { store, mirror } = this.state();
+    const { store, mirror, env, tasksOnly } = this.state();
     const data = store.view({
       customerId: url.searchParams.get('customerId') || undefined,
       productId: url.searchParams.get('productId') || undefined,
@@ -250,13 +250,12 @@ export class CustomerBusinessApi {
       .prepare('SELECT hash,error FROM customer_business_sync WHERE scope=?')
       .get(store.scope);
     const products = this.knowledge().list();
-    const pending = sync?.hash !== mirrorHash(store.view(), products, this.state().env);
-    const feishu = await mirror.info();
+    const pending = sync?.hash !== mirrorHash(store.view(), products, env) || Boolean(sync?.error);
     return {
       schemaVersion: CUSTOMER_BUSINESS_VERSION,
       ...data,
       tasks: data.tasks.filter((task) => task.origin === 'automatic-followup'),
-      ...(this.state().tasksOnly
+      ...(tasksOnly
         ? {
             tasks: data.tasks
               .filter((task) => task.origin === 'automatic-followup')
@@ -275,10 +274,11 @@ export class CustomerBusinessApi {
       customers,
       products,
       customerError,
-      feishu:
-        pending || sync?.error
-          ? { ...feishu, status: 'pending', error: sync?.error || '' }
-          : feishu,
+      feishu: {
+        configured: mirror.configured,
+        status: !mirror.configured ? 'not_configured' : pending ? 'pending' : 'synced',
+        error: sync?.error || '',
+      },
     };
   }
   async handle(request, url, readJson) {

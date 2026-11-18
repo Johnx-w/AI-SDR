@@ -1044,7 +1044,7 @@ export function OutreachCommunication() {
   const [suppressionReason, setSuppressionReason] = useState('人工标记不再联系');
   const [query, setQuery] = useState('');
   const [recordStatus, setRecordStatus] = useState('all');
-  const [recordCampaign, setRecordCampaign] = useState('all');
+  const [recordRefresh, setRecordRefresh] = useState(0);
   const [recordPage, setRecordPage] = useState(1);
   const [recordPageSize, setRecordPageSize] = useState(20);
   const [recordResult, setRecordResult] = useState<{
@@ -1067,7 +1067,6 @@ export function OutreachCommunication() {
   const recordKey = new URLSearchParams({
     page: String(recordPage),
     pageSize: String(recordPageSize),
-    campaignId: recordCampaign,
     group: recordStatus,
     q: query.trim(),
   }).toString();
@@ -1100,27 +1099,34 @@ export function OutreachCommunication() {
 
   useEffect(() => {
     if (tab !== 'deliveries') return;
-    let active = true;
     const controller = new AbortController();
-    setRecordsLoading(true);
-    setRecordError(null);
-    void outreachApi<OutreachDeliveryPage>(`/deliveries?${recordKey}`, {
-      signal: controller.signal,
-    })
-      .then((data) => {
-        if (active) setRecordResult({ key: recordKey, data });
-      })
-      .catch((reason: unknown) => {
-        if (active) setRecordError(message(reason));
-      })
-      .finally(() => {
-        if (active) setRecordsLoading(false);
-      });
+    let pending = false;
+    const loadRecords = async () => {
+      if (pending) return;
+      pending = true;
+      setRecordsLoading(true);
+      setRecordError(null);
+      try {
+        const data = await outreachApi<OutreachDeliveryPage>(`/deliveries?${recordKey}`, {
+          signal: controller.signal,
+        });
+        if (!controller.signal.aborted) setRecordResult({ key: recordKey, data });
+      } catch (reason: unknown) {
+        if (!controller.signal.aborted) setRecordError(message(reason));
+      } finally {
+        pending = false;
+        if (!controller.signal.aborted) setRecordsLoading(false);
+      }
+    };
+    void loadRecords();
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void loadRecords();
+    }, 10000);
     return () => {
-      active = false;
+      window.clearInterval(timer);
       controller.abort();
     };
-  }, [tab, recordKey, state]);
+  }, [tab, recordKey, recordRefresh]);
 
   const refresh = useCallback(async () => {
     const current = ++request.current;
@@ -1349,6 +1355,7 @@ export function OutreachCommunication() {
       setDeliveryFull(result);
       if (sampleBody?.delivery?.id === result.id)
         setSampleBody({ key: sampleBody.key, delivery: result });
+      setRecordRefresh((current) => current + 1);
       if (detailId) await refreshDetail(detailId);
       await refresh();
       setNotice(
@@ -1378,6 +1385,7 @@ export function OutreachCommunication() {
             setError(null);
             setLoading(true);
             setSignatureRefresh((current) => current + 1);
+            setRecordRefresh((current) => current + 1);
             void refresh()
               .catch((reason: unknown) => setError(message(reason)))
               .finally(() => setLoading(false));
@@ -1967,21 +1975,6 @@ export function OutreachCommunication() {
                       />
                     </label>
                     <select
-                      aria-label="按计划筛选"
-                      value={recordCampaign}
-                      onChange={(event) => {
-                        setRecordCampaign(event.target.value);
-                        setRecordPage(1);
-                      }}
-                    >
-                      <option value="all">全部计划</option>
-                      {campaigns.map((campaign) => (
-                        <option key={campaign.id} value={campaign.id}>
-                          {campaign.name}
-                        </option>
-                      ))}
-                    </select>
-                    <select
                       aria-label="按发送状态筛选"
                       value={recordStatus}
                       onChange={(event) => {
@@ -1993,6 +1986,7 @@ export function OutreachCommunication() {
                       <option value="sent">已发送</option>
                       <option value="failed">发送失败</option>
                       <option value="replied">有回复</option>
+                      <option value="skipped">已跳过</option>
                     </select>
                   </div>
                   <InlineError value={recordError} />
@@ -2074,13 +2068,13 @@ export function OutreachCommunication() {
                   ) : (
                     <Empty
                       title={
-                        query.trim() || recordStatus !== 'all' || recordCampaign !== 'all'
+                        query.trim() || recordStatus !== 'all'
                           ? '没有符合筛选条件的记录'
                           : '暂无发送记录'
                       }
                       detail={
-                        query.trim() || recordStatus !== 'all' || recordCampaign !== 'all'
-                          ? '请调整搜索词、计划或发送状态。'
+                        query.trim() || recordStatus !== 'all'
+                          ? '请调整搜索词或发送状态。'
                           : '准备计划样稿或进行公司邮箱试发后，邮件会显示在这里。'
                       }
                     />

@@ -227,10 +227,7 @@ export function createApp({
     getEnv: () => connections.environment(),
     fetchImpl,
     knowledge,
-    loadCustomers: async () => {
-      if (!library().meta) await library().refresh();
-      return (await loadLeads()).leads;
-    },
+    loadCustomers: () => library().snapshot(true).leads,
     customerRecord: (id) => provider.customerRecord?.(id),
     customerRemoteId: (id) => (provider.customerRemoteId ? provider.customerRemoteId(id) : id),
     syncCustomers: () => provider.syncCustomers?.(),
@@ -273,7 +270,7 @@ export function createApp({
         env: current,
         jobs: acquisitionJobs(jobs().db, acquisitionScope()),
         mailboxes: service.mailboxes.list(),
-        deliveries: service.deliveries(),
+        deliveries: service.deliveries(undefined, ['accepted']),
       }).catch((error) => console.error('T7/T8/T10 飞书同步失败：' + error.message)),
       (async () => {
         await provider.syncCustomers?.();

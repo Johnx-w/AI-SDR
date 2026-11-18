@@ -11,7 +11,7 @@ test('全部发送记录和入口总数包含已取消及已跳过', async (t) =
   for (const status of ['accepted', 'unknown', 'failed', 'cancelled', 'skipped'])
     service.putDelivery({ id: status, campaignId: 'cancelled-plan', status, companyName: 'Buyer' });
   assert.equal(service.listDeliveries().total, 5);
-  assert.equal(service.listDeliveries({ campaignId: 'cancelled-plan', q: 'Buyer' }).total, 5);
+  assert.equal(service.listDeliveries({ q: 'Buyer' }).total, 5);
   assert.equal((await service.state()).deliveryStats.total, 5);
   assert.deepEqual(
     service.listDeliveries({ group: 'cancelled' }).items.map((row) => row.id),
@@ -75,7 +75,6 @@ test('六类发送状态先跨记录筛选再分页，已核实未发出不再�
     assert.ok(result.items.every((delivery) => deliveryGroup(delivery) === group));
   }
   assert.equal(service.listDeliveries({ group: 'attention', status: 'unknown' }).total, 12);
-  assert.equal(service.listDeliveries({ group: 'attention', campaignId: 'missing' }).total, 0);
   assert.equal(service.listDeliveries({ group: 'pending', q: 'Submitting' }).total, 12);
   assert.throws(() => service.listDeliveries({ group: 'invalid' }), { status: 400 });
 });
@@ -92,6 +91,7 @@ test('发送失败按原状态筛选，有回复按已同步的入站邮件筛�
     { id: 'confirmed-failed', status: 'failed', resolution: { outcome: 'failed' } },
     { id: 'replied', status: 'accepted', messageId: '<replied@example.org>' },
     { id: 'unanswered', status: 'accepted', messageId: '<unanswered@example.org>' },
+    { id: 'new-thread', status: 'accepted', messageId: '<new-thread@example.org>' },
   ])
     service.putDelivery({
       campaignId: 'one',
@@ -106,7 +106,7 @@ test('发送失败按原状态筛选，有回复按已同步的入站邮件筛�
       ...delivery,
     });
   service.conversations.importDeliveries();
-  service.conversations.putMessage(mailbox, {
+  const inbound = {
     identity: 'buyer-reply',
     messageId: '<buyer-reply@example.org>',
     inReplyTo: '<replied@example.org>',
@@ -119,6 +119,32 @@ test('发送失败按原状态筛选，有回复按已同步的入站邮件筛�
     occurredAt: '2026-11-18T02:00:00.000Z',
     source: 'imap',
     deliveryStatus: 'received',
+  };
+  service.conversations.putMessage(mailbox, inbound);
+  service.conversations.putMessage(mailbox, {
+    ...inbound,
+    messageId: '<separate-message@example.org>',
+    inReplyTo: undefined,
+    references: [],
+    from: 'new-thread@buyer.example',
+  });
+  service.conversations.putMessage(
+    { id: mailbox.id, email: 'other@example.org' },
+    {
+      ...inbound,
+      inReplyTo: '<unanswered@example.org>',
+      references: [],
+      from: 'unanswered@buyer.example',
+      to: 'other@example.org',
+    },
+  );
+  service.conversations.putMessage(mailbox, {
+    ...inbound,
+    messageId: '<old-message@example.org>',
+    inReplyTo: undefined,
+    references: [],
+    from: 'unanswered@buyer.example',
+    occurredAt: '2026-11-17T02:00:00.000Z',
   });
   assert.deepEqual(
     service
@@ -129,14 +155,14 @@ test('发送失败按原状态筛选，有回复按已同步的入站邮件筛�
   );
   assert.deepEqual(
     service.listDeliveries({ group: 'replied' }).items.map(({ id }) => id),
-    ['replied'],
+    ['new-thread', 'replied'],
   );
   const result = await handleOutreach({
     request: { method: 'GET' },
     url: new URL('http://localhost/api/v1/outreach/deliveries?group=replied'),
     service,
   });
-  assert.equal(result.total, 1);
+  assert.equal(result.total, 2);
 });
 
 test('发送记录分页能访问超过最近500条的历史，先筛选再分页并限制无效页码', async (t) => {
@@ -170,7 +196,7 @@ test('发送记录分页能访问超过最近500条的历史，先筛选再分�
   const second = await get('page=2');
   assert.equal(second.items[0].id, 'd-502');
   assert.equal(new Set([...first.items, ...second.items].map((d) => d.id)).size, 40);
-  const filtered = await get('campaignId=one&status=accepted&q=BUYER-1&pageSize=10&page=2');
+  const filtered = await get('status=accepted&q=BUYER-1&pageSize=10&page=2');
   assert.equal(filtered.total, 56);
   assert.equal(filtered.items.length, 10);
   assert.ok(filtered.items.every((d) => d.campaignId === 'one' && d.to.includes('buyer-1')));

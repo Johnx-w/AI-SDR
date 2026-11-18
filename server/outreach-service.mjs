@@ -153,13 +153,13 @@ export class OutreachService {
     this.running = null;
     this.timer = null;
     this.closed = false;
-    for (const d of this.deliveries().filter((d) => d.status === 'sending'))
+    for (const d of this.deliveries(undefined, ['sending']))
       this.putDelivery({
         ...d,
         status: 'unknown',
         reason: '发送时服务中断，请核对原邮箱；系统不会自动重发',
       });
-    for (const d of this.deliveries().filter((d) => d.status === 'draft' && !d.subject)) {
+    for (const d of this.deliveries(undefined, ['draft']).filter((d) => !d.subject)) {
       this.putDelivery({ ...d, status: 'cancelled', reason: '草稿生成中断，可重新准备' });
       this.release(d.id);
     }
@@ -215,50 +215,33 @@ export class OutreachService {
       .all(...params)
       .map((r) => JSON.parse(r.data));
   }
-  listDeliveries({
-    page = 1,
-    pageSize = 20,
-    campaignId = 'all',
-    status = 'all',
-    group = 'all',
-    q = '',
-  } = {}) {
+  listDeliveries({ page = 1, pageSize = 20, status = 'all', group = 'all', q = '' } = {}) {
     const size = [10, 20, 50, 100].includes(Number(pageSize)) ? Number(pageSize) : 20;
     const requestedPage = Number.isSafeInteger(Number(page)) && Number(page) > 0 ? Number(page) : 1;
     const where = [],
       params = [];
-    if (campaignId !== 'all') {
-      where.push('campaign_id = ?');
-      params.push(campaignId);
-    }
     if (status !== 'all') {
       where.push('state = ?');
       params.push(status);
     }
     if (group !== 'all') {
-      if (group === 'failed') where.push("state = 'failed'");
-      else if (group === 'replied')
+      if (['sent', 'failed', 'skipped'].includes(group)) {
+        where.push('state = ?');
+        params.push(group === 'sent' ? 'accepted' : group);
+      } else if (group === 'replied')
         where.push(`state = 'accepted' AND EXISTS (
-          SELECT 1 FROM mailbox_thread_messages AS message
-          JOIN mailbox_threads AS thread ON thread.id = message.thread_id
-          WHERE json_extract(message.data, '$.direction') = 'inbound'
-            AND json_extract(message.data, '$.occurredAt') >= json_extract(outreach_deliveries.data, '$.sentAt')
+          SELECT 1 FROM incoming
+          WHERE incoming.received_at >= julianday(json_extract(outreach_deliveries.data, '$.sentAt'))
+            AND incoming.mailbox_id = json_extract(outreach_deliveries.data, '$.mailboxId')
+            AND incoming.account = lower(json_extract(outreach_deliveries.data, '$.from'))
             AND (
-              EXISTS (
+              incoming.sender = lower(json_extract(outreach_deliveries.data, '$.to'))
+              OR (incoming.customer_id != '' AND incoming.customer_id = json_extract(outreach_deliveries.data, '$.customerId'))
+              OR EXISTS (
                 SELECT 1 FROM mailbox_thread_links AS link
-                WHERE link.account_key = message.account_key
-                  AND link.thread_id = message.thread_id
+                WHERE link.account_key = incoming.account_key
+                  AND link.thread_id = incoming.thread_id
                   AND link.external_id = json_extract(outreach_deliveries.data, '$.messageId')
-              )
-              OR (
-                json_extract(thread.data, '$.mailboxId') = json_extract(outreach_deliveries.data, '$.mailboxId')
-                AND (
-                  outreach_lower(json_extract(message.data, '$.from')) = outreach_lower(json_extract(outreach_deliveries.data, '$.to'))
-                  OR (
-                    coalesce(json_extract(outreach_deliveries.data, '$.customerId'), '') != ''
-                    AND json_extract(thread.data, '$.customerId') = json_extract(outreach_deliveries.data, '$.customerId')
-                  )
-                )
               )
             )
         )`);
@@ -279,14 +262,29 @@ export class OutreachService {
       params.push(query.toLowerCase());
     }
     const clause = where.length ? ` WHERE ${where.join(' AND ')}` : '';
+    // Project the small fields once rather than reopen each full message for every delivery.
+    const source =
+      group === 'replied'
+        ? `WITH incoming AS MATERIALIZED (
+            SELECT message.thread_id, message.account_key,
+              json_extract(thread.data, '$.mailboxId') AS mailbox_id,
+              lower(json_extract(thread.data, '$.account')) AS account,
+              json_extract(thread.data, '$.customerId') AS customer_id,
+              lower(json_extract(message.data, '$.from')) AS sender,
+              julianday(json_extract(message.data, '$.occurredAt')) AS received_at
+            FROM mailbox_thread_messages AS message
+            JOIN mailbox_threads AS thread ON thread.id = message.thread_id
+            WHERE json_extract(message.data, '$.direction') = 'inbound'
+          ) `
+        : '';
     const total = this.db
-      .prepare(`SELECT count(*) AS total FROM outreach_deliveries${clause}`)
+      .prepare(`${source}SELECT count(*) AS total FROM outreach_deliveries${clause}`)
       .get(...params).total;
     const totalPages = Math.max(1, Math.ceil(total / size));
     const currentPage = Math.min(requestedPage, totalPages);
     const items = this.db
       .prepare(
-        `SELECT json_remove(data, '$.candidate') AS data FROM outreach_deliveries${clause} ORDER BY rowid DESC LIMIT ? OFFSET ?`,
+        `${source}SELECT json_remove(data, '$.candidate') AS data FROM outreach_deliveries${clause} ORDER BY rowid DESC LIMIT ? OFFSET ?`,
       )
       .all(...params, size, (currentPage - 1) * size)
       .map((row) => JSON.parse(row.data));
@@ -332,7 +330,7 @@ export class OutreachService {
     };
     for (const row of this.db
       .prepare(
-        "SELECT state, json_extract(data, '$.resolution.outcome') AS outcome, count(*) AS count FROM outreach_deliveries WHERE campaign_id=? GROUP BY state,outcome",
+        "SELECT state, CASE WHEN state='failed' THEN json_extract(data, '$.resolution.outcome') END AS outcome, count(*) AS count FROM outreach_deliveries WHERE campaign_id=? GROUP BY state,outcome",
       )
       .all(c.id)) {
       if (row.state in stats) stats[row.state] += row.count;
@@ -379,7 +377,7 @@ export class OutreachService {
     };
     for (const row of this.db
       .prepare(
-        "SELECT state, json_extract(data, '$.resolution.outcome') AS outcome, count(*) AS count FROM outreach_deliveries GROUP BY state,outcome",
+        "SELECT state, CASE WHEN state='failed' THEN json_extract(data, '$.resolution.outcome') END AS outcome, count(*) AS count FROM outreach_deliveries GROUP BY state,outcome",
       )
       .all()) {
       deliveryStats.total += row.count;
