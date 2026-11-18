@@ -197,8 +197,14 @@ function translatedProduct(value) {
   const text = value.trim().replace(/\s*(?:产品线|product line)$/i, '');
   return productTranslations.find(([pattern]) => pattern.test(text))?.[1] || text;
 }
-function summary(field, value, category) {
-  const text = originalValue(value).trim();
+function summary(field, value, quote, category) {
+  const text = (
+    value && typeof value === 'object'
+      ? Object.values(value)
+          .filter((part) => typeof part === 'string' || typeof part === 'number')
+          .join('、')
+      : originalValue(value)
+  ).trim();
   const key = normalize(text);
   const enumValues = own(enums, field);
   if (Array.isArray(value) && enumValues) {
@@ -210,8 +216,8 @@ function summary(field, value, category) {
   }
   const translatedEnum = enumValues && own(enumValues, key);
   if (translatedEnum) return brief(category + '：' + translatedEnum);
-  if (field === 'company_name' || field === 'legal_company_name' || field === 'trading_names')
-    return text ? brief(category + '：' + text) : category + '资料待核对';
+  if (text && ['company_name', 'legal_company_name', 'trading_names'].includes(field))
+    return brief(category + '：' + text);
   if (field === 'company_years' && /^\d+(?:\.\d+)?$/.test(text))
     return brief(`官网自述持续经营 ${text} 年`);
   if (field === 'company_since' && /^\d{4}(?:-\d{2}-\d{2})?$/.test(text))
@@ -226,14 +232,15 @@ function summary(field, value, category) {
   }
   if (field === 'service_areas' && own(areaTranslations, key))
     return brief(category + '：' + own(areaTranslations, key));
-  if (chinese.test(text)) {
-    const first =
-      text
-        .split(/\r?\n/)
-        .find((line) => line.trim() && !/^(?:原文|来源|依据)[:：]/.test(line.trim())) || text;
-    return brief(first.startsWith(category) ? first : category + '：' + first);
+  const factText = !enumValues && !/^(?:true|false|unknown|n\/a)$/i.test(text) ? text : '';
+  for (const candidate of [factText, quote]) {
+    const excerpt = candidate
+      .split(/\r?\n/)
+      .map((line) => line.trim().replace(/^原文[:：]\s*/, ''))
+      .find((line) => line && !/^(?:来源|依据)[:：]|^https?:\/\/\S+$/i.test(line));
+    if (excerpt) return brief(excerpt, 90);
   }
-  return `已记录${category}资料，展开查看原文`;
+  return '';
 }
 
 // This is presentation grouping only. No input record, scoring fact or source is rewritten.
@@ -271,11 +278,12 @@ export function groupWebsiteEvidence(facts, identityEvidence = []) {
       group = {
         id: stableId(key),
         category,
-        summary: summary(canonical, fact.value, category),
+        summary: '',
         records: [],
       };
       groups.set(key, group);
     }
+    if (!group.summary) group.summary = summary(canonical, fact.value, record.quote, category);
     if (
       !group.records.some(
         (saved) =>
@@ -287,5 +295,8 @@ export function groupWebsiteEvidence(facts, identityEvidence = []) {
     )
       group.records.push(record);
   }
-  return [...groups.values()];
+  return [...groups.values()].map((group) => ({
+    ...group,
+    summary: group.summary || '未保存可摘要的正文',
+  }));
 }

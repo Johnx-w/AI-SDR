@@ -854,18 +854,6 @@ main {
   color: var(--color-text-muted);
   font-size: 13px;
 }
-.grade-A {
-  background: var(--color-success-soft);
-  color: var(--color-success);
-}
-.grade-B {
-  background: var(--color-primary-soft);
-  color: var(--color-primary-text);
-}
-.grade-C {
-  background: var(--color-warning-soft);
-  color: var(--color-warning);
-}
 .tiny-track {
   width: 64px;
   height: 4px;

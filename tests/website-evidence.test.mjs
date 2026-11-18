@@ -64,7 +64,7 @@ test('矛盾的值与不同业务命题不会因共用原文或来源被合并',
   assert.doesNotMatch(groups[4].summary, /采购|进口|采购意向/);
 });
 
-test('摘要为简短中文展示，完整的长文本、换行和链接逐字保留', () => {
+test('长描述使用简短事实摘要，完整的长文本、换行和链接逐字保留', () => {
   const longEnglish =
     'This is an unfamiliar English business statement whose details must not be guessed. '.repeat(
       8,
@@ -79,9 +79,9 @@ test('摘要为简短中文展示，完整的长文本、换行和链接逐字�
   ]);
   for (const group of groups) {
     assert.ok(group.summary.length <= 100);
-    assert.match(group.summary, /[\u3400-\u9fff]/);
   }
-  assert.doesNotMatch(groups[0].summary, /unfamiliar|whose details/);
+  assert.ok(longEnglish.startsWith(groups[0].summary.slice(0, -1)));
+  assert.match(groups[0].summary, /…$/);
   assert.equal(groups[0].records[0].value, longEnglish);
   assert.equal(groups[0].records[0].quote, quote);
   assert.equal(groups[0].records[0].source_url, home + 'detail?at=2026-10-24T10:00:00Z');
@@ -99,9 +99,10 @@ test('不猜测未知枚举或未知英文字段，不把原型属性误认为�
   ]);
   assert.equal(groups.length, 5);
   for (const group of groups) {
-    assert.match(group.summary, /已记录/);
     assert.doesNotMatch(group.summary, /自有工厂|零售商|批发商|function|\[object Object\]/);
   }
+  assert.equal(groups[0].summary, 'Exact original quotation.');
+  assert.equal(groups[1].summary, 'Exact original quotation.');
   assert.equal(websiteEvidenceFieldLabel('future_business_field'), '其他官网事实');
   assert.equal(websiteEvidenceFieldLabel('constructor'), '其他官网事实');
 });
@@ -118,6 +119,7 @@ test('缺失或不安全的来源保持原值，空值命题的不同引文不�
   assert.equal(groups[0].records[1].source_url, 'javascript:alert(1)');
   assert.equal(groups[1].category, '企业概况');
   assert.equal(groups[1].records[0].quote, 'Different claim A');
+  assert.equal(groups[1].summary, 'Different claim A');
   assert.equal(groups[2].records[0].quote, 'Different claim B');
 });
 
@@ -135,6 +137,7 @@ test('旧结构数组和对象安全展示，规范对象键顺序去重但保�
   assert.match(groups[0].summary, /零售商、服务商/);
   assert.equal(groups[0].records[0].value, JSON.stringify(role));
   assert.equal(groups[1].records.length, 2);
+  assert.equal(groups[1].summary, '12 Main St、Sydney');
   assert.equal(groups[1].records[0].value, JSON.stringify(one));
   assert.equal(groups[2].category, '定制特征');
 });

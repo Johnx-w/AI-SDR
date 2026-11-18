@@ -113,7 +113,7 @@ test('互相冲突的生产模式不合并或覆盖，共用引文的不同事�
   assert.match(initialView(html), /企业|个人|住宅/);
 });
 
-test('未知英文描述使用中性中文摘要，完整内容仍可展开且不被当作采购意向', () => {
+test('未映射的官网描述使用事实短摘，完整内容和来源可展开核对', () => {
   const narrative =
     'The satellite showroom now uses an unusual appointment process and does not disclose purchasing plans.';
   const html = render([
@@ -125,13 +125,20 @@ test('未知英文描述使用中性中文摘要，完整内容仍可展开且�
     },
   ]);
   const visible = initialView(html);
-  assert.match(visible, /[\u3400-\u9fff]/);
-  assert.doesNotMatch(
-    visible,
-    /satellite showroom|unrecognized_research_field|已确认采购|明确采购需求/,
-  );
+  assert.match(visible, /The satellite showroom now uses an unusual appointment process/);
+  assert.doesNotMatch(visible, /已记录.*资料|unrecognized_research_field|已确认采购|明确采购需求/);
   assert.match(html, /The satellite showroom now uses an unusual appointment process/);
   assert.match(html, /Literal source paragraph\./);
+});
+
+test('多个英文服务地区展示具体地名并保留其余条目的数量', () => {
+  const areas = ['San Diego, CA', 'Orange County, CA', 'Sacramento, CA', 'Fresno, CA'];
+  const html = render(areas.map((value) => ({ field: 'service_areas', value })));
+  const visible = initialView(html);
+  assert.equal(items(html).length, 1);
+  assert.match(visible, /San Diego, CA、Orange County, CA、Sacramento, CA等 4 项/);
+  assert.doesNotMatch(visible, /已记录.*资料|Fresno/);
+  assert.match(html, /Fresno, CA/);
 });
 
 test('安全来源可打开，危险地址仅作文字保留，缺少来源不会伪造官网出处', () => {
@@ -181,7 +188,8 @@ test('多个经营网点集中在一个默认折叠项中，展开可核对每�
     1,
   );
   assert.match(initialView(html), /3 条记录/);
-  assert.doesNotMatch(initialView(html), /showroom|Visit our|https:/);
+  assert.match(initialView(html), /Sydney showroom、Melbourne showroom、Brisbane showroom/);
+  assert.doesNotMatch(initialView(html), /Visit our|https:/);
   for (const fact of facts) {
     assert.ok(html.includes(fact.quote));
     assert.ok(html.includes('href="' + fact.source_url + '"'));

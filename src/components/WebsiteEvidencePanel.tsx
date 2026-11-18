@@ -50,8 +50,10 @@ function summaryRows(groups: ReturnType<typeof groupWebsiteEvidence>) {
   }
   return rows.map((row) => {
     const visible = row.parts.slice(0, 3).join('、');
-    const summary = visible + (row.parts.length > 3 ? `等 ${row.parts.length} 项` : '');
-    return { ...row, summary: summary.length > 90 ? summary.slice(0, 89) + '…' : summary };
+    const more = row.parts.length > 3 ? `等 ${row.parts.length} 项` : '';
+    const limit = 90 - more.length;
+    const summary = visible.length > limit ? visible.slice(0, limit - 1) + '…' : visible;
+    return { ...row, summary: summary + more };
   });
 }
 

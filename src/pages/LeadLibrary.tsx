@@ -458,7 +458,7 @@ export function LeadLibrary() {
                     </td>
                     <td>
                       <div className="reference-score">
-                        <span className={'grade-box grade-' + l.grade}>
+                        <span className="grade-box">
                           {['A', 'B', 'C'].includes(l.grade) ? l.grade : '—'}
                         </span>
                         <div>
