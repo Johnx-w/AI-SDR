@@ -21,14 +21,12 @@ export interface OverviewData {
   metrics: {
     companies: number | null;
     newCompanies: number | null;
-    activeDemands: number | null;
     dueTasks: number | null;
   };
   work: { overdue: number | null; today: number | null };
   links: {
     companies: string;
     newCompanies: string;
-    activeDemands: string;
     dueTasks: string;
     overdue: string;
     today: string;
@@ -60,7 +58,6 @@ export interface OverviewData {
   schedules: { id: string; name: string; status: string; nextRunAt: string | null; to: string }[];
   trend: { date: string; count: number | null }[];
   captures: OverviewCapture[];
-  stages: { stage: string; label: string; count: number; to: string }[];
   products: { draft: number | null; to: string; syncIssues: number | null };
   coverage: { recordedOnly: true; note: string };
 }

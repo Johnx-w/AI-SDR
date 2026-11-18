@@ -3,16 +3,6 @@ import { overviewRange, taskBucket, activeDemand } from '../src/domain/overview-
 import { isDevelopmentCustomer } from './customer-eligibility.mjs';
 
 const dayMs = 86400000;
-const stages = {
-  new: '新需求',
-  clarifying: '确认规格',
-  quoting: '报价中',
-  sampling: '样品中',
-  negotiating: '商务沟通',
-  won: '已成交',
-  lost: '未成交',
-  closed: '已关闭',
-};
 const sourceNames = {
   customers: '客户库',
   business: '客户业务',
@@ -313,7 +303,6 @@ export class OverviewService {
       metrics: {
         companies: results.customers.data ? customers.length : null,
         newCompanies: acquisition ? captures.length : null,
-        activeDemands: graph ? activeDemands.length : null,
         dueTasks: graph ? work.overdue + work.today : null,
       },
       work,
@@ -325,7 +314,6 @@ export class OverviewService {
           period,
           asOf: range.asOf,
         }),
-        activeDemands: businessLink('demands', { state: 'active' }),
         dueTasks: taskLink('due'),
         overdue: taskLink('overdue'),
         today: taskLink('today'),
@@ -335,14 +323,6 @@ export class OverviewService {
       schedules,
       trend,
       captures,
-      stages: graph
-        ? Object.entries(stages).map(([stage, label]) => ({
-            stage,
-            label,
-            count: graph.demands.filter((demand) => demand.stage === stage).length,
-            to: businessLink('demands', { state: stage }),
-          }))
-        : [],
       products: {
         draft: productRows
           ? productRows.filter((product) => product.status === 'draft').length

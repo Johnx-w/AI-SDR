@@ -36,7 +36,8 @@ test('总览HTTP只读聚合真实客户与本地业务，不调用搜索、邮�
       assert.equal(response.headers.get('cache-control'), 'no-store');
       const result = await response.json();
       assert.equal(result.metrics.companies, 1);
-      assert.equal(result.metrics.activeDemands, 0);
+      assert.equal(Object.hasOwn(result.metrics, 'activeDemands'), false);
+      assert.equal(Object.hasOwn(result, 'stages'), false);
       assert.equal(result.metrics.dueTasks, 0);
       assert.equal(result.metrics.newCompanies, 0);
       assert.equal(result.asOf, '2026-10-25T02:00:00.000Z');
@@ -69,7 +70,7 @@ test('客户入口未接通时总览其它本地来源仍可读，客户数不�
       const result = await response.json();
       assert.equal(result.metrics.companies, null);
       assert.equal(result.sources.customers.state, 'unavailable');
-      assert.equal(result.metrics.activeDemands, 0);
+      assert.equal(result.metrics.dueTasks, 0);
       assert.equal(result.products.draft, 0);
     },
   );

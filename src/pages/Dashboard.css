@@ -201,7 +201,7 @@
 }
 .ov-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
 }
 .ov-metric {
@@ -460,12 +460,6 @@
   flex-shrink: 0;
   font-size: 9px;
 }
-.ov-bottom-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.38fr) minmax(0, 1fr);
-  gap: 18px;
-  align-items: stretch;
-}
 .ov-chart-link {
   display: block;
   margin: 0 14px;
@@ -502,39 +496,6 @@
 .ov-coverage > svg {
   flex-shrink: 0;
   margin-top: 2px;
-}
-.ov-stage-list {
-  display: grid;
-  gap: 14px;
-  padding: 0 23px 22px;
-}
-.ov-stage {
-  display: grid;
-  grid-template-columns: 64px minmax(20px, 1fr) 25px;
-  align-items: center;
-  gap: 12px;
-  font-size: 11px;
-  color: var(--color-text-secondary);
-  border-radius: 3px;
-}
-.ov-stage > div {
-  height: 6px;
-  background: var(--color-surface-muted);
-  border-radius: 5px;
-  overflow: hidden;
-}
-.ov-stage i {
-  display: block;
-  height: 100%;
-  background: var(--color-primary);
-  min-width: 0;
-  border-radius: 5px;
-}
-.ov-stage b {
-  text-align: right;
-  font-size: 11px;
-  color: var(--color-text);
-  font-weight: 550;
 }
 .ov-support-grid {
   display: grid;
@@ -709,8 +670,7 @@
   }
 }
 @media (max-width: 1000px) {
-  .ov-main-grid,
-  .ov-bottom-grid {
+  .ov-main-grid {
     grid-template-columns: minmax(0, 1fr);
   }
   .ov-side-stack {

@@ -366,7 +366,7 @@ export function Dashboard() {
           </p>
         )}
         <div className="ov-metrics ov-skeleton" aria-hidden="true">
-          {[0, 1, 2, 3].map((key) => (
+          {[0, 1, 2].map((key) => (
             <div className="panel" key={key}>
               <i />
               <b />
@@ -394,7 +394,6 @@ export function Dashboard() {
     },
   ];
   const anySourceFailure = Object.values(data.sources).some((source) => source.state !== 'ready');
-  const stageTotal = data.stages.reduce((sum, stage) => sum + stage.count, 0);
   return (
     <div className="ov-page">
       {header}
@@ -476,15 +475,6 @@ export function Dashboard() {
           icon={ArrowDownToLine}
           to={data.links.newCompanies}
           source={data.sources.acquisition}
-        />
-        <Metric
-          title="当前进行中需求"
-          value={data.metrics.activeDemands}
-          unit="条"
-          detail="客户明确表达且尚未结束"
-          icon={FileCheck2}
-          to={data.links.activeDemands}
-          source={data.sources.business}
         />
         <Metric
           title="当前到期跟进"
@@ -642,53 +632,20 @@ export function Dashboard() {
           </section>
         </div>
       </div>
-      <div className="ov-bottom-grid">
-        <section className="panel ov-trend-panel">
-          <PanelHeading
-            title="已记录新增趋势"
-            detail={`${data.range.label} · 按实际收录时间统计`}
-            to={data.links.newCompanies}
-            link="收录明细"
-          />
-          <SourceNotice source={data.sources.acquisition} />
-          <CaptureTrend data={data} />
-          <p className="ov-coverage">
-            <CircleAlert size={13} aria-hidden="true" />
-            {data.coverage.note}
-          </p>
-        </section>
-        <section className="panel ov-stages-panel">
-          <PanelHeading
-            title="当前需求阶段"
-            detail="按需求条数统计，包含已结束的需求"
-            to="/outreach?tab=conversations"
-            link="需求明细"
-          />
-          <SourceNotice source={data.sources.business} />
-          {stageTotal ? (
-            <div className="ov-stage-list">
-              {data.stages.map((stage) => (
-                <Link to={stage.to} className="ov-stage ov-clickable" key={stage.stage}>
-                  <span>{stage.label}</span>
-                  <div aria-hidden="true">
-                    <i style={{ width: `${(stage.count / stageTotal) * 100}%` }} />
-                  </div>
-                  <b>{stage.count}</b>
-                </Link>
-              ))}
-            </div>
-          ) : (
-            <EmptyState
-              title={
-                data.sources.business.state === 'unavailable'
-                  ? '需求阶段暂不可用'
-                  : '暂无自动整理的采购需求'
-              }
-              detail="从实际沟通登记需求后，将显示各阶段的当前分布。"
-            />
-          )}
-        </section>
-      </div>
+      <section className="panel ov-trend-panel">
+        <PanelHeading
+          title="已记录新增趋势"
+          detail={`${data.range.label} · 按实际收录时间统计`}
+          to={data.links.newCompanies}
+          link="收录明细"
+        />
+        <SourceNotice source={data.sources.acquisition} />
+        <CaptureTrend data={data} />
+        <p className="ov-coverage">
+          <CircleAlert size={13} aria-hidden="true" />
+          {data.coverage.note}
+        </p>
+      </section>
       <section className="panel ov-health-panel">
         <PanelHeading title="资料与数据状态" detail="查看资料审核及各数据来源的最近读取状态" />
         <div className="ov-support-grid">
@@ -736,7 +693,7 @@ export function Dashboard() {
         <SourceNotice source={data.sources.products} />
       </section>
       <p className="ov-footnote">
-        日期筛选仅影响期间新增和趋势；当前客户、需求与待办按当前记录展示。页面可见时自动更新。
+        日期筛选仅影响期间新增和趋势；当前客户与待办按当前记录展示。页面可见时自动更新。
       </p>
     </div>
   );

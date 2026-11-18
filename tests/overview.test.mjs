@@ -94,7 +94,6 @@ test('总览按实际收录时间统计新增，待办不随成果范围改变�
   assert.deepEqual(result.metrics, {
     companies: 3,
     newCompanies: 2,
-    activeDemands: 2,
     dueTasks: 2,
   });
   assert.deepEqual(result.work, { overdue: 1, today: 1 });
@@ -126,6 +125,19 @@ test('总览按实际收录时间统计新增，待办不随成果范围改变�
   assert.equal(
     new URL(result.links.dueTasks, 'http://example.test').searchParams.get('bucket'),
     'due',
+  );
+});
+
+test('总览不再返回需求统计或阶段明细，真实需求仍可定位到客户邮件', async () => {
+  const { service, graph } = fixture();
+  const result = await service.read();
+  assert.equal(Object.hasOwn(result, 'stages'), false);
+  assert.equal(Object.hasOwn(result.metrics, 'activeDemands'), false);
+  assert.equal(Object.hasOwn(result.links, 'activeDemands'), false);
+  assert.equal(graph.demands.length, 5);
+  assert.equal(
+    result.priority.find((row) => row.customerId === '2').to,
+    '/outreach?tab=conversations&customerId=2',
   );
 });
 
@@ -255,7 +267,6 @@ test('单源故障保留同范围旧事实，首次缺失返回null且错误不�
     acquisition: unavailable,
   }).read();
   assert.equal(failed.sources.business.state, 'unavailable');
-  assert.equal(failed.metrics.activeDemands, null);
   assert.equal(failed.metrics.dueTasks, null);
   assert.equal(failed.metrics.companies, 3);
   assert.equal(failed.metrics.newCompanies, null);
@@ -280,7 +291,7 @@ test('切换客户表清空旧来源缓存，初次远端失败可读已有客�
   currentScope = 'two';
   const result = await service.read();
   assert.equal(result.sources.business.state, 'unavailable');
-  assert.equal(result.metrics.activeDemands, null);
+  assert.equal(result.metrics.dueTasks, null);
   const replica = await new OverviewService({
     ...config,
     customers: () => {
@@ -347,7 +358,6 @@ test('单源永久等待在deadline后降级，其它本地业务保持可读', 
   assert.equal(result.sources.customers.state, 'unavailable');
   assert.equal(result.metrics.companies, null);
   assert.equal(result.sources.business.state, 'ready');
-  assert.equal(result.metrics.activeDemands, 2);
   assert.equal(result.metrics.dueTasks, 2);
   assert.equal(result.metrics.newCompanies, 2);
   assert.equal(result.products.draft, 2);
