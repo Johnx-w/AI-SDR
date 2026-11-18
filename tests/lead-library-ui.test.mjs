@@ -165,6 +165,33 @@ test('客户列表为空时全部市场下仍提供待核实选项', () => {
   );
 });
 
+test('客户评级只显示一次字母并保留依据入口，各开发状态使用各自颜色', () => {
+  const statuses = ['待开发', '已联系', '已回复', '跟进中', '已成交', '停止开发'];
+  const html = renderLibrary(
+    '客户画像',
+    statuses.map((status, index) => ({
+      ...lead,
+      id: 'status-' + index,
+      grade: ['A', 'B', 'C'][index % 3],
+      matchLevel: '明确匹配',
+      status,
+    })),
+    { pending: true },
+  );
+  const table = html.match(/<table\b[^>]*>([\s\S]*?)<\/table>/)?.[1];
+  assert.ok(table);
+  const scores = [...table.matchAll(/<div class="reference-score">([\s\S]*?)<\/td>/g)];
+  assert.equal(scores.length, 6);
+  for (const [, score] of scores) {
+    assert.equal((score.match(/>[ABC]</g) || []).length, 1);
+    assert.doesNotMatch(score, /匹配等级|明确匹配/);
+    assert.match(score, /查看 Acme Screens 的评级依据/);
+  }
+  const tones = ['neutral', 'blue', 'teal', 'amber', 'green', 'red'];
+  for (const [index, status] of statuses.entries())
+    assert.ok(table.includes(`class="badge ${tones[index]}">${status}</span>`));
+});
+
 test('客户在分页前按首次录入时间倒序，评级和研究更新不置顶', () => {
   const customers = [
     { ...lead, id: 'unknown-1', name: 'Unknown First', createdAt: null, updatedAt: 9999999999999 },

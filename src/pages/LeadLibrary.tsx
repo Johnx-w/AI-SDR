@@ -44,6 +44,14 @@ const typeNames: Record<string, string> = {
   service_provider: '服务商',
   unknown: '待核实',
 };
+const statusTones: Record<string, string> = {
+  待开发: 'neutral',
+  已联系: 'blue',
+  已回复: 'teal',
+  跟进中: 'amber',
+  已成交: 'green',
+  停止开发: 'red',
+};
 const safeUrl = (s: string) => {
   try {
     const u = new URL(s);
@@ -454,10 +462,6 @@ export function LeadLibrary() {
                           {['A', 'B', 'C'].includes(l.grade) ? l.grade : '—'}
                         </span>
                         <div>
-                          <strong>{l.grade}</strong>
-                          <span className="subtext">
-                            {l.matchLevel ? '匹配等级：' + l.matchLevel : '查看评级依据'}
-                          </span>
                           <button
                             className="rating-reason-short text-link"
                             aria-label={`查看 ${l.name} 的评级依据`}
@@ -478,7 +482,7 @@ export function LeadLibrary() {
                       <span className="subtext">{l.contactSummary.detail}</span>
                     </td>
                     <td>
-                      <Badge>{l.status}</Badge>
+                      <Badge tone={statusTones[l.status] || 'neutral'}>{l.status}</Badge>
                     </td>
                     <td>
                       <button

@@ -1448,6 +1448,7 @@ export function OutreachCommunication() {
                 mailboxes={mailboxes}
                 mailboxId={conversationMailboxId}
                 customerId={searchParams.get('customerId') || ''}
+                inboundOnly={searchParams.get('inboundOnly') === '1'}
                 onMailboxChange={openMailboxConversations}
               />
             )}

@@ -23,7 +23,14 @@ const safeSource = (value: string) => {
 };
 
 function summaryRows(groups: ReturnType<typeof groupWebsiteEvidence>) {
-  const collections = new Set(['经营产品', '制造产品', '客户类型', '业务特征', '服务范围']);
+  const collections = new Set([
+    '经营产品',
+    '制造产品',
+    '客户类型',
+    '业务特征',
+    '服务范围',
+    '经营网点',
+  ]);
   const rows: (ReturnType<typeof groupWebsiteEvidence>[number] & { parts: string[] })[] = [];
   const byCategory = new Map<string, (typeof rows)[number]>();
   for (const group of groups) {

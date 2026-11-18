@@ -17,6 +17,16 @@
   color: var(--color-warning);
 }
 
+.reference-lead-table .badge.teal {
+  background: #eaf6f7;
+  color: #1e7280;
+}
+
+.reference-lead-table .badge.red {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
 .library-sync-details {
   margin: -8px 0 18px;
   color: var(--color-text-muted);

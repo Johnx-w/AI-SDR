@@ -855,24 +855,16 @@ main {
   font-size: 13px;
 }
 .grade-A {
-  background: var(--color-surface-muted);
-  color: var(--color-text-secondary);
+  background: var(--color-success-soft);
+  color: var(--color-success);
 }
 .grade-B {
-  background: var(--color-surface-muted);
-  color: var(--color-text-muted);
+  background: var(--color-primary-soft);
+  color: var(--color-primary-text);
 }
 .grade-C {
-  background: var(--color-surface-muted);
-  color: var(--color-text-muted);
-}
-.reference-score strong {
-  font-size: 13px;
-  font-weight: 500;
-}
-.reference-score small {
-  font-size: 9px;
-  color: var(--color-text-muted);
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
 }
 .tiny-track {
   width: 64px;

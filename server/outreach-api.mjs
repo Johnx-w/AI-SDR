@@ -27,6 +27,7 @@ export async function handleOutreach({ request, url, service, readJson, idempote
       customerId: url.searchParams.get('customerId') || '',
       q: url.searchParams.get('q') || '',
       unread: url.searchParams.get('unread') === '1',
+      inboundOnly: url.searchParams.get('inboundOnly') === '1',
     });
   if (path === '/conversations/sync' && method === 'POST') {
     const body = await readJson(request);

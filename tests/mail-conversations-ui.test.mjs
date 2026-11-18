@@ -62,6 +62,7 @@ test('mail lookup encodes account and search filters while writes are limited to
       customerId: 'customer/a b',
       q: '  samples & quotes  ',
       unread: true,
+      inboundOnly: true,
     },
     controller.signal,
   );
@@ -71,6 +72,7 @@ test('mail lookup encodes account and search filters while writes are limited to
   assert.equal(url.searchParams.get('customerId'), 'customer/a b');
   assert.equal(url.searchParams.get('q'), 'samples & quotes');
   assert.equal(url.searchParams.get('unread'), '1');
+  assert.equal(url.searchParams.get('inboundOnly'), '1');
   assert.equal(requests[0].init.signal, controller.signal);
   assert.equal(requests[0].init.method, undefined);
   await mailConversationsApi.detail('thread/a b', controller.signal);

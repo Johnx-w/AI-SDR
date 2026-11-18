@@ -49,6 +49,25 @@ test('real mailbox conversations are directly accessible, enforce local origins 
   const base = `http://127.0.0.1:${app.address().port}/api/v1/outreach/conversations`;
   const headers = { 'Content-Type': 'application/json' };
   const request = (suffix = '', options = {}) => fetch(base + suffix, { headers, ...options });
+  service.putDelivery({
+    id: 'sent-only',
+    campaignId: 'campaign',
+    mailboxId: 'account',
+    from: 'sales@brand.example',
+    to: 'silent@buyer.example',
+    subject: 'Introduction',
+    bodyText: 'Our introduction.',
+    status: 'accepted',
+    messageId: '<sent-only@brand.example>',
+    sentAt: '2026-10-26T04:00:00Z',
+    customerId: 'sent-only',
+    companyName: 'Silent Buyer',
+  });
+  assert.equal((await (await request('?customerId=sent-only')).json()).items.length, 1);
+  assert.equal(
+    (await (await request('?customerId=sent-only&inboundOnly=1')).json()).items.length,
+    0,
+  );
   assert.equal((await request('', { headers: {} })).status, 200);
   assert.equal(
     (await request('', { headers: { ...headers, Origin: 'https://foreign.example' } })).status,
@@ -78,6 +97,12 @@ test('real mailbox conversations are directly accessible, enforce local origins 
   const list = await response.json();
   assert.equal(list.items.length, 1);
   const id = list.items[0].id;
+  const received = await (await request('?customerId=buyer&inboundOnly=1')).json();
+  assert.deepEqual(
+    received.items.map((item) => item.id),
+    [id],
+  );
+  assert.equal((await (await request('?customerId=another&inboundOnly=1')).json()).items.length, 0);
   const message = service.conversations.detail(id).messages[0];
   service.businessState = () => ({
     messages: [

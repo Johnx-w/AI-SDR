@@ -29,7 +29,9 @@ export function CustomerBusinessSummary({ customerId }: { customerId: string }) 
       <div className="business-summary-links">
         <Link
           className="btn secondary"
-          to={'/outreach?tab=conversations&customerId=' + encodeURIComponent(customerId)}
+          to={
+            '/inbox?' + new URLSearchParams({ tab: 'conversations', customerId, inboundOnly: '1' })
+          }
         >
           客户邮件
         </Link>

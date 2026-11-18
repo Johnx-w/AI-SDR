@@ -130,13 +130,20 @@ export interface MailConversationDetail {
 
 export const mailConversationsApi = {
   list(
-    filters: { mailboxId: string; customerId?: string; q: string; unread: boolean },
+    filters: {
+      mailboxId: string;
+      customerId?: string;
+      q: string;
+      unread: boolean;
+      inboundOnly?: boolean;
+    },
     signal?: AbortSignal,
   ) {
     const params = new URLSearchParams({ mailboxId: filters.mailboxId });
     if (filters.customerId) params.set('customerId', filters.customerId);
     if (filters.q.trim()) params.set('q', filters.q.trim());
     if (filters.unread) params.set('unread', '1');
+    if (filters.inboundOnly) params.set('inboundOnly', '1');
     return outreachApi<MailConversationList>(`/conversations?${params}`, { signal });
   },
   detail(id: string, signal?: AbortSignal) {

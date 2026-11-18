@@ -391,7 +391,7 @@ export class MailConversations {
       : thread;
   }
 
-  list({ mailboxId = 'all', customerId = '', q = '', unread = false } = {}) {
+  list({ mailboxId = 'all', customerId = '', q = '', unread = false, inboundOnly = false } = {}) {
     this.importDeliveries();
     const selected = this.selected(mailboxId);
     const query = text(q, 500).toLowerCase().trim();
@@ -416,6 +416,8 @@ export class MailConversations {
       .filter(
         (thread) =>
           (!customerId || thread.customerId === customerId) &&
+          (!inboundOnly ||
+            this.messages(thread.id).some((message) => message.direction === 'inbound')) &&
           (!unread || thread.unread) &&
           (!query ||
             [thread.account, thread.participant, thread.subject, thread.preview, thread.companyName]

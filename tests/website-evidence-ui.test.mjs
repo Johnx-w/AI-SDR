@@ -165,6 +165,29 @@ test('没有证据时展示空状态，不生成无来源事实', () => {
   assert.doesNotMatch(html, /href=|已确认|无自有工厂/);
 });
 
+test('多个经营网点集中在一个默认折叠项中，展开可核对每个网点及其来源', () => {
+  const facts = ['Sydney showroom', 'Melbourne showroom', 'Brisbane showroom'].map(
+    (value, index) => ({
+      field: 'operating_outlet',
+      value,
+      quote: 'Visit our ' + value,
+      source_url: 'https://buyer.example.org/location-' + index,
+    }),
+  );
+  const html = render(facts);
+  assert.equal(items(html).length, 1);
+  assert.equal(
+    (initialView(html).match(/class="website-evidence-category">经营网点</g) || []).length,
+    1,
+  );
+  assert.match(initialView(html), /3 条记录/);
+  assert.doesNotMatch(initialView(html), /showroom|Visit our|https:/);
+  for (const fact of facts) {
+    assert.ok(html.includes(fact.quote));
+    assert.ok(html.includes('href="' + fact.source_url + '"'));
+  }
+});
+
 test('同类产品集中成简短摘要，全部不同产品和各自出处仍保留在折叠内容中', () => {
   const names = [
     'Roller Blinds',

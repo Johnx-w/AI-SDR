@@ -251,11 +251,13 @@ export function MailConversations({
   mailboxes,
   mailboxId = 'all',
   customerId = '',
+  inboundOnly = false,
   onMailboxChange,
 }: {
   mailboxes: OutreachMailbox[];
   mailboxId?: string;
   customerId?: string;
+  inboundOnly?: boolean;
   onMailboxChange: (mailboxId: string) => void;
 }) {
   const [query, setQuery] = useState('');
@@ -298,10 +300,12 @@ export function MailConversations({
     const timeout = window.setTimeout(
       () => {
         void mailConversationsApi
-          .list({ mailboxId, customerId, q: query, unread }, controller.signal)
+          .list({ mailboxId, customerId, q: query, unread, inboundOnly }, controller.signal)
           .then((value) => {
             if (controller.signal.aborted) return;
             setList(value);
+            if (customerId && inboundOnly && value.items.length)
+              selectConversation(value.items[0].id);
           })
           .catch((reason: unknown) => {
             if (!controller.signal.aborted) setListError(errorText(reason));
@@ -316,7 +320,7 @@ export function MailConversations({
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [mailboxId, customerId, query, unread, revision, selectConversation]);
+  }, [mailboxId, customerId, query, unread, inboundOnly, revision, selectConversation]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -462,7 +466,8 @@ export function MailConversations({
       <p className="mail-conversations-scope">
         {customerId && (
           <span>
-            仅显示该客户邮件 · <Link to="/outreach?tab=conversations">查看全部客户</Link> ·{' '}
+            {inboundOnly ? '仅显示该客户有来信的会话' : '仅显示该客户邮件'} ·{' '}
+            <Link to="/inbox?tab=conversations">查看全部客户</Link> ·{' '}
           </span>
         )}
         首次同步读取最近 30 天的收件箱与可识别的已发件箱，之后继续增量读取。
@@ -526,11 +531,19 @@ export function MailConversations({
             </div>
           ) : (
             <Empty
-              title={query || unread ? '没有符合筛选的会话' : '暂无邮件会话'}
+              title={
+                query || unread
+                  ? '没有符合筛选的会话'
+                  : customerId && inboundOnly
+                    ? '暂无该客户的来信'
+                    : '暂无邮件会话'
+              }
               detail={
                 query || unread
                   ? '试试调整搜索词或取消未读筛选。'
-                  : '可手动同步邮箱；系统发送的邮件也会在这里保存。'
+                  : customerId && inboundOnly
+                    ? '当前已同步的邮箱记录中没有该客户的来信，可同步邮件后重新查看。'
+                    : '可手动同步邮箱；系统发送的邮件也会在这里保存。'
               }
             />
           )}
