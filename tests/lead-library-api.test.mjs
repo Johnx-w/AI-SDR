@@ -40,6 +40,41 @@ async function open(options) {
   };
 }
 
+test('网页分页与直达档案只读 SQLite；快照过期也不拉飞书', async () => {
+  let reads = 0;
+  const server = await open({
+    env: { ...env, LEAD_LIBRARY_TTL_MS: '0' },
+    fetchImpl: withFeishuAuth(async () => {
+      if (++reads !== 1) throw new Error('offline');
+      return response(
+        Array.from({ length: 19 }, (_, index) => record(`rec_${index}`, `Buyer ${index}`)),
+      );
+    }),
+  });
+  try {
+    await fetch(server.base + '/list');
+    const get = async (path) => {
+      const res = await fetch(server.base + path);
+      assert.equal(res.status, 200);
+      return res.json();
+    };
+    const first = await get('/list?page=1');
+    assert.equal(first.leads.length, 8);
+    assert.equal(first.total, 19);
+    const second = await get('/list?page=2&q=Buyer%201&market=美国');
+    assert.equal(second.filteredTotal, 10);
+    assert.equal(second.leads.length, 2);
+    assert.equal(first.facets.grades.B, 19);
+    const exported = await get('?page=2&q=Buyer%201');
+    assert.equal(exported.leads.length, 10);
+    assert.ok(exported.leads.every((lead) => lead.fields && lead.name.startsWith('Buyer 1')));
+    assert.equal((await get('/rec_18?local=1')).lead.name, 'Buyer 18');
+    assert.equal(reads, 1);
+  } finally {
+    await server.close();
+  }
+});
+
 test('客户摘要与详情独立，连续列表、详情和导出读取复用同一飞书快照', async () => {
   let reads = 0;
   const server = await open({

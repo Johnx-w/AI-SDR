@@ -63,6 +63,11 @@ export interface OverviewData {
 }
 
 export const overviewApi = {
+  async reminderCount(signal: AbortSignal): Promise<number> {
+    const response = await fetch('/api/v1/overview?summary=reminders', { signal });
+    if (!response.ok) throw new Error('提醒计数读取失败');
+    return (await response.json()).count;
+  },
   async get(
     period: OverviewPeriod = '7d',
     signal?: AbortSignal,

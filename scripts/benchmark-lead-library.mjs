@@ -127,14 +127,11 @@ async function benchmark(size, folder) {
       library.detail(current[Math.floor((index * size) / 20)].id),
     );
     const unchangedRefresh = await refreshMeasurement(library, 0);
-    const changedIndex = Math.floor(size / 2);
-    current = current.map((lead, index) =>
-      index === changedIndex ? { ...lead, email: `updated@${lead.domain}` } : lead,
-    );
+    const added = fixture(size);
+    current.push(added);
     const changedRefresh = await refreshMeasurement(library, 1);
-    const detail = await library.detail(current[changedIndex].id);
-    if (detail.lead.email !== current[changedIndex].email)
-      throw new Error('Changed customer detail was not persisted');
+    const detail = await library.detail(added.id);
+    if (detail.lead.email !== added.email) throw new Error('New customer detail was not persisted');
     return {
       customers: size,
       seededDetailBytesPerCustomer: fixtureDetailBytes,
@@ -142,7 +139,7 @@ async function benchmark(size, folder) {
       warmList,
       warmDetail,
       unchangedRefresh,
-      oneCustomerChangedRefresh: changedRefresh,
+      oneCustomerAddedRefresh: changedRefresh,
     };
   } finally {
     library.close();

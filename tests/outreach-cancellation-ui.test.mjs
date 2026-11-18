@@ -31,6 +31,7 @@ function setup(
     detailResponse,
     deliveryResponse,
     recordsResponse,
+    stateGate,
     extraDeliveries = [],
   } = {},
 ) {
@@ -138,7 +139,40 @@ function setup(
       return {
         outreachApi: async (path, init = {}) => {
           requests.push({ path, init });
-          if (path === '/state') return structuredClone(state());
+          if (path.startsWith('/state?')) {
+            if (stateGate) await stateGate;
+            const params = new URLSearchParams(path.split('?')[1]),
+              view = params.get('view'),
+              filter = params.get('status');
+            const data = state(),
+              matched = data.campaigns.filter(
+                (item) =>
+                  (view === 'tests'
+                    ? item.mode === 'internal_test'
+                    : item.mode === 'production' &&
+                      ['completed', 'cancelled'].includes(item.status) === (view === 'history')) &&
+                  (!filter ||
+                    filter === 'all' ||
+                    (filter === 'attention'
+                      ? item.deliveryGroups?.attention || item.lastError
+                      : item.status === filter)) &&
+                  item.name.toLowerCase().includes((params.get('q') || '').toLowerCase()),
+              );
+            const size = Number(params.get('pageSize')) || 20,
+              page = Number(params.get('page')) || 1;
+            return structuredClone({
+              ...data,
+              counts: {
+                total: data.campaigns.length,
+                active: data.campaigns.filter((item) => item.status === 'active').length,
+              },
+              page,
+              filtered: matched.length,
+              campaigns: matched
+                .slice((page - 1) * size, page * size)
+                .map((item) => ({ ...item, customerCount: item.customerIds?.length })),
+            });
+          }
           if (path.startsWith('/mailboxes/')) {
             const mailbox = mailboxDetails[path.slice('/mailboxes/'.length)];
             if (mailbox instanceof Error) throw mailbox;
@@ -164,6 +198,7 @@ function setup(
             const result = structuredClone(
               deliveries.find((item) => path === `/deliveries/${item.id}`),
             );
+            result.campaignName = campaign.name;
             return deliveryResponse ? deliveryResponse(result) : result;
           }
           if (path === '/campaigns/campaign-one/cancel') {
@@ -257,6 +292,7 @@ test('详情响应超过多个轮询周期仍显示结果，完成及取消的�
     });
     await h.ready();
     if (status !== 'active') h.click('历史计划');
+    await h.ready();
     h.click('执行详情');
     h.render();
     assert.match(h.html(), /正在读取计划/);
@@ -303,6 +339,7 @@ test('详情加载失败结束等待并允许重试', async () => {
   });
   await h.ready();
   h.click('历史计划');
+  await h.ready();
   h.click('执行详情');
   h.render();
   await flush();
@@ -373,6 +410,7 @@ test('单封正文读取失败可重试，不重新下载整个计划', async ()
   });
   await h.ready();
   h.click('历史计划');
+  await h.ready();
   h.click('执行详情');
   h.render();
   await flush();
@@ -420,8 +458,10 @@ test('运行中的获客自动首发保留在当前计划，按收录客户展�
   assert.match(h.html(), /automation\?tab=runs&amp;job=source-job/);
   for (const label of ['暂停计划', '取消计划', '编辑']) assert.equal(h.button(label), undefined);
   h.click('历史计划');
+  await h.ready();
   assert.equal(h.button('执行详情'), undefined);
   h.click('当前计划');
+  await h.ready();
   h.click('执行详情');
   h.render();
   await flush();
@@ -463,6 +503,7 @@ test('confirming cancellation submits the reviewed campaign revision and keeps i
   assert.equal(h.button('取消计划'), undefined);
   assert.equal(h.button('编辑'), undefined);
   h.click('历史计划');
+  await h.ready();
   assert.ok(h.button('执行详情'));
   assert.match(h.html(), /已取消/);
   h.click('执行详情');
@@ -484,6 +525,7 @@ test('completed and cancelled plans retain details without controls that could r
     const h = setup(status);
     await h.ready();
     h.click('历史计划');
+    await h.ready();
     assert.equal(h.button('取消计划'), undefined);
     assert.equal(h.button('编辑'), undefined);
     h.click('执行详情');
@@ -547,27 +589,55 @@ test('计划表格默认只列当前正式计划，搜索筛选先于分页且�
   assert.equal(rows().length, 20);
   assert.doesNotMatch(h.html(), /Historical plan|Company test/);
   h.click('下一页');
+  await h.ready();
   assert.equal(rows().length, 5);
   h.change('搜索计划名称', 'eUrOpE 23');
+  await h.ready();
   assert.equal(rows().length, 1);
   assert.match(h.html(), /第 1 \/ 1 页/);
   h.change('搜索计划名称', '');
+  await h.ready();
   h.change('按计划状态筛选', 'attention');
+  await h.ready();
   assert.equal(rows().length, 1);
   assert.match(h.html(), /Europe 23/);
   h.change('按计划状态筛选', 'active');
+  await h.ready();
   h.change('每页计划条数', '10');
+  await h.ready();
   assert.equal(rows().length, 10);
   h.click('历史计划');
+  await h.ready();
   assert.equal(rows().length, 1);
   assert.match(h.html(), /Historical plan/);
   assert.match(h.html(), /39 \/ 50/);
   assert.match(h.html(), /width:78%/);
   assert.doesNotMatch(h.html(), /Company test/);
   h.click('公司试发');
+  await h.ready();
   assert.equal(rows().length, 1);
   assert.match(h.html(), /Company test/);
   assert.deepEqual(h.writes(), []);
+});
+
+test('发送记录不等待状态轮询，也不并发重复读取相同状态', async () => {
+  let finish;
+  const h = setup('active', {
+    tab: 'deliveries',
+    stateGate: new Promise((resolve) => {
+      finish = resolve;
+    }),
+  });
+  await h.ready();
+  try {
+    assert.match(h.html(), /Buyer company/);
+    h.tick(10000);
+    h.tick(10000);
+    assert.equal(h.requests.filter(({ path }) => path.startsWith('/state?')).length, 1);
+  } finally {
+    finish();
+    await flush();
+  }
 });
 
 test('发送记录只按状态筛选且分页置底，未知结果详情保留核对说明', async () => {

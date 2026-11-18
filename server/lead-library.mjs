@@ -5,6 +5,10 @@ import { createHash } from 'node:crypto';
 import { customerWebsite } from './customer-fields.mjs';
 import { domainKey } from './website-identity.mjs';
 import { isDevelopmentCustomer } from './customer-eligibility.mjs';
+import { marketLabel, leadProductCategories } from '../src/domain/lead-library-filters.ts';
+
+const eligible = "coalesce(json_extract(summary,'$.developmentEligible'),1) = 1";
+const newest = "coalesce(json_extract(summary,'$.createdAt'),0) DESC,position,record_id";
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const plainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -174,6 +178,22 @@ export class LeadLibrary {
         scope TEXT PRIMARY KEY, data TEXT NOT NULL
       );`);
     this.migrateVersions();
+    this.db
+      .exec(`CREATE INDEX IF NOT EXISTS lead_page_order ON lead_library_customers(scope,${newest}) WHERE ${eligible};
+      CREATE INDEX IF NOT EXISTS archive_pending_by_scope ON customer_archive_sync(scope) WHERE json_extract(data,'$.revision') > json_extract(data,'$.syncedRevision')`);
+    this.db.function('lead_market', marketLabel);
+    this.db.function('lead_has_product', (value, category) =>
+      Number(leadProductCategories(value || '').includes(category)),
+    );
+    this.db.function('lead_status', (id, status) => this.pageDecorator({ id, status }).status);
+    this.db.function('lead_search', (value, q) => {
+      const lead = JSON.parse(value);
+      return Number(
+        `${lead.name} ${(lead.companyIdentity?.aliases || []).join(' ')} ${lead.domain} ${lead.contact} ${lead.email} ${lead.source}`
+          .toLowerCase()
+          .includes(q),
+      );
+    });
     this.meta = this.db
       .prepare('SELECT synced_at,refreshed_at,revision FROM lead_library_sync WHERE scope=?')
       .get(scope);
@@ -321,6 +341,68 @@ export class LeadLibrary {
     return this.snapshot();
   }
 
+  page(filters, decorate, { exportDetails = false } = {}) {
+    this.assertOpen();
+    const revision = this.meta?.revision || 0;
+    const base = `FROM lead_library_customers WHERE scope=? AND ${eligible}`;
+    if (this.pageDecorator !== decorate || this.facetRevision !== revision) {
+      this.pageDecorator = decorate;
+      const grades = Object.create(null),
+        markets = new Set(),
+        statuses = new Set();
+      let total = 0;
+      for (const row of this.db
+        .prepare(
+          `SELECT json_extract(summary,'$.grade') AS grade,lead_market(json_extract(summary,'$.market')) AS market,lead_status(record_id,json_extract(summary,'$.status')) AS status,count(*) AS count ${base} GROUP BY grade,market,status`,
+        )
+        .all(this.scope)) {
+        grades[row.grade] = (grades[row.grade] || 0) + row.count;
+        markets.add(row.market);
+        statuses.add(row.status);
+        total += row.count;
+      }
+      this.facets = { grades, markets: [...markets], statuses: [...statuses], total };
+      this.facetRevision = revision;
+    }
+    const where = [],
+      args = [this.scope];
+    for (const [key, condition] of Object.entries({
+      q: 'lead_search(summary,?)',
+      market: "lead_market(json_extract(summary,'$.market'))=?",
+      grade: "json_extract(summary,'$.grade')=?",
+      product: "lead_has_product(json_extract(summary,'$.product'),?)",
+      status: "lead_status(record_id,json_extract(summary,'$.status'))=?",
+    })) {
+      const value = filters.get(key);
+      if (!value) continue;
+      where.push(condition);
+      args.push(key === 'q' ? value.toLowerCase() : value);
+    }
+    const source = base + (where.length ? ' AND ' + where.join(' AND ') : '');
+    const filteredTotal = where.length
+      ? this.db.prepare(`SELECT count(*) AS total ${source}`).get(...args).total
+      : this.facets.total;
+    const requested = Number(filters.get('page'));
+    const page = Math.min(
+      Math.max(1, Math.ceil(filteredTotal / 8)),
+      Number.isSafeInteger(requested) && requested > 0 ? requested : 1,
+    );
+    const leads = this.db
+      .prepare(
+        `SELECT ${exportDetails ? 'detail' : 'summary'} AS data ${source} ORDER BY ${newest}${exportDetails ? '' : ' LIMIT 8 OFFSET ?'}`,
+      )
+      .all(...args, ...(exportDetails ? [] : [(page - 1) * 8]))
+      .map(({ data }) => decorate(JSON.parse(data)));
+    return {
+      ...this.metadata(),
+      leads,
+      total: this.facets.total,
+      filteredTotal,
+      page,
+      facets: this.facets,
+    };
+  }
+
   async all() {
     await this.ensure();
     return this.snapshot(true);
@@ -328,6 +410,11 @@ export class LeadLibrary {
 
   async detail(id) {
     await this.ensure();
+    return this.localDetail(id);
+  }
+
+  localDetail(id) {
+    this.assertOpen();
     const row = this.db
       .prepare('SELECT detail,version FROM lead_library_customers WHERE scope=? AND record_id=?')
       .get(this.scope, id);

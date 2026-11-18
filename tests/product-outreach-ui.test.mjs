@@ -221,6 +221,7 @@ test('计划只展示邮箱负责的产品，不再填写旧介绍文案', async
         ],
         products,
         campaigns: [],
+        counts: { total: 0, active: 0 },
         deliveries: [],
         readiness: {},
       },

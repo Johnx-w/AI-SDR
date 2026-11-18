@@ -5,15 +5,19 @@ import type { BusinessWorkspace } from '../services/customerBusiness';
 import './CustomerBusinessSummary.css';
 
 export function CustomerBusinessSummary({ customerId }: { customerId: string }) {
-  const [data, setData] = useState<BusinessWorkspace | null>(null);
+  const [data, setData] = useState<Pick<BusinessWorkspace, 'customerContexts' | 'tasks'> | null>(
+    null,
+  );
   const [error, setError] = useState('');
   useEffect(() => {
     const controller = new AbortController();
     setData(null);
     setError('');
     void customerBusinessApi
-      .workspace({ customerId }, controller.signal)
-      .then(setData)
+      .summary(customerId, controller.signal)
+      .then((result) => {
+        if (!controller.signal.aborted) setData(result);
+      })
       .catch((cause) => {
         if (!controller.signal.aborted)
           setError(cause instanceof Error ? cause.message : '业务记录暂时无法读取');
@@ -44,21 +48,17 @@ export function CustomerBusinessSummary({ customerId }: { customerId: string }) 
       {data && (
         <>
           <h3>下一步行动</h3>
-          {data.tasks
-            .filter((row) => row.status === 'pending')
-            .sort((a, b) => a.dueAt.localeCompare(b.dueAt))
-            .slice(0, 3)
-            .map((row) => (
-              <div className="business-summary-row" key={row.id}>
-                <strong>{row.title}</strong>
-                <span>
-                  {new Date(row.dueAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })} ·{' '}
-                  {row.notes || '系统自动执行'}
-                </span>
-                <Link to={link('tasks')}>核对任务与执行结果</Link>
-              </div>
-            ))}
-          {!data.tasks.some((row) => row.status === 'pending') && <p>暂无待执行跟进任务。</p>}
+          {data.tasks.map((row) => (
+            <div className="business-summary-row" key={row.id}>
+              <strong>{row.title}</strong>
+              <span>
+                {new Date(row.dueAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })} ·{' '}
+                {row.notes || '系统自动执行'}
+              </span>
+              <Link to={link('tasks')}>核对任务与执行结果</Link>
+            </div>
+          ))}
+          {!data.tasks.length && <p>暂无待执行跟进任务。</p>}
         </>
       )}
     </div>

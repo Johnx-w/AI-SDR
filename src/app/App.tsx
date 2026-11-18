@@ -87,15 +87,23 @@ export function App() {
   const [reminderLoading, setReminderLoading] = useState(false);
   const [reminderError, setReminderError] = useState('');
   const [reminderRevision, setReminderRevision] = useState(0);
+  const [reminderCount, setReminderCount] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
     setReminderLoading(true);
     setReminderError('');
-    void overviewApi
-      .get('7d', controller.signal)
+    const read = notifications
+      ? overviewApi.get('7d', controller.signal)
+      : overviewApi.reminderCount(controller.signal);
+    void read
       .then(
         (value) => {
-          if (!controller.signal.aborted) setReminders(value);
+          if (controller.signal.aborted) return;
+          if (typeof value === 'number') setReminderCount(value);
+          else {
+            setReminders(value);
+            setReminderCount((value.metrics.dueTasks || 0) + (value.products.draft || 0));
+          }
         },
         () => {
           if (!controller.signal.aborted) setReminderError('提醒读取失败，请关闭后重试');
@@ -120,7 +128,6 @@ export function App() {
     };
   }, []);
   const current = nav.find((item) => item.path === location.pathname);
-  const reminderCount = (reminders?.metrics.dueTasks || 0) + (reminders?.products.draft || 0);
   return (
     <div className="app-shell">
       {mobile && (

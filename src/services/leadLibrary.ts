@@ -120,6 +120,9 @@ export interface LeadMetadata {
 }
 export interface LeadList extends LeadMetadata {
   leads: LeadSummary[];
+  page?: number;
+  filteredTotal?: number;
+  facets?: { grades: Record<string, number>; markets: string[]; statuses: string[] };
 }
 interface LeadDetail extends LeadMetadata {
   lead: Prospect;
@@ -189,6 +192,9 @@ export function startLeadLibraryPolling({
 // mounted page, so StrictMode and quick navigation can share the same work.
 export class LeadLibraryClient {
   private snapshot: LeadList | null = null;
+  private snapshotKey = '';
+  private requestedKey = '';
+  private detailScope?: string;
   private listeners = new Set<() => void>();
   private details = new Map<string, Prospect>();
   private detailVersions = new Map<string, string | null>();
@@ -210,8 +216,8 @@ export class LeadLibraryClient {
       typeof document !== 'undefined' && document.visibilityState === 'visible',
   ) {}
 
-  cachedList() {
-    return this.snapshot;
+  cachedList(key = this.snapshotKey) {
+    return key === this.snapshotKey ? this.snapshot : null;
   }
   cachedDetail(id: string | null) {
     return id ? this.details.get(id) || null : null;
@@ -227,6 +233,7 @@ export class LeadLibraryClient {
     this.acceptedSequence = ++this.sequence;
     this.mutationSequence = this.acceptedSequence;
     this.snapshot = null;
+    this.detailScope = undefined;
     this.details.clear();
     this.detailVersions.clear();
     this.mutations.clear();
@@ -260,7 +267,8 @@ export class LeadLibraryClient {
     const value = this.cachedDetail(id);
     return value && this.detailVersions.get(id) === this.versionFor(id) ? value : null;
   }
-  private acceptList(data: LeadList, sequence: number) {
+  private acceptList(data: LeadList, sequence: number, key: string) {
+    if (key !== this.requestedKey) return data;
     if (!Array.isArray(data.leads)) throw new Error('客户列表数据不完整，请重试');
     const sameScope = this.snapshot?.scope === data.scope;
     const revision = Number(data.sync.revision);
@@ -278,12 +286,12 @@ export class LeadLibraryClient {
     if (!sameScope || this.snapshot?.sync.revision !== data.sync.revision) {
       // Keep a displayed dossier during same-table revalidation. Clearing it
       // would unmount edit forms and discard drafts on every background sync.
-      if (!sameScope) {
+      if (!sameScope && this.detailScope !== data.scope) {
         if (this.snapshot) this.epoch++;
         this.details.clear();
         this.detailVersions.clear();
         this.mutations.clear();
-      } else {
+      } else if (!data.page) {
         const ids = new Set(data.leads.map((lead) => lead.id));
         for (const id of this.details.keys()) {
           if (!ids.has(id)) {
@@ -298,19 +306,23 @@ export class LeadLibraryClient {
       }
     }
     this.snapshot = data;
+    this.snapshotKey = key;
     this.emit();
     return data;
   }
-  list(): Promise<LeadList> {
-    if (this.listRequest) return this.listRequest;
+  list(key = this.requestedKey): Promise<LeadList> {
+    if (this.listRequest && key === this.requestedKey) return this.listRequest;
+    this.requestedKey = key;
     const sequence = ++this.sequence;
     const epoch = this.epoch;
-    const request = this.request<LeadList>('/api/v1/leads/real/list', 'GET', this.isActive()).then(
-      (data) => {
-        if (epoch !== this.epoch) throw new Error('客户连接已变更，请重新读取列表');
-        return this.acceptList(data, sequence);
-      },
-    );
+    const request = this.request<LeadList>(
+      '/api/v1/leads/real/list' + (key ? '?' + key : ''),
+      'GET',
+      this.isActive(),
+    ).then((data) => {
+      if (epoch !== this.epoch) throw new Error('客户连接已变更，请重新读取列表');
+      return this.acceptList(data, sequence, key);
+    });
     this.listRequest = request;
     void request
       .finally(() => {
@@ -323,13 +335,16 @@ export class LeadLibraryClient {
     if (this.listRequest) await this.listRequest.catch(() => {});
     return this.list();
   }
-  refresh(): Promise<LeadList> {
+  refresh(key = this.requestedKey): Promise<LeadList> {
     if (this.refreshRequest) return this.refreshRequest;
     const sequence = ++this.sequence;
     const epoch = this.epoch;
-    const request = this.request<LeadList>('/api/v1/leads/real/refresh', 'POST').then((data) => {
+    const request = this.request<LeadList>(
+      '/api/v1/leads/real/refresh' + (key ? '?' + key : ''),
+      'POST',
+    ).then((data) => {
       if (epoch !== this.epoch) throw new Error('客户连接已变更，请重新读取列表');
-      return this.acceptList(data, sequence);
+      return this.acceptList(data, sequence, key);
     });
     this.refreshRequest = request;
     void request
@@ -339,7 +354,7 @@ export class LeadLibraryClient {
       .catch(() => {});
     return request;
   }
-  detail(id: string): Promise<Prospect> {
+  detail(id: string, local = false): Promise<Prospect> {
     const cached = this.freshDetail(id);
     if (cached) return Promise.resolve(cached);
     const version = this.versionFor(id);
@@ -349,41 +364,46 @@ export class LeadLibraryClient {
       return existing.promise;
     const epoch = this.epoch;
     const scope = this.snapshot?.scope;
-    const request = this.request<LeadDetail>('/api/v1/leads/real/' + encodeURIComponent(id)).then(
-      (data) => {
-        if (!data.lead || data.lead.id !== id) throw new Error('未收到完整客户档案，请重试');
-        if (epoch !== this.epoch || mutation !== (this.mutations.get(id) || 0)) {
-          const current = this.freshDetail(id);
-          if (current) return current;
-          throw new Error('客户资料已更新，请重新读取档案');
-        }
-        if (
-          (scope && data.scope !== scope) ||
-          (this.snapshot && data.scope !== this.snapshot.scope)
-        ) {
-          // If this request preceded the first list, the current list already
-          // identifies the right scope. Never clear it for an older reply.
-          if (scope === this.snapshot?.scope) {
-            this.reset();
-            void this.list().catch(() => {});
-          }
-          throw new Error('客户连接已变更，正在重新加载列表');
-        }
-        // A background sync may finish between the list and detail requests.
-        // Revalidate the list instead of associating a new detail with old rows.
-        const responseVersion = data.version || `revision:${data.sync.revision}`;
-        if (this.snapshot && responseVersion !== this.versionFor(id)) {
-          const current = this.freshDetail(id);
-          if (current) return current;
+    const request = this.request<LeadDetail>(
+      '/api/v1/leads/real/' + encodeURIComponent(id) + (local ? '?local=1' : ''),
+    ).then((data) => {
+      if (!data.lead || data.lead.id !== id) throw new Error('未收到完整客户档案，请重试');
+      if (epoch !== this.epoch || mutation !== (this.mutations.get(id) || 0)) {
+        const current = this.freshDetail(id);
+        if (current) return current;
+        throw new Error('客户资料已更新，请重新读取档案');
+      }
+      if (
+        (scope && data.scope !== scope) ||
+        (this.snapshot && data.scope !== this.snapshot.scope)
+      ) {
+        // If this request preceded the first list, the current list already
+        // identifies the right scope. Never clear it for an older reply.
+        if (scope === this.snapshot?.scope) {
+          this.reset();
           void this.list().catch(() => {});
-          throw new Error('客户资料已更新，请重试打开档案');
         }
-        this.details.set(id, data.lead);
-        this.detailVersions.set(id, responseVersion);
-        this.emit();
-        return data.lead;
-      },
-    );
+        throw new Error('客户连接已变更，正在重新加载列表');
+      }
+      // A background sync may finish between the list and detail requests.
+      // Revalidate the list instead of associating a new detail with old rows.
+      const responseVersion = data.version || `revision:${data.sync.revision}`;
+      if (
+        this.snapshot &&
+        (!this.snapshot.page || this.versionFor(id)) &&
+        responseVersion !== this.versionFor(id)
+      ) {
+        const current = this.freshDetail(id);
+        if (current) return current;
+        void this.list().catch(() => {});
+        throw new Error('客户资料已更新，请重试打开档案');
+      }
+      this.detailScope = data.scope;
+      this.details.set(id, data.lead);
+      this.detailVersions.set(id, responseVersion);
+      this.emit();
+      return data.lead;
+    });
     this.detailRequests.set(id, { version, mutation, promise: request });
     void request
       .finally(() => {
@@ -405,10 +425,12 @@ export class LeadLibraryClient {
     this.detailRequests.delete(id);
     this.emit();
   }
-  async exportDetails(): Promise<Prospect[]> {
+  async exportDetails(key = ''): Promise<Prospect[]> {
     const scope = this.snapshot?.scope;
     const epoch = this.epoch;
-    const data = await this.request<LeadList & { leads: Prospect[] }>('/api/v1/leads/real');
+    const data = await this.request<LeadList & { leads: Prospect[] }>(
+      '/api/v1/leads/real' + (key ? '?' + key : ''),
+    );
     if (epoch !== this.epoch || (scope && data.scope !== scope))
       throw new Error('客户连接已变更，请刷新列表后重新导出');
     if (!Array.isArray(data.leads)) throw new Error('客户导出数据不完整，请重试');

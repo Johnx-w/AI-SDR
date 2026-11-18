@@ -1023,7 +1023,7 @@ export function OutreachCommunication() {
       return next;
     });
   }
-  const [state, setState] = useState<OutreachState | null>(null);
+  const [state, setState] = useState<(OutreachState & { viewKey: string }) | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1079,6 +1079,17 @@ export function OutreachCommunication() {
   const [campaignStatus, setCampaignStatus] = useState('all');
   const [campaignPage, setCampaignPage] = useState(1);
   const [campaignPageSize, setCampaignPageSize] = useState(20);
+  const viewKey = new URLSearchParams(
+    tab === 'campaigns'
+      ? {
+          view: campaignView,
+          status: campaignStatus,
+          q: campaignQuery.trim(),
+          page: String(campaignPage),
+          pageSize: String(campaignPageSize),
+        }
+      : { view: tab },
+  ).toString();
   const recordKey = new URLSearchParams({
     page: String(recordPage),
     pageSize: String(recordPageSize),
@@ -1086,6 +1097,7 @@ export function OutreachCommunication() {
     q: query.trim(),
   }).toString();
   const request = useRef(0);
+  const pendingState = useRef<{ key: string; promise: Promise<void> } | null>(null);
   const detailController = useRef<AbortController | null>(null);
   const detailStatus = useRef<string | null>(null);
   const internalTestKey = useRef<string | null>(null);
@@ -1143,11 +1155,28 @@ export function OutreachCommunication() {
     };
   }, [tab, recordKey, recordRefresh]);
 
-  const refresh = useCallback(async () => {
-    const current = ++request.current;
-    const result = await outreachApi<OutreachState>('/state');
-    if (current === request.current) setState(result);
-  }, []);
+  const refresh = useCallback(
+    async (poll = false) => {
+      const pending = pendingState.current;
+      if (pending?.key === viewKey) {
+        if (poll) return pending.promise;
+        const generation = request.current;
+        await pending.promise.catch(() => {});
+        if (generation !== request.current) return;
+      }
+      const current = ++request.current;
+      const promise = outreachApi<OutreachState>('/state?' + viewKey)
+        .then((result) => {
+          if (current === request.current) setState({ ...result, viewKey });
+        })
+        .finally(() => {
+          if (pendingState.current?.promise === promise) pendingState.current = null;
+        });
+      pendingState.current = { key: viewKey, promise };
+      return promise;
+    },
+    [viewKey],
+  );
   const refreshDetail = useCallback(async (id: string) => {
     detailController.current?.abort();
     const controller = new AbortController();
@@ -1173,15 +1202,25 @@ export function OutreachCommunication() {
   }, []);
 
   useEffect(() => {
+    let active = true;
     setLoading(true);
-    void refresh()
-      .catch((reason: unknown) => setError(message(reason)))
-      .finally(() => setLoading(false));
+    void refresh(true)
+      .catch((reason: unknown) => {
+        if (active) setError(message(reason));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
     const interval = window.setInterval(() => {
-      if (!document.hidden) void refresh().catch((reason: unknown) => setError(message(reason)));
+      if (!document.hidden)
+        void refresh(true).catch((reason: unknown) => {
+          if (active) setError(message(reason));
+        });
     }, 10000);
     return () => {
       window.clearInterval(interval);
+      active = false;
+      pendingState.current = null;
       request.current += 1;
     };
   }, [refresh]);
@@ -1273,27 +1312,10 @@ export function OutreachCommunication() {
   }
   const mailboxes = state?.mailboxes || [];
   const campaigns = state?.campaigns || [];
-  const filteredCampaigns = campaigns.filter((campaign) => {
-    const history = ['completed', 'cancelled'].includes(campaign.status);
-    const matchesView =
-      campaignView === 'tests'
-        ? campaign.mode === 'internal_test'
-        : campaign.mode === 'production' && (campaignView === 'history' ? history : !history);
-    return (
-      matchesView &&
-      campaign.name.toLocaleLowerCase().includes(campaignQuery.trim().toLocaleLowerCase()) &&
-      (campaignStatus === 'all' ||
-        (campaignStatus === 'attention'
-          ? (campaign.deliveryGroups?.attention || 0) > 0 || !!campaign.lastError
-          : campaign.status === campaignStatus))
-    );
-  });
-  const campaignTotalPages = Math.max(1, Math.ceil(filteredCampaigns.length / campaignPageSize));
-  const currentCampaignPage = Math.min(campaignPage, campaignTotalPages);
-  const visibleCampaigns = filteredCampaigns.slice(
-    (currentCampaignPage - 1) * campaignPageSize,
-    currentCampaignPage * campaignPageSize,
-  );
+  const visibleCampaigns = state?.viewKey === viewKey ? campaigns : [];
+  const filteredCount = state?.viewKey === viewKey ? state.filtered : 0;
+  const campaignTotalPages = Math.max(1, Math.ceil(filteredCount / campaignPageSize));
+  const currentCampaignPage = state?.viewKey === viewKey ? state.page : 1;
   const deliveryStats = state?.deliveryStats;
   const products = state?.products || [];
   const connected = mailboxes.filter(
@@ -1438,7 +1460,7 @@ export function OutreachCommunication() {
         {(
           [
             { id: 'mailboxes', label: '邮箱管理', icon: Mail, count: mailboxes.length },
-            { id: 'campaigns', label: '触达计划', icon: Send, count: campaigns.length },
+            { id: 'campaigns', label: '触达计划', icon: Send, count: state?.counts?.total ?? null },
             { id: 'deliveries', label: '发送记录', icon: Inbox, count: deliveryStats?.total || 0 },
             { id: 'conversations', label: '邮件会话', icon: MessageSquare, count: null },
           ] as const
@@ -1458,13 +1480,13 @@ export function OutreachCommunication() {
           </button>
         ))}
       </div>
-      {!state && loading ? (
+      {!state && loading && tab !== 'deliveries' ? (
         <div className="outreach-loading">
           <LoaderCircle size={22} className="outreach-spin" />
           正在读取邮箱和计划…
         </div>
       ) : (
-        state && (
+        (state || tab === 'deliveries') && (
           <div role="tabpanel" id={`outreach-panel-${tab}`} aria-labelledby={`outreach-tab-${tab}`}>
             {tab === 'conversations' && (
               <MailConversations
@@ -1475,7 +1497,7 @@ export function OutreachCommunication() {
                 onMailboxChange={openMailboxConversations}
               />
             )}
-            {tab === 'campaigns' && (
+            {tab === 'campaigns' && state && (
               <>
                 <div className="outreach-metrics">
                   {[
@@ -1547,9 +1569,7 @@ export function OutreachCommunication() {
                     <h2>触达计划</h2>
                     <p>选择客户范围，启动后自动生成开发信并按规则发送。</p>
                   </div>
-                  <span>
-                    {campaigns.filter((item) => item.status === 'active').length} 个运行中
-                  </span>
+                  <span>{state.counts.active} 个运行中</span>
                 </div>
                 <section className="panel outreach-records">
                   <div className="outreach-campaign-views" aria-label="计划视图">
@@ -1620,7 +1640,7 @@ export function OutreachCommunication() {
                     </select>
                   </div>
                   <nav className="outreach-record-pagination" aria-label="触达计划分页">
-                    <span aria-live="polite">共 {filteredCampaigns.length} 个计划</span>
+                    <span aria-live="polite">共 {filteredCount} 个计划</span>
                     <label>
                       每页
                       <select
@@ -1690,7 +1710,7 @@ export function OutreachCommunication() {
                                 <strong>
                                   {campaign.stats?.accepted || 0} /{' '}
                                   {campaign.acquisitionSource
-                                    ? campaign.customerIds?.length || 0
+                                    ? campaign.customerCount || 0
                                     : campaign.targetCount}
                                 </strong>
                                 {campaign.acquisitionSource && <small>已发送 / 本轮收录客户</small>}
@@ -1700,7 +1720,7 @@ export function OutreachCommunication() {
                                 <div className="outreach-progress-track" aria-hidden="true">
                                   <span
                                     style={{
-                                      width: `${Math.min(100, ((campaign.stats?.accepted || 0) / Math.max(1, campaign.acquisitionSource ? campaign.customerIds?.length || 0 : campaign.targetCount || 0)) * 100)}%`,
+                                      width: `${Math.min(100, ((campaign.stats?.accepted || 0) / Math.max(1, campaign.acquisitionSource ? campaign.customerCount || 0 : campaign.targetCount || 0)) * 100)}%`,
                                     }}
                                   />
                                 </div>
@@ -1785,6 +1805,8 @@ export function OutreachCommunication() {
                         </tbody>
                       </table>
                     </div>
+                  ) : state?.viewKey !== viewKey && !error ? (
+                    <p role="status">正在读取触达计划…</p>
                   ) : (
                     <Empty
                       title={
@@ -2584,6 +2606,7 @@ export function OutreachCommunication() {
               delivery={currentDeliveryPreview}
               loadingBody={deliveryFull?.id !== currentDeliveryPreview.id && !verificationError}
               campaignName={
+                currentDeliveryPreview.campaignName ||
                 campaigns.find((campaign) => campaign.id === currentDeliveryPreview.campaignId)
                   ?.name
               }

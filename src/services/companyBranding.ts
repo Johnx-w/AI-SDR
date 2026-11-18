@@ -164,9 +164,12 @@ export class CompanyBrandingClient {
     if (cached && cached.expiresAt > this.now()) return Promise.resolve(cached.marks);
     const pending = this.pending.get(key);
     if (pending) return pending;
-    const request = this.fetcher('/api/v1/leads/real/' + encodeURIComponent(id) + '/branding', {
-      signal: AbortSignal.timeout(20000),
-    })
+    const request = this.fetcher(
+      '/api/v1/leads/real/' + encodeURIComponent(id) + '/branding?local=1',
+      {
+        signal: AbortSignal.timeout(20000),
+      },
+    )
       .then(async (response) => {
         if (!response.ok) throw new Error('企业 Logo 暂时不可用');
         const result = await response.json();

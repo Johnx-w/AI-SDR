@@ -26,10 +26,7 @@ export function normalizeDevelopmentStatus(status) {
 }
 
 // Derive display progress from saved business facts; keep the upstream record intact.
-export function decorateLeadDevelopment(
-  snapshot,
-  { customerContexts = [], messages = [], demands = [] } = {},
-) {
+export function leadDevelopment({ customerContexts = [], messages = [], demands = [] } = {}) {
   const controls = new Map(customerContexts.map((row) => [row.customerId, row]));
   const progress = new Map();
   const advance = (customerId, rank) =>
@@ -76,7 +73,7 @@ export function decorateLeadDevelopment(
     )
       advance(demand.customerId, 3);
   }
-  const decorate = (lead) => {
+  return (lead) => {
     const context = controls.get(lead.id);
     let status = normalizeDevelopmentStatus(lead.status);
     const rank = progress.get(lead.id) || 0;
@@ -92,6 +89,10 @@ export function decorateLeadDevelopment(
       ...(lead.version ? { version: `${lead.version}${suffix}` } : {}),
     };
   };
+}
+
+export function decorateLeadDevelopment(snapshot, facts) {
+  const decorate = leadDevelopment(facts);
   if (snapshot.leads) return { ...snapshot, leads: snapshot.leads.map(decorate) };
   if (snapshot.lead) {
     const lead = decorate({ ...snapshot.lead, version: snapshot.version });

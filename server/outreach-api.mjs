@@ -3,7 +3,7 @@ const fail = (status, message) => Object.assign(new Error(message), { status });
 export async function handleOutreach({ request, url, service, readJson, idempotencyKey }) {
   const path = url.pathname.slice('/api/v1/outreach'.length),
     method = request.method;
-  if (path === '/state' && method === 'GET') return service.state();
+  if (path === '/state' && method === 'GET') return service.state(url.searchParams);
   if (path === '/deliveries' && method === 'GET')
     return service.listDeliveries(Object.fromEntries(url.searchParams));
   const delivery = path.match(/^\/deliveries\/([\w-]+)$/);

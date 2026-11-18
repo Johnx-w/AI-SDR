@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { leadDevelopment } from './lead-development.mjs';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -111,6 +112,7 @@ export class CustomerBusiness {
       CREATE TABLE IF NOT EXISTS customer_business_requests(
         scope TEXT NOT NULL,kind TEXT NOT NULL,request_key TEXT NOT NULL,body_hash TEXT NOT NULL,entity_id TEXT NOT NULL,
         PRIMARY KEY(scope,kind,request_key));
+      CREATE INDEX IF NOT EXISTS business_entity_customer ON customer_business_entities(scope,kind,json_extract(data,'$.customerId'));
       CREATE TABLE IF NOT EXISTS customer_business_contexts(
         scope TEXT NOT NULL,customer_id TEXT NOT NULL,data TEXT NOT NULL,
         PRIMARY KEY(scope,customer_id));
@@ -130,12 +132,12 @@ export class CustomerBusiness {
       .get(this.scope, kind, id);
     return row ? JSON.parse(row.data) : null;
   }
-  all(kind) {
+  all(kind, customerId) {
     return this.db
       .prepare(
-        'SELECT data FROM customer_business_entities WHERE scope=? AND kind=? ORDER BY rowid',
+        `SELECT data FROM customer_business_entities WHERE scope=? AND kind=?${customerId ? " AND json_extract(data,'$.customerId')=?" : ''} ORDER BY rowid`,
       )
-      .all(this.scope, kind)
+      .all(this.scope, kind, ...(customerId ? [customerId] : []))
       .map((row) => JSON.parse(row.data));
   }
   context(customerId) {
@@ -152,6 +154,34 @@ export class CustomerBusiness {
       .prepare('SELECT data FROM customer_business_contexts WHERE scope=? ORDER BY rowid')
       .all(this.scope)
       .map(({ data }) => JSON.parse(data));
+  }
+  nextTasks(id) {
+    return this.db
+      .prepare(
+        `SELECT data FROM customer_business_entities WHERE scope=? AND kind='tasks' AND json_extract(data,'$.customerId')=? AND json_extract(data,'$.origin')='automatic-followup' AND json_extract(data,'$.status')='pending' ORDER BY json_extract(data,'$.dueAt'),id LIMIT 3`,
+      )
+      .all(this.scope, id)
+      .map(({ data }) => JSON.parse(data));
+  }
+  development(customerId) {
+    const { revision } = this.db
+      .prepare("SELECT total_changes() || ':' || data_version AS revision FROM pragma_data_version")
+      .get();
+    if (revision !== this.developmentRevision) {
+      if (customerId)
+        return leadDevelopment({
+          customerContexts: [this.context(customerId)],
+          messages: this.all('messages', customerId),
+          demands: this.all('demands', customerId),
+        });
+      this.decorate = leadDevelopment({
+        customerContexts: this.contexts(),
+        messages: this.all('messages'),
+        demands: this.all('demands'),
+      });
+      this.developmentRevision = revision;
+    }
+    return this.decorate;
   }
   putContext(context) {
     const current = this.context(context.customerId);

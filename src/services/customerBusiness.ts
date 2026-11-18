@@ -141,6 +141,11 @@ async function request<T>(path = '', options: RequestInit = {}): Promise<T> {
   return body as T;
 }
 export const customerBusinessApi = {
+  summary: (id: string, signal?: AbortSignal) =>
+    request<Pick<BusinessWorkspace, 'customerContexts' | 'tasks'>>(
+      '/summary/' + encodeURIComponent(id),
+      { signal },
+    ),
   workspace: (filter: { customerId?: string; productId?: string } = {}, signal?: AbortSignal) => {
     const query = new URLSearchParams();
     if (filter.customerId) query.set('customerId', filter.customerId);

@@ -36,6 +36,7 @@ import { validateContactEdit } from './lead-contacts.mjs';
 import { LeadLibrary } from './lead-library.mjs';
 import { LeadPerformance } from './lead-performance.mjs';
 import { OverviewService } from './overview.mjs';
+import { overviewRange } from '../src/domain/overview-rules.mjs';
 import { websiteScope } from './website-metadata.mjs';
 import { acquisitionJobs, syncOperationalFeishu } from './operational-feishu.mjs';
 import { syncAssessmentFeishu } from './assessment-feishu.mjs';
@@ -332,8 +333,15 @@ export function createApp({
     // Keep measurements scoped to the connection that started this request.
     const metrics = leadPerformance;
     try {
-      const body = decorateLeadDevelopment(await read(), business.state().store.view());
-      if (body.leads) {
+      const body = await read();
+      if (body.lead) {
+        const decorate = business.state().store.development(body.lead.id);
+        const { version, ...lead } = decorate({ ...body.lead, version: body.version });
+        body.lead = lead;
+        body.version = version;
+      } else if (body.leads && !body.facets) {
+        const decorate = business.state().store.development();
+        body.leads = body.leads.map(decorate);
         body.leads = body.leads.filter(isDevelopmentCustomer);
         body.total = body.leads.length;
       }
@@ -408,6 +416,20 @@ export function createApp({
         admitted = true;
         if (url.pathname === '/api/v1/overview') {
           if (request.method !== 'GET') throw new ApiError(405, '总览仅支持读取');
+          if (url.searchParams.get('summary') === 'reminders') {
+            const store = business.state().store;
+            const due = store.db
+              .prepare(
+                `SELECT count(*) AS count FROM customer_business_entities WHERE scope=? AND kind='tasks' AND json_extract(data,'$.origin')='automatic-followup' AND json_extract(data,'$.status')='pending' AND julianday(json_extract(data,'$.dueAt')) < julianday(?)`,
+              )
+              .get(store.scope, overviewRange().todayEnd);
+            const draft = knowledge()
+              .db.prepare(
+                "SELECT count(*) AS count FROM product_knowledge WHERE json_extract(data,'$.status')='draft'",
+              )
+              .get();
+            return json(response, 200, { count: due.count + draft.count });
+          }
           return json(
             response,
             200,
@@ -652,19 +674,37 @@ export function createApp({
           });
         if (url.pathname === '/api/v1/leads/real/list' && request.method === 'GET') {
           if (request.headers['x-lead-library-activity'] === 'active') library().touch();
+          if (url.searchParams.has('page'))
+            return await leadJson(response, 'list', () =>
+              library().page(url.searchParams, business.state().store.development()),
+            );
           return await leadJson(response, 'list', () => library().list());
         }
         if (url.pathname === '/api/v1/leads/real/refresh' && request.method === 'POST')
           return await leadJson(response, 'refresh', async () => {
             await provider.syncCustomers?.();
-            return library().refresh();
+            const snapshot = await library().refresh();
+            return url.searchParams.has('page')
+              ? library().page(url.searchParams, business.state().store.development())
+              : snapshot;
           });
         if (url.pathname === '/api/v1/leads/real' && request.method === 'GET')
-          return await leadJson(response, 'export', loadLeads);
+          return await leadJson(
+            response,
+            'export',
+            url.searchParams.has('page')
+              ? () =>
+                  library().page(url.searchParams, business.state().store.development(), {
+                    exportDetails: true,
+                  })
+              : loadLeads,
+          );
         const leadRoute = url.pathname.match(/^\/api\/v1\/leads\/real\/([\w-]{1,100})$/);
         if (leadRoute && request.method === 'GET')
           return await leadJson(response, 'detail', async () => {
-            const data = await library().detail(leadRoute[1]);
+            const data = url.searchParams.has('local')
+              ? library().localDetail(leadRoute[1])
+              : await library().detail(leadRoute[1]);
             return { ...data, lead: provider.decorateLeads({ leads: [data.lead] }).leads[0] };
           });
         const supplementRoute = url.pathname.match(
@@ -789,7 +829,9 @@ export function createApp({
         }
         const branding = url.pathname.match(/^\/api\/v1\/leads\/real\/([\w-]+)\/branding$/);
         if (branding && request.method === 'GET') {
-          const { lead } = await library().detail(branding[1]);
+          const { lead } = url.searchParams.has('local')
+            ? library().localDetail(branding[1])
+            : await library().detail(branding[1]);
           return json(response, 200, await brandingCache.get(lead));
         }
         if (url.pathname === `${prefix}/status` && request.method === 'GET')
@@ -948,6 +990,9 @@ export function createApp({
         'Content-Type': types[extname(target)] || 'application/octet-stream',
         'Content-Length': content.length,
         Vary: 'Accept-Encoding',
+        ...(/^\/assets\/[\w.-]+-[\w-]{8,}\.(css|js)$/.test(pathname) && extname(target) !== '.html'
+          ? { 'Cache-Control': 'private, max-age=31536000, immutable' }
+          : {}),
         ...(compressed ? { 'Content-Encoding': 'gzip' } : {}),
         'X-Content-Type-Options': 'nosniff',
         'Referrer-Policy': 'same-origin',
@@ -966,6 +1011,10 @@ export function createApp({
   const startBackground = () => {
     if (backgroundStarted || isMaintaining()) return;
     backgroundStarted = true;
+    if (env.LEAD_LIBRARY_DB_PATH && !library().meta && connections.environment().FEISHU_TABLE_ID)
+      void library()
+        .refresh()
+        .catch(() => {});
     plans().start();
     if (env.CUSTOMER_BUSINESS_DB_PATH || env.BATCH_DB_PATH) business.start();
     if (env.OUTREACH_DB_PATH || jobs().outreachJobs().length) outreach().start();

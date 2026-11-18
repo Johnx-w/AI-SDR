@@ -42,6 +42,7 @@ export interface OutreachMailbox {
 }
 
 export interface OutreachCampaign {
+  customerCount?: number;
   followUpEnabled?: boolean;
   followUpPaused?: boolean;
   id: string;
@@ -86,6 +87,7 @@ export type OutreachDeliveryStatus =
   | 'cancelled';
 
 export interface OutreachDelivery {
+  campaignName?: string;
   id: string;
   campaignId: string;
   mode?: 'internal_test' | 'production';
@@ -126,6 +128,9 @@ export interface OutreachDelivery {
 }
 
 export interface OutreachState {
+  counts: { total: number; active: number };
+  filtered: number;
+  page: number;
   mailboxes: OutreachMailbox[];
   campaigns: OutreachCampaign[];
   deliveryStats: Record<OutreachDeliveryStatus | 'total', number>;

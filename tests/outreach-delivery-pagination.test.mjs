@@ -7,6 +7,75 @@ import { OutreachService } from '../server/outreach-service.mjs';
 import { handleOutreach } from '../server/outreach-api.mjs';
 import { deliveryGroup } from '../src/domain/outreach-status.mjs';
 
+test('网页计划按真实状态和注意项先筛选再分页，仅返回可见行；索引统计不排序邮件正文', async (t) => {
+  const service = new OutreachService({
+    mailboxes: { list: () => [] },
+    acquisitionSources: () => assert.fail('网页不读取获客任务'),
+  });
+  t.after(() => service.close());
+  const plans = [];
+  const prepare = service.db.prepare.bind(service.db);
+  service.db.prepare = (sql) => {
+    const statement = prepare(sql);
+    if (
+      sql.startsWith('SELECT') &&
+      (sql.includes('INDEXED BY outreach_counts') ||
+        sql.includes('INDEXED BY outreach_record_search'))
+    ) {
+      const original = statement.all.bind(statement);
+      statement.all = (...args) => {
+        plans.push({
+          sql,
+          plan: prepare('EXPLAIN QUERY PLAN ' + sql)
+            .all(...args)
+            .map((row) => row.detail)
+            .join(';'),
+        });
+        return original(...args);
+      };
+    }
+    return statement;
+  };
+  for (let index = 0; index < 25; index++) {
+    const campaignId = `plan-${index}`;
+    service.putCampaign({
+      id: campaignId,
+      name: `Buyer ${index}`,
+      mode: 'production',
+      status: index === 24 ? 'completed' : 'active',
+      customerIds: ['one'],
+      productScopes: [{ facts: 'private to the plan details' }],
+    });
+    service.putDelivery({
+      id: `delivery-${index}`,
+      campaignId,
+      status: index % 2 ? 'draft' : 'accepted',
+      subject: 'Ready',
+      companyName: 'Buyer',
+      candidate: { evidence: 'x'.repeat(1000) },
+    });
+  }
+  const read = (params) => service.state(new URLSearchParams(params));
+  const page = await read('view=current&status=attention&q=BUYER&page=2&pageSize=10');
+  assert.deepEqual({ ...page.counts }, { total: 25, active: 24 });
+  assert.equal(page.filtered, 12);
+  assert.deepEqual(
+    page.campaigns.map((row) => row.id),
+    ['plan-3', 'plan-1'],
+  );
+  assert.equal(page.campaigns[0].customerCount, 1);
+  assert.ok(!('productScopes' in page.campaigns[0]));
+  assert.equal((await read('view=history')).campaigns[0].id, 'plan-24');
+  assert.deepEqual((await read('view=deliveries')).campaigns, []);
+  assert.equal(service.listDeliveries({ q: 'Buyer', page: 2 }).items.length, 5);
+  const global = plans.find(
+    ({ sql }) => sql.includes('GROUP BY campaign_id') && !sql.includes('WHERE campaign_id='),
+  );
+  assert.match(global.plan, /outreach_counts/);
+  assert.doesNotMatch(global.plan, /TEMP B-TREE/);
+  assert.ok(plans.some(({ plan }) => plan.includes('outreach_record_search')));
+});
+
 test('全部发送记录和入口总数包含已取消及已跳过', async (t) => {
   const service = new OutreachService({ mailboxes: { list: () => [] } });
   t.after(() => service.close());

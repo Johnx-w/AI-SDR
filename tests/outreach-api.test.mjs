@@ -49,7 +49,7 @@ test('计划摘要省略批量HTML和候选快照，单封读取保留原文且�
   assert.equal(summary.deliveries[0].candidate, undefined);
   const full = await (await fetch(`${base}/deliveries/delivery-1`)).json();
   const { candidate, ...expected } = original.deliveries[1];
-  assert.deepEqual(full, expected);
+  assert.deepEqual(full, { ...expected, campaignName: campaign.name });
   assert.equal((await fetch(`${base}/deliveries/missing`)).status, 404);
   assert.equal(
     (

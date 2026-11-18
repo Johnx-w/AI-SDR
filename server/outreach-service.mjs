@@ -22,6 +22,12 @@ const text = (value, max = 200) => (typeof value === 'string' ? value.trim().sli
 const list = (value) =>
   Array.isArray(value) ? [...new Set(value.map((v) => text(v)).filter(Boolean))].slice(0, 200) : [];
 const iso = (now) => new Date(now()).toISOString();
+const outcomeSql = "CASE WHEN state='failed' THEN json_extract(data,'$.resolution.outcome') END";
+const draftSql =
+  "CASE WHEN state='draft' THEN coalesce(json_extract(data,'$.subject'),'')!='' ELSE 0 END";
+const recordSearchSql = ['companyName', 'to', 'from', 'subject']
+  .map((field) => `coalesce(json_extract(data,'$.${field}'),'')`)
+  .join(" || ' ' || ");
 const terminal = new Set(['accepted', 'failed', 'unknown', 'blocked', 'skipped', 'cancelled']);
 const customerSkipCodes = new Set([
   'match_unverified',
@@ -97,6 +103,8 @@ export class OutreachService {
       CREATE TABLE IF NOT EXISTS outreach_campaigns(id TEXT PRIMARY KEY,data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS outreach_deliveries(id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,state TEXT NOT NULL,data TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS outreach_delivery_campaign ON outreach_deliveries(campaign_id,state);
+      CREATE INDEX IF NOT EXISTS outreach_counts ON outreach_deliveries(campaign_id,state,${outcomeSql},${draftSql});
+      CREATE INDEX IF NOT EXISTS outreach_record_search ON outreach_deliveries((${recordSearchSql}),state,id);
       CREATE TABLE IF NOT EXISTS outreach_reservations(identity TEXT PRIMARY KEY,delivery_id TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS outreach_requests(key TEXT PRIMARY KEY,kind TEXT NOT NULL,result_id TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS outreach_suppression(identity TEXT PRIMARY KEY,reason TEXT NOT NULL);`);
@@ -250,14 +258,11 @@ export class OutreachService {
     }
     const query = String(q).trim();
     if (query) {
-      const fields = ['companyName', 'to', 'from', 'subject'];
-      where.push(
-        `instr(outreach_lower(${fields.map((field) => `coalesce(json_extract(data, '$.${field}'), '')`).join(" || ' ' || ")}), ?) > 0`,
-      );
+      where.push(`instr(outreach_lower(${recordSearchSql}), ?) > 0`);
       params.push(query.toLowerCase());
     }
     const clause = where.length ? ` WHERE ${where.join(' AND ')}` : '';
-    const source = `FROM outreach_deliveries LEFT JOIN outreach_delivery_bounces AS bounce
+    const source = `FROM outreach_deliveries ${query ? 'INDEXED BY outreach_record_search' : ''} LEFT JOIN outreach_delivery_bounces AS bounce
       ON bounce.delivery_id = outreach_deliveries.id AND state = 'accepted'`;
     const total = this.db
       .prepare(`SELECT count(*) AS total ${source}${clause}`)
@@ -281,6 +286,9 @@ export class OutreachService {
   }
   deliveryRecord(id) {
     const { candidate, ...delivery } = this.delivery(id);
+    delivery.campaignName = this.db
+      .prepare("SELECT json_extract(data,'$.name') AS name FROM outreach_campaigns WHERE id=?")
+      .get(delivery.campaignId)?.name;
     const bounce =
       delivery.status === 'accepted' &&
       this.db
@@ -303,6 +311,10 @@ export class OutreachService {
     return d;
   }
   withStats(c) {
+    const { stats, deliveryGroups } = this.deliveryCounts(c.id);
+    return { ...c, stats, deliveryGroups };
+  }
+  deliveryCounts(campaignId) {
     const deliveryGroups = {
       pending: 0,
       sent: 0,
@@ -321,23 +333,66 @@ export class OutreachService {
       skipped: 0,
       sending: 0,
     };
+    let total = 0,
+      cancelled = 0;
     for (const row of this.db
       .prepare(
-        "SELECT state, CASE WHEN state='failed' THEN json_extract(data, '$.resolution.outcome') END AS outcome, count(*) AS count FROM outreach_deliveries WHERE campaign_id=? GROUP BY state,outcome",
+        `SELECT state,${outcomeSql} AS outcome,${draftSql} AS ready,count(*) AS count FROM outreach_deliveries INDEXED BY outreach_counts ${campaignId ? 'WHERE campaign_id=?' : ''} GROUP BY campaign_id,state,outcome,ready`,
       )
-      .all(c.id)) {
+      .all(...(campaignId ? [campaignId] : []))) {
+      total += row.count;
+      if (row.state === 'cancelled') cancelled += row.count;
       if (row.state in stats) stats[row.state] += row.count;
-      deliveryGroups[deliveryGroup({ status: row.state, resolution: { outcome: row.outcome } })] +=
-        row.count;
+      deliveryGroups[
+        deliveryGroup({
+          status: row.state,
+          subject: row.ready,
+          resolution: { outcome: row.outcome },
+        })
+      ] += row.count;
     }
-    const readyDrafts = this.db
+    return { stats, total, cancelled, deliveryGroups };
+  }
+  campaignPage(params) {
+    const view = params.get('view'),
+      status = params.get('status'),
+      q = params.get('q')?.trim().toLowerCase();
+    const where = [],
+      args = [];
+    const history = "json_extract(data,'$.status') IN ('completed','cancelled')";
+    where.push(
+      view === 'tests'
+        ? "json_extract(data,'$.mode')='internal_test'"
+        : `json_extract(data,'$.mode')='production' AND ${view === 'history' ? '' : 'NOT'} (${history})`,
+    );
+    if (q) {
+      where.push("instr(outreach_lower(json_extract(data,'$.name')),?)>0");
+      args.push(q);
+    }
+    if (status === 'attention')
+      where.push(
+        `(coalesce(json_extract(data,'$.lastError'),'') != '' OR EXISTS (SELECT 1 FROM outreach_deliveries INDEXED BY outreach_counts WHERE campaign_id=outreach_campaigns.id AND outreach_delivery_group(state,${draftSql},${outcomeSql})='attention'))`,
+      );
+    else if (status && status !== 'all') {
+      where.push("json_extract(data,'$.status')=?");
+      args.push(status);
+    }
+    const source = 'FROM outreach_campaigns WHERE ' + where.join(' AND ');
+    const filtered = this.db.prepare(`SELECT count(*) AS count ${source}`).get(...args).count;
+    const size = [10, 20, 50, 100].includes(Number(params.get('pageSize')))
+      ? Number(params.get('pageSize'))
+      : 20;
+    const page = Math.max(
+      1,
+      Math.min(Math.ceil(filtered / size), Math.floor(Number(params.get('page'))) || 1),
+    );
+    const campaigns = this.db
       .prepare(
-        "SELECT count(*) AS count FROM outreach_deliveries WHERE campaign_id=? AND state='draft' AND coalesce(json_extract(data, '$.subject'), '') != ''",
+        `SELECT json_array_length(data,'$.customerIds') AS customerCount,json_remove(data,'$.customerIds','$.baselineCustomerIds','$.productScopes') AS data ${source} ORDER BY rowid DESC LIMIT ? OFFSET ?`,
       )
-      .get(c.id).count;
-    deliveryGroups.pending -= readyDrafts;
-    deliveryGroups.attention += readyDrafts;
-    return { ...c, stats, deliveryGroups };
+      .all(...args, size, (page - 1) * size)
+      .map(({ data, customerCount }) => this.withStats({ ...JSON.parse(data), customerCount }));
+    return { campaigns, filtered, page };
   }
   detail(id) {
     return { campaign: this.withStats(this.campaign(id)), deliveries: this.deliveries(id) };
@@ -345,50 +400,42 @@ export class OutreachService {
   generatorClient() {
     return this.generator || createOutreachGenerator({ env: this.getEnv() });
   }
-  async state() {
+  async state(params) {
     const mailboxes = this.mailboxes.list().map(({ signatureDesign, ...mailbox }) => mailbox);
-    const campaigns = this.campaigns();
-    const deliveryGroups = {
-      pending: 0,
-      sent: 0,
-      attention: 0,
-      resolved: 0,
-      skipped: 0,
-      cancelled: 0,
-    };
-    const deliveryStats = {
-      total: 0,
-      draft: 0,
-      queued: 0,
-      sending: 0,
-      accepted: 0,
-      failed: 0,
-      unknown: 0,
-      blocked: 0,
-      cancelled: 0,
-      skipped: 0,
-    };
-    for (const row of this.db
-      .prepare(
-        "SELECT state, CASE WHEN state='failed' THEN json_extract(data, '$.resolution.outcome') END AS outcome, count(*) AS count FROM outreach_deliveries GROUP BY state,outcome",
-      )
-      .all()) {
-      deliveryStats.total += row.count;
-      if (row.state in deliveryStats) deliveryStats[row.state] += row.count;
-      deliveryGroups[deliveryGroup({ status: row.state, resolution: { outcome: row.outcome } })] +=
-        row.count;
-    }
-    const readyDrafts = this.db
-      .prepare(
-        "SELECT count(*) AS count FROM outreach_deliveries WHERE state='draft' AND coalesce(json_extract(data, '$.subject'), '') != ''",
-      )
-      .get().count;
-    deliveryGroups.pending -= readyDrafts;
-    deliveryGroups.attention += readyDrafts;
+    const { stats, total, cancelled, deliveryGroups } = this.deliveryCounts();
+    const deliveryStats = { ...stats, total, cancelled };
     let generatorConfigured = false;
     try {
       generatorConfigured = !!this.generatorClient().configured;
     } catch {}
+    if (params?.has('view')) {
+      const counts = this.db
+        .prepare(
+          "SELECT count(*) AS total,count(*) FILTER (WHERE json_extract(data,'$.status')='active') AS active FROM outreach_campaigns",
+        )
+        .get();
+      const page = ['current', 'history', 'tests'].includes(params.get('view'))
+        ? this.campaignPage(params)
+        : { campaigns: [], filtered: 0, page: 1 };
+      const products = this.products().map(({ id, name, label, category, approved, status }) => ({
+        id,
+        name,
+        label,
+        category,
+        approved,
+        status,
+      }));
+      return {
+        mailboxes,
+        products,
+        ...page,
+        counts,
+        deliveryStats,
+        deliveryGroups,
+        readiness: { generatorConfigured },
+      };
+    }
+    const campaigns = this.campaigns();
     const followUps = this.followUps.all();
     const followUpStats = {
       sending: followUps.filter((item) => item.status === 'sending').length,

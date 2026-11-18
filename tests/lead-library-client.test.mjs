@@ -27,6 +27,25 @@ const deferred = () => {
   return { promise, resolve };
 };
 
+test('迟到的筛选响应不覆盖新页，直达非当前页档案不要求下载客户库', async () => {
+  const pending = deferred(),
+    calls = [];
+  const client = new LeadLibraryClient(async (url) => {
+    calls.push(url);
+    if (url.endsWith('?page=1')) return pending.promise;
+    if (url.includes('/list?')) return Response.json({ ...snapshot(), leads: [], page: 2 });
+    return Response.json({ ...detail(), version: 'v1' });
+  });
+  const older = client.list('page=1');
+  await client.list('page=2');
+  pending.resolve(Response.json({ ...snapshot(), page: 1 }));
+  await older;
+  assert.equal(client.cachedList('page=1'), null);
+  assert.equal(client.cachedList('page=2').page, 2);
+  assert.deepEqual(await client.detail(lead.id, true), lead);
+  assert.equal(calls.length, 3);
+});
+
 test('跨页面同时读取合并为一个请求，已加载列表和详情可立即复用', async () => {
   const pending = deferred();
   const calls = [];

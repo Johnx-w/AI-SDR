@@ -19,13 +19,12 @@ import type { SupplementContext } from '../services/leadSupplements';
 import { WebsiteEvidencePanel } from '../components/WebsiteEvidencePanel';
 import { CustomerBusinessSummary } from '../components/CustomerBusinessSummary';
 import { leadLibrary, startLeadLibraryPolling } from '../services/leadLibrary';
-import type { LeadList, Prospect } from '../services/leadLibrary';
+import type { Prospect } from '../services/leadLibrary';
 import { exportCsv } from '../services/csv';
 import { formatBeijingText, formatBeijingTime } from '../domain/date-time.mjs';
 import {
   developmentStatuses,
   leadProductCategoryLabels,
-  leadProductCategories,
   marketLabel,
 } from '../domain/lead-library-filters';
 import './LeadLibrary.css';
@@ -62,12 +61,9 @@ const safeUrl = (s: string) => {
     return undefined;
   }
 };
-const newestFirst = (a: { createdAt?: number | null }, b: { createdAt?: number | null }) =>
-  (b.createdAt ?? 0) - (a.createdAt ?? 0);
 export function LeadLibrary() {
   const { notify } = useWorkspace();
   const [params, setParams] = useSearchParams();
-  const [remote, setRemote] = useState<LeadList | null>(leadLibrary.cachedList());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [detailError, setDetailError] = useState('');
@@ -85,43 +81,52 @@ export function LeadLibrary() {
   const [supplement, setSupplement] = useState<SupplementContext | undefined>(undefined);
   const detailBody = useRef<HTMLDivElement>(null);
   const mounted = useRef(false);
+  const listKey = new URLSearchParams({
+    page: String(page),
+    q: query,
+    market,
+    grade,
+    product,
+    status,
+  }).toString();
+  const currentKey = useRef(listKey);
+  const remote = leadLibrary.cachedList(listKey);
   async function load(refresh = false) {
     setLoading(true);
     setError('');
     try {
-      const data = await (refresh ? leadLibrary.refresh() : leadLibrary.list());
-      if (mounted.current) setRemote(data);
+      await (refresh ? leadLibrary.refresh(listKey) : leadLibrary.list(listKey));
     } catch (e) {
-      if (mounted.current) setError((e as Error).message);
+      if (mounted.current && listKey === currentKey.current) setError((e as Error).message);
     } finally {
-      if (mounted.current) setLoading(false);
+      if (mounted.current && listKey === currentKey.current) setLoading(false);
     }
   }
   useEffect(() => {
     mounted.current = true;
+    currentKey.current = listKey;
     const unsubscribe = leadLibrary.subscribe(() => {
-      setRemote(leadLibrary.cachedList());
       setCacheVersion((value) => value + 1);
     });
     const stopPolling = startLeadLibraryPolling({
       read: () => load(),
-      isRefreshing: () => Boolean(leadLibrary.cachedList()?.sync.refreshing),
+      isRefreshing: () => Boolean(leadLibrary.cachedList(listKey)?.sync.refreshing),
     });
     return () => {
       mounted.current = false;
       unsubscribe();
       stopPolling();
     };
-  }, []);
+  }, [listKey]);
   const selectedId = params.get('lead');
   const selectedVersion =
     remote?.leads.find((lead) => lead.id === selectedId)?.version || remote?.sync.revision;
   const viewed = leadLibrary.cachedDetail(selectedId);
   useEffect(() => {
     setDetailError('');
-    if (!selectedId || !remote) return;
+    if (!selectedId) return;
     let active = true;
-    void leadLibrary.detail(selectedId).catch((e: Error) => {
+    void leadLibrary.detail(selectedId, true).catch((e: Error) => {
       if (active) setDetailError(e.message);
     });
     return () => {
@@ -138,23 +143,10 @@ export function LeadLibrary() {
   useEffect(() => {
     setSupplement(undefined);
   }, [params.get('lead')]);
-  const leads = remote?.leads || [];
-  const filtered = leads
-    .filter(
-      (l) =>
-        (!query ||
-          `${l.name} ${(l.companyIdentity?.aliases || []).join(' ')} ${l.domain} ${l.contact} ${l.email} ${l.source}`
-            .toLowerCase()
-            .includes(query.toLowerCase())) &&
-        (!market || marketLabel(l.market) === market) &&
-        (!grade || l.grade === grade) &&
-        (!product || leadProductCategories(l.product).includes(product)) &&
-        (!status || l.status === status),
-    )
-    .sort(newestFirst);
-  const pages = Math.max(1, Math.ceil(filtered.length / 8));
-  const current = Math.min(page, pages);
-  const rows = filtered.slice((current - 1) * 8, current * 8);
+  const filteredTotal = remote?.filteredTotal || 0;
+  const pages = Math.max(1, Math.ceil(filteredTotal / 8));
+  const current = remote?.page || 1;
+  const rows = remote?.leads || [];
   useEffect(() => {
     const body = detailBody.current;
     if (body) body.scrollTop = 0;
@@ -184,11 +176,9 @@ export function LeadLibrary() {
   const close = () => setParams({ dataset: 'real' });
   const download = async () => {
     setExporting(true);
-    const selectedIds = new Set(filtered.map((lead) => lead.id));
     try {
-      const full = await leadLibrary.exportDetails();
-      const exported = full.filter((lead) => selectedIds.has(lead.id)).sort(newestFirst);
-      if (exported.length !== selectedIds.size)
+      const exported = await leadLibrary.exportDetails(listKey);
+      if (exported.length !== filteredTotal)
         throw new Error('客户列表已发生变化，请刷新后重新导出');
       exportCsv(
         exported.map((l) => ({
@@ -226,7 +216,7 @@ export function LeadLibrary() {
       <PageHeading eyebrow="CUSTOMER LIBRARY" title="客户库">
         <button
           className="btn secondary"
-          disabled={!filtered.length || exporting}
+          disabled={!filteredTotal || exporting}
           onClick={() => void download()}
         >
           <ArrowDownToLine size={16} />
@@ -238,7 +228,7 @@ export function LeadLibrary() {
           onClick={() => void load(true)}
         >
           <RefreshCw size={16} className={loading || remote?.sync.refreshing ? 'spin' : ''} />
-          {loading || remote?.sync.refreshing ? '正在同步' : '同步飞书'}
+          {remote?.sync.refreshing ? '正在同步' : '同步飞书'}
         </button>
       </PageHeading>
       <div className="library-sync-status" role="status" aria-live="polite">
@@ -246,9 +236,7 @@ export function LeadLibrary() {
         <span>
           {remote?.syncedAt ? `最近同步：${formatBeijingTime(remote.syncedAt)}` : '尚未同步客户'}
         </span>
-        {(loading || remote?.sync.refreshing) && remote && (
-          <span>正在后台同步，当前客户可继续查看</span>
-        )}
+        {remote?.sync.refreshing && <span>正在后台同步，当前客户可继续查看</span>}
         {!!remote?.sync.pendingWrites && (
           <span className={remote.sync.writeError ? 'library-sync-warning' : undefined}>
             本地已保存，{remote.sync.pendingWrites} 位客户待同步飞书
@@ -294,10 +282,10 @@ export function LeadLibrary() {
       )}
       <div className="library-stats">
         {[
-          { name: '全部客户', value: leads.length },
+          { name: '全部客户', value: remote?.total || 0 },
           ...['A', 'B', 'C'].map((grade) => ({
             name: `${grade} 级`,
-            value: leads.filter((lead) => lead.grade === grade).length,
+            value: remote?.facets?.grades[grade] || 0,
           })),
         ].map((x) => (
           <div key={x.name}>
@@ -332,13 +320,15 @@ export function LeadLibrary() {
               label: '市场',
               val: market,
               set: setMarket,
-              options: [...new Set([...leads.map((l) => marketLabel(l.market)), '待核实'])],
+              options: [...new Set([...(remote?.facets?.markets || []), '待核实'])],
             },
             {
               label: '评级',
               val: grade,
               set: setGrade,
-              options: [...new Set(['A', 'B', 'C', ...leads.map((l) => l.grade)])].filter(Boolean),
+              options: [
+                ...new Set(['A', 'B', 'C', ...Object.keys(remote?.facets?.grades || {})]),
+              ].filter(Boolean),
             },
             {
               label: '产品',
@@ -350,7 +340,7 @@ export function LeadLibrary() {
               label: '状态',
               val: status,
               set: setStatus,
-              options: [...new Set([...developmentStatuses, ...leads.map((l) => l.status)])],
+              options: [...new Set([...developmentStatuses, ...(remote?.facets?.statuses || [])])],
             },
           ].map((f) => (
             <select
@@ -389,17 +379,16 @@ export function LeadLibrary() {
           >
             清空筛选
           </button>
-          <span>共 {filtered.length} 条线索</span>
+          <span>共 {filteredTotal} 条线索</span>
         </div>
         {!remote && !error ? (
           <div className="library-loading">
             <RefreshCw className="spin" size={25} />
-            <h3>正在读取飞书客户</h3>
-            <p>首次同步客户列表，完成后即可查看…</p>
+            <h3>正在读取客户列表</h3>
           </div>
         ) : !remote && error ? (
           <div className="empty-state error-state">
-            <h3>暂时无法读取飞书客户</h3>
+            <h3>暂时无法读取客户列表</h3>
             <p>{error}</p>
             <button className="btn secondary" onClick={() => void load()}>
               重新读取

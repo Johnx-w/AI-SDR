@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { summarizeLead } from '../server/lead-library.mjs';
+import { LeadLibrary } from '../server/lead-library.mjs';
 import { createModuleLoader } from './helpers/modules.mjs';
 
 const lead = {
@@ -32,8 +32,17 @@ const lead = {
 // Render the real library and its real TSX children with deterministic loaded
 // data; replace only browser routing, initial state and the workspace context.
 function renderLibrary(tab = '客户画像', customers = [lead], options = {}) {
+  const library = new LeadLibrary({
+    readLeads: async () => {
+      throw new Error('unexpected sync');
+    },
+  });
+  for (const customer of customers) library.upsert(customer);
   const snapshot = {
-    leads: customers.map(summarizeLead),
+    ...library.page(
+      new URLSearchParams({ market: options.market || '', grade: options.grade || '' }),
+      (lead) => lead,
+    ),
     syncedAt: '2026-10-25T01:00:00.000Z',
     total: customers.length,
     source: 'feishu',
@@ -41,6 +50,7 @@ function renderLibrary(tab = '客户画像', customers = [lead], options = {}) {
     sync: { refreshing: false, stale: false, error: '', revision: 1 },
     ...options.snapshot,
   };
+  library.close();
   const entry = new URL('../src/pages/LeadLibrary.tsx', import.meta.url);
   let stateIndex = 0;
   const load = createModuleLoader((specifier, path) => {
@@ -53,11 +63,11 @@ function renderLibrary(tab = '客户画像', customers = [lead], options = {}) {
           useState: (initial) => {
             const index = stateIndex++;
             return [
-              index === 3 && options.detailError !== undefined
+              index === 2 && options.detailError !== undefined
                 ? options.detailError
-                : index === 8 && options.market !== undefined
+                : index === 7 && options.market !== undefined
                   ? options.market
-                  : index === 9 && options.grade !== undefined
+                  : index === 8 && options.grade !== undefined
                     ? options.grade
                     : initial === '客户画像'
                       ? tab
