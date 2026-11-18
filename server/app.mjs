@@ -331,6 +331,18 @@ export function createApp({
     });
     response.end(serialized);
   };
+  const pageJson = async (response, status, body, serialized = JSON.stringify(body)) => {
+    if (
+      serialized.length >= 1024 &&
+      (response.req.headers['accept-encoding'] || '').split(',').some((v) => v.trim() === 'br')
+    ) {
+      const bytes = await brotli(serialized, { params: { [zlib.BROTLI_PARAM_QUALITY]: 4 } });
+      response.setHeader('Vary', 'Accept-Encoding');
+      response.setHeader('Content-Encoding', 'br');
+      return json(response, status, body, bytes);
+    }
+    return json(response, status, body, serialized);
+  };
   const leadJson = async (response, operation, read) => {
     const started = performance.now();
     // Keep measurements scoped to the connection that started this request.
@@ -352,7 +364,9 @@ export function createApp({
       const durationMs = performance.now() - started;
       metrics.record(operation, { durationMs, bytes: Buffer.byteLength(serialized) });
       response.setHeader('Server-Timing', `${operation};dur=${durationMs.toFixed(2)}`);
-      return json(response, 200, body, serialized);
+      return operation === 'detail' || operation === 'list'
+        ? await pageJson(response, 200, body, serialized)
+        : json(response, 200, body, serialized);
     } catch (error) {
       const durationMs = performance.now() - started;
       metrics.record(operation, { durationMs, error: true });
@@ -448,7 +462,12 @@ export function createApp({
           );
         }
         if (url.pathname.startsWith('/api/v1/outreach/')) {
-          return json(
+          const reply =
+            request.method === 'GET' &&
+            ['/api/v1/outreach/state', '/api/v1/outreach/deliveries'].includes(url.pathname)
+              ? pageJson
+              : json;
+          return await reply(
             response,
             200,
             await handleOutreach({

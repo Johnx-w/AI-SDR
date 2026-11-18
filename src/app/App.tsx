@@ -28,7 +28,8 @@ import { overviewApi } from '../services/overview';
 import type { OverviewData } from '../services/overview';
 import { OverviewReminders } from '../components/OverviewReminders';
 import type { InitialPage } from './initialPage';
-import type { LeadLibraryClient } from '../services/leadLibrary';
+import { leadLibrary as defaultLibrary, type LeadLibraryClient } from '../services/leadLibrary';
+import { outreachApi, type OutreachState, type OutreachDeliveryPage } from '../outreachApi';
 const Dashboard = lazy(() =>
   import('../pages/Dashboard').then((module) => ({ default: module.Dashboard })),
 );
@@ -147,9 +148,44 @@ export function App({
   const current = nav.find((item) => item.path === location.pathname);
   const boot = useRef(initial);
   const outreachPages = useRef<Pick<InitialPage, 'outreach' | 'records'>>({});
+  const warmed = useRef(false);
   useEffect(() => {
-    if (location.pathname === '/settings') outreachPages.current = {};
-  }, [location.pathname]);
+    if (location.pathname === '/settings') {
+      outreachPages.current = {};
+      warmed.current = false;
+    }
+    if (warmed.current || !['/', '/leads', '/inbox'].includes(location.pathname)) return;
+    const customerList = library ?? defaultLibrary;
+    const pages = outreachPages.current;
+    const warm = () => {
+      if (warmed.current || document.hidden) return;
+      warmed.current = true;
+      const inbox = location.pathname === '/inbox';
+      const tab = new URLSearchParams(location.search).get('tab') || 'campaigns';
+      if (location.pathname !== '/leads' && !customerList.cachedList())
+        void customerList.list('page=1&q=&market=&grade=&product=&status=', false).catch(() => {});
+      const viewKey = 'view=current&status=all&q=&page=1&pageSize=20';
+      if (!pages.outreach && !(inbox && tab === 'campaigns'))
+        void outreachApi<OutreachState>('/state?' + viewKey)
+          .then((data) => {
+            pages.outreach ??= { ...data, viewKey };
+          })
+          .catch(() => {});
+      const key = 'page=1&pageSize=20&group=all&q=';
+      if (!pages.records && !(inbox && tab === 'deliveries'))
+        void outreachApi<OutreachDeliveryPage>('/deliveries?' + key)
+          .then((data) => {
+            pages.records ??= { key, data };
+          })
+          .catch(() => {});
+    };
+    const timer = window.setTimeout(warm, 150);
+    document.addEventListener('visibilitychange', warm);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', warm);
+    };
+  }, [library, location.pathname, location.search]);
   useEffect(() => {
     boot.current = undefined;
     document.getElementById('root')?.setAttribute('data-interactive', 'true');

@@ -185,6 +185,7 @@ export function LeadLibrary({
     setFocusOpportunity(detailTab === '供货机会');
     setTab(detailTab === '供货机会' ? '客户画像' : detailTab);
   };
+  const warmDossier = (id: string) => void leadLibrary.detail(id, true).catch(() => {});
   const close = () => setParams({ dataset: 'real' });
   const download = async () => {
     setExporting(true);
@@ -424,6 +425,8 @@ export function LeadLibrary({
                   <tr
                     key={l.id}
                     tabIndex={0}
+                    onPointerEnter={() => warmDossier(l.id)}
+                    onFocus={() => warmDossier(l.id)}
                     onClick={() => open(l.id)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && e.target === e.currentTarget) open(l.id);

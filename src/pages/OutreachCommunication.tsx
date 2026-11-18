@@ -1346,7 +1346,12 @@ export function OutreachCommunication({
   const testRingChanged =
     JSON.stringify(testMailboxes.map((mailbox) => [mailbox.id, mailbox.email])) !==
     JSON.stringify(connected.map((mailbox) => [mailbox.id, mailbox.email]));
-  const recordData = recordResult?.key === recordKey ? recordResult.data : null;
+  const recordData =
+    recordResult?.key === recordKey
+      ? recordResult.data
+      : pages?.records?.key === recordKey
+        ? pages.records.data
+        : null;
   const paginationData = recordData || recordResult?.data;
   const visibleRecords = recordData?.items || [];
   const shownDetail = detail?.campaign.id === detailId ? detail : null;

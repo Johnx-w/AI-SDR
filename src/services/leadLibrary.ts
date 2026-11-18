@@ -322,7 +322,7 @@ export class LeadLibraryClient {
     this.emit();
     return data;
   }
-  list(key = this.requestedKey): Promise<LeadList> {
+  list(key = this.requestedKey, active = this.isActive()): Promise<LeadList> {
     if (this.listRequest && key === this.requestedKey) return this.listRequest;
     this.requestedKey = key;
     const sequence = ++this.sequence;
@@ -330,7 +330,7 @@ export class LeadLibraryClient {
     const request = this.request<LeadList>(
       '/api/v1/leads/real/list' + (key ? '?' + key : ''),
       'GET',
-      this.isActive(),
+      active,
     ).then((data) => {
       if (epoch !== this.epoch) throw new Error('客户连接已变更，请重新读取列表');
       return this.acceptList(data, sequence, key);

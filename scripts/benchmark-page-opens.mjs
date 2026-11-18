@@ -129,9 +129,13 @@ try {
     let bytes;
     for (let iteration = 0; iteration < 7; iteration++) {
       const start = performance.now(),
-        response = await fetch(base + '/api/v1' + path),
+        response = await fetch(base + '/api/v1' + path, {
+          headers: { 'Accept-Encoding': iteration === 0 ? 'br' : 'identity' },
+        }),
         raw = await response.text();
       assert.equal(response.status, 200, name);
+      if (!legacy && raw.length >= 1024)
+        assert.equal(response.headers.get('content-encoding'), iteration === 0 ? 'br' : null, name);
       assert.ok(check(JSON.parse(raw)), name);
       times.push(performance.now() - start);
       bytes = Buffer.byteLength(raw);
@@ -246,6 +250,26 @@ try {
       worst = Math.max(worst, stats.maxMs);
     }
     if (!legacy) assert.ok(worst <= 700, `页面有效内容最慢 ${worst} ms（目标 700 ms）`);
+    if (!legacy) {
+      const first = await context.newPage();
+      const reads = ['/leads/real/list?', '/outreach/state?view=current'].map((path) =>
+        first.waitForResponse((res) => res.url().includes(path) && res.ok(), { timeout: 5000 }),
+      );
+      await Promise.all([first.goto(base + '/inbox?tab=deliveries'), ...reads]);
+      await first.getByRole('link', { name: '客户库', exact: true }).click();
+      const row = first.locator('.reference-lead-table tbody tr').nth(2);
+      const name = await row.locator('strong').innerText();
+      await Promise.all([
+        first.waitForResponse((res) => res.url().endsWith('?local=1') && res.ok(), {
+          timeout: 5000,
+        }),
+        row.focus(),
+      ]);
+      await first.route('**/api/v1/leads/real/**', (route) => route.abort());
+      await row.press('Enter');
+      await first.getByRole('heading', { name, exact: true }).waitFor({ timeout: 700 });
+      await first.close();
+    }
   }
 } finally {
   await browser?.close();
