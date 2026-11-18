@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "node --env-file-if-exists=.env scripts/dev.mjs",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && vite build --ssr src/entry-server.tsx --outDir dist/server-render --emptyOutDir",
     "start": "node --env-file-if-exists=.env server/index.mjs",
     "release": "node scripts/release.mjs",
     "release:check": "node scripts/release.mjs check",

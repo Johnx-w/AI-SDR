@@ -49,8 +49,8 @@ const senderVersion = (m) =>
     ...(m.signatureDesign ? [m.signatureDesign] : []),
     [...(m.productIds || [])].sort(),
   ]);
-const day = (date) =>
-  new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date(date));
+const dayFormat = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' });
+const day = (date) => dayFormat.format(new Date(date));
 function sendWindowError(w) {
   const validTime = /^([01]\d|2[0-3]):[0-5]\d$/;
   if (!w || !validTime.test(w.start) || !validTime.test(w.end) || w.start === w.end)
@@ -105,6 +105,8 @@ export class OutreachService {
       CREATE INDEX IF NOT EXISTS outreach_delivery_campaign ON outreach_deliveries(campaign_id,state);
       CREATE INDEX IF NOT EXISTS outreach_counts ON outreach_deliveries(campaign_id,state,${outcomeSql},${draftSql});
       CREATE INDEX IF NOT EXISTS outreach_record_search ON outreach_deliveries((${recordSearchSql}),state,id);
+      CREATE INDEX IF NOT EXISTS outreach_customer_deliveries ON outreach_deliveries(campaign_id,json_extract(data,'$.customerId'));
+      CREATE INDEX IF NOT EXISTS outreach_activity ON outreach_deliveries(state,id,json_extract(data,'$.mailboxId'),json_extract(data,'$.sentAt'),json_extract(data,'$.attemptedAt'),json_extract(data,'$.createdAt'));
       CREATE TABLE IF NOT EXISTS outreach_reservations(identity TEXT PRIMARY KEY,delivery_id TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS outreach_requests(key TEXT PRIMARY KEY,kind TEXT NOT NULL,result_id TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS outreach_suppression(identity TEXT PRIMARY KEY,reason TEXT NOT NULL);`);
@@ -216,7 +218,14 @@ export class OutreachService {
       .run(c.id, JSON.stringify(data));
     return this.withStats(data);
   }
-  deliveries(campaignId, states) {
+  deliveryActivity(state) {
+    return this.db
+      .prepare(
+        `SELECT state AS status,id,json_extract(data,'$.mailboxId') AS mailboxId,json_extract(data,'$.sentAt') AS sentAt,json_extract(data,'$.attemptedAt') AS attemptedAt,json_extract(data,'$.createdAt') AS createdAt FROM outreach_deliveries INDEXED BY outreach_activity ${state ? 'WHERE state=?' : ''}`,
+      )
+      .all(...(state ? [state] : []));
+  }
+  deliveries(campaignId, states, customerId) {
     const where = [],
       params = [];
     if (campaignId) {
@@ -226,6 +235,10 @@ export class OutreachService {
     if (states) {
       where.push(`state IN (${states.map(() => '?').join(',')})`);
       params.push(...states);
+    }
+    if (customerId !== undefined) {
+      where.push("json_extract(data,'$.customerId')=?");
+      params.push(customerId);
     }
     return this.db
       .prepare(
@@ -732,7 +745,7 @@ export class OutreachService {
       );
       if (canRefresh) {
         try {
-          this.prepare(campaign.id);
+          this.prepare(campaign.id, false);
         } catch (error) {
           this.putCampaign({ ...campaign, lastError: safeError(error) });
         }
@@ -755,7 +768,7 @@ export class OutreachService {
       ? leads
       : leads.filter((l) => !c.baselineCustomerIds.includes(l.id));
     const skipped = new Set(
-      this.deliveries(c.id)
+      this.deliveries(c.id, ['skipped', 'failed'])
         .filter(
           (d) =>
             d.status === 'skipped' || (d.status === 'failed' && d.resolution?.outcome === 'failed'),
@@ -778,7 +791,7 @@ export class OutreachService {
       });
     }
     const existing = ignoreDelivery ? this.delivery(ignoreDelivery) : null;
-    const history = this.deliveries()
+    const history = this.deliveryActivity()
       .concat(this.followUps.all())
       .filter((d) => d.id !== ignoreDelivery);
     const { identities, blocked: stopped } = this.contactState(ignoreDelivery);
@@ -822,7 +835,7 @@ export class OutreachService {
           }
         : {
             ...c,
-            senderAssignments: this.deliveries(c.id)
+            senderAssignments: this.deliveries(c.id, ['blocked'])
               .filter((delivery) => delivery.status === 'blocked' && delivery.materialRefresh)
               .map((delivery) => ({
                 customerId: delivery.customerId,
@@ -837,7 +850,7 @@ export class OutreachService {
     const eligible = [],
       blocked = [...result.blocked];
     for (const candidate of result.eligible) {
-      if (this.isReserved(candidate, ignoreDelivery))
+      if (this.identities(candidate).some((key) => identities.has(key) || stopped.has(key)))
         blocked.push({
           ...candidate,
           reasonCode: 'already_contacted_or_unknown',
@@ -847,11 +860,11 @@ export class OutreachService {
     }
     return { eligible, blocked };
   }
-  prepare(id) {
+  prepare(id, includeDetail = true) {
     const c = this.campaign(id);
     if (['cancelled', 'completed'].includes(c.status))
       throw fail(409, '计划已结束，不能重新准备样稿');
-    if (this.preparing.has(id)) return this.detail(id);
+    if (this.preparing.has(id)) return includeDetail ? this.detail(id) : undefined;
     if (c.mode !== 'production') throw fail(400, '测试计划使用固定测试内容');
     if (!c.mailboxIds.length && !c.acquisitionSource) throw fail(400, '请先选择发件邮箱');
     if (!this.acquisitionAllowed(c)) throw fail(409, '获客自动首发已暂停或关闭');
@@ -882,7 +895,7 @@ export class OutreachService {
       .finally(() => this.preparing.delete(id));
     this.preparationQueue = operation;
     this.preparing.set(id, operation);
-    return this.detail(id);
+    return includeDetail ? this.detail(id) : undefined;
   }
   async prepareDrafts(id, revision, wasActive) {
     const c = this.campaign(id);
@@ -898,12 +911,15 @@ export class OutreachService {
       return;
     let slots =
       (c.acquisitionSource ? Infinity : c.targetCount) -
-      this.deliveries(id).filter((d) => !['blocked', 'cancelled', 'skipped'].includes(d.status))
-        .length;
+      this.db
+        .prepare(
+          "SELECT count(*) AS n FROM outreach_deliveries WHERE campaign_id=? AND state NOT IN ('blocked','cancelled','skipped')",
+        )
+        .get(id).n;
     const configurationIssues = new Map();
     for (const candidate of result.blocked.slice(0, c.acquisitionSource ? undefined : 200)) {
       if (customerSkipCodes.has(candidate.reasonCode)) {
-        const prior = this.deliveries(id).find(
+        const prior = this.deliveries(id, undefined, candidate.customerId).find(
           (d) => d.customerId === candidate.customerId && d.status !== 'cancelled',
         );
         if (
@@ -938,7 +954,7 @@ export class OutreachService {
           candidate.reason,
           (configurationIssues.get(candidate.reason) || 0) + 1,
         );
-        for (const old of this.deliveries(id, ['blocked']).filter(
+        for (const old of this.deliveries(id, ['blocked'], candidate.customerId).filter(
           (delivery) =>
             delivery.customerId === candidate.customerId &&
             !delivery.subject &&
@@ -951,14 +967,14 @@ export class OutreachService {
         }
         continue;
       }
-      const priorBlocked = this.deliveries(id).find(
+      const priorBlocked = this.deliveries(id, ['blocked'], candidate.customerId).find(
         (d) =>
           d.customerId === candidate.customerId && d.status === 'blocked' && !d.materialRefresh,
       );
       if (c.acquisitionSource && priorBlocked && priorBlocked.reason !== candidate.reason)
         this.putDelivery({ ...priorBlocked, reason: candidate.reason || candidate.reasonCode });
       if (
-        this.deliveries(id).some(
+        this.deliveries(id, undefined, candidate.customerId).some(
           (d) => d.customerId === candidate.customerId && d.status !== 'cancelled',
         )
       )
@@ -993,7 +1009,7 @@ export class OutreachService {
         const mailbox = this.mailboxes.get(candidate.mailboxId),
           product = this.products().find((p) => p.id === candidate.productId);
         // Retry an empty, unsubmitted draft in place instead of accumulating cancellations.
-        const unfinished = this.deliveries(id).find(
+        const unfinished = this.deliveries(id, ['blocked'], candidate.customerId).find(
           (delivery) =>
             delivery.customerId === candidate.customerId &&
             delivery.status === 'blocked' &&
@@ -1002,7 +1018,7 @@ export class OutreachService {
             !delivery.attemptedAt &&
             !delivery.messageId,
         );
-        const replaced = this.deliveries(id).find(
+        const replaced = this.deliveries(id, ['blocked'], candidate.customerId).find(
           (delivery) =>
             delivery.customerId === candidate.customerId &&
             delivery.status === 'blocked' &&
@@ -1054,7 +1070,7 @@ export class OutreachService {
         try {
           this.transaction(() => {
             this.reserve(d);
-            for (const prior of this.deliveries(id))
+            for (const prior of this.deliveries(id, ['blocked'], d.customerId))
               if (
                 prior.id !== d.id &&
                 prior.customerId === d.customerId &&
@@ -1147,7 +1163,11 @@ export class OutreachService {
     if (this.closed) return;
     const current = this.campaign(id);
     if (current.revision === revision && !['paused', 'cancelled'].includes(current.status)) {
-      const deliveries = this.deliveries(id);
+      const deliveries = this.db
+        .prepare(
+          "SELECT state AS status, CASE WHEN state='blocked' THEN json_extract(data,'$.reason') END AS reason FROM outreach_deliveries WHERE campaign_id=? ORDER BY rowid",
+        )
+        .all(id);
       const pending = deliveries.some((d) => ['draft', 'queued', 'sending'].includes(d.status));
       const reasons = new Map();
       for (const delivery of deliveries.filter((d) => d.status === 'blocked')) {
@@ -1210,7 +1230,7 @@ export class OutreachService {
     for (const d of this.deliveries(id))
       if (d.status === 'draft' && d.subject) this.putDelivery({ ...d, status: 'queued' });
     this.start();
-    if (!this.deliveries(id, ['queued']).length) this.prepare(id);
+    if (!this.deliveries(id, ['queued']).length) this.prepare(id, false);
     void this.tick();
     return this.detail(id);
   }
@@ -1354,7 +1374,7 @@ export class OutreachService {
     if (!m || m.paused || m.smtpStatus !== 'connected' || !m.configured) return false;
     if (c.mode === 'internal_test') return true;
     if (c.approvedRevision !== c.revision || !this.inWindow(c)) return false;
-    const history = this.deliveries()
+    const history = this.deliveryActivity()
       .concat(this.followUps.all())
       .filter(
         (v) =>
@@ -1455,7 +1475,7 @@ export class OutreachService {
       ) {
         this.putCampaign({ ...current, lastRefreshAt: iso(this.now) });
         try {
-          this.prepare(c.id);
+          this.prepare(c.id, false);
         } catch (error) {
           if (!c.acquisitionSource) throw error;
           this.putCampaign({ ...this.campaign(c.id), lastError: safeError(error) });

@@ -124,7 +124,7 @@ export interface LeadList extends LeadMetadata {
   filteredTotal?: number;
   facets?: { grades: Record<string, number>; markets: string[]; statuses: string[] };
 }
-interface LeadDetail extends LeadMetadata {
+export interface LeadDetail extends LeadMetadata {
   lead: Prospect;
   version: string;
 }
@@ -218,6 +218,15 @@ export class LeadLibraryClient {
 
   cachedList(key = this.snapshotKey) {
     return key === this.snapshotKey ? this.snapshot : null;
+  }
+  prime(key: string, list: LeadList, detail?: LeadDetail) {
+    this.requestedKey = key;
+    this.acceptList(list, ++this.sequence, key);
+    if (detail && detail.scope === list.scope) {
+      this.detailScope = list.scope;
+      this.details.set(detail.lead.id, detail.lead);
+      this.detailVersions.set(detail.lead.id, detail.version);
+    }
   }
   cachedDetail(id: string | null) {
     return id ? this.details.get(id) || null : null;

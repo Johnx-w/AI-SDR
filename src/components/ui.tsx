@@ -19,21 +19,25 @@ export function Modal({
   children,
   onClose,
   wide = false,
+  initiallyVisible = false,
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   wide?: boolean;
+  initiallyVisible?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const dialog = ref.current;
+    if (dialog?.open) dialog.close();
     dialog?.showModal();
     return () => dialog?.close();
   }, []);
   return (
     <dialog
       ref={ref}
+      open={initiallyVisible || undefined}
       className={`modal ${wide ? 'wide' : ''}`}
       onCancel={(event) => {
         event.preventDefault();

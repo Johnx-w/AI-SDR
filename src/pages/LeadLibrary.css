@@ -46,3 +46,10 @@
 .library-sync-details p {
   margin: 5px 0;
 }
+.modal.wide[open]:not(:modal) {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  z-index: 100;
+  box-shadow: 0 0 0 100vmax rgb(0 0 0 / 35%);
+}

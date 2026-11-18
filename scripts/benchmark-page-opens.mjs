@@ -157,6 +157,19 @@ try {
       ['触达计划', '/inbox?tab=campaigns', '.outreach-campaign-table tbody tr'],
       ['发送记录', '/inbox?tab=deliveries', '#outreach-panel-deliveries tbody tr'],
     ];
+    if (!legacy) {
+      const plain = await browser.newContext({ javaScriptEnabled: false });
+      const view = await plain.newPage();
+      for (const [, path, selector] of cases) {
+        const response = await view.goto(base + path);
+        assert.match(response.headers()['cache-control'], /no-store/);
+        assert.ok(
+          await view.locator(selector).first().isVisible(),
+          '首屏不依赖交互组件下载：' + path,
+        );
+      }
+      await plain.close();
+    }
     let worst = 0;
     for (const [label, path, selector] of cases) {
       const times = [];
@@ -198,6 +211,7 @@ try {
       ['发送记录', '#outreach-tab-deliveries', '#outreach-panel-deliveries tbody tr'],
     ];
     const timings = clicks.map(() => []);
+    if (!legacy) await page.locator('#root[data-interactive]').waitFor({ state: 'attached' });
     for (let iteration = 0; iteration < 6; iteration++) {
       for (const [index, [label, button, selector]] of clicks.entries()) {
         const elapsed = await page.evaluate(

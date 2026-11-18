@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowUpRight,
@@ -22,14 +22,28 @@ import {
   Zap,
 } from 'lucide-react';
 import { useWorkspace } from './WorkspaceProvider';
-import { Dashboard, Communication, Materials } from '../pages/Workbench';
-import { ApiConnections } from '../pages/ApiConnections';
+import { OutreachCommunication as Communication } from '../pages/OutreachCommunication';
 import { LeadLibrary } from '../pages/LeadLibrary';
-import { Automation } from '../pages/Automation';
-import { CustomerBusiness } from '../pages/CustomerBusiness';
 import { overviewApi } from '../services/overview';
 import type { OverviewData } from '../services/overview';
 import { OverviewReminders } from '../components/OverviewReminders';
+import type { InitialPage } from './initialPage';
+import type { LeadLibraryClient } from '../services/leadLibrary';
+const Dashboard = lazy(() =>
+  import('../pages/Dashboard').then((module) => ({ default: module.Dashboard })),
+);
+const Materials = lazy(() =>
+  import('../pages/ProductKnowledge').then((module) => ({ default: module.ProductKnowledgePage })),
+);
+const ApiConnections = lazy(() =>
+  import('../pages/ApiConnections').then((module) => ({ default: module.ApiConnections })),
+);
+const Automation = lazy(() =>
+  import('../pages/Automation').then((module) => ({ default: module.Automation })),
+);
+const CustomerBusiness = lazy(() =>
+  import('../pages/CustomerBusiness').then((module) => ({ default: module.CustomerBusiness })),
+);
 
 const nav = [
   { path: '/', name: '运营总览', icon: LayoutDashboard },
@@ -40,7 +54,10 @@ const nav = [
   { path: '/materials', name: '产品与资料', icon: FolderOpen },
   { path: '/settings', name: 'API 连接', icon: Settings2 },
 ];
-export function App() {
+export function App({
+  library,
+  initial,
+}: { library?: LeadLibraryClient; initial?: InitialPage } = {}) {
   const { toast, notify } = useWorkspace();
   const searchRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -128,6 +145,11 @@ export function App() {
     };
   }, []);
   const current = nav.find((item) => item.path === location.pathname);
+  const boot = useRef(initial);
+  useEffect(() => {
+    boot.current = undefined;
+    document.getElementById('root')?.setAttribute('data-interactive', 'true');
+  }, []);
   return (
     <div className="app-shell">
       {mobile && (
@@ -270,29 +292,31 @@ export function App() {
           </div>
         )}
         <main>
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/leads" element={<LeadLibrary />} />
-            <Route path="/tasks" element={<Navigate to="/business?tab=tasks" replace />} />
-            <Route path="/business" element={<CustomerBusiness />} />
-            <Route path="/materials" element={<Materials />} />
-            <Route path="/campaigns" element={<Navigate to="/inbox?tab=campaigns" replace />} />
-            <Route path="/inbox" element={<Communication />} />
-            <Route path="/automation" element={<Automation />} />
-            <Route path="/reports" element={<Navigate to="/" replace />} />
-            <Route path="/settings" element={<ApiConnections />} />
-            <Route
-              path="*"
-              element={
-                <div className="not-found">
-                  <h1>这个页面还没有内容</h1>
-                  <NavLink className="btn primary" to="/">
-                    返回工作台
-                  </NavLink>
-                </div>
-              }
-            />
-          </Routes>
+          <Suspense fallback={<p role="status">正在读取页面…</p>}>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/leads" element={<LeadLibrary library={library} />} />
+              <Route path="/tasks" element={<Navigate to="/business?tab=tasks" replace />} />
+              <Route path="/business" element={<CustomerBusiness />} />
+              <Route path="/materials" element={<Materials />} />
+              <Route path="/campaigns" element={<Navigate to="/inbox?tab=campaigns" replace />} />
+              <Route path="/inbox" element={<Communication initial={boot.current} />} />
+              <Route path="/automation" element={<Automation />} />
+              <Route path="/reports" element={<Navigate to="/" replace />} />
+              <Route path="/settings" element={<ApiConnections />} />
+              <Route
+                path="*"
+                element={
+                  <div className="not-found">
+                    <h1>这个页面还没有内容</h1>
+                    <NavLink className="btn primary" to="/">
+                      返回工作台
+                    </NavLink>
+                  </div>
+                }
+              />
+            </Routes>
+          </Suspense>
         </main>
       </div>
       {toast && (

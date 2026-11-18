@@ -999,7 +999,9 @@ function MessagePreview({
   );
 }
 
-export function OutreachCommunication() {
+export function OutreachCommunication({
+  initial,
+}: { initial?: import('../app/initialPage').InitialPage } = {}) {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = searchParams.get('tab');
   const tab: Tab = ['mailboxes', 'campaigns', 'deliveries', 'conversations'].includes(
@@ -1023,7 +1025,9 @@ export function OutreachCommunication() {
       return next;
     });
   }
-  const [state, setState] = useState<(OutreachState & { viewKey: string }) | null>(null);
+  const [state, setState] = useState<(OutreachState & { viewKey: string }) | null>(
+    initial?.outreach ?? null,
+  );
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1065,7 +1069,7 @@ export function OutreachCommunication() {
   const [recordResult, setRecordResult] = useState<{
     key: string;
     data: OutreachDeliveryPage;
-  } | null>(null);
+  } | null>(initial?.records ?? null);
   const [recordError, setRecordError] = useState<string | null>(null);
   const [recordsLoading, setRecordsLoading] = useState(false);
   const [signatureMailboxes, setSignatureMailboxes] = useState<Record<string, OutreachMailbox>>({});

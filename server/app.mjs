@@ -6,6 +6,7 @@ import { resolve, extname, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { gzip } from 'node:zlib';
 import { promisify } from 'node:util';
+import { pageRenderer } from './initial-page.mjs';
 import { decorateLeadDevelopment } from './lead-development.mjs';
 import { isDevelopmentCustomer } from './customer-eligibility.mjs';
 import { BrandingCache } from './branding-cache.mjs';
@@ -271,7 +272,7 @@ export function createApp({
         env: current,
         jobs: acquisitionJobs(jobs().db, acquisitionScope()),
         mailboxes: service.mailboxes.list(),
-        deliveries: service.deliveries(undefined, ['accepted']),
+        deliveries: service.deliveryActivity('accepted'),
       }).catch((error) => console.error('T7/T8/T10 飞书同步失败：' + error.message)),
       (async () => {
         await provider.syncCustomers?.();
@@ -356,6 +357,11 @@ export function createApp({
       response.setHeader('Server-Timing', `${operation};dur=${durationMs.toFixed(2)}`);
       throw error;
     }
+  };
+  const renderPage = pageRenderer(dist);
+  const localDossier = (id) => {
+    const data = library().localDetail(id);
+    return { ...data, lead: provider.decorateLeads({ leads: [data.lead] }).leads[0] };
   };
   const server = createServer(async (request, response) => {
     let admitted = false;
@@ -702,9 +708,8 @@ export function createApp({
         const leadRoute = url.pathname.match(/^\/api\/v1\/leads\/real\/([\w-]{1,100})$/);
         if (leadRoute && request.method === 'GET')
           return await leadJson(response, 'detail', async () => {
-            const data = url.searchParams.has('local')
-              ? library().localDetail(leadRoute[1])
-              : await library().detail(leadRoute[1]);
+            if (url.searchParams.has('local')) return localDossier(leadRoute[1]);
+            const data = await library().detail(leadRoute[1]);
             return { ...data, lead: provider.decorateLeads({ leads: [data.lead] }).leads[0] };
           });
         const supplementRoute = url.pathname.match(
@@ -962,6 +967,8 @@ export function createApp({
       const pathname = decodeURIComponent(url.pathname);
       let target = resolve(dist, `.${pathname}`);
       if (target !== dist && !target.startsWith(dist + sep)) throw new ApiError(403, '无效路径');
+      if (target.toLowerCase().startsWith(resolve(dist, 'server-render').toLowerCase() + sep))
+        throw new ApiError(404, '文件不存在');
       try {
         if ((await stat(target)).isDirectory()) target = resolve(target, 'index.html');
       } catch {
@@ -973,7 +980,70 @@ export function createApp({
       } catch {
         throw new ApiError(404, '请先运行 npm run build，或使用 npm run dev');
       }
+      const initialRoute =
+        pathname === '/leads' ||
+        (pathname === '/inbox' &&
+          ['campaigns', 'deliveries'].includes(url.searchParams.get('tab') || 'campaigns'));
+      if (initialRoute) response.setHeader('Cache-Control', 'private, no-store');
+      if (
+        initialRoute &&
+        request.method === 'GET' &&
+        request.headers['sec-fetch-dest'] === 'document' &&
+        ['none', 'same-origin'].includes(request.headers['sec-fetch-site']) &&
+        !request.headers.origin &&
+        !isMaintaining() &&
+        existsSync(resolve(dist, 'server-render', 'entry-server.js'))
+      ) {
+        apiRequests++;
+        admitted = true;
+        try {
+          const initial = {};
+          if (pathname === '/leads') {
+            const filter = new URLSearchParams({
+              page: '1',
+              q: url.searchParams.get('q') || '',
+              market: '',
+              grade: '',
+              product: '',
+              status: '',
+            });
+            const decorate = business.state().store.development();
+            initial.list = { key: filter.toString(), data: library().page(filter, decorate) };
+            const id = url.searchParams.get('lead');
+            if (id && /^[\w-]{1,100}$/.test(id)) {
+              const detail = localDossier(id);
+              const { version, ...lead } = decorate({ ...detail.lead, version: detail.version });
+              initial.detail = { ...detail, version, lead };
+            }
+          } else {
+            const records = url.searchParams.get('tab') === 'deliveries';
+            const viewKey = records
+              ? 'view=deliveries'
+              : 'view=current&status=all&q=&page=1&pageSize=20';
+            initial.outreach = {
+              ...(await outreach().state(new URLSearchParams(viewKey))),
+              viewKey,
+            };
+            if (records)
+              initial.records = {
+                key: 'page=1&pageSize=20&group=all&q=',
+                data: outreach().listDeliveries(),
+              };
+          }
+          content = Buffer.from(await renderPage(url.pathname + url.search, initial));
+        } catch (error) {
+          if (error.status !== 404) console.warn('服务端首屏不可用：', error.name);
+        }
+      }
+      const encodedAsset =
+        target.startsWith(resolve(dist, 'assets') + sep) &&
+        /\.(js|css)$/.test(target) &&
+        (request.headers['accept-encoding'] || '')
+          .split(',')
+          .some((value) => value.trim() === 'br') &&
+        existsSync(target + '.br');
       const compressed =
+        !encodedAsset &&
         ['.html', '.js', '.css', '.svg'].includes(extname(target)) &&
         (request.headers['accept-encoding'] || '').split(',').some((value) => {
           const [encoding, ...parameters] = value.trim().toLowerCase().split(';');
@@ -985,7 +1055,8 @@ export function createApp({
             })
           );
         });
-      if (compressed) content = await compress(content);
+      if (encodedAsset) content = await readFile(target + '.br');
+      else if (compressed) content = await compress(content);
       response.writeHead(200, {
         'Content-Type': types[extname(target)] || 'application/octet-stream',
         'Content-Length': content.length,
@@ -993,7 +1064,11 @@ export function createApp({
         ...(/^\/assets\/[\w.-]+-[\w-]{8,}\.(css|js)$/.test(pathname) && extname(target) !== '.html'
           ? { 'Cache-Control': 'private, max-age=31536000, immutable' }
           : {}),
-        ...(compressed ? { 'Content-Encoding': 'gzip' } : {}),
+        ...(encodedAsset
+          ? { 'Content-Encoding': 'br' }
+          : compressed
+            ? { 'Content-Encoding': 'gzip' }
+            : {}),
         'X-Content-Type-Options': 'nosniff',
         'Referrer-Policy': 'same-origin',
       });

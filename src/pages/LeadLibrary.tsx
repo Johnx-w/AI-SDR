@@ -18,7 +18,7 @@ import { SupplementPanel } from '../components/SupplementPanel';
 import type { SupplementContext } from '../services/leadSupplements';
 import { WebsiteEvidencePanel } from '../components/WebsiteEvidencePanel';
 import { CustomerBusinessSummary } from '../components/CustomerBusinessSummary';
-import { leadLibrary, startLeadLibraryPolling } from '../services/leadLibrary';
+import { leadLibrary as defaultLibrary, startLeadLibraryPolling } from '../services/leadLibrary';
 import type { Prospect } from '../services/leadLibrary';
 import { exportCsv } from '../services/csv';
 import { formatBeijingText, formatBeijingTime } from '../domain/date-time.mjs';
@@ -61,7 +61,7 @@ const safeUrl = (s: string) => {
     return undefined;
   }
 };
-export function LeadLibrary() {
+export function LeadLibrary({ library: leadLibrary = defaultLibrary } = {}) {
   const { notify } = useWorkspace();
   const [params, setParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
@@ -516,7 +516,7 @@ export function LeadLibrary() {
         </footer>
       </section>
       {selectedId && (
-        <Modal title="客户档案" wide onClose={close}>
+        <Modal title="客户档案" wide initiallyVisible onClose={close}>
           <div className="modal-body prospect-detail" ref={detailBody}>
             {!viewed ? (
               detailError ? (

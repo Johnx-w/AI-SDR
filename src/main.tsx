@@ -3,18 +3,27 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { WorkspaceProvider } from './app/WorkspaceProvider';
 import { App } from './app/App';
+import type { InitialPage } from './app/initialPage';
+import { leadLibrary } from './services/leadLibrary';
 import './theme.css';
 import './styles.css';
 import './workbench.css';
 import './workspace.css';
 import './acquisition.css';
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
+const root = document.getElementById('root')!;
+const seed = document.getElementById('initial-page');
+const initial: InitialPage | undefined = seed ? JSON.parse(seed.textContent!) : undefined;
+seed?.remove();
+if (initial?.list) leadLibrary.prime(initial.list.key, initial.list.data, initial.detail);
+const app = (
   <React.StrictMode>
     <BrowserRouter>
       <WorkspaceProvider>
-        <App />
+        <App initial={initial} />
       </WorkspaceProvider>
     </BrowserRouter>
-  </React.StrictMode>,
+  </React.StrictMode>
 );
+if (initial) ReactDOM.hydrateRoot(root, app);
+else ReactDOM.createRoot(root).render(app);
