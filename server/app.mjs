@@ -4,7 +4,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
 import { createHash } from 'node:crypto';
-import { gzip } from 'node:zlib';
+import { gzip, brotliCompress, constants as zlib } from 'node:zlib';
 import { promisify } from 'node:util';
 import { pageRenderer } from './initial-page.mjs';
 import { decorateLeadDevelopment } from './lead-development.mjs';
@@ -58,6 +58,7 @@ const types = {
 };
 const maxJsonBytes = 32768;
 const compress = promisify(gzip);
+const brotli = promisify(brotliCompress);
 export function validateInput(input) {
   const target = validateTarget(input);
   if (input.auto_first_touch !== undefined)
@@ -130,7 +131,7 @@ export function createApp({
   let readingLeads;
   const readLeads = () => {
     if (!readingLeads)
-      readingLeads = provider.readLeads().finally(() => {
+      readingLeads = provider.readLeads({ raw: true }).finally(() => {
         readingLeads = undefined;
       });
     return readingLeads;
@@ -155,6 +156,7 @@ export function createApp({
           )
           .digest('hex'),
         readLeads,
+        decorateImported: (lead) => provider.decorateLeads({ leads: [lead] }).leads[0],
         ...(env.LEAD_LIBRARY_TTL_MS !== undefined
           ? { ttlMs: Number(env.LEAD_LIBRARY_TTL_MS) }
           : {}),
@@ -985,6 +987,7 @@ export function createApp({
         (pathname === '/inbox' &&
           ['campaigns', 'deliveries'].includes(url.searchParams.get('tab') || 'campaigns'));
       if (initialRoute) response.setHeader('Cache-Control', 'private, no-store');
+      let rendered = false;
       if (
         initialRoute &&
         request.method === 'GET' &&
@@ -1030,7 +1033,10 @@ export function createApp({
                 data: outreach().listDeliveries(),
               };
           }
-          content = Buffer.from(await renderPage(url.pathname + url.search, initial));
+          content = Buffer.from(
+            await renderPage(url.pathname + url.search, initial, request.headers.cookie),
+          );
+          rendered = true;
         } catch (error) {
           if (error.status !== 404) console.warn('服务端首屏不可用：', error.name);
         }
@@ -1042,8 +1048,14 @@ export function createApp({
           .split(',')
           .some((value) => value.trim() === 'br') &&
         existsSync(target + '.br');
+      const compressedPage =
+        rendered &&
+        (request.headers['accept-encoding'] || '')
+          .split(',')
+          .some((value) => value.trim() === 'br');
       const compressed =
         !encodedAsset &&
+        !compressedPage &&
         ['.html', '.js', '.css', '.svg'].includes(extname(target)) &&
         (request.headers['accept-encoding'] || '').split(',').some((value) => {
           const [encoding, ...parameters] = value.trim().toLowerCase().split(';');
@@ -1056,6 +1068,8 @@ export function createApp({
           );
         });
       if (encodedAsset) content = await readFile(target + '.br');
+      else if (compressedPage)
+        content = await brotli(content, { params: { [zlib.BROTLI_PARAM_QUALITY]: 4 } });
       else if (compressed) content = await compress(content);
       response.writeHead(200, {
         'Content-Type': types[extname(target)] || 'application/octet-stream',
@@ -1064,7 +1078,7 @@ export function createApp({
         ...(/^\/assets\/[\w.-]+-[\w-]{8,}\.(css|js)$/.test(pathname) && extname(target) !== '.html'
           ? { 'Cache-Control': 'private, max-age=31536000, immutable' }
           : {}),
-        ...(encodedAsset
+        ...(encodedAsset || compressedPage
           ? { 'Content-Encoding': 'br' }
           : compressed
             ? { 'Content-Encoding': 'gzip' }

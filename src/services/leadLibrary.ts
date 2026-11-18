@@ -130,6 +130,7 @@ export interface LeadDetail extends LeadMetadata {
 }
 
 interface LibraryPollingOptions {
+  initialLoaded?: boolean;
   read: () => Promise<unknown>;
   isRefreshing: () => boolean;
   visibility?: Pick<Document, 'visibilityState' | 'addEventListener' | 'removeEventListener'>;
@@ -140,6 +141,7 @@ interface LibraryPollingOptions {
 // Timers and visibility are explicit dependencies so the lifecycle can be
 // exercised without rendering React or relying on browser timer throttling.
 export function startLeadLibraryPolling({
+  initialLoaded = false,
   read,
   isRefreshing,
   visibility = document,
@@ -180,7 +182,8 @@ export function startLeadLibraryPolling({
     if (visibility.visibilityState === 'visible') void tick();
   };
   visibility.addEventListener('visibilitychange', onVisibility);
-  void tick();
+  if (initialLoaded) schedule();
+  else void tick();
   return () => {
     stopped = true;
     clear();

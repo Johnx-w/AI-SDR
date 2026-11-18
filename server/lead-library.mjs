@@ -127,6 +127,7 @@ export class LeadLibrary {
     path = ':memory:',
     scope = '',
     readLeads,
+    decorateImported = (lead) => lead,
     now = Date.now,
     ttlMs = 60000,
     retryMs = 15000,
@@ -141,6 +142,7 @@ export class LeadLibrary {
     this.db = new DatabaseSync(path);
     this.scope = scope;
     this.readLeads = readLeads;
+    this.decorateImported = decorateImported;
     this.now = now;
     this.ttlMs = ttlMs;
     this.retryMs = retryMs;
@@ -500,8 +502,9 @@ export class LeadLibrary {
             aliases.add(mirror.remoteId);
           }
         }
-        for (const lead of this.snapshot(true).leads)
-          if (!aliases.has(lead.id)) records.set(lead.id, lead);
+        const local = this.snapshot(true).leads;
+        const known = new Set(local.map((lead) => lead.id));
+        for (const lead of local) if (!aliases.has(lead.id)) records.set(lead.id, lead);
         for (const [id, lead] of changes) records.set(id, lead);
         const syncedAt =
           typeof data.syncedAt === 'string' && Number.isFinite(Date.parse(data.syncedAt))
@@ -509,6 +512,7 @@ export class LeadLibrary {
             : new Date(this.now()).toISOString();
         // Validate and serialize the complete response before changing any saved rows.
         const serialized = [...records.values()].map((lead, position) => {
+          if (!known.has(lead.id)) lead = this.decorateImported(lead);
           const summary = summarizeLead(lead);
           return {
             id: lead.id,

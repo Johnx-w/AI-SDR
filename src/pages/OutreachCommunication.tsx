@@ -1101,6 +1101,8 @@ export function OutreachCommunication({
     q: query.trim(),
   }).toString();
   const request = useRef(0);
+  const seededState = useRef(initial?.outreach?.viewKey);
+  const seededRecords = useRef(initial?.records?.key);
   const pendingState = useRef<{ key: string; promise: Promise<void> } | null>(null);
   const detailController = useRef<AbortController | null>(null);
   const detailStatus = useRef<string | null>(null);
@@ -1149,7 +1151,8 @@ export function OutreachCommunication({
         if (!controller.signal.aborted) setRecordsLoading(false);
       }
     };
-    void loadRecords();
+    if (seededRecords.current !== recordKey) void loadRecords();
+    seededRecords.current = undefined;
     const timer = window.setInterval(() => {
       if (!document.hidden) void loadRecords();
     }, 10000);
@@ -1207,14 +1210,17 @@ export function OutreachCommunication({
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    void refresh(true)
-      .catch((reason: unknown) => {
-        if (active) setError(message(reason));
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+    if (seededState.current !== viewKey) {
+      setLoading(true);
+      void refresh(true)
+        .catch((reason: unknown) => {
+          if (active) setError(message(reason));
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+    }
+    seededState.current = undefined;
     const interval = window.setInterval(() => {
       if (!document.hidden)
         void refresh(true).catch((reason: unknown) => {

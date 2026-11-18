@@ -43,9 +43,9 @@ export function createAcquisitionProvider({
         ? '后端直连网页检索、研究模型与飞书；真实任务结果见任务记录。'
         : '后端直连配置缺失：' + config.missing.join('、'),
     },
-    readLeads: async () => {
+    readLeads: async ({ raw = false } = {}) => {
       const data = await feishu.readLeads();
-      return service().decorateLeads ? service().decorateLeads(data) : data;
+      return !raw && service().decorateLeads ? service().decorateLeads(data) : data;
     },
     currentAssessments: () => service().assessments.current(),
     assessmentInfo: () => service().assessmentInfo(),

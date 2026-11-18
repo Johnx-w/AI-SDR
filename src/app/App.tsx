@@ -295,7 +295,16 @@ export function App({
           <Suspense fallback={<p role="status">正在读取页面…</p>}>
             <Routes>
               <Route path="/" element={<Dashboard />} />
-              <Route path="/leads" element={<LeadLibrary library={library} />} />
+              <Route
+                path="/leads"
+                element={
+                  <LeadLibrary
+                    library={library}
+                    initialKey={boot.current?.list?.key}
+                    initialDetailId={boot.current?.detail?.lead.id}
+                  />
+                }
+              />
               <Route path="/tasks" element={<Navigate to="/business?tab=tasks" replace />} />
               <Route path="/business" element={<CustomerBusiness />} />
               <Route path="/materials" element={<Materials />} />

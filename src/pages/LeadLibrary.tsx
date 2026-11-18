@@ -61,7 +61,11 @@ const safeUrl = (s: string) => {
     return undefined;
   }
 };
-export function LeadLibrary({ library: leadLibrary = defaultLibrary } = {}) {
+export function LeadLibrary({
+  library: leadLibrary = defaultLibrary,
+  initialKey,
+  initialDetailId,
+}: { library?: typeof defaultLibrary; initialKey?: string; initialDetailId?: string } = {}) {
   const { notify } = useWorkspace();
   const [params, setParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
@@ -90,6 +94,8 @@ export function LeadLibrary({ library: leadLibrary = defaultLibrary } = {}) {
     status,
   }).toString();
   const currentKey = useRef(listKey);
+  const seededKey = useRef(initialKey);
+  const seededDetail = useRef(initialDetailId);
   const remote = leadLibrary.cachedList(listKey);
   async function load(refresh = false) {
     setLoading(true);
@@ -109,9 +115,11 @@ export function LeadLibrary({ library: leadLibrary = defaultLibrary } = {}) {
       setCacheVersion((value) => value + 1);
     });
     const stopPolling = startLeadLibraryPolling({
+      initialLoaded: seededKey.current === listKey,
       read: () => load(),
       isRefreshing: () => Boolean(leadLibrary.cachedList(listKey)?.sync.refreshing),
     });
+    seededKey.current = undefined;
     return () => {
       mounted.current = false;
       unsubscribe();
@@ -125,6 +133,10 @@ export function LeadLibrary({ library: leadLibrary = defaultLibrary } = {}) {
   useEffect(() => {
     setDetailError('');
     if (!selectedId) return;
+    if (seededDetail.current === selectedId && leadLibrary.cachedDetail(selectedId)) {
+      seededDetail.current = undefined;
+      return;
+    }
     let active = true;
     void leadLibrary.detail(selectedId, true).catch((e: Error) => {
       if (active) setDetailError(e.message);

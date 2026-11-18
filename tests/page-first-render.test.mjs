@@ -10,7 +10,12 @@ test('只有同源文档导航取得无缓存首屏；脚本边界、作用域�
   const dist = await mkdtemp(join(tmpdir(), 'page-first-'));
   t.after(() => rm(dist, { recursive: true, force: true }));
   await mkdir(join(dist, 'server-render'));
-  await writeFile(join(dist, 'index.html'), '<div id="root"></div>');
+  await mkdir(join(dist, 'assets'));
+  await writeFile(join(dist, 'assets', 'style-demo1234.css'), 'body{margin:0}');
+  await writeFile(
+    join(dist, 'index.html'),
+    '<link rel="stylesheet" href="/assets/style-demo1234.css"><div id="root"></div>',
+  );
   await writeFile(
     join(dist, 'server-render', 'entry-server.js'),
     'export const renderPage=()=>"<main>first</main>"',
@@ -36,6 +41,11 @@ test('只有同源文档导航取得无缓存首屏；脚本边界、作用域�
   const res = await read({});
   assert.match(res.headers.get('cache-control'), /no-store/);
   const body = await res.text();
+  assert.match(body, /data-initial-css/);
+  const warm = await read({ cookie: 'sf_style=style-demo1234.css', 'accept-encoding': 'br' });
+  assert.equal(warm.headers.get('content-encoding'), 'br');
+  assert.doesNotMatch(await warm.text(), /data-initial-css/);
+  assert.match(await (await read({ cookie: 'sf_style=old.css' })).text(), /data-initial-css/);
   assert.match(body, /<main>first/);
   assert.ok(!body.includes('<script>bad()'));
   assert.ok(body.includes('\\u003c/script>'));

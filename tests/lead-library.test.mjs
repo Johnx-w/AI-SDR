@@ -30,6 +30,24 @@ const response = (leads = [lead()]) => ({
   total: leads.length,
   syncedAt: '2026-10-25T04:00:00.000Z',
 });
+test('历史导入只为新增客户匹配研究证据，保留本地更新及摘要修复', async (t) => {
+  const added = [];
+  let input = response();
+  const library = new LeadLibrary({
+    readLeads: async () => input,
+    decorateImported: (item) => {
+      added.push(item.id);
+      return item;
+    },
+  });
+  t.after(() => library.close());
+  await library.refresh();
+  library.upsert({ id: 'rec-1', name: 'Local' });
+  input = response([lead({ name: 'Remote' }), lead({ id: 'rec-2' })]);
+  await library.refresh();
+  assert.deepEqual(added, ['rec-1', 'rec-2']);
+  assert.equal(library.localDetail('rec-1').lead.name, 'Local');
+});
 const deferred = () => {
   let resolve, reject;
   const promise = new Promise((yes, no) => {

@@ -27,3 +27,20 @@ const app = (
 );
 if (initial) ReactDOM.hydrateRoot(root, app);
 else ReactDOM.createRoot(root).render(app);
+const embedded = document.querySelector<HTMLStyleElement>('style[data-initial-css]');
+if (embedded?.dataset.initialCss) {
+  const path = embedded.dataset.initialCss,
+    link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.href = path;
+  link.fetchPriority = 'low';
+  link.onload = () => {
+    embedded.remove();
+    document.cookie =
+      'sf_style=' +
+      path.split('/').pop() +
+      '; Path=/; SameSite=Strict; Max-Age=31536000' +
+      (location.protocol === 'https:' ? '; Secure' : '');
+  };
+  document.head.append(link);
+}
