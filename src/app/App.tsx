@@ -146,6 +146,10 @@ export function App({
   }, []);
   const current = nav.find((item) => item.path === location.pathname);
   const boot = useRef(initial);
+  const outreachPages = useRef<Pick<InitialPage, 'outreach' | 'records'>>({});
+  useEffect(() => {
+    if (location.pathname === '/settings') outreachPages.current = {};
+  }, [location.pathname]);
   useEffect(() => {
     boot.current = undefined;
     document.getElementById('root')?.setAttribute('data-interactive', 'true');
@@ -309,7 +313,10 @@ export function App({
               <Route path="/business" element={<CustomerBusiness />} />
               <Route path="/materials" element={<Materials />} />
               <Route path="/campaigns" element={<Navigate to="/inbox?tab=campaigns" replace />} />
-              <Route path="/inbox" element={<Communication initial={boot.current} />} />
+              <Route
+                path="/inbox"
+                element={<Communication initial={boot.current} pages={outreachPages.current} />}
+              />
               <Route path="/automation" element={<Automation />} />
               <Route path="/reports" element={<Navigate to="/" replace />} />
               <Route path="/settings" element={<ApiConnections />} />

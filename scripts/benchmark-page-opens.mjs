@@ -213,6 +213,12 @@ try {
     const timings = clicks.map(() => []);
     if (!legacy) await page.locator('#root[data-interactive]').waitFor({ state: 'attached' });
     for (let iteration = 0; iteration < 6; iteration++) {
+      if (!legacy && iteration === 1) {
+        await page.route('**/api/v1/outreach/{state,deliveries}?*', async (route) => {
+          await new Promise((resolve) => setTimeout(resolve, 900));
+          await route.continue();
+        });
+      }
       for (const [index, [label, button, selector]] of clicks.entries()) {
         const elapsed = await page.evaluate(
           async ({ button, selector, label }) => {

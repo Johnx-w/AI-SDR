@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import type { InitialPage } from '../app/initialPage';
 import {
   ArrowRight,
   Check,
@@ -1001,7 +1002,8 @@ function MessagePreview({
 
 export function OutreachCommunication({
   initial,
-}: { initial?: import('../app/initialPage').InitialPage } = {}) {
+  pages,
+}: { initial?: InitialPage; pages?: Pick<InitialPage, 'outreach' | 'records'> } = {}) {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = searchParams.get('tab');
   const tab: Tab = ['mailboxes', 'campaigns', 'deliveries', 'conversations'].includes(
@@ -1025,7 +1027,7 @@ export function OutreachCommunication({
       return next;
     });
   }
-  const [state, setState] = useState<(OutreachState & { viewKey: string }) | null>(
+  const [received, setState] = useState<(OutreachState & { viewKey: string }) | null>(
     initial?.outreach ?? null,
   );
   const [loading, setLoading] = useState(false);
@@ -1069,15 +1071,12 @@ export function OutreachCommunication({
   const [recordResult, setRecordResult] = useState<{
     key: string;
     data: OutreachDeliveryPage;
-  } | null>(initial?.records ?? null);
+  } | null>(initial?.records ?? pages?.records ?? null);
   const [recordError, setRecordError] = useState<string | null>(null);
   const [recordsLoading, setRecordsLoading] = useState(false);
   const [signatureMailboxes, setSignatureMailboxes] = useState<Record<string, OutreachMailbox>>({});
   const [signatureRefresh, setSignatureRefresh] = useState(0);
   const [signatureError, setSignatureError] = useState<string | null>(null);
-  const signatureKey = JSON.stringify(
-    state?.mailboxes.map(({ id, signature, updatedAt }) => [id, signature, updatedAt]) || [],
-  );
   const [campaignQuery, setCampaignQuery] = useState('');
   const [campaignView, setCampaignView] = useState('current');
   const [campaignStatus, setCampaignStatus] = useState('all');
@@ -1094,6 +1093,19 @@ export function OutreachCommunication({
         }
       : { view: tab },
   ).toString();
+  const state =
+    received?.viewKey !== viewKey && pages?.outreach?.viewKey === viewKey
+      ? pages.outreach
+      : received;
+  const signatureKey = JSON.stringify(
+    state?.mailboxes.map(({ id, signature, updatedAt }) => [id, signature, updatedAt]) || [],
+  );
+  useEffect(() => {
+    if (pages && received?.viewKey.startsWith('view=current&')) pages.outreach = received;
+  }, [pages, received]);
+  useEffect(() => {
+    if (pages && recordResult) pages.records = recordResult;
+  }, [pages, recordResult]);
   const recordKey = new URLSearchParams({
     page: String(recordPage),
     pageSize: String(recordPageSize),
