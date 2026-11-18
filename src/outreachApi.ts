@@ -95,13 +95,14 @@ export interface OutreachDelivery {
   mailboxId: string;
   from: string;
   subject: string;
-  bodyText: string;
+  bodyText?: string;
   bodyHtml?: string;
   status: OutreachDeliveryStatus;
   reason?: string | null;
   matchReason?: string | null;
   createdAt: string;
   sentAt?: string | null;
+  bouncedAt?: string;
   attemptedAt?: string | null;
   skippedAt?: string;
   messageId?: string | null;

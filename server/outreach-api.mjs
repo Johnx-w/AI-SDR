@@ -7,10 +7,7 @@ export async function handleOutreach({ request, url, service, readJson, idempote
   if (path === '/deliveries' && method === 'GET')
     return service.listDeliveries(Object.fromEntries(url.searchParams));
   const delivery = path.match(/^\/deliveries\/([\w-]+)$/);
-  if (delivery && method === 'GET') {
-    const { candidate, ...result } = service.delivery(delivery[1]);
-    return result;
-  }
+  if (delivery && method === 'GET') return service.deliveryRecord(delivery[1]);
   const deliveryAction = path.match(/^\/deliveries\/([\w-]+)\/(reconcile|resolve)$/);
   if (deliveryAction && method === 'POST') {
     const [, id, action] = deliveryAction;

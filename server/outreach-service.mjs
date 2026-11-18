@@ -10,6 +10,7 @@ import {
   eligibleOutreachFacts,
 } from './outreach-content.mjs';
 import { OutreachFollowUps } from './outreach-follow-ups.mjs';
+import { initializeOutreachBounces, recordOutreachBounces } from './outreach-bounces.mjs';
 import { MailConversations } from './mail-conversations.mjs';
 import { MailReplies } from './mail-replies.mjs';
 import { renderMailboxSignature, signaturePlainTextHtml } from '../src/domain/mail-signature.mjs';
@@ -140,8 +141,18 @@ export class OutreachService {
           ),
       customers,
       recordCommunication,
+      recordDeliveryBounces: (mailbox, messages) =>
+        recordOutreachBounces(
+          this.db,
+          messages.map((message) => ({
+            ...message,
+            mailboxId: mailbox.id,
+            account: mailbox.email,
+          })),
+        ),
       now,
     });
+    this.transaction(() => initializeOutreachBounces(this.db));
     this.replies = new MailReplies({
       db: this.db,
       mailboxes,
@@ -225,26 +236,10 @@ export class OutreachService {
       params.push(status);
     }
     if (group !== 'all') {
-      if (['sent', 'failed', 'skipped'].includes(group)) {
-        where.push('state = ?');
-        params.push(group === 'sent' ? 'accepted' : group);
-      } else if (group === 'replied')
-        where.push(`state = 'accepted' AND EXISTS (
-          SELECT 1 FROM incoming
-          WHERE incoming.received_at >= julianday(json_extract(outreach_deliveries.data, '$.sentAt'))
-            AND incoming.mailbox_id = json_extract(outreach_deliveries.data, '$.mailboxId')
-            AND incoming.account = lower(json_extract(outreach_deliveries.data, '$.from'))
-            AND (
-              incoming.sender = lower(json_extract(outreach_deliveries.data, '$.to'))
-              OR (incoming.customer_id != '' AND incoming.customer_id = json_extract(outreach_deliveries.data, '$.customerId'))
-              OR EXISTS (
-                SELECT 1 FROM mailbox_thread_links AS link
-                WHERE link.account_key = incoming.account_key
-                  AND link.thread_id = incoming.thread_id
-                  AND link.external_id = json_extract(outreach_deliveries.data, '$.messageId')
-              )
-            )
-        )`);
+      if (group === 'sent') where.push("state = 'accepted' AND bounce.delivery_id IS NULL");
+      else if (group === 'failed')
+        where.push("(state = 'failed' OR bounce.delivery_id IS NOT NULL)");
+      else if (group === 'skipped') where.push("state = 'skipped'");
       else {
         if (!Object.hasOwn(deliveryGroupLabels, group)) throw fail(400, '请选择有效的发送状态');
         where.push(
@@ -262,38 +257,36 @@ export class OutreachService {
       params.push(query.toLowerCase());
     }
     const clause = where.length ? ` WHERE ${where.join(' AND ')}` : '';
-    // Project the small fields once rather than reopen each full message for every delivery.
-    const source =
-      group === 'replied'
-        ? `WITH incoming AS MATERIALIZED (
-            SELECT message.thread_id, message.account_key,
-              json_extract(thread.data, '$.mailboxId') AS mailbox_id,
-              lower(json_extract(thread.data, '$.account')) AS account,
-              json_extract(thread.data, '$.customerId') AS customer_id,
-              lower(json_extract(message.data, '$.from')) AS sender,
-              julianday(json_extract(message.data, '$.occurredAt')) AS received_at
-            FROM mailbox_thread_messages AS message
-            JOIN mailbox_threads AS thread ON thread.id = message.thread_id
-            WHERE json_extract(message.data, '$.direction') = 'inbound'
-          ) `
-        : '';
+    const source = `FROM outreach_deliveries LEFT JOIN outreach_delivery_bounces AS bounce
+      ON bounce.delivery_id = outreach_deliveries.id AND state = 'accepted'`;
     const total = this.db
-      .prepare(`${source}SELECT count(*) AS total FROM outreach_deliveries${clause}`)
+      .prepare(`SELECT count(*) AS total ${source}${clause}`)
       .get(...params).total;
     const totalPages = Math.max(1, Math.ceil(total / size));
     const currentPage = Math.min(requestedPage, totalPages);
     const items = this.db
       .prepare(
-        `${source}SELECT json_remove(data, '$.candidate') AS data FROM outreach_deliveries${clause} ORDER BY rowid DESC LIMIT ? OFFSET ?`,
+        `SELECT json_remove(data, '$.candidate', '$.bodyText', '$.bodyHtml') AS data,
+          bounce.received_at AS bouncedAt ${source}${clause}
+          ORDER BY outreach_deliveries.rowid DESC LIMIT ? OFFSET ?`,
       )
       .all(...params, size, (currentPage - 1) * size)
-      .map((row) => JSON.parse(row.data));
+      .map(({ data, bouncedAt }) => ({ ...JSON.parse(data), ...(bouncedAt ? { bouncedAt } : {}) }));
     return { items, total, page: currentPage, pageSize: size, totalPages };
   }
   delivery(id) {
     const row = this.db.prepare('SELECT data FROM outreach_deliveries WHERE id=?').get(id);
     if (!row) throw fail(404, '发送记录不存在');
     return JSON.parse(row.data);
+  }
+  deliveryRecord(id) {
+    const { candidate, ...delivery } = this.delivery(id);
+    const bounce =
+      delivery.status === 'accepted' &&
+      this.db
+        .prepare('SELECT received_at FROM outreach_delivery_bounces WHERE delivery_id=?')
+        .get(id);
+    return bounce ? { ...delivery, bouncedAt: bounce.received_at } : delivery;
   }
   putDelivery(d) {
     if (d.status === 'unknown' && !d.reconciliation) {

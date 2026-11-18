@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { OutreachService } from '../server/outreach-service.mjs';
 import { handleOutreach } from '../server/outreach-api.mjs';
 import { deliveryGroup } from '../src/domain/outreach-status.mjs';
@@ -79,90 +82,140 @@ test('六类发送状态先跨记录筛选再分页，已核实未发出不再�
   assert.throws(() => service.listDeliveries({ group: 'invalid' }), { status: 400 });
 });
 
-test('发送失败按原状态筛选，有回复按已同步的入站邮件筛选', async (t) => {
-  const mailbox = { id: 'sales', email: 'sales@example.org' };
-  const service = new OutreachService({
-    mailboxes: { list: () => [mailbox], get: (id) => (id === mailbox.id ? mailbox : null) },
+test('发送失败包括缓存和新同步的退信，同一封邮件只计一条并保留SMTP结果', async (t) => {
+  const folder = mkdtempSync(join(tmpdir(), 'outreach-bounces-'));
+  const mailbox = { id: 'sales', email: 'sales@example.org', configured: true };
+  const alternate = { ...mailbox, email: 'other@example.org' };
+  const sentAt = '2026-11-18T01:00:00.000Z';
+  const occurredAt = '2026-11-18T02:00:00.000Z';
+  const makeNote = (id, patch) => ({
+    messageId: `<notice-${id}@example.org>`,
+    direction: 'inbound',
+    from: 'mailer-daemon@example.org',
+    to: mailbox.email,
+    subject: 'Delivery Status Notification (Failure)',
+    bodyText: 'Your message could not be delivered.',
+    occurredAt,
+    source: 'imap',
+    ...patch,
   });
-  t.after(() => service.close());
+  const open = () =>
+    new OutreachService({
+      path: join(folder, 'outreach.sqlite'),
+      mailboxes: {
+        list: () => [mailbox],
+        readMailbox: async () => ({
+          folders: [
+            {
+              path: 'INBOX',
+              uidValidity: '1',
+              nextUid: 3,
+              messages: [
+                makeNote('dsn', { uid: 1, inReplyTo: '<dsn@example.org>' }),
+                makeNote('dsn-copy', { uid: 2, inReplyTo: '<dsn@example.org>' }),
+              ],
+            },
+          ],
+        }),
+      },
+    });
+  let service = open();
+  t.after(async () => {
+    await service.close();
+    rmSync(folder, { recursive: true, force: true });
+  });
   service.putCampaign({ id: 'one', name: 'Plan' });
   for (const delivery of [
     { id: 'failed', status: 'failed' },
     { id: 'confirmed-failed', status: 'failed', resolution: { outcome: 'failed' } },
-    { id: 'replied', status: 'accepted', messageId: '<replied@example.org>' },
-    { id: 'unanswered', status: 'accepted', messageId: '<unanswered@example.org>' },
-    { id: 'new-thread', status: 'accepted', messageId: '<new-thread@example.org>' },
+    { id: 'aliyun' },
+    { id: 'dsn' },
+    { id: 'unaffected' },
+    { id: 'ambiguous-1', to: 'same@buyer.example' },
+    { id: 'ambiguous-2', to: 'same@buyer.example' },
   ])
     service.putDelivery({
       campaignId: 'one',
-      customerId: delivery.id,
-      companyName: delivery.id,
+      status: 'accepted',
       mailboxId: mailbox.id,
       from: mailbox.email,
       to: `${delivery.id}@buyer.example`,
       subject: 'Products',
-      sentAt: '2026-11-18T01:00:00.000Z',
-      createdAt: '2026-11-18T01:00:00.000Z',
+      sentAt,
+      messageId: `<${delivery.id}@example.org>`,
+      bodyText: 'Original outgoing body',
       ...delivery,
     });
-  service.conversations.importDeliveries();
-  const inbound = {
-    identity: 'buyer-reply',
-    messageId: '<buyer-reply@example.org>',
-    inReplyTo: '<replied@example.org>',
-    references: ['<replied@example.org>'],
-    direction: 'inbound',
-    from: 'replied@buyer.example',
-    to: mailbox.email,
-    subject: 'Re: Products',
-    bodyText: 'Please send details.',
-    occurredAt: '2026-11-18T02:00:00.000Z',
-    source: 'imap',
-    deliveryStatus: 'received',
-  };
-  service.conversations.putMessage(mailbox, inbound);
-  service.conversations.putMessage(mailbox, {
-    ...inbound,
-    messageId: '<separate-message@example.org>',
-    inReplyTo: undefined,
-    references: [],
-    from: 'new-thread@buyer.example',
-  });
+  const aliyunNote = (id, recipient) =>
+    makeNote(id, {
+      from: 'no-reply@mailsupport.aliyun.com',
+      subject: '来自【企业邮箱】的退信',
+      bodyText: `很抱歉您发送的邮件被退回，以下是该邮件的相关信息：
+  发件人 : [${mailbox.email}]
+  主题 : Products
+  原文 : 邮件原文包含在附件中。
+无法发送到 [${recipient}]
+
+退信原因
+  系统应答: 421 4.3.2 Delivery failed`,
+    });
+  service.conversations.putMessage(mailbox, aliyunNote('aliyun', 'aliyun@buyer.example'));
+  service.conversations.putMessage(mailbox, aliyunNote('ambiguous', 'same@buyer.example'));
   service.conversations.putMessage(
-    { id: mailbox.id, email: 'other@example.org' },
-    {
-      ...inbound,
-      inReplyTo: '<unanswered@example.org>',
-      references: [],
-      from: 'unanswered@buyer.example',
-      to: 'other@example.org',
-    },
+    mailbox,
+    makeNote('delayed', {
+      inReplyTo: '<unaffected@example.org>',
+      subject: 'Delivery Status Notification (Delay)',
+    }),
+  );
+  service.conversations.putMessage(
+    mailbox,
+    makeNote('too-early', {
+      inReplyTo: '<unaffected@example.org>',
+      occurredAt: '2026-11-18T00:00:00.000Z',
+    }),
+  );
+  service.conversations.putMessage(
+    alternate,
+    makeNote('wrong-identity', {
+      inReplyTo: '<unaffected@example.org>',
+      to: alternate.email,
+    }),
   );
   service.conversations.putMessage(mailbox, {
-    ...inbound,
-    messageId: '<old-message@example.org>',
-    inReplyTo: undefined,
-    references: [],
-    from: 'unanswered@buyer.example',
-    occurredAt: '2026-11-17T02:00:00.000Z',
+    ...aliyunNote('ordinary', 'unaffected@buyer.example'),
+    from: 'unaffected@buyer.example',
   });
+  // Reopen the cache in the layout used before bounce tracking was added.
+  service.db.exec('DROP TABLE IF EXISTS outreach_delivery_bounces');
+  await service.close();
+  service = open();
+  const call = (path, method = 'GET') =>
+    handleOutreach({
+      request: { method },
+      url: new URL(`http://localhost/api/v1/outreach${path}`),
+      readJson: async () => ({ mailboxId: mailbox.id }),
+      service,
+    });
+  const historical = await call('/deliveries?group=failed');
+  assert.equal(historical.total, 3);
+  assert.equal(historical.items.find((d) => d.id === 'aliyun')?.bouncedAt, occurredAt);
+  await call('/conversations/sync', 'POST');
+  const failed = await call('/deliveries?group=failed');
   assert.deepEqual(
-    service
-      .listDeliveries({ group: 'failed' })
-      .items.map(({ id }) => id)
-      .sort(),
-    ['confirmed-failed', 'failed'],
+    failed.items.map(({ id }) => id),
+    ['dsn', 'aliyun', 'confirmed-failed', 'failed'],
   );
   assert.deepEqual(
-    service.listDeliveries({ group: 'replied' }).items.map(({ id }) => id),
-    ['new-thread', 'replied'],
+    (await call('/deliveries?group=sent')).items.map(({ id }) => id),
+    ['ambiguous-2', 'ambiguous-1', 'unaffected'],
   );
-  const result = await handleOutreach({
-    request: { method: 'GET' },
-    url: new URL('http://localhost/api/v1/outreach/deliveries?group=replied'),
-    service,
-  });
-  assert.equal(result.total, 2);
+  const detail = await call('/deliveries/dsn');
+  assert.equal(detail.status, 'accepted');
+  assert.equal(detail.bouncedAt, occurredAt);
+  assert.equal(detail.bodyText, 'Original outgoing body');
+  assert.equal((await call('/deliveries?group=failed&q=dsn@buyer.example')).total, 1);
+  assert.equal((await service.state()).deliveryStats.accepted, 5);
 });
 
 test('发送记录分页能访问超过最近500条的历史，先筛选再分页并限制无效页码', async (t) => {
@@ -254,7 +307,8 @@ test('沟通中心状态统计全部发送记录，完整记录和邮箱署名�
   assert.equal(state.deliveries, undefined);
   assert.equal(state.mailboxes[0].signatureDesign, undefined);
   assert.equal(service.listDeliveries().items[0].candidate, undefined);
-  assert.equal(service.listDeliveries().items[0].bodyText, 'Full email content');
+  assert.equal(service.listDeliveries().items[0].bodyText, undefined);
+  assert.equal(service.deliveryRecord('delivery-522').bodyText, 'Full email content');
   assert.equal(service.detail('campaign').deliveries[0].candidate.evidence, 'full candidate');
   const mailboxDetail = await handleOutreach({
     request: { method: 'GET' },

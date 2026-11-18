@@ -828,6 +828,15 @@ function CampaignEditor({
   );
 }
 
+function DeliveryBadge({ delivery }: { delivery: OutreachDelivery }) {
+  const group = deliveryGroup(delivery);
+  return (
+    <Badge tone={delivery.bouncedAt ? 'red' : tone(group)}>
+      {delivery.bouncedAt ? '投递失败' : deliveryGroupLabels[group]}
+    </Badge>
+  );
+}
+
 function MessagePreview({
   delivery,
   campaignName,
@@ -835,6 +844,7 @@ function MessagePreview({
   onReconcile,
   onResolve,
   verifying = false,
+  loadingBody = false,
 }: {
   delivery: OutreachDelivery;
   campaignName?: string;
@@ -842,6 +852,7 @@ function MessagePreview({
   onReconcile?: (delivery: OutreachDelivery) => void;
   onResolve?: (delivery: OutreachDelivery) => void;
   verifying?: boolean;
+  loadingBody?: boolean;
 }) {
   const customerLink = delivery.customerId
     ? `/leads?${new URLSearchParams({ lead: delivery.customerId })}`
@@ -863,14 +874,14 @@ function MessagePreview({
   return (
     <article className="outreach-message">
       <div className="outreach-message-top">
-        <Badge tone={tone(deliveryGroup(delivery))}>
-          {deliveryGroupLabels[deliveryGroup(delivery)]}
-        </Badge>
+        <DeliveryBadge delivery={delivery} />
         <span>{formatTime(delivery.sentAt || delivery.createdAt)}</span>
       </div>
       <p className="outreach-hint">
-        {deliveryDetailLabel(delivery)}
-        {delivery.status === 'accepted' && '；尚未确认客户收件或阅读。'}
+        {delivery.bouncedAt
+          ? `邮件提交后原发件邮箱收到退信 · ${formatTime(delivery.bouncedAt)}`
+          : deliveryDetailLabel(delivery)}
+        {delivery.status === 'accepted' && !delivery.bouncedAt && '；尚未确认客户收件或阅读。'}
         {delivery.status === 'unknown' && '；请先核对原邮箱，系统不会自动重发。'}
       </p>
       {delivery.status === 'unknown' && (
@@ -913,9 +924,13 @@ function MessagePreview({
         <>
           <h3>{delivery.subject || '尚未生成主题'}</h3>
           {delivery.bodyText || delivery.bodyHtml ? (
-            <MailMessageBody message={{ ...delivery, source: 'outreach' }} />
+            <MailMessageBody
+              message={{ ...delivery, bodyText: delivery.bodyText || '', source: 'outreach' }}
+            />
           ) : (
-            <div className="outreach-message-body">邮件内容尚未生成。</div>
+            <div className="outreach-message-body">
+              {loadingBody ? '正在读取邮件正文…' : '邮件内容尚未生成。'}
+            </div>
           )}
         </>
       )}
@@ -1985,7 +2000,6 @@ export function OutreachCommunication() {
                       <option value="all">全部</option>
                       <option value="sent">已发送</option>
                       <option value="failed">发送失败</option>
-                      <option value="replied">有回复</option>
                       <option value="skipped">已跳过</option>
                     </select>
                   </div>
@@ -2028,9 +2042,7 @@ export function OutreachCommunication() {
                                 )}
                               </td>
                               <td>
-                                <Badge tone={tone(deliveryGroup(delivery))}>
-                                  {deliveryGroupLabels[deliveryGroup(delivery)]}
-                                </Badge>
+                                <DeliveryBadge delivery={delivery} />
                                 {delivery.mode === 'internal_test' &&
                                   delivery.receivedVerifiedAt && (
                                     <small className="outreach-receipt-verified">
@@ -2042,6 +2054,7 @@ export function OutreachCommunication() {
                               <td className="outreach-time-cell">
                                 {formatTime(
                                   delivery.resolution?.at ||
+                                    delivery.bouncedAt ||
                                     delivery.sentAt ||
                                     delivery.attemptedAt ||
                                     delivery.skippedAt ||
@@ -2569,6 +2582,7 @@ export function OutreachCommunication() {
             <InlineError value={verificationError} />
             <MessagePreview
               delivery={currentDeliveryPreview}
+              loadingBody={deliveryFull?.id !== currentDeliveryPreview.id && !verificationError}
               campaignName={
                 campaigns.find((campaign) => campaign.id === currentDeliveryPreview.campaignId)
                   ?.name

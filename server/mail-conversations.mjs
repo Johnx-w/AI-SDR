@@ -31,9 +31,18 @@ export class MailConversations {
     deliveries = () => [],
     customers = () => [],
     recordCommunication,
+    recordDeliveryBounces,
     now = Date.now,
   }) {
-    Object.assign(this, { db, mailboxes, deliveries, customers, recordCommunication, now });
+    Object.assign(this, {
+      db,
+      mailboxes,
+      deliveries,
+      customers,
+      recordCommunication,
+      recordDeliveryBounces,
+      now,
+    });
     this.pending = new Map();
     this.closed = false;
     db.exec(`
@@ -532,6 +541,10 @@ export class MailConversations {
             nextUid: folder.nextUid,
           };
         }
+        this.recordDeliveryBounces?.(
+          mailbox,
+          batch.folders.filter((folder) => !folder.sent).flatMap((folder) => folder.messages),
+        );
         this.saveState(key, {
           contentVersion: 2,
           cursors,

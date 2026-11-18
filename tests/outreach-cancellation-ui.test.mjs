@@ -580,7 +580,7 @@ test('发送记录只按状态筛选且分页置底，未知结果详情保留�
     allElements(filter)
       .filter((node) => node.type === 'option')
       .map(textContent),
-    ['全部', '已发送', '发送失败', '有回复', '已跳过'],
+    ['全部', '已发送', '发送失败', '已跳过'],
   );
   const elements = h.elements();
   assert.ok(!elements.some((node) => node.props['aria-label'] === '按计划筛选'));
@@ -592,16 +592,36 @@ test('发送记录只按状态筛选且分页置底，未知结果详情保留�
   h.render();
   await flush();
   assert.ok(h.requests.some(({ path }) => path.includes('group=failed')));
-  h.change('按发送状态筛选', 'replied');
-  h.render();
-  await flush();
-  assert.ok(h.requests.some(({ path }) => path.includes('group=replied')));
   assert.ok(h.requests.every(({ path }) => !path.includes('campaignId=')));
   h.elements()
     .find((node) => node.props['aria-label'] === '查看 Buyer company 的首发记录')
     .props.onClick();
   assert.match(h.html(), /结果待核实；请先核对原邮箱，系统不会自动重发/);
   assert.deepEqual(h.writes(), []);
+});
+
+test('发送失败筛选把已收到退信的首发显示为投递失败', async () => {
+  const h = setup('active', {
+    tab: 'deliveries',
+    extraDeliveries: [
+      {
+        id: 'bounce',
+        companyName: 'Bounced buyer',
+        subject: 'Products',
+        status: 'accepted',
+        bouncedAt: '2026-11-18T02:00:00.000Z',
+      },
+    ],
+  });
+  await h.ready();
+  h.change('按发送状态筛选', 'failed');
+  h.render();
+  await flush();
+  assert.match(h.html(), /投递失败/);
+  h.elements()
+    .find((node) => node.props['aria-label'] === '查看 Bounced buyer 的首发记录')
+    .props.onClick();
+  assert.match(h.html(), /原发件邮箱收到退信/);
 });
 
 test('后台状态刷新不会取消发送记录筛选的慢请求', async () => {
