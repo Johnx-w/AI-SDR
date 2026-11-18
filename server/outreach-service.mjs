@@ -227,8 +227,6 @@ export class OutreachService {
     const requestedPage = Number.isSafeInteger(Number(page)) && Number(page) > 0 ? Number(page) : 1;
     const where = [],
       params = [];
-    if (group !== 'cancelled' && status !== 'cancelled') where.push("state != 'cancelled'");
-    if (group !== 'skipped' && status !== 'skipped') where.push("state != 'skipped'");
     if (campaignId !== 'all') {
       where.push('campaign_id = ?');
       params.push(campaignId);
@@ -238,11 +236,39 @@ export class OutreachService {
       params.push(status);
     }
     if (group !== 'all') {
-      if (!Object.hasOwn(deliveryGroupLabels, group)) throw fail(400, '请选择有效的发送状态');
-      where.push(
-        "outreach_delivery_group(state, CASE WHEN state='draft' THEN json_extract(data, '$.subject') END, json_extract(data, '$.resolution.outcome')) = ?",
-      );
-      params.push(group);
+      if (group === 'failed') where.push("state = 'failed'");
+      else if (group === 'replied')
+        where.push(`state = 'accepted' AND EXISTS (
+          SELECT 1 FROM mailbox_thread_messages AS message
+          JOIN mailbox_threads AS thread ON thread.id = message.thread_id
+          WHERE json_extract(message.data, '$.direction') = 'inbound'
+            AND json_extract(message.data, '$.occurredAt') >= json_extract(outreach_deliveries.data, '$.sentAt')
+            AND (
+              EXISTS (
+                SELECT 1 FROM mailbox_thread_links AS link
+                WHERE link.account_key = message.account_key
+                  AND link.thread_id = message.thread_id
+                  AND link.external_id = json_extract(outreach_deliveries.data, '$.messageId')
+              )
+              OR (
+                json_extract(thread.data, '$.mailboxId') = json_extract(outreach_deliveries.data, '$.mailboxId')
+                AND (
+                  outreach_lower(json_extract(message.data, '$.from')) = outreach_lower(json_extract(outreach_deliveries.data, '$.to'))
+                  OR (
+                    coalesce(json_extract(outreach_deliveries.data, '$.customerId'), '') != ''
+                    AND json_extract(thread.data, '$.customerId') = json_extract(outreach_deliveries.data, '$.customerId')
+                  )
+                )
+              )
+            )
+        )`);
+      else {
+        if (!Object.hasOwn(deliveryGroupLabels, group)) throw fail(400, '请选择有效的发送状态');
+        where.push(
+          "outreach_delivery_group(state, CASE WHEN state='draft' THEN json_extract(data, '$.subject') END, json_extract(data, '$.resolution.outcome')) = ?",
+        );
+        params.push(group);
+      }
     }
     const query = String(q).trim();
     if (query) {
@@ -356,7 +382,7 @@ export class OutreachService {
         "SELECT state, json_extract(data, '$.resolution.outcome') AS outcome, count(*) AS count FROM outreach_deliveries GROUP BY state,outcome",
       )
       .all()) {
-      if (!['cancelled', 'skipped'].includes(row.state)) deliveryStats.total += row.count;
+      deliveryStats.total += row.count;
       if (row.state in deliveryStats) deliveryStats[row.state] += row.count;
       deliveryGroups[deliveryGroup({ status: row.state, resolution: { outcome: row.outcome } })] +=
         row.count;

@@ -713,6 +713,10 @@
 .outreach-record-pagination select {
   font: inherit;
 }
+.outreach-record-pagination-bottom {
+  border-top: 1px solid var(--color-border);
+  border-bottom: 0;
+}
 .outreach-record-page-actions {
   flex-wrap: wrap;
 }

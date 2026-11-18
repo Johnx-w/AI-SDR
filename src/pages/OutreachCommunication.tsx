@@ -1989,75 +1989,13 @@ export function OutreachCommunication() {
                         setRecordPage(1);
                       }}
                     >
-                      <option value="all">全部（不含已取消、已跳过）</option>
-                      {Object.entries(deliveryGroupLabels).map(([status, label]) => (
-                        <option value={status} key={status}>
-                          {label}
-                        </option>
-                      ))}
+                      <option value="all">全部</option>
+                      <option value="sent">已发送</option>
+                      <option value="failed">发送失败</option>
+                      <option value="replied">有回复</option>
                     </select>
                   </div>
                   <InlineError value={recordError} />
-                  {paginationData && (
-                    <nav
-                      className="outreach-record-pagination"
-                      aria-label="发送记录分页"
-                      aria-busy={recordsLoading || !recordData}
-                    >
-                      <span aria-live="polite">
-                        共 {paginationData.total} 条 · 第{' '}
-                        {paginationData.total
-                          ? (paginationData.page - 1) * paginationData.pageSize + 1
-                          : 0}
-                        –
-                        {Math.min(
-                          paginationData.page * paginationData.pageSize,
-                          paginationData.total,
-                        )}{' '}
-                        条
-                      </span>
-                      <label>
-                        每页
-                        <select
-                          aria-label="每页发送记录条数"
-                          value={recordPageSize}
-                          onChange={(event) => {
-                            setRecordPageSize(Number(event.target.value));
-                            setRecordPage(1);
-                          }}
-                        >
-                          {[10, 20, 50, 100].map((size) => (
-                            <option key={size} value={size}>
-                              {size} 条
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <div className="outreach-record-page-actions">
-                        <button
-                          className="btn secondary"
-                          disabled={recordsLoading || !recordData || paginationData.page <= 1}
-                          onClick={() => setRecordPage(paginationData.page - 1)}
-                        >
-                          上一页
-                        </button>
-                        <span>
-                          第 {paginationData.page} / {paginationData.totalPages} 页
-                        </span>
-                        <button
-                          className="btn secondary"
-                          disabled={
-                            recordsLoading ||
-                            !recordData ||
-                            paginationData.page >= paginationData.totalPages
-                          }
-                          onClick={() => setRecordPage(paginationData.page + 1)}
-                        >
-                          下一页
-                        </button>
-                      </div>
-                    </nav>
-                  )}
                   {!recordData ? (
                     <div className="outreach-loading" role="status">
                       {recordError ? '发送记录读取失败，请点击刷新重试。' : '正在读取发送记录…'}
@@ -2146,6 +2084,66 @@ export function OutreachCommunication() {
                           : '准备计划样稿或进行公司邮箱试发后，邮件会显示在这里。'
                       }
                     />
+                  )}
+                  {paginationData && (
+                    <nav
+                      className="outreach-record-pagination outreach-record-pagination-bottom"
+                      aria-label="发送记录分页"
+                      aria-busy={recordsLoading || !recordData}
+                    >
+                      <span aria-live="polite">
+                        共 {paginationData.total} 条 · 第{' '}
+                        {paginationData.total
+                          ? (paginationData.page - 1) * paginationData.pageSize + 1
+                          : 0}
+                        –
+                        {Math.min(
+                          paginationData.page * paginationData.pageSize,
+                          paginationData.total,
+                        )}{' '}
+                        条
+                      </span>
+                      <label>
+                        每页
+                        <select
+                          aria-label="每页发送记录条数"
+                          value={recordPageSize}
+                          onChange={(event) => {
+                            setRecordPageSize(Number(event.target.value));
+                            setRecordPage(1);
+                          }}
+                        >
+                          {[10, 20, 50, 100].map((size) => (
+                            <option key={size} value={size}>
+                              {size} 条
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <div className="outreach-record-page-actions">
+                        <button
+                          className="btn secondary"
+                          disabled={recordsLoading || !recordData || paginationData.page <= 1}
+                          onClick={() => setRecordPage(paginationData.page - 1)}
+                        >
+                          上一页
+                        </button>
+                        <span>
+                          第 {paginationData.page} / {paginationData.totalPages} 页
+                        </span>
+                        <button
+                          className="btn secondary"
+                          disabled={
+                            recordsLoading ||
+                            !recordData ||
+                            paginationData.page >= paginationData.totalPages
+                          }
+                          onClick={() => setRecordPage(paginationData.page + 1)}
+                        >
+                          下一页
+                        </button>
+                      </div>
+                    </nav>
                   )}
                 </section>
               </>

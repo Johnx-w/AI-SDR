@@ -567,7 +567,7 @@ test('计划表格默认只列当前正式计划，搜索筛选先于分页且�
   assert.deepEqual(h.writes(), []);
 });
 
-test('发送记录提供六类筛选，未知结果详情保留先核对且不重发的说明', async () => {
+test('发送记录提供四类筛选且分页置底，未知结果详情保留核对说明', async () => {
   const h = setup('active', { tab: 'deliveries', deliveryStatus: 'unknown' });
   await h.ready();
   h.render();
@@ -577,21 +577,21 @@ test('发送记录提供六类筛选，未知结果详情保留先核对且不�
     allElements(filter)
       .filter((node) => node.type === 'option')
       .map(textContent),
-    [
-      '全部（不含已取消、已跳过）',
-      '待发送',
-      '已发送',
-      '需处理',
-      '已核实未发出',
-      '已跳过',
-      '已取消',
-    ],
+    ['全部', '已发送', '发送失败', '有回复'],
   );
-  h.change('按发送状态筛选', 'attention');
+  const elements = h.elements();
+  assert.ok(
+    elements.findIndex((node) => node.type === 'table') <
+      elements.findIndex((node) => node.props['aria-label'] === '发送记录分页'),
+  );
+  h.change('按发送状态筛选', 'failed');
   h.render();
   await flush();
-  assert.ok(h.requests.some(({ path }) => path.includes('group=attention')));
-  assert.match(h.html(), /需处理/);
+  assert.ok(h.requests.some(({ path }) => path.includes('group=failed')));
+  h.change('按发送状态筛选', 'replied');
+  h.render();
+  await flush();
+  assert.ok(h.requests.some(({ path }) => path.includes('group=replied')));
   h.elements()
     .find((node) => node.props['aria-label'] === '查看 Buyer company 的首发记录')
     .props.onClick();
