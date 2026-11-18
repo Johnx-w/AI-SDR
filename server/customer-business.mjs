@@ -113,6 +113,8 @@ export class CustomerBusiness {
         scope TEXT NOT NULL,kind TEXT NOT NULL,request_key TEXT NOT NULL,body_hash TEXT NOT NULL,entity_id TEXT NOT NULL,
         PRIMARY KEY(scope,kind,request_key));
       CREATE INDEX IF NOT EXISTS business_entity_customer ON customer_business_entities(scope,kind,json_extract(data,'$.customerId'));
+      CREATE INDEX IF NOT EXISTS business_external_message ON customer_business_entities(scope,json_extract(data,'$.externalId')) WHERE kind='messages';
+      CREATE INDEX IF NOT EXISTS business_mailbox_message ON customer_business_entities(scope,json_extract(data,'$.mailboxMessageId')) WHERE kind='messages';
       CREATE TABLE IF NOT EXISTS customer_business_contexts(
         scope TEXT NOT NULL,customer_id TEXT NOT NULL,data TEXT NOT NULL,
         PRIMARY KEY(scope,customer_id));

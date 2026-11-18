@@ -319,6 +319,26 @@ export class LeadLibrary {
       ...this.metadata(),
     };
   }
+  mailContacts() {
+    const revision = this.meta?.revision || 0;
+    if (this.contactsRevision !== revision) {
+      this.mailDirectory = this.db
+        .prepare(
+          "SELECT record_id AS id,json_extract(summary,'$.name') AS name,json_extract(summary,'$.email') AS email,json_extract(detail,'$.contactEvidence') AS evidence FROM lead_library_customers WHERE scope=?",
+        )
+        .all(this.scope)
+        .map(({ id, name, email, evidence }) => ({
+          id,
+          name,
+          email,
+          contactEvidence: (JSON.parse(evidence || '[]') || [])
+            .filter((item) => item.kind === 'email')
+            .map(({ kind, value }) => ({ kind, value })),
+        }));
+      this.contactsRevision = revision;
+    }
+    return this.mailDirectory;
+  }
 
   async ensure() {
     this.assertOpen();
@@ -462,18 +482,23 @@ export class LeadLibrary {
           throw fail(502, '飞书客户分页不完整，已保留上次成功同步的数据');
         // Feishu imports add history; they never replace or delete the local master dossier.
         const aliases = new Set();
+        const byDomain = new Map();
+        for (const [id, lead] of records) {
+          const domain = domainKey(lead.website);
+          if (!domain) continue;
+          if (!byDomain.has(domain)) byDomain.set(domain, []);
+          byDomain.get(domain).push(id);
+        }
         for (const row of this.db
           .prepare('SELECT record_id,data FROM customer_archive_sync WHERE scope=?')
           .all(this.scope)) {
           const mirror = JSON.parse(row.data);
           const domain = domainKey(customerWebsite(mirror.record));
-          for (const [id, lead] of records)
-            if (
-              id !== row.record_id &&
-              (id === mirror.remoteId || (domain && domainKey(lead.website) === domain))
-            )
-              records.delete(id);
-          if (mirror.remoteId !== row.record_id) aliases.add(mirror.remoteId);
+          for (const id of byDomain.get(domain) || []) if (id !== row.record_id) records.delete(id);
+          if (mirror.remoteId !== row.record_id) {
+            records.delete(mirror.remoteId);
+            aliases.add(mirror.remoteId);
+          }
         }
         for (const lead of this.snapshot(true).leads)
           if (!aliases.has(lead.id)) records.set(lead.id, lead);

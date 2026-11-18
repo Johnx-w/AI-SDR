@@ -59,7 +59,7 @@ export function CompanyLogo({ id, name, website }: { id: string; name: string; w
   const identity = JSON.stringify([id, website || '', name]);
   const initial = (): LogoState => ({
     identity,
-    marks: companyBranding.cached(id, identity),
+    marks: [],
     index: 0,
     loadedUrl: '',
   });

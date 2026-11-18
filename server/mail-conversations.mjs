@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { setImmediate as yieldToRequests } from 'node:timers/promises';
 import { mailSyncFailure } from './mail-sync-errors.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -372,49 +373,50 @@ export class MailConversations {
     });
   }
 
-  localCustomer(thread, customers = () => this.customers()) {
+  customerLookup() {
+    let matches;
+    return (participant) => {
+      if (!matches) {
+        matches = new Map();
+        for (const customer of this.customers()) {
+          const emails = [
+            customer.email,
+            ...(customer.contactEvidence || [])
+              .filter((entry) => entry.kind === 'email')
+              .map((entry) => entry.value),
+          ];
+          for (const email of new Set(
+            emails
+              .flatMap((value) =>
+                text(value, 8000)
+                  .split(/[\s,;；、]+/u)
+                  .map(address),
+              )
+              .filter(Boolean),
+          ))
+            matches.set(email, matches.has(email) ? null : customer);
+        }
+      }
+      return matches.get(participant);
+    };
+  }
+  localCustomer(thread, lookup = this.customerLookup()) {
     if (thread.customerId) return thread;
     const participant = address(thread.participant);
     if (!participant) return thread;
-    let available;
     try {
-      available = customers();
+      const customer = lookup(participant);
+      return customer ? { ...thread, customerId: customer.id, companyName: customer.name } : thread;
     } catch {
       return thread;
     }
-    const matched = available.filter((customer) => {
-      const emails = [
-        customer.email,
-        ...(customer.contactEvidence || [])
-          .filter((entry) => entry.kind === 'email')
-          .map((entry) => entry.value),
-      ];
-      return emails.some((value) =>
-        text(value, 8000)
-          .split(/[\s,;；、]+/u)
-          .some((email) => address(email) === participant),
-      );
-    });
-    return matched.length === 1
-      ? { ...thread, customerId: matched[0].id, companyName: matched[0].name }
-      : thread;
   }
 
   list({ mailboxId = 'all', customerId = '', q = '', unread = false, inboundOnly = false } = {}) {
     this.importDeliveries();
     const selected = this.selected(mailboxId);
     const query = text(q, 500).toLowerCase().trim();
-    let customerList;
-    const customers = () => {
-      if (customerList === undefined) {
-        try {
-          customerList = this.customers();
-        } catch {
-          customerList = [];
-        }
-      }
-      return customerList;
-    };
+    const customers = this.customerLookup();
     const items = selected
       .flatMap((mailbox) =>
         this.db
@@ -559,8 +561,14 @@ export class MailConversations {
       });
       if (this.recordCommunication) {
         for (const thread of this.list({ mailboxId: mailbox.id }).items) {
+          await yieldToRequests();
+          if (this.closed || !this.mailboxes.list().some((current) => keyFor(current) === key))
+            break;
           try {
-            await this.recordCommunication(this.detail(thread.id));
+            await this.recordCommunication({
+              conversation: thread,
+              messages: this.messages(thread.id).map(({ unread, ...message }) => message),
+            });
             this.setBusinessStatus(thread.id, '');
           } catch {
             this.setBusinessStatus(thread.id, '邮件已保存，客户沟通记录待核对；下次同步会重试。');
@@ -583,7 +591,9 @@ export class MailConversations {
   setBusinessStatus(id, error) {
     const row = this.db.prepare('SELECT data FROM mailbox_threads WHERE id=?').get(id);
     if (!row) return;
-    const thread = { ...JSON.parse(row.data), recordError: error || undefined };
+    const saved = JSON.parse(row.data);
+    if ((saved.recordError || '') === (error || '')) return;
+    const thread = { ...saved, recordError: error || undefined };
     this.db.prepare('UPDATE mailbox_threads SET data=? WHERE id=?').run(JSON.stringify(thread), id);
   }
 

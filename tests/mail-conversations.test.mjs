@@ -91,6 +91,36 @@ function harness(t, extra = {}) {
   };
 }
 
+test('同一邮箱的后台重试只加载一次客户和已导入首封，不为每个会话重复扫库', async (t) => {
+  let reads = 0,
+    imports = 0;
+  const found = [];
+  const h = harness(t, {
+    customers: () => {
+      reads++;
+      return [{ id: 'buyer', name: 'Buyer', email: 'buyer@buyer.example' }];
+    },
+    recordCommunication: async (detail) => found.push(detail.conversation.customerId),
+  });
+  const original = h.inbox.importDeliveries.bind(h.inbox);
+  h.inbox.importDeliveries = () => {
+    imports++;
+    return original();
+  };
+  h.respond(
+    batch(
+      Array.from({ length: 12 }, (_, i) =>
+        received('msg-' + i, { uid: i + 1, subject: 'Inquiry ' + i }),
+      ),
+    ),
+  );
+  await h.inbox.sync({ mailboxId: 'one' });
+  assert.ok(found.length > 1);
+  assert.ok(found.every((id) => id === 'buyer'));
+  assert.equal(reads, 1);
+  assert.ok(imports <= 2);
+});
+
 test('mailbox classification reaches business recording and resync preserves previously recorded classifications', async (t) => {
   const recorded = [];
   const h = harness(t, { recordCommunication: async (detail) => recorded.push(detail) });

@@ -21,16 +21,20 @@ export async function recordMailConversation({ store, conversation, messages }) 
     const context = store.context(customerId);
     if (context.fixedEmail && context.fixedEmail.toLowerCase() !== account)
       throw fail('客户固定邮箱与邮件会话不一致，请核对归属');
-    const all = store.all('messages');
-    const priorFor = (message) =>
-      all.filter(
-        (item) =>
-          item.channel === 'email' &&
-          item.account?.toLowerCase() === account &&
-          (message.messageId
-            ? item.externalId === message.messageId
-            : item.mailboxMessageId === message.id),
-      );
+    const priorByMessage = new Map(
+      eligible.map((message) => {
+        const field = message.messageId ? 'externalId' : 'mailboxMessageId';
+        const matches = store.db
+          .prepare(
+            `SELECT data FROM customer_business_entities WHERE scope=? AND kind='messages' AND json_extract(data,'$.${field}')=?`,
+          )
+          .all(store.scope, message.messageId || message.id)
+          .map((row) => JSON.parse(row.data))
+          .filter((item) => item.channel === 'email' && item.account?.toLowerCase() === account);
+        return [message, matches];
+      }),
+    );
+    const priorFor = (message) => priorByMessage.get(message);
     const linked = [
       ...new Set(
         eligible.flatMap((message) => priorFor(message).map((item) => item.conversationId)),
@@ -43,7 +47,7 @@ export async function recordMailConversation({ store, conversation, messages }) 
       : store.get('conversations', mappedId);
     if (!target) {
       const candidates = store
-        .all('conversations')
+        .all('conversations', customerId)
         .filter(
           (item) =>
             item.customerId === customerId &&

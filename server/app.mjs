@@ -252,7 +252,7 @@ export function createApp({
           getScope: acquisitionScope,
           acquisitionSources: () => acquisitionOutreachSources(jobs(), plans()),
           businessState: () => business.state().store.view(),
-          customers: () => library().snapshot(true).leads,
+          customers: () => library().mailContacts(),
           recordFollowUp: (action, first) =>
             recordFollowUpTask(business.state().store, action, first),
           recordAccepted: (delivery) =>
