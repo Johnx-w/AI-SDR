@@ -163,7 +163,9 @@ export function App({
       const inbox = location.pathname === '/inbox';
       const tab = new URLSearchParams(location.search).get('tab') || 'campaigns';
       if (location.pathname !== '/leads' && !customerList.cachedList())
-        void customerList.list('page=1&q=&market=&grade=&product=&status=', false).catch(() => {});
+        void customerList
+          .list('page=1&q=&market=&grade=&product=&status=', false, true)
+          .catch(() => {});
       const viewKey = 'view=current&status=all&q=&page=1&pageSize=20';
       if (!pages.outreach && !(inbox && tab === 'campaigns'))
         void outreachApi<OutreachState>('/state?' + viewKey)

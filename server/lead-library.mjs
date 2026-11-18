@@ -363,7 +363,7 @@ export class LeadLibrary {
     return this.snapshot();
   }
 
-  page(filters, decorate, { exportDetails = false } = {}) {
+  page(filters, decorate, { exportDetails = false, prepareDossiers } = {}) {
     this.assertOpen();
     const revision = this.meta?.revision || 0;
     const base = `FROM lead_library_customers WHERE scope=? AND ${eligible}`;
@@ -409,15 +409,23 @@ export class LeadLibrary {
       Math.max(1, Math.ceil(filteredTotal / 8)),
       Number.isSafeInteger(requested) && requested > 0 ? requested : 1,
     );
-    const leads = this.db
+    const rows = this.db
       .prepare(
-        `SELECT ${exportDetails ? 'detail' : 'summary'} AS data ${source} ORDER BY ${newest}${exportDetails ? '' : ' LIMIT 8 OFFSET ?'}`,
+        `SELECT ${exportDetails ? 'detail' : 'summary'} AS data${prepareDossiers && !exportDetails ? ',detail' : ''} ${source} ORDER BY ${newest}${exportDetails ? '' : ' LIMIT 8 OFFSET ?'}`,
       )
-      .all(...args, ...(exportDetails ? [] : [(page - 1) * 8]))
-      .map(({ data }) => decorate(JSON.parse(data)));
+      .all(...args, ...(exportDetails ? [] : [(page - 1) * 8]));
+    const leads = rows.map(({ data }) => decorate(JSON.parse(data)));
     return {
       ...this.metadata(),
       leads,
+      ...(prepareDossiers && !exportDetails
+        ? {
+            dossiers: prepareDossiers(rows.map((row) => JSON.parse(row.detail))).map((lead, i) => ({
+              lead: decorate(lead),
+              version: leads[i].version,
+            })),
+          }
+        : {}),
       total: this.facets.total,
       filteredTotal,
       page,

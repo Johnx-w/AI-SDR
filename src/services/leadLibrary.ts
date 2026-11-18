@@ -119,6 +119,7 @@ export interface LeadMetadata {
   };
 }
 export interface LeadList extends LeadMetadata {
+  dossiers?: Pick<LeadDetail, 'lead' | 'version'>[];
   leads: LeadSummary[];
   page?: number;
   filteredTotal?: number;
@@ -232,7 +233,7 @@ export class LeadLibraryClient {
     }
   }
   cachedDetail(id: string | null) {
-    return id ? this.details.get(id) || null : null;
+    return id ? this.freshDetail(id) || this.details.get(id) || null : null;
   }
   subscribe(listener: () => void) {
     this.listeners.add(listener);
@@ -276,8 +277,13 @@ export class LeadLibraryClient {
     return summary.version || `revision:${snapshot!.sync.revision}`;
   }
   private freshDetail(id: string) {
-    const value = this.cachedDetail(id);
-    return value && this.detailVersions.get(id) === this.versionFor(id) ? value : null;
+    const version = this.versionFor(id);
+    const value = this.details.get(id);
+    if (value && this.detailVersions.get(id) === version) return value;
+    return (
+      this.snapshot?.dossiers?.find((item) => item.lead.id === id && item.version === version)
+        ?.lead ?? null
+    );
   }
   private acceptList(data: LeadList, sequence: number, key: string) {
     if (key !== this.requestedKey) return data;
@@ -317,18 +323,28 @@ export class LeadLibraryClient {
           this.detailRequests.delete(id);
       }
     }
+    if (sameScope && !data.dossiers && this.snapshot?.dossiers) {
+      data.dossiers = this.snapshot.dossiers.filter((item) =>
+        data.leads.some((row) => row.id === item.lead.id && row.version === item.version),
+      );
+    }
     this.snapshot = data;
     this.snapshotKey = key;
     this.emit();
     return data;
   }
-  list(key = this.requestedKey, active = this.isActive()): Promise<LeadList> {
+  list(
+    key = this.requestedKey,
+    active = this.isActive(),
+    includeDossiers = false,
+  ): Promise<LeadList> {
     if (this.listRequest && key === this.requestedKey) return this.listRequest;
     this.requestedKey = key;
     const sequence = ++this.sequence;
     const epoch = this.epoch;
     const request = this.request<LeadList>(
-      '/api/v1/leads/real/list' + (key ? '?' + key : ''),
+      '/api/v1/leads/real/list' +
+        (key ? '?' + key + (includeDossiers ? '&include=dossiers' : '') : ''),
       'GET',
       active,
     ).then((data) => {
@@ -368,7 +384,11 @@ export class LeadLibraryClient {
   }
   detail(id: string, local = false): Promise<Prospect> {
     const cached = this.freshDetail(id);
-    if (cached) return Promise.resolve(cached);
+    if (cached) {
+      this.details.set(id, cached);
+      this.detailVersions.set(id, this.versionFor(id));
+      return Promise.resolve(cached);
+    }
     const version = this.versionFor(id);
     const mutation = this.mutations.get(id) || 0;
     const existing = this.detailRequests.get(id);
@@ -429,7 +449,7 @@ export class LeadLibraryClient {
     this.acceptedSequence = ++this.sequence;
     this.mutationSequence = this.acceptedSequence;
     this.listRequest = null;
-    const current = this.details.get(id);
+    const current = this.cachedDetail(id);
     if (current) {
       this.details.set(id, { ...current, ...saved });
       this.detailVersions.set(id, this.versionFor(id));

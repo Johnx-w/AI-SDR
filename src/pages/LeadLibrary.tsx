@@ -97,6 +97,18 @@ export function LeadLibrary({
   const seededKey = useRef(initialKey);
   const seededDetail = useRef(initialDetailId);
   const remote = leadLibrary.cachedList(listKey);
+  const visibleVersions = remote?.leads.map((item) => item.id + ':' + item.version).join(',');
+  useEffect(() => {
+    if (
+      !visibleVersions ||
+      !leadLibrary.cachedList(listKey)?.leads.some((item) => !leadLibrary.cachedDetail(item.id))
+    )
+      return;
+    const timer = window.setTimeout(() => {
+      if (!document.hidden) void leadLibrary.list(listKey, false, true).catch(() => {});
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [leadLibrary, listKey, visibleVersions]);
   async function load(refresh = false) {
     setLoading(true);
     setError('');

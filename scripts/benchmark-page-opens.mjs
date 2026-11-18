@@ -255,17 +255,26 @@ try {
       const reads = ['/leads/real/list?', '/outreach/state?view=current'].map((path) =>
         first.waitForResponse((res) => res.url().includes(path) && res.ok(), { timeout: 5000 }),
       );
-      await Promise.all([first.goto(base + '/inbox?tab=deliveries'), ...reads]);
+      const [, listResponse] = await Promise.all([
+        first.goto(base + '/inbox?tab=deliveries'),
+        ...reads,
+      ]);
+      const prepared = await listResponse.json();
+      assert.deepEqual(
+        prepared.dossiers?.map((item) => item.lead.id),
+        prepared.leads.map((row) => row.id),
+      );
+      assert.equal(prepared.dossiers.length, 8);
+      const chosen = prepared.dossiers[2];
+      const single = await (
+        await fetch(base + '/api/v1/leads/real/' + encodeURIComponent(chosen.lead.id) + '?local=1')
+      ).json();
+      assert.deepEqual(chosen, { lead: single.lead, version: single.version });
       await first.getByRole('link', { name: '客户库', exact: true }).click();
       const row = first.locator('.reference-lead-table tbody tr').nth(2);
       const name = await row.locator('strong').innerText();
-      await Promise.all([
-        first.waitForResponse((res) => res.url().endsWith('?local=1') && res.ok(), {
-          timeout: 5000,
-        }),
-        row.focus(),
-      ]);
       await first.route('**/api/v1/leads/real/**', (route) => route.abort());
+      await row.focus();
       await row.press('Enter');
       await first.getByRole('heading', { name, exact: true }).waitFor({ timeout: 700 });
       await first.close();

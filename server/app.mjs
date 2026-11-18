@@ -703,7 +703,12 @@ export function createApp({
           if (request.headers['x-lead-library-activity'] === 'active') library().touch();
           if (url.searchParams.has('page'))
             return await leadJson(response, 'list', () =>
-              library().page(url.searchParams, business.state().store.development()),
+              library().page(url.searchParams, business.state().store.development(), {
+                prepareDossiers:
+                  url.searchParams.get('include') === 'dossiers'
+                    ? (leads) => provider.decorateLeads({ leads }).leads
+                    : undefined,
+              }),
             );
           return await leadJson(response, 'list', () => library().list());
         }
