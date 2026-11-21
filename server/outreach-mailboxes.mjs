@@ -129,6 +129,7 @@ function outgoing(record, message) {
           'messageId',
           'inReplyTo',
           'references',
+          'autoReply',
           'attachments',
           'sentAt',
           'expectedAccount',
@@ -211,6 +212,9 @@ function outgoing(record, message) {
     ...(embedded.html ? { html: embedded.html } : {}),
     messageId,
     ...(inReplyTo ? { inReplyTo } : {}),
+    ...(message.autoReply === true
+      ? { headers: { 'Auto-Submitted': 'auto-replied', 'X-Auto-Response-Suppress': 'All' } }
+      : {}),
     ...(references.length ? { references } : {}),
     ...(attachments.length || embedded.attachments.length
       ? { attachments: [...attachments, ...embedded.attachments] }

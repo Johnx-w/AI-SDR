@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { knownReplyType } from './communication-rounds.mjs';
+import { siteAllowsProduct } from '../src/domain/mail-site.mjs';
 import { eligibleOutreachFacts, outreachMaterialVersion } from './outreach-content.mjs';
 import { createResearchProviders } from './research-providers.mjs';
 import { renderMailboxSignature, signaturePlainTextHtml } from '../src/domain/mail-signature.mjs';
@@ -8,7 +9,15 @@ import { renderMailboxSignature, signaturePlainTextHtml } from '../src/domain/ma
 const hour = 3600000;
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const identity = (m) =>
-  hash([m.email, m.displayName, m.signature, m.signatureDesign, m.productIds]);
+  hash([
+    m.email,
+    m.website,
+    m.brandName,
+    m.displayName,
+    m.signature,
+    m.signatureDesign,
+    m.productIds,
+  ]);
 const errorText = (error) =>
   error?.status || error?.code === 'ERR_ASSERTION'
     ? error.message
@@ -75,7 +84,8 @@ export class OutreachFollowUps {
     this.recordTask = recordTask;
     service.db
       .exec(`CREATE TABLE IF NOT EXISTS outreach_followups(id TEXT PRIMARY KEY,state TEXT NOT NULL,data TEXT NOT NULL);
-      CREATE INDEX IF NOT EXISTS outreach_followups_state ON outreach_followups(state);`);
+      CREATE INDEX IF NOT EXISTS outreach_followups_state ON outreach_followups(state);
+      CREATE INDEX IF NOT EXISTS outreach_followups_mailbox ON outreach_followups(state,json_extract(data,'$.mailboxId'));`);
     for (const item of this.all().filter((r) => r.status === 'sending'))
       this.put({ ...item, status: 'unknown', reason: '发送时服务中断，需核对原邮箱，不自动重发' });
   }
@@ -142,7 +152,7 @@ export class OutreachFollowUps {
         reason: '',
         dueAt: new Date(Date.parse(first.sentAt) + hours * hour).toISOString(),
         createdAt: new Date(this.service.now()).toISOString(),
-        reviewedAutoReplies: [],
+        notificationPolicy: 'continue',
       });
     }
   }
@@ -163,7 +173,7 @@ export class OutreachFollowUps {
     for (const item of this.pending().filter((r) => r.campaignId === id)) {
       if (action === 'disable')
         this.put({ ...item, status: 'cancelled', reason: '已关闭首封未回复跟进' });
-      if (action === 'resume') {
+      if (action === 'resume' && item.notificationPolicy !== 'continue') {
         const detail = this.detail(item);
         this.put({
           ...item,
@@ -181,6 +191,21 @@ export class OutreachFollowUps {
     s.start();
     void s.tick();
     return s.detail(id);
+  }
+  stopFor({ mailboxId, customerId, email, at, reason, firstId }) {
+    const rows = this.service.db
+      .prepare(
+        `SELECT data FROM outreach_followups WHERE state IN ('pending','sending')
+      AND json_extract(data,'$.mailboxId')=? AND (json_extract(data,'$.customerId')=?
+      OR lower(json_extract(data,'$.to'))=? OR json_extract(data,'$.firstId')=?)`,
+      )
+      .all(mailboxId, customerId || '', email?.toLowerCase() || '', firstId || '');
+    for (const row of rows) {
+      const item = JSON.parse(row.data);
+      if (Date.parse(at) < Date.parse(this.service.delivery(item.firstId).sentAt)) continue;
+      if (item.status === 'pending') this.put({ ...item, status: 'cancelled', reason });
+      else this.put({ ...item, stopReason: reason });
+    }
   }
   detail(item) {
     const s = this.service,
@@ -202,14 +227,36 @@ export class OutreachFollowUps {
     if (!c.followUpEnabled || c.status === 'cancelled')
       return { status: 'cancelled', reason: '发送计划或自动跟进已关闭' };
     if (c.scope !== s.getScope()) return { reason: '客户数据来源已改变' };
-    const ownMessages = new Set([
-      first.messageId,
-      ...this.all()
-        .filter((r) => r.firstId === first.id)
-        .map((r) => r.messageId),
-    ]);
+    if (item.status === 'cancelled') return { status: 'cancelled', reason: item.reason };
+    if (item.stopReason) return { status: 'cancelled', reason: item.stopReason };
+    if (first.senderWebsite) {
+      const box = s.mailboxes.get(item.mailboxId);
+      if (!box || first.senderWebsite !== box.website || first.senderBrand !== box.brandName)
+        return { status: 'cancelled', reason: '原首信所属官网或品牌已变化' };
+    }
+    if (s.db.prepare('SELECT 1 FROM outreach_delivery_bounces WHERE delivery_id=?').get(first.id))
+      return { status: 'cancelled', reason: '收件地址已退信' };
+    if (
+      s.db
+        .prepare(
+          `SELECT 1 FROM mail_reply_operations WHERE conversation_id=? AND status IN ('sending','unknown','accepted')
+      AND json_extract(data,'$.createdAt')>=? LIMIT 1`,
+        )
+        .get(detail.conversation.id, first.sentAt)
+    )
+      return { status: 'cancelled', reason: '本会话已有回信提交，结束本轮追信' };
+    const ownMessages = new Set(
+      [
+        first.messageId,
+        ...this.all()
+          .filter((r) => r.firstId === first.id)
+          .map((r) => r.messageId),
+      ].filter(Boolean),
+    );
     const later = detail.messages.filter(
-      (m) => Date.parse(m.occurredAt) >= Date.parse(first.sentAt) && !ownMessages.has(m.messageId),
+      (m) =>
+        Date.parse(m.receivedAt || m.occurredAt) >= Date.parse(first.sentAt) &&
+        !ownMessages.has(m.messageId),
     );
     if (
       later.some(
@@ -239,7 +286,10 @@ export class OutreachFollowUps {
         .some((key) => s.db.prepare('SELECT 1 FROM outreach_suppression WHERE identity=?').get(key))
     )
       return { status: 'cancelled', reason: '客户已停止自动联系或由人工接管' };
-    if (incoming.some((m) => !item.reviewedAutoReplies.includes(m.id)))
+    if (
+      item.notificationPolicy !== 'continue' &&
+      incoming.some((m) => !item.reviewedAutoReplies?.includes(m.id))
+    )
       return { reason: '收到系统自动回复，核对后在所属计划恢复追信' };
     if (
       this.all().some(
@@ -276,8 +326,10 @@ export class OutreachFollowUps {
         )
         .all())
         await this.mirror(JSON.parse(data));
-    for (const item of this.pending()) {
+    for (const queued of this.pending()) {
       if (s.closed || s.isMaintaining()) return;
+      const item = this.get(queued.id);
+      if (item?.status !== 'pending') continue;
       const c = s.campaign(item.campaignId);
       if (!c.followUpEnabled || c.status === 'cancelled') {
         await this.mirror(
@@ -331,7 +383,10 @@ export class OutreachFollowUps {
       first = s.delivery(item.firstId);
     await s.conversations.sync({ mailboxId: mailbox.id });
     const sync = s.conversations.syncState(mailbox);
-    assert(!sync.error && !sync.hasMore && sync.lastSyncAt, '尚未完整核对最新来信');
+    assert(
+      !sync.error && !sync.hasMore && sync.folderCoverage?.sent !== false && sync.lastSyncAt,
+      '尚未完整核对收件及已发送文件夹',
+    );
     const detail = this.detail(item);
     const blocked = this.guard(this.get(item.id), detail);
     if (blocked) {
@@ -347,6 +402,7 @@ export class OutreachFollowUps {
     assert(
       product &&
         mailbox.productIds?.includes(product.id) &&
+        siteAllowsProduct(product, mailbox) &&
         eligibleOutreachFacts(product, campaign, new Date(s.now())).length,
       '原产品或发件范围当前不可用',
     );
@@ -366,7 +422,10 @@ export class OutreachFollowUps {
     await s.conversations.sync({ mailboxId: mailbox.id });
     const latestSync = s.conversations.syncState(mailbox);
     assert(
-      !latestSync.error && !latestSync.hasMore && latestSync.lastSyncAt,
+      !latestSync.error &&
+        !latestSync.hasMore &&
+        latestSync.folderCoverage?.sent !== false &&
+        latestSync.lastSyncAt,
       '发送前收信核对未完成',
     );
     const latest = this.detail(item),
@@ -383,6 +442,7 @@ export class OutreachFollowUps {
     const signature = renderMailboxSignature(mailbox);
     const greeting = (first.bodyText || '').split(/\r?\n/)[0];
     const content = `${greeting}\n\n${body.trim()}`;
+    if (this.get(item.id)?.status !== 'pending') return;
     const pending = this.put({
       ...this.get(item.id),
       status: 'sending',
@@ -463,7 +523,7 @@ export class OutreachFollowUps {
       if (error.code === 'FOLLOWUP_PRE_SEND_BLOCKED')
         this.put({
           ...pending,
-          status: 'pending',
+          status: this.guard(this.get(item.id), this.detail(item))?.status || 'pending',
           reason: error.message,
           retryAt: new Date(s.now() + 60000).toISOString(),
         });

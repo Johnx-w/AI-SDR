@@ -258,6 +258,24 @@ export function createApp({
           getScope: acquisitionScope,
           acquisitionSources: () => acquisitionOutreachSources(jobs(), plans()),
           businessState: () => business.state().store.view(),
+          customerMailState: (id) => {
+            const store = business.state().store;
+            return {
+              context: store.context(id),
+              conversations: store.all('conversations', id),
+              demands: store.all('demands', id),
+            };
+          },
+          setMailOwnership: async (detail, ownership, owner) => {
+            const store = business.state().store;
+            const mapped = await recordMailConversation({ store, ...detail });
+            if (!mapped.conversationId) throw new ApiError(409, '请先关联客户再更改接待归属');
+            const conversation = store.get('conversations', mapped.conversationId);
+            await store.saveConversation(
+              { ...conversation, ownership, owner },
+              { expectedVersion: conversation.version },
+            );
+          },
           customers: () => library().mailContacts(),
           recordFollowUp: (action, first) =>
             recordFollowUpTask(business.state().store, action, first),
@@ -1061,9 +1079,10 @@ export function createApp({
               initial.detail = { ...detail, version, lead };
             }
           } else {
-            const records = url.searchParams.get('tab') === 'deliveries';
-            const viewKey = records
-              ? 'view=deliveries'
+            const tab = url.searchParams.get('tab');
+            const records = tab === 'deliveries';
+            const viewKey = ['deliveries', 'mailboxes', 'conversations', 'review'].includes(tab)
+              ? 'view=' + tab
               : 'view=current&status=all&q=&page=1&pageSize=20';
             initial.outreach = {
               ...(await outreach().state(new URLSearchParams(viewKey))),

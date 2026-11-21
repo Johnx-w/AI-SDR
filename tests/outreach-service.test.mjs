@@ -703,9 +703,8 @@ test('跨计划分配计入已保留草稿，但待发草稿复核不因邮箱�
     false,
   );
   assert.match(h.service.campaign(second.id).waitingReason, /额度/);
-  // Website metadata and priority do not change an already prepared sender.
+  // Allocation priority does not change an already prepared sender.
   h.boxes[0].priority = 999;
-  h.boxes[0].website = 'https://legacy.example.org';
   h.service.activate(first.id, first.revision);
   await h.service.tick();
   assert.equal(h.service.deliveries(first.id)[0].status, 'accepted');
@@ -730,6 +729,22 @@ test('计划品类筛选与邮箱产品范围共同决定首封资格', async (t
   assert.equal(drafts.length, 1);
   assert.equal(drafts[0].customerId, 'roller');
   assert.equal(drafts[0].mailboxId, 'brand-a');
+});
+
+test('已准备首信更换官网时撤回旧正文，不发送旧品牌草稿', async (t) => {
+  const h = harness();
+  t.after(() => h.service.close());
+  await runInternalTest(h);
+  const campaign = await prepare(h);
+  const draft = h.service.deliveries(campaign.id)[0];
+  h.boxes.find((box) => box.id === draft.mailboxId).website = 'https://other-brand.example.org';
+  h.service.activate(campaign.id, campaign.revision);
+  await h.service.tick();
+  assert.notEqual(h.service.delivery(draft.id).status, 'accepted');
+  assert.equal(
+    h.deliveries.some((row) => row.to === draft.to),
+    false,
+  );
 });
 
 test('已审核草稿的产品范围被撤回时停止发送，不切换到其他邮箱', async (t) => {
@@ -1541,7 +1556,23 @@ test('追信共享发送窗口和每日额度，SMTP提交前暂停生效，记�
     await h.service.close();
   }
 });
-test('真人回复及人工发信立即终止两次剩余追信，自动回执保留待执行直至明确恢复', async () => {
+test('追信生成与提交期间更换发件官网，原品牌的剩余追信均撤回', async () => {
+  const h = await followUpHarness();
+  try {
+    h.state.clock += 72 * 3600000;
+    const send = h.service.mailboxes.send;
+    h.service.mailboxes.send = async (id, message, opts) => {
+      h.boxes[0].website = 'https://new-brand.example.org';
+      return send(id, message, opts);
+    };
+    await h.service.tick();
+    assert.equal(h.deliveries.length, 1);
+    assert.ok(h.service.followUps.all().every((item) => item.status === 'cancelled'));
+  } finally {
+    await h.service.close();
+  }
+});
+test('真人回复及人工发信立即终止剩余追信，新任务中的自动回执不改变第3、7天安排', async () => {
   for (const direction of ['inbound', 'outbound']) {
     const h = await followUpHarness();
     try {
@@ -1564,11 +1595,37 @@ test('真人回复及人工发信立即终止两次剩余追信，自动回执�
     });
     h.state.clock = Date.parse(h.first.sentAt) + 72 * 3600000;
     await h.service.tick();
-    assert.equal(h.deliveries.length, 1);
-    assert.match(h.service.followUps.all()[0].reason, /自动回复/);
+    assert.equal(h.deliveries.length, 2);
+    h.state.clock = Date.parse(h.first.sentAt) + 168 * 3600000;
+    await h.service.tick();
+    assert.equal(h.deliveries.length, 3);
+  } finally {
+    await h.service.close();
+  }
+});
+test('已因自动回执等待人工的旧追信保留原状态，新追信缺已发件夹时也不会提交', async () => {
+  const h = await followUpHarness();
+  try {
+    const legacy = h.service.followUps.all()[0];
+    h.service.followUps.put({ ...legacy, notificationPolicy: undefined, reviewedAutoReplies: [] });
+    h.state.clock += 60000;
+    addResponse(h, {
+      classification: 'auto_reply',
+      subject: 'Out of office',
+      bodyText: 'I am away.',
+    });
+    h.state.clock = Date.parse(h.first.sentAt) + 72 * 3600000;
+    await h.service.tick();
+    assert.match(h.service.followUps.get(legacy.id).reason, /系统自动回复/);
+    h.service.mailboxes.readMailbox = async () => ({
+      folders: [],
+      hasMore: false,
+      folderCoverage: { inbox: true, sent: false },
+    });
     h.service.followUps.control(h.campaign.id, 'resume');
     await h.service.tick();
-    assert.equal(h.deliveries.length, 2, JSON.stringify(h.service.followUps.all()));
+    assert.equal(h.deliveries.length, 1);
+    assert.match(h.service.followUps.get(legacy.id).reason, /已发送文件夹/);
   } finally {
     await h.service.close();
   }

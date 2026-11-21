@@ -21,6 +21,7 @@ export function customerReplyText(message) {
 }
 
 export function knownReplyType(message) {
+  if (message.classification === 'hard_bounce') return '联系方式失效';
   const body = customerReplyText(message);
   const subject = String(message.subject || '');
   const notification =
@@ -46,6 +47,39 @@ export function knownReplyType(message) {
     return '系统自动回复';
   if (['unsubscribe', 'complaint'].includes(message.classification)) return '真人客户回复';
   return null;
+}
+
+export function incomingClassification(message) {
+  const body = customerReplyText({ body: message.bodyText || message.body || '' });
+  const subject = String(message.subject || '');
+  if (
+    /^(?:mailer-daemon|postmaster)@/iu.test(message.from) &&
+    /undeliverable|failure|undelivered|退信/iu.test(subject)
+  )
+    return 'hard_bounce';
+  if (/^no-reply@mailsupport\.aliyun\.com$/iu.test(message.from) && /退信/u.test(subject))
+    return 'hard_bounce';
+  if (message.classification && message.classification !== 'normal') return message.classification;
+  if (
+    knownReplyType({ ...message, body }) === '系统自动回复' ||
+    /^(?:no[-_.]?reply|notifications?)@/iu.test(message.from)
+  )
+    return 'auto_reply';
+  if (
+    /^(?:re:\s*)?unsubscribe\s*[.!]?$/iu.test(subject) ||
+    /(?:^|[.!?\n]\s*)\s*(?:please\s+)?(?:unsubscribe(?:\s+me)?|remove me from (?:your|the) (?:mailing )?list|(?:please )?(?:do not|don't|stop) (?:contact(?:ing)?|email(?:ing)?) (?:me|us))\b/imu.test(
+      body,
+    ) ||
+    /请勿(?:再)?(?:联系|发信)|请(?:帮我)?退订|^退订[。\s]*$/mu.test(body)
+  )
+    return 'unsubscribe';
+  if (
+    /\b(?:report(?:ed|ing)? (?:you|this) (?:as|for) spam|this is spam)\b|我要投诉|这是垃圾邮件/iu.test(
+      body,
+    )
+  )
+    return 'complaint';
+  return 'normal';
 }
 
 const externalId = (value) =>

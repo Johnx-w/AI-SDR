@@ -65,6 +65,7 @@ export function recordOutreachBounces(db, messages) {
     `INSERT INTO outreach_delivery_bounces(delivery_id,received_at) VALUES(?,?)
     ON CONFLICT(delivery_id) DO UPDATE SET received_at=max(received_at, excluded.received_at)`,
   );
+  const confirmed = [];
   for (const notice of notices) {
     const matches = deliveries.filter(
       (delivery) =>
@@ -75,8 +76,13 @@ export function recordOutreachBounces(db, messages) {
           ? delivery.messageId === notice.originalId
           : delivery.recipient === notice.recipient && delivery.subject?.trim() === notice.subject),
     );
-    if (matches.length === 1) save.run(matches[0].id, new Date(notice.receivedAt).toISOString());
+    if (matches.length === 1) {
+      const receivedAt = new Date(notice.receivedAt).toISOString();
+      save.run(matches[0].id, receivedAt);
+      confirmed.push({ id: matches[0].id, receivedAt });
+    }
   }
+  return confirmed;
 }
 
 export function initializeOutreachBounces(db) {

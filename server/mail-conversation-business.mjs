@@ -162,7 +162,12 @@ export async function recordMailConversation({ store, conversation, messages }) 
             : '来自沟通中心的真实邮件同步。',
         audit: [
           {
-            action: message.source === 'manual' ? 'manual_mail_reply' : 'mailbox_imported',
+            action:
+              message.source === 'manual'
+                ? 'manual_mail_reply'
+                : message.source === 'automatic'
+                  ? 'automatic_mail_reply'
+                  : 'mailbox_imported',
             at: timestamp,
           },
         ],
@@ -171,9 +176,10 @@ export async function recordMailConversation({ store, conversation, messages }) 
         updatedAt: timestamp,
       };
       store.put('messages', record);
+      if (record.direction === 'inbound') store.applyIncoming(record);
       recorded++;
     }
-    store.putContext({ ...context, fixedEmail: account, updatedAt: timestamp });
+    store.putContext({ ...store.context(customerId), fixedEmail: account, updatedAt: timestamp });
     store.db.exec('COMMIT');
     return { recorded, conversationId: target.id };
   } catch (error) {

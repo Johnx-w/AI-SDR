@@ -121,6 +121,25 @@ test('仅正式 unknown 可核实；IMAP 原邮箱准确发送证据才确认已
   await assert.rejects(h.service.reconcileDelivery('unknown'), { status: 409 });
 });
 
+test('首封结果未知时等待已发件证据，追信到期相对于实际发出时间', async (t) => {
+  const h = harness(t);
+  h.service.putCampaign({
+    id: 'campaign',
+    status: 'active',
+    followUpEnabled: true,
+    mailboxIds: [mailbox.id],
+  });
+  h.service.putDelivery(delivery('unknown', { followUpAtSubmission: true }));
+  await h.service.reconcileDelivery('unknown');
+  assert.equal(h.service.followUps.all().length, 0);
+  const actual = '2026-11-12T02:06:00.000Z';
+  h.respond(batch([sent({ occurredAt: actual })]));
+  await h.service.reconcileDelivery('unknown');
+  assert.deepEqual(
+    h.service.followUps.all().map((a) => a.dueAt),
+    ['2026-11-15T02:06:00.000Z', '2026-11-19T02:06:00.000Z'],
+  );
+});
 test('同 Message-ID 但发件人或收件人不一致不能确认，也不能人工判为未提交', async (t) => {
   const h = harness(t);
   h.service.putDelivery(delivery('unknown'));

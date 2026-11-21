@@ -13,6 +13,9 @@ import { OutreachFollowUps } from './outreach-follow-ups.mjs';
 import { initializeOutreachBounces, recordOutreachBounces } from './outreach-bounces.mjs';
 import { MailConversations } from './mail-conversations.mjs';
 import { MailReplies } from './mail-replies.mjs';
+import { MailReception } from './mail-reception.mjs';
+
+import { siteAllowsProduct } from '../src/domain/mail-site.mjs';
 import { renderMailboxSignature, signaturePlainTextHtml } from '../src/domain/mail-signature.mjs';
 import { deliveryGroup, deliveryGroupLabels } from '../src/domain/outreach-status.mjs';
 
@@ -83,6 +86,8 @@ export class OutreachService {
     getEnv = () => ({}),
     getScope = () => 'local',
     businessState = () => ({}),
+    customerMailState,
+    setMailOwnership,
     customers = () => [],
     recordAccepted,
     recordCommunication,
@@ -124,6 +129,7 @@ export class OutreachService {
       getEnv,
       getScope,
       businessState,
+      setMailOwnership,
       recordAccepted,
       generator,
       now,
@@ -131,6 +137,16 @@ export class OutreachService {
       acquisitionSources,
       isMaintaining,
     });
+    this.customerMailState =
+      customerMailState ||
+      ((id) => {
+        const graph = businessState();
+        return {
+          context: graph.customerContexts?.find((c) => c.customerId === id),
+          conversations: (graph.conversations || []).filter((c) => c.customerId === id),
+          demands: (graph.demands || []).filter((d) => d.customerId === id),
+        };
+      });
     this.followUps = new OutreachFollowUps(this, recordFollowUp);
     this.preparing = new Map();
     this.conversations = new MailConversations({
@@ -158,15 +174,25 @@ export class OutreachService {
           ),
       customers,
       recordCommunication,
-      recordDeliveryBounces: (mailbox, messages) =>
-        recordOutreachBounces(
+      onMessage: (box, thread, message, lookup) =>
+        this.reception.observe(box, thread, message, lookup),
+      recordDeliveryBounces: (mailbox, messages) => {
+        const matched = recordOutreachBounces(
           this.db,
           messages.map((message) => ({
             ...message,
             mailboxId: mailbox.id,
             account: mailbox.email,
           })),
-        ),
+        );
+        for (const bounce of matched || [])
+          this.followUps.stopFor({
+            mailboxId: mailbox.id,
+            firstId: bounce.id,
+            at: bounce.receivedAt,
+            reason: '原邮件已确认退信',
+          });
+      },
       now,
     });
     this.transaction(() => initializeOutreachBounces(this.db));
@@ -174,9 +200,12 @@ export class OutreachService {
       db: this.db,
       mailboxes,
       conversations: this.conversations,
+      guardReply: (input) => this.reception.guardReply(input),
+      onSettled: (op) => this.reception.settled(op),
       recordCommunication,
       now,
     });
+    this.reception = new MailReception(this);
     this.preparationQueue = Promise.resolve();
     this.running = null;
     this.timer = null;
@@ -454,6 +483,11 @@ export class OutreachService {
         products,
         ...page,
         counts,
+        reviewCount: this.db
+          .prepare(
+            "SELECT count(*) AS n FROM mail_reception WHERE state IN ('review','attention','uncertain')",
+          )
+          .get().n,
         deliveryStats,
         deliveryGroups,
         readiness: { generatorConfigured },
@@ -723,6 +757,16 @@ export class OutreachService {
     if (delivery.mode !== 'production' || !delivery.candidate) return '';
     const product = this.products().find((row) => row.id === delivery.candidate.productId);
     const version = outreachMaterialVersion(product, campaign, new Date(this.now()));
+    const mailbox = this.mailboxes.get(delivery.mailboxId);
+    if (
+      product &&
+      mailbox &&
+      (!siteAllowsProduct(product, mailbox) ||
+        (delivery.senderWebsite &&
+          (delivery.senderWebsite !== mailbox.website ||
+            delivery.senderBrand !== mailbox.brandName)))
+    )
+      return '官网或负责品牌已变化，请重新准备邮件';
     return !version ||
       product.version !== delivery.productVersion ||
       (delivery.materialVersion && version !== delivery.materialVersion)
@@ -1066,6 +1110,8 @@ export class OutreachService {
           candidate,
           revision,
           acquisitionRoundId: c.acquisitionSource?.roundId,
+          senderWebsite: mailbox.website,
+          senderBrand: mailbox.brandName,
           senderVersion: senderVersion(mailbox),
           productVersion: product.version,
           materialVersion:
@@ -1385,7 +1431,18 @@ export class OutreachService {
     if (!m || m.paused || m.smtpStatus !== 'connected' || !m.configured) return false;
     if (c.mode === 'internal_test') return true;
     if (c.approvedRevision !== c.revision || !this.inWindow(c)) return false;
+    return this.replyCapacity(m, c.intervalSeconds);
+  }
+  replyCapacity(m, interval = 0, except = '') {
+    const replies = this.db
+      .prepare(
+        `SELECT json_extract(data,'$.createdAt') AS attemptedAt, status FROM mail_reply_operations WHERE
+      json_extract(data,'$.mailboxId')=? AND idempotency_key<>? AND status IN ('accepted','sending','unknown','failed') AND json_extract(data,'$.createdAt')>=?`,
+      )
+      .all(m.id, except, new Date(this.now() - 86400000).toISOString())
+      .map((r) => ({ ...r, mailboxId: m.id }));
     const history = this.deliveryActivity()
+      .concat(replies)
       .concat(this.followUps.all())
       .filter(
         (v) =>
@@ -1400,7 +1457,7 @@ export class OutreachService {
       0,
       ...history.map((v) => Date.parse(v.sentAt || v.attemptedAt || v.createdAt)),
     );
-    return this.now() - last >= Math.max(c.intervalSeconds, m.intervalSeconds) * 1000;
+    return this.now() - last >= Math.max(interval || 0, m.intervalSeconds || 0) * 1000;
   }
   start() {
     if (this.timer || this.closed) return;
@@ -1511,6 +1568,7 @@ export class OutreachService {
       }
     }
     await this.followUps.tick();
+    await this.reception.tick();
   }
   async dispatch(c, d, m) {
     const current = this.campaign(c.id);
@@ -1610,6 +1668,7 @@ export class OutreachService {
     }
     const pending = {
       ...d,
+      followUpAtSubmission: c.mode === 'production' && c.followUpEnabled === true,
       status: 'sending',
       attemptedAt: iso(this.now),
       messageId: `<${d.id}@${m.email.split('@')[1]}>`,
@@ -1682,7 +1741,8 @@ export class OutreachService {
           messageId: result.messageId || pending.messageId,
           sentAt: accepted ? iso(this.now) : null,
         });
-        if (accepted) this.followUps.schedule(saved, this.campaign(c.id));
+        if (accepted && pending.followUpAtSubmission)
+          this.followUps.schedule(saved, this.campaign(c.id));
         return saved;
       });
       if (accepted && c.mode === 'production' && this.recordAccepted) {
@@ -1765,6 +1825,8 @@ export class OutreachService {
           : {}),
         reconciliation,
       });
+      if (evidence && current.followUpAtSubmission === true)
+        this.followUps.schedule(result, this.campaign(current.campaignId));
       return { result, acceptedNow: !!evidence };
     });
     if (acceptedNow && this.recordAccepted) {
@@ -1806,6 +1868,8 @@ export class OutreachService {
         },
       });
       if (outcome === 'failed') this.release(id);
+      if (outcome === 'accepted' && current.followUpAtSubmission === true)
+        this.followUps.schedule(resolved, this.campaign(current.campaignId));
       return resolved;
     });
     if (outcome === 'accepted' && this.recordAccepted) {

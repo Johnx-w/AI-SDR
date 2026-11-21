@@ -32,7 +32,11 @@ export async function handleOutreach({ request, url, service, readJson, idempote
       throw fail(400, '请选择有效邮箱');
     return service.conversations.sync({ mailboxId: body.mailboxId || 'all' });
   }
-  const conversation = path.match(/^\/conversations\/([\w-]+)(?:\/(read|draft|reply))?$/);
+  if (path === '/reception' && method === 'GET')
+    return service.reception.list(Object.fromEntries(url.searchParams));
+  const conversation = path.match(
+    /^\/conversations\/([\w-]+)(?:\/(read|draft|reply|ownership|regenerate))?$/,
+  );
   if (conversation) {
     const [, id, action] = conversation;
     if (!action && method === 'GET') {
@@ -50,6 +54,7 @@ export async function handleOutreach({ request, url, service, readJson, idempote
       return {
         ...detail,
         ...service.replies.detailExtras(id),
+        reception: service.reception.detail(detail.conversation),
         demands: (graph.demands || []).filter(
           (d) =>
             recordIds.has(d.sourceMessageId) ||
@@ -66,11 +71,31 @@ export async function handleOutreach({ request, url, service, readJson, idempote
     if (action === 'draft' && method === 'PUT')
       return { draft: service.replies.saveDraft(id, await readJson(request)) };
     if (action === 'draft' && method === 'DELETE') {
-      service.replies.deleteDraft(id, await readJson(request));
+      service.reception.discardDraft(id, await readJson(request));
       return { draft: null };
     }
-    if (action === 'reply' && method === 'POST')
-      return service.replies.reply(id, await readJson(request));
+    if (action === 'ownership' && method === 'POST')
+      return service.reception.ownership(id, (await readJson(request)).action);
+    if (action === 'regenerate' && method === 'POST') {
+      const { sourceId, revision } = await readJson(request);
+      if (typeof sourceId !== 'string' || service.reception.row(sourceId)?.thread_id !== id)
+        throw fail(409, '来信或会话已变化');
+      if (revision !== (service.replies.draft(id)?.revision || 0))
+        throw fail(409, '草稿已被修改，请重新打开会话');
+      await service.reception.prepare(sourceId, { regenerate: true });
+      return service.replies.detailExtras(id);
+    }
+    if (action === 'reply' && method === 'POST') {
+      const input = await readJson(request);
+      if (
+        service.replies.draft(id)?.provenance &&
+        !service.replies.operations(id).some((op) => op.idempotencyKey === input.idempotencyKey)
+      )
+        await service.reception.verifyInbox(
+          service.mailboxes.get(service.conversations.detail(id).conversation.mailboxId),
+        );
+      return service.replies.reply(id, input);
+    }
     throw fail(405, '不支持的邮件会话操作');
   }
   if (path === '/mailboxes' && method === 'POST')

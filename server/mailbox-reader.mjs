@@ -301,6 +301,7 @@ export function createMailboxReader({
         uidValidity: String(client.mailbox.uidValidity),
       },
       occurredAt: instant(headers.date) || receivedAt,
+      receivedAt,
       messageId: messageId(headers.messageId ?? metadata.envelope?.messageId),
       inReplyTo: messageId(headers.inReplyTo ?? metadata.envelope?.inReplyTo),
       references: references(headers.references),

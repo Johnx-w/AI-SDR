@@ -3,6 +3,11 @@ const names = {
   'shutterblindssolutions.com': 'Shutter & Blinds Solutions',
   'shuangshengshutter.com': 'Shuangsheng Shutter',
 };
+const brandMention = {
+  'honeybadgerblinds.com': /\bhoney[\s-]*badger(?:\s*blinds)?\b|蜜獾/iu,
+  'shuangshengshutter.com': /\bshuang[\s-]*sheng(?:\s*shutters?)?\b|双盛/iu,
+  'shutterblindssolutions.com': /\bshutter\s*(?:&|and)?\s*blinds?\s*solutions?\b|\bSBS\b/iu,
+};
 export function mailSite(url) {
   try {
     return new URL(url.includes('://') ? url : 'https://' + url).hostname
@@ -27,8 +32,9 @@ export function siteAllowsProduct(product, mailbox, requireSite = false) {
         brands.includes(s),
       )
     );
-  if (source && names[source]) return source === domain;
-  return requireSite ? !!domain && source === domain : true;
+  if (source) return source === domain;
+  // Legacy custom mailboxes can have manually assigned, untagged sales products.
+  return !requireSite && !names[domain];
 }
 export function mentionsOtherSite(question, mailbox) {
   const domain = mailSite(mailbox.website),
@@ -36,7 +42,8 @@ export function mentionsOtherSite(question, mailbox) {
   return Object.entries(names).some(
     ([other, name]) =>
       other !== domain &&
-      (normalized.includes(other.split('.')[0]) ||
+      (brandMention[other].test(question) ||
+        normalized.includes(other.split('.')[0]) ||
         normalized.includes(name.toLowerCase().replace(/[^a-z0-9]/gu, ''))),
   );
 }

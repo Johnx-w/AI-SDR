@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { setImmediate as yieldToRequests } from 'node:timers/promises';
 import { mailSyncFailure } from './mail-sync-errors.mjs';
+import { incomingClassification } from './communication-rounds.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -33,6 +34,7 @@ export class MailConversations {
     customers = () => [],
     recordCommunication,
     recordDeliveryBounces,
+    onMessage,
     now = Date.now,
   }) {
     Object.assign(this, {
@@ -42,6 +44,7 @@ export class MailConversations {
       customers,
       recordCommunication,
       recordDeliveryBounces,
+      onMessage,
       now,
     });
     this.pending = new Map();
@@ -70,6 +73,7 @@ export class MailConversations {
   }
 
   transaction(work) {
+    if (this.db.isTransaction) return work();
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const value = work();
@@ -103,6 +107,7 @@ export class MailConversations {
       syncing: this.pending.has(keyFor(mailbox)),
       hasMore: state.hasMore || false,
       folders: state.folders || [],
+      folderCoverage: state.folderCoverage || null,
       since: state.since || null,
       skipped: state.skipped || 0,
     };
@@ -189,7 +194,7 @@ export class MailConversations {
     return thread;
   }
 
-  putMessage(mailbox, input, extra = {}) {
+  putMessage(mailbox, input, extra = {}, lookup) {
     const accountKey = keyFor(mailbox);
     const externalId = messageId(input.messageId);
     const from = address(input.from);
@@ -230,7 +235,7 @@ export class MailConversations {
         };
       }
       if (
-        ['outreach', 'manual'].includes(old.source) &&
+        ['outreach', 'manual', 'automatic'].includes(old.source) &&
         input.source === 'imap' &&
         input.direction === 'outbound' &&
         old.from === from
@@ -307,12 +312,9 @@ export class MailConversations {
       bodyUnavailable: input.bodyUnavailable || undefined,
       attachments: attachmentMetadata(input.attachments),
       occurredAt,
+      receivedAt: input.receivedAt || occurredAt,
       deliveryStatus: input.deliveryStatus,
-      classification: ['normal', 'auto_reply', 'unsubscribe', 'hard_bounce', 'complaint'].includes(
-        input.classification,
-      )
-        ? input.classification
-        : 'normal',
+      classification: input.direction === 'inbound' ? incomingClassification(input) : 'normal',
       messageId: externalId || undefined,
       source: input.source,
       unread: input.direction === 'inbound' && input.unread !== false,
@@ -327,7 +329,8 @@ export class MailConversations {
       ON CONFLICT(account_key,external_id) DO UPDATE SET thread_id=excluded.thread_id`,
         )
         .run(accountKey, reference, threadId);
-    this.rebuild(threadId, mailbox, { ...inherited, ...extra });
+    const thread = this.rebuild(threadId, mailbox, { ...inherited, ...extra });
+    this.onMessage?.(mailbox, thread, data, lookup);
     return 1;
   }
 
@@ -412,11 +415,13 @@ export class MailConversations {
     }
   }
 
-  list({ mailboxId = 'all', customerId = '', q = '', unread = false, inboundOnly = false } = {}) {
+  list(
+    { mailboxId = 'all', customerId = '', q = '', unread = false, inboundOnly = false } = {},
+    customers = this.customerLookup(),
+  ) {
     this.importDeliveries();
     const selected = this.selected(mailboxId);
     const query = text(q, 500).toLowerCase().trim();
-    const customers = this.customerLookup();
     const items = selected
       .flatMap((mailbox) =>
         this.db
@@ -511,6 +516,7 @@ export class MailConversations {
       stage = 'validate';
       if (!Array.isArray(batch.folders)) throw fail(502, '邮件同步结果无效');
       let imported = 0;
+      const lookup = this.customerLookup();
       stage = 'save';
       this.transaction(() => {
         const cursors = { ...prior.cursors };
@@ -525,18 +531,23 @@ export class MailConversations {
             throw Object.assign(fail(502, '邮件同步位置无效'), { code: 'MAILBOX_SYNC_INVALID' });
           }
           for (const message of folder.messages) {
-            imported += this.putMessage(mailbox, {
-              ...message,
-              identity: [folder.path, folder.uidValidity, message.uid],
-              sourceLocator: {
-                folder: folder.path,
-                sent: folder.sent === true,
-                uidValidity: String(folder.uidValidity),
-                uid: message.uid,
+            imported += this.putMessage(
+              mailbox,
+              {
+                ...message,
+                identity: [folder.path, folder.uidValidity, message.uid],
+                sourceLocator: {
+                  folder: folder.path,
+                  sent: folder.sent === true,
+                  uidValidity: String(folder.uidValidity),
+                  uid: message.uid,
+                },
+                source: 'imap',
+                deliveryStatus: message.direction === 'inbound' ? 'received' : 'sent',
               },
-              source: 'imap',
-              deliveryStatus: message.direction === 'inbound' ? 'received' : 'sent',
-            });
+              {},
+              lookup,
+            );
           }
           cursors[folder.path] = {
             uidValidity: String(folder.uidValidity),
@@ -555,12 +566,13 @@ export class MailConversations {
           error: null,
           lastError: prior.lastError || null,
           folders: batch.folders.map((folder) => folder.path),
+          folderCoverage: batch.folderCoverage,
           hasMore: !!batch.hasMore,
           skipped: batch.folders.reduce((sum, folder) => sum + (folder.skipped || 0), 0),
         });
       });
       if (this.recordCommunication) {
-        for (const thread of this.list({ mailboxId: mailbox.id }).items) {
+        for (const thread of this.list({ mailboxId: mailbox.id }, lookup).items) {
           await yieldToRequests();
           if (this.closed || !this.mailboxes.list().some((current) => keyFor(current) === key))
             break;

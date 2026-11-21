@@ -34,12 +34,29 @@ const preSendFailures = new Set([
   'MAILBOX_INVALID',
   'MAILBOX_CREDENTIAL_FAILED',
   'MAILBOX_IDENTITY_CHANGED',
+  'REPLY_POLICY_CHANGED',
 ]);
 
 /** Human replies own a separate durable send ledger; they never enter outreach scheduling. */
 export class MailReplies {
-  constructor({ db, mailboxes, conversations, recordCommunication, now = Date.now }) {
-    Object.assign(this, { db, mailboxes, conversations, recordCommunication, now });
+  constructor({
+    db,
+    mailboxes,
+    conversations,
+    recordCommunication,
+    guardReply,
+    onSettled,
+    now = Date.now,
+  }) {
+    Object.assign(this, {
+      db,
+      mailboxes,
+      conversations,
+      recordCommunication,
+      guardReply,
+      onSettled,
+      now,
+    });
     this.pending = new Map();
     this.retainedResults = new Map();
     this.closed = false;
@@ -174,7 +191,7 @@ export class MailReplies {
     return row?.data ? JSON.parse(row.data) : null;
   }
 
-  saveDraft(id, input = {}) {
+  saveDraft(id, input = {}, provenance) {
     this.ensureOpen();
     validInput(input);
     const detail = this.conversations.detail(id);
@@ -194,6 +211,11 @@ export class MailReplies {
       subject: context.subject,
       ...content,
       attachments,
+      ...(provenance
+        ? { provenance }
+        : previous?.provenance && previous.replyToMessageId === context.replyToMessageId
+          ? { provenance: previous.provenance, edited: true }
+          : {}),
       updatedAt: this.timestamp(),
     };
     this.db
@@ -327,7 +349,7 @@ export class MailReplies {
     }
   }
 
-  reply(id, input = {}) {
+  reply(id, input = {}, origin = 'manual') {
     this.ensureOpen();
     validInput(input);
     const request = this.request(id, input);
@@ -352,6 +374,7 @@ export class MailReplies {
       throw fail(409, '回信草稿版本或原邮件已变化，请重新保存后发送');
     const context = this.context(detail, request.requestedId);
     const content = normalizeReplyContent(draft);
+    this.guardReply?.({ id, source: request.requestedId, draft, origin, key: request.key });
     const attachments = normalizeAttachments(draft.attachments);
     if (
       (request.descriptor.content && digest(request.descriptor.content) !== digest(content)) ||
@@ -361,6 +384,7 @@ export class MailReplies {
       throw fail(409, '发送内容与已保存草稿不一致，请先保存当前内容');
     const payload = {
       expectedAccount: detail.conversation.account,
+      ...(origin === 'automatic' ? { autoReply: true } : {}),
       to: context.to,
       subject: context.subject,
       text: content.bodyText,
@@ -393,6 +417,8 @@ export class MailReplies {
       id: 'reply_' + randomUUID(),
       idempotencyKey: request.key,
       payloadHash: request.payloadHash,
+      origin,
+      ...(draft.provenance ? { provenance: draft.provenance } : {}),
       conversationId: id,
       mailboxId: context.mailboxId,
       replyToMessageId: context.replyToMessageId,
@@ -412,15 +438,24 @@ export class MailReplies {
       sentAt: null,
     };
     this.persist(operation);
-    const pending = this.send(operation).finally(() => this.pending.delete(request.key));
+    const pending = this.send(operation, draft).finally(() => this.pending.delete(request.key));
     this.pending.set(request.key, pending);
     return pending;
   }
 
-  async send(operation) {
+  async send(operation, draft) {
     let result;
     try {
-      result = await this.mailboxes.send(operation.mailboxId, operation.payload);
+      result = await this.mailboxes.send(operation.mailboxId, operation.payload, {
+        beforeSend: () =>
+          this.guardReply?.({
+            id: operation.conversationId,
+            source: operation.replyToMessageId,
+            draft,
+            origin: operation.origin,
+            key: operation.idempotencyKey,
+          }),
+      });
       const matches = (values) =>
         Array.isArray(values) && values.some((value) => address(value) === address(operation.to));
       const accepted = result?.accepted === true || matches(result?.accepted);
@@ -438,11 +473,18 @@ export class MailReplies {
     } catch (error) {
       operation.status = preSendFailures.has(error?.code) ? 'failed' : 'unknown';
       operation.error =
-        operation.status === 'failed'
-          ? '邮箱当前不能发信，请核对连接、暂停状态及发件身份'
-          : '发送结果待核实，请在邮箱中核对，勿重复发送';
+        error.code === 'REPLY_POLICY_CHANGED'
+          ? error.message
+          : operation.status === 'failed'
+            ? '邮箱当前不能发信，请核对连接、暂停状态及发件身份'
+            : '发送结果待核实，请在邮箱中核对，勿重复发送';
     }
     this.persistAttemptResult(operation);
+    try {
+      this.onSettled?.(operation);
+    } catch {
+      operation.recordError = '回信结果已记录，接待列表将在重启后核对';
+    }
     if (operation.status !== 'accepted') return this.result(operation);
 
     try {
@@ -469,7 +511,7 @@ export class MailReplies {
         attachments: operation.payload.attachments,
         occurredAt: operation.sentAt,
         deliveryStatus: 'accepted',
-        source: 'manual',
+        source: operation.origin === 'automatic' ? 'automatic' : 'manual',
         messageId: operation.messageId,
         inReplyTo: operation.payload.inReplyTo,
         references: operation.payload.references,

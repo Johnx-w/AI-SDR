@@ -16,8 +16,8 @@ T12 自动同步随本次版本交付，使用运行环境有效飞书连接和�
 | 获客、搜索、预算、定时计划与自动首发 | [获客](acquisition.md)                                  | 官网唯一自动获客来源；SQLite 主库先保存、飞书后台同步             |
 | 客户、产品、自动需求及只读追信任务   | [客户与产品数据](customer-data.md)                      | T1/T3/T4 自动记录；正式原 T5 不再接收网页产品镜像                 |
 | 当前评级与客户档案                   | [客户评级](assessment.md)                               | `acquisition-v5.0`；A/B/C 按方向取证，普通缺项不作为人工补档门槛  |
-| 首封、收信、阅读、人工回复及发送事实 | [邮件沟通](outreach-first-touch.md)                     | 后台收信及 72／168 小时追信已实现；正式自动回信待接入             |
-| AI 业务员与自动接待                  | [当前实现与待实现设计](ai-sales-agent-design.md)        | 四品类正式配置、授权与自动回信待实现                              |
+| 首封、收信、阅读、人工回复及发送事实 | [邮件沟通](outreach-first-touch.md)                     | 后台收信、72／168 小时追信、按邮箱接待和待审回信                  |
+| AI 业务员与自动接待                  | [当前实现与待实现设计](ai-sales-agent-design.md)        | 独立四品类配置及自动商务承诺属于后续设计                          |
 | 模块、接口、存储、部署、备份与恢复   | [架构与运行](architecture.md)                           | 标准交付流程入口；文档整理不执行发布或真实业务                    |
 | 飞书字段与数据归属                   | [飞书镜像填写规范](new-feishu-bitable-filling-spec.md)  | T2/T12 最新评估镜像；正式 Base 与测试环境分开，前三条模板保持停用 |
 | 自动首发检查范围                     | [测试用例与验收](acquisition-auto-first-touch-tests.md) | 当前业务预期和离线复跑入口；历史执行次数已归档                    |
@@ -57,7 +57,7 @@ T12 自动同步随本次版本交付，使用运行环境有效飞书连接和�
 | [ADR-0014](adr/0014-original-mail-format-and-manual-replies.md)             | 原格式阅读与人工回复                           |
 | [ADR-0017](adr/0017-automatic-sending-with-confirmed-information.md)        | 基础首封免逐封审核；标准商务自动回信待实现     |
 | [ADR-0018](adr/0018-simple-llm-outreach-with-fixed-signatures.md)           | 独立首封写作；旧专业模式及审批链已移除         |
-| [ADR-0019](adr/0019-ai-sales-agents-with-controlled-mail-reception.md)      | 正式接待独立授权；配置及运行链路待实现         |
+| [ADR-0019](adr/0019-ai-sales-agents-with-controlled-mail-reception.md)      | 接待独立授权，四品类角色配置待实现             |
 | [ADR-0020](adr/0020-website-only-acquisition.md)                            | 官网为唯一自动获客来源                         |
 | [ADR-0022](adr/0022-unified-abc-customer-grades.md)                         | 当前统一 A/B/C，正式 T12 已按快照回填          |
 | [ADR-0023](adr/0023-acquisition-scoped-automatic-first-touch.md)            | 获客范围内逐家自动首发及计划控制               |
