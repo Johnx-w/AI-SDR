@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { isIP } from 'node:net';
 import { domainKey } from './website-identity.mjs';
+import { siteAllowsProduct } from '../src/domain/mail-site.mjs';
 import { assessmentSummaryFields } from './customer-fields.mjs';
 import { businessProductRelation, countryMatches, windowProductDirections } from './relevance.mjs';
 import { researchProviderConfig } from './acquisition-config.mjs';
@@ -496,6 +497,7 @@ export function selectOutreachCandidates({
     const permittedSenders = senders.filter(
       (mailbox) =>
         array(mailbox.productIds).includes(chosen.product.id) &&
+        siteAllowsProduct(chosen.product, mailbox) &&
         (!assignment || assignment.mailboxId === mailbox.id),
     );
     if (!permittedSenders.length) {

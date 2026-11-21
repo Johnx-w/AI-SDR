@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import nodemailer from 'nodemailer';
 import MailComposer from 'nodemailer/lib/mail-composer';
 import { ImapFlow } from 'imapflow';
+import { siteBrand } from '../src/domain/mail-site.mjs';
 import { createMailboxReader, MailboxReadError } from './mailbox-reader.mjs';
 import { normalizeSignatureDesign, embedSignatureImages } from './mail-signature.mjs';
 import { renderMailboxSignature } from '../src/domain/mail-signature.mjs';
@@ -14,11 +15,6 @@ const IMAP = Object.freeze({ host: 'imap.qiye.aliyun.com', port: 993, secure: tr
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 const DPAPI = 'windows-dpapi-current-user';
 const AES = 'aes-256-gcm-local-key';
-const brandNames = {
-  'honeybadgerblinds.com': 'Honey Badger Blinds',
-  'shutterblindssolutions.com': 'Shutter & Blinds Solutions',
-  'shuangshengshutter.com': 'Shuangsheng Shutter',
-};
 const messages = {
   MAILBOX_INVALID: '邮箱配置格式不正确',
   MAILBOX_NOT_FOUND: '邮箱不存在',
@@ -366,6 +362,9 @@ function normalize(input, previous) {
     'signature',
     'signatureDesign',
     'productIds',
+    'knowledgeProductIds',
+    'owner',
+    'replyMode',
     'priority',
     'dailyLimit',
     'intervalSeconds',
@@ -379,9 +378,17 @@ function normalize(input, previous) {
   if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/u.test(id)) throw fail();
   const address = email(value.email);
   const site = website(value.website ?? 'https://' + address.split('@')[1]);
-  const defaultBrand = brandNames[new URL(site).hostname] || '';
+  const defaultBrand = siteBrand(site);
   const productIds = value.productIds ?? [];
   if (!Array.isArray(productIds) || productIds.length > 500) throw fail();
+  const knowledgeProductIds = value.knowledgeProductIds ?? [];
+  const replyMode = value.replyMode ?? 'manual';
+  if (
+    !Array.isArray(knowledgeProductIds) ||
+    knowledgeProductIds.length > 500 ||
+    !['manual', 'review', 'auto'].includes(replyMode)
+  )
+    throw fail();
   const paused = value.paused ?? true;
   if (typeof paused !== 'boolean') throw fail();
   const signatureDesign = normalizeSignatureDesign(value.signatureDesign);
@@ -395,6 +402,9 @@ function normalize(input, previous) {
     signature: text(value.signature ?? '', 8000, false, true),
     ...(signatureDesign ? { signatureDesign } : {}),
     productIds: [...new Set(productIds.map((id) => text(id, 180, true)))],
+    knowledgeProductIds: [...new Set(knowledgeProductIds.map((id) => text(id, 180, true)))],
+    owner: text(value.owner ?? value.displayName ?? '', 160),
+    replyMode,
     priority: integer(value.priority ?? 100, 0, 10000),
     dailyLimit: integer(value.dailyLimit ?? 50, 1, 500),
     intervalSeconds: integer(value.intervalSeconds ?? 60, 5, 86400),
@@ -446,6 +456,7 @@ export class OutreachMailboxes {
             sendingEnabled,
             createdAt,
             updatedAt,
+            replyEnabledAt,
             ...settings
           } = record;
           const normalized = normalize({ ...settings, paused: settings.paused ?? false });
@@ -477,6 +488,7 @@ export class OutreachMailboxes {
           );
           this.records.set(normalized.id, {
             ...normalized,
+            replyEnabledAt: typeof replyEnabledAt === 'string' ? replyEnabledAt : null,
             credential: credential || null,
             credentialProtection: credential ? credentialProtection : null,
             verification: {
@@ -573,6 +585,12 @@ export class OutreachMailboxes {
     const now = new Date().toISOString();
     return {
       ...record,
+      replyEnabledAt:
+        record.replyMode === 'manual'
+          ? null
+          : !previous?.replyEnabledAt || identityChanged || previous.website !== record.website
+            ? now
+            : previous.replyEnabledAt,
       credential,
       credentialProtection,
       verification:
@@ -710,7 +728,14 @@ export class OutreachMailboxes {
           messageId,
         };
       } catch (error) {
-        if (error instanceof OutreachMailboxError || error.code === 'OUTREACH_PRE_SEND_BLOCKED')
+        if (
+          error instanceof OutreachMailboxError ||
+          [
+            'OUTREACH_PRE_SEND_BLOCKED',
+            'FOLLOWUP_PRE_SEND_BLOCKED',
+            'REPLY_POLICY_CHANGED',
+          ].includes(error.code)
+        )
           throw error;
         throw fail('MAILBOX_SEND_FAILED', 503);
       } finally {

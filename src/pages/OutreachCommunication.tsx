@@ -27,9 +27,11 @@ import {
 } from 'lucide-react';
 import { PageHeading } from '../components/PageHeading';
 import { MailConversations } from '../components/MailConversations';
+import { ReplyPreview } from '../components/ReplyPreview';
 import { MailMessageBody } from '../components/MailMessageBody';
 import { MailSignatureFields, defaultSignatureDesign } from '../components/MailSignatureFields';
 import { renderMailboxSignature } from '../domain/mail-signature.mjs';
+import { siteAllowsProduct, siteBrand } from '../domain/mail-site.mjs';
 import { deliveryGroup, deliveryGroupLabels } from '../domain/outreach-status.mjs';
 import type { MailSignatureDesign } from '../domain/mail-signature.mjs';
 import { Badge, Empty, Modal } from '../components/ui';
@@ -223,7 +225,17 @@ function MailboxEditor({
   onSave: (input: MailboxInput) => Promise<void>;
 }) {
   const [selectedProducts, setSelectedProducts] = useState(mailbox?.productIds || []);
+  const [knowledge, setKnowledge] = useState(mailbox?.knowledgeProductIds || []);
+  const [site, setSite] = useState(mailbox?.website || '');
+  const [brand, setBrand] = useState(mailbox?.brandName || '');
+  const [replyMode, setReplyMode] = useState(mailbox?.replyMode || 'manual');
   const [email, setEmail] = useState(mailbox?.email || '');
+  const domain = email.split('@')[1] || '';
+  const website = site || (domain ? 'https://' + domain : '');
+  const identity = { website, email, brandName: brand || siteBrand(website) || domain };
+  const allowedKnowledge = products.filter(
+    (p) => productApproved(p) && siteAllowsProduct(p, identity, true),
+  );
   const [displayName, setDisplayName] = useState(mailbox?.displayName || '');
   const [signature, setSignature] = useState(mailbox?.signature || '');
   const [signatureDesign, setSignatureDesign] = useState<MailSignatureDesign | null>(
@@ -239,19 +251,22 @@ function MailboxEditor({
     const form = new FormData(event.currentTarget);
     const password = String(form.get('password') || '');
     const address = String(form.get('email')).trim();
-    const domain = address.split('@').at(-1)?.toLowerCase() || '';
     const displayName = String(form.get('displayName')).trim();
     setBusy(true);
     setError(null);
     try {
       await onSave({
         email: address,
-        website:
-          mailbox?.email === address && mailbox.website ? mailbox.website : `https://${domain}`,
-        brandName: mailbox?.brandName || displayName || domain,
+        website,
+        brandName: identity.brandName,
+        owner: String(form.get('owner') || displayName),
+        replyMode,
+        knowledgeProductIds: knowledge.filter((id) => allowedKnowledge.some((p) => p.id === id)),
         displayName,
         ...(signatureDesign ? { signatureDesign } : { signature }),
-        productIds: selectedProducts,
+        productIds: selectedProducts.filter((id) =>
+          products.some((p) => p.id === id && siteAllowsProduct(p, identity)),
+        ),
         priority: mailbox?.priority ?? 100,
         dailyLimit: Number(form.get('dailyLimit')),
         intervalSeconds: Number(form.get('intervalSeconds')),
@@ -279,15 +294,6 @@ function MailboxEditor({
         autoComplete="off"
       >
         <InlineError value={error} />
-        <div className="outreach-form-section">
-          <h3>此邮箱负责的产品</h3>
-          <p>先按客户产品匹配邮箱。以确认的供货范围配置，无需等待官网可访问。</p>
-        </div>
-        <ProductOptions
-          products={products}
-          selected={selectedProducts}
-          onChange={setSelectedProducts}
-        />
         {selectedProducts.some((id) => !products.some((product) => product.id === id)) && (
           <div className="outreach-alert">
             <span>以下已配置产品不在当前资料库中，正式计划不会使用：</span>
@@ -336,6 +342,32 @@ function MailboxEditor({
             />
           </label>
           <label className="outreach-full">
+            产品官网
+            <input
+              type="url"
+              value={website}
+              onChange={(event) => setSite(event.target.value)}
+              placeholder="https://company.com"
+              required
+            />
+          </label>
+          <label>
+            官网品牌
+            <input
+              value={brand || siteBrand(website)}
+              onChange={(event) => setBrand(event.target.value)}
+              placeholder={domain}
+            />
+          </label>
+          <label>
+            负责人
+            <input
+              name="owner"
+              defaultValue={mailbox?.owner || mailbox?.displayName}
+              placeholder="默认使用业务员姓名"
+            />
+          </label>
+          <label className="outreach-full">
             第三方客户端密码
             <input
               name="password"
@@ -348,6 +380,41 @@ function MailboxEditor({
             />
             <small>仅提交到服务器，不保存在浏览器本地。</small>
           </label>
+        </div>
+        <div className="outreach-form-section">
+          <h3>此邮箱负责的产品</h3>
+          <ProductOptions
+            products={products.filter((p) => siteAllowsProduct(p, identity))}
+            selected={selectedProducts}
+            onChange={setSelectedProducts}
+          />
+          <h3>客户回信</h3>
+          <label>
+            接待方式
+            <select
+              value={replyMode}
+              onChange={(e) => setReplyMode(e.target.value as typeof replyMode)}
+            >
+              <option value="manual">业务员手动回复</option>
+              <option value="review">生成草稿，逐封审核</option>
+              <option value="auto">有明确依据时自动回复</option>
+            </select>
+          </label>
+          {replyMode !== 'manual' && (
+            <>
+              <h4>回复可用资料</h4>
+              <ProductOptions
+                products={allowedKnowledge}
+                selected={knowledge}
+                onChange={setKnowledge}
+                emptyText="请先在产品资料中审核并填写此官网或适用品牌。"
+              />
+              <Link to="/materials">管理产品资料</Link>
+            </>
+          )}
+          <small>
+            开启未回复跟进的计划会在首封发出后第 3、7 天沿原线程追信，收到客户回复即结束。
+          </small>
         </div>
         <div className="outreach-form-section">
           <h3>邮件签名</h3>
@@ -805,7 +872,7 @@ function CampaignEditor({
             <input
               type="checkbox"
               name="followUpEnabled"
-              defaultChecked={campaign?.followUpEnabled === true}
+              defaultChecked={campaign ? campaign.followUpEnabled === true : true}
             />
             首封未回复自动跟进（第3天、第7天）
           </label>
@@ -1882,7 +1949,14 @@ export function OutreachCommunication({
                           </span>
                           <div>
                             <h3>{mailbox.email}</h3>
-                            <p>业务员：{mailbox.displayName || '待设置'}</p>
+                            <p>
+                              {mailbox.owner || mailbox.displayName || '待设置负责人'} ·{' '}
+                              {mailbox.replyMode === 'auto'
+                                ? '自动接待'
+                                : mailbox.replyMode === 'review'
+                                  ? '逐封审核'
+                                  : '手动接待'}
+                            </p>
                           </div>
                           <Badge tone={mailbox.paused ? 'amber' : tone(mailbox.smtpStatus)}>
                             {mailbox.paused
@@ -1893,6 +1967,7 @@ export function OutreachCommunication({
                           </Badge>
                         </div>
                         <div className="outreach-mailbox-coverage">
+                          <ReplyPreview id={mailbox.id} />
                           <span>负责产品</span>
                           <div className="outreach-product-tags">
                             {mailbox.productIds?.length ? (

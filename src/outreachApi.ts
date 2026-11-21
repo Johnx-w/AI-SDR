@@ -19,6 +19,8 @@ export interface OutreachProduct {
   version?: number;
   englishName?: string;
   outreachFacts?: OutreachFact[];
+  brands?: string[];
+  sourceUrl?: string;
 }
 
 export interface OutreachMailbox {
@@ -30,6 +32,9 @@ export interface OutreachMailbox {
   signature: string;
   signatureDesign?: MailSignatureDesign | null;
   productIds: string[];
+  knowledgeProductIds?: string[];
+  owner?: string;
+  replyMode?: 'manual' | 'review' | 'auto';
   priority: number;
   dailyLimit: number;
   intervalSeconds: number;

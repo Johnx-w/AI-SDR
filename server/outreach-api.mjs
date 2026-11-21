@@ -79,11 +79,17 @@ export async function handleOutreach({ request, url, service, readJson, idempote
     const body = await readJson(request);
     return { mailboxes: await service.mailboxes.import(body.items) };
   }
-  const mailbox = path.match(/^\/mailboxes\/([\w-]+)(?:\/(verify))?$/);
+  const mailbox = path.match(/^\/mailboxes\/([\w-]+)(?:\/(verify|preview))?$/);
   if (mailbox) {
     const [, id, action] = mailbox;
     if (!action && method === 'GET') return service.mailboxes.get(id);
     if (action === 'verify' && method === 'POST') return service.mailboxes.verify(id);
+    if (action === 'preview' && method === 'POST') {
+      const { question } = await readJson(request);
+      if (typeof question !== 'string' || !question.trim() || question.length > 4000)
+        throw fail(400, '请输入 1 至 4000 字的问题');
+      return service.answerQuestion(service.mailboxes.get(id), question, service.now());
+    }
     if (!action && method === 'PUT') {
       const body = await readJson(request);
       return service.mailboxes.save({ ...body, id });

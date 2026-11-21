@@ -25,6 +25,7 @@ import { AcquisitionSchedules } from './acquisition-schedules.mjs';
 import { ProductCatalog } from './product-catalog.mjs';
 import { workbookPage } from './product-workbooks.mjs';
 import { ProductKnowledge } from './product-knowledge.mjs';
+import { answerMailQuestion } from './mail-knowledge.mjs';
 import { MAX_PRODUCT_DOCUMENT_BYTES } from './product-documents.mjs';
 import { ProductKnowledgeFeishu } from './product-knowledge-feishu.mjs';
 import { CustomerBusinessApi } from './customer-business-api.mjs';
@@ -251,6 +252,8 @@ export function createApp({
               isDevelopmentCustomer,
             ),
           products: () => knowledge().list(),
+          answerQuestion: (mailbox, question, now) =>
+            answerMailQuestion(knowledge(), mailbox, question, now),
           getEnv: () => connections.environment(),
           getScope: acquisitionScope,
           acquisitionSources: () => acquisitionOutreachSources(jobs(), plans()),

@@ -74,6 +74,12 @@ export class OutreachService {
     mailboxes,
     loadLeads = async () => [],
     products = () => [],
+    answerQuestion = () => ({
+      automatic: false,
+      reason: '尚无所选资料',
+      sources: [],
+      body: 'Could you confirm the model and the detail you need?',
+    }),
     getEnv = () => ({}),
     getScope = () => 'local',
     businessState = () => ({}),
@@ -114,6 +120,7 @@ export class OutreachService {
       mailboxes,
       loadLeads,
       products,
+      answerQuestion,
       getEnv,
       getScope,
       businessState,
@@ -430,14 +437,18 @@ export class OutreachService {
       const page = ['current', 'history', 'tests'].includes(params.get('view'))
         ? this.campaignPage(params)
         : { campaigns: [], filtered: 0, page: 1 };
-      const products = this.products().map(({ id, name, label, category, approved, status }) => ({
-        id,
-        name,
-        label,
-        category,
-        approved,
-        status,
-      }));
+      const products = this.products().map(
+        ({ id, name, label, category, approved, status, brands, sourceUrl }) => ({
+          id,
+          name,
+          label,
+          category,
+          approved,
+          brands,
+          sourceUrl,
+          status,
+        }),
+      );
       return {
         mailboxes,
         products,

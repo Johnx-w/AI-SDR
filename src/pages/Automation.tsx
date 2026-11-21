@@ -1062,7 +1062,12 @@ export function Automation() {
                         type="radio"
                         name="acquisition-followup"
                         checked={input.auto_first_touch === true}
-                        onChange={() => patch({ auto_first_touch: true })}
+                        onChange={() =>
+                          patch({
+                            auto_first_touch: true,
+                            auto_follow_up: input.auto_follow_up ?? true,
+                          })
+                        }
                       />
                       <span>
                         <strong>获客后自动首发</strong>
