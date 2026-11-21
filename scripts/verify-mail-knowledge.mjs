@@ -62,6 +62,19 @@ export async function verifyWorkbookAnswers(dir) {
       assert.equal(answer.automatic, automatic);
       const page = workbookPage(knowledge.db, source.productId, source.documentId, { sheet });
       assert.equal(page.rows[0].cells.find((c) => c.ref === ref).value, value);
+      if (sheet === '参考价格') {
+        for (const [coordinate, expected] of [
+          ['C2', 'USD/㎡'],
+          ['D2', '品类：卷帘；配置：拉珠/拉绳；EXW；不足1㎡按1㎡计'],
+        ]) {
+          assert.equal(page.rows[0].cells.find((c) => c.ref === coordinate)?.value, expected);
+          assert.equal(
+            answer.sources.find((s) => s.sheet === sheet && s.ref === coordinate)?.value,
+            expected,
+          );
+          assert.ok(answer.body.includes(expected));
+        }
+      }
       answers.push({ question, sheet, ref, value, automatic });
     }
     for (const website of ['https://shuangshengshutter.com', 'https://shutterblindssolutions.com'])
