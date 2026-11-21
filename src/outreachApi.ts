@@ -133,6 +133,7 @@ export interface OutreachDelivery {
 }
 
 export interface OutreachState {
+  reviewCount?: number;
   counts: { total: number; active: number };
   filtered: number;
   page: number;

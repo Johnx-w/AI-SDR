@@ -131,6 +131,23 @@ function fixture({
   };
 }
 
+test('连接验证选中两个只读文件夹，无需读取邮件或推进同步游标', async () => {
+  const { reader, calls } = fixture({ inbox: [row(1)] });
+  const result = await reader.read({ checkOnly: true });
+  assert.deepEqual(result.folderCoverage, { inbox: true, sent: true });
+  assert.deepEqual(
+    calls.filter((c) => c[0] === 'lock').map((c) => [c[1], c[2].readOnly]),
+    [
+      ['INBOX', true],
+      ['Sent Items', true],
+    ],
+  );
+  assert.equal(
+    calls.some((c) => c[0] === 'search' || c[0] === 'fetch'),
+    false,
+  );
+  assert.ok(calls.includes('logout'));
+});
 test('reads inbox and provider sent folder without flag changes or attachment downloads', async () => {
   const inbound = row(1, {
     cc: 'Office <office@customer.example>',

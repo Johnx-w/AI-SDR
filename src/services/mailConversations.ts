@@ -1,4 +1,5 @@
 import { outreachApi } from '../outreachApi';
+import type { ReplySource } from '../components/ReplyPreview';
 
 export interface MailThread {
   id: string;
@@ -35,7 +36,8 @@ export interface MailMessage {
   occurredAt: string;
   deliveryStatus: 'received' | 'sent' | 'accepted' | 'unknown' | 'failed' | 'sending';
   messageId?: string;
-  source: 'imap' | 'outreach' | 'manual';
+  source: 'imap' | 'outreach' | 'manual' | 'automatic';
+  classification?: string;
 }
 
 export interface MailInlineImage {
@@ -57,10 +59,15 @@ export interface MailDraftContent {
   attachments: MailReplyAttachment[];
 }
 export interface MailReplyDraft extends MailDraftContent {
+  edited?: boolean;
+  provenance?: { sources: ReplySource[] };
   revision: number;
   updatedAt?: string;
 }
 export interface MailReplyRecord {
+  messageId?: string;
+  origin?: string;
+  provenance?: { sources: ReplySource[] };
   id: string;
   status: 'accepted' | 'failed' | 'unknown' | 'sending';
   reason?: string;
@@ -111,6 +118,14 @@ export interface MailConversationList {
 }
 
 export interface MailConversationDetail {
+  reception?: {
+    sourceId?: string;
+    state?: string;
+    reason: string;
+    owner?: string;
+    human: boolean;
+    stopped: boolean;
+  };
   demands?: {
     id: string;
     title: string;

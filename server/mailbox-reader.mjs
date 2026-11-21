@@ -310,7 +310,7 @@ export function createMailboxReader({
     };
   }
 
-  async function readFolder(client, folder, previous, since, releases) {
+  async function readFolder(client, folder, previous, since, releases, checkOnly) {
     const lock = await client.getMailboxLock(folder.path, { readOnly: true });
     const release = () => {
       if (releases.delete(release)) {
@@ -321,6 +321,7 @@ export function createMailboxReader({
     };
     releases.add(release);
     try {
+      if (checkOnly) return { path: folder.path, sent: folder.sent };
       const current = cursor({
         uidValidity: client.mailbox?.uidValidity,
         nextUid: client.mailbox?.uidNext,
@@ -379,7 +380,11 @@ export function createMailboxReader({
   }
 
   return Object.freeze({
-    async read({ cursors = {}, since = new Date(Date.now() - 30 * 86400_000).toISOString() } = {}) {
+    async read({
+      cursors = {},
+      since = new Date(Date.now() - 30 * 86400_000).toISOString(),
+      checkOnly = false,
+    } = {}) {
       if (!cursors || typeof cursors !== 'object' || Array.isArray(cursors) || !instant(since))
         throw invalid();
       let client,
@@ -431,6 +436,7 @@ export function createMailboxReader({
                 Object.hasOwn(cursors, folder.path) ? cursors[folder.path] : null,
                 since,
                 releases,
+                checkOnly,
               ),
             );
           return {

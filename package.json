@@ -19,6 +19,9 @@
     "test": "node --test tests/*.test.mjs",
     "preflight:native": "node --env-file-if-exists=.env scripts/native-preflight.mjs",
     "verify:native:live": "node --env-file-if-exists=.env scripts/verify-native-live.mjs",
+    "verify:mail:knowledge": "node scripts/verify-mail-knowledge.mjs",
+    "verify:mail:browser": "node scripts/verify-mail-browser.mjs",
+    "verify:mail:internal": "node scripts/verify-mail-internal.mjs --live-internal",
     "format": "prettier --write src server scripts tests docs README.md *.json *.ts",
     "format:check": "prettier --check src server scripts tests docs README.md *.json *.ts"
   },
@@ -39,6 +42,7 @@
     "@types/react": "19.1.16",
     "@types/react-dom": "19.1.9",
     "@vitejs/plugin-react": "5.0.4",
+    "playwright-core": "1.65.1",
     "prettier": "3.6.2",
     "typescript": "5.9.3",
     "vite": "7.3.7"

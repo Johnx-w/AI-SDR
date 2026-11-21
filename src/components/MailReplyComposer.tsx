@@ -484,7 +484,7 @@ export function MailReplyComposer({
               onClick={() => void send()}
             >
               {sending ? <LoaderCircle size={15} className="outreach-spin" /> : <Send size={15} />}
-              {sending ? '正在发送…' : '发送回复'}
+              {sending ? '正在发送…' : detail.draft?.provenance ? '批准发送' : '发送回复'}
             </button>
             <button
               type="button"

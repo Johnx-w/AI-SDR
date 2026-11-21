@@ -883,3 +883,35 @@
     font-size: 18px;
   }
 }
+.mail-review-list,
+.mail-reception-controls {
+  padding: 18px 22px;
+}
+.mail-review-list article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 16px 0;
+  border-top: 1px solid #dce3e9;
+}
+.mail-review-list article p,
+.mail-reception-controls p {
+  margin: 0.35em 0;
+  overflow-wrap: anywhere;
+}
+.mail-reception-controls {
+  border-bottom: 1px solid #dce3e9;
+}
+.outreach-reply-preview {
+  width: 100%;
+  margin-block: 6px;
+}
+.outreach-reply-preview summary {
+  cursor: pointer;
+}
+.outreach-reply-preview input {
+  display: block;
+  width: 100%;
+  margin-block: 6px;
+}

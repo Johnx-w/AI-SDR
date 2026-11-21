@@ -23,6 +23,8 @@ import type {
   MailThread,
 } from '../services/mailConversations';
 import { Badge, Empty } from './ui';
+import { ReceptionControls } from './MailReviewQueue';
+import { ReplySources } from './ReplyPreview';
 import { MailMessageBody } from './MailMessageBody';
 import { MailReplyComposer } from './MailReplyComposer';
 import '../mail-conversations.css';
@@ -56,6 +58,7 @@ export function MailConversationTimeline({
   messages,
   demands = [],
   demandNotices = [],
+  replies = [],
   onReply,
 }: MailConversationDetail & { onReply?: (id: string) => void }) {
   return (
@@ -106,6 +109,10 @@ export function MailConversationTimeline({
         {messages.length ? (
           messages.map((mail) => {
             const status = statuses[mail.deliveryStatus] || statuses.unknown;
+            const operation =
+              mail.direction === 'outbound'
+                ? replies.find((reply) => reply.messageId === mail.messageId)
+                : undefined;
             return (
               <article key={mail.id} className={`mail-conversation-message ${mail.direction}`}>
                 <div className="mail-conversation-message-top">
@@ -115,7 +122,18 @@ export function MailConversationTimeline({
                     ) : (
                       <ArrowUpRight size={16} />
                     )}
-                    {mail.direction === 'inbound' ? '收到' : '发出'}
+                    {mail.direction === 'inbound'
+                      ? (
+                          {
+                            auto_reply: '系统通知',
+                            hard_bounce: '退信',
+                            unsubscribe: '退订',
+                            complaint: '投诉',
+                          } as Record<string, string>
+                        )[mail.classification || ''] || '客户来信'
+                      : operation?.origin === 'automatic' || mail.source === 'automatic'
+                        ? '自动回复'
+                        : '发出'}
                   </strong>
                   <Badge tone={status.tone}>{status.label}</Badge>
                   <time dateTime={mail.occurredAt}>{formatTime(mail.occurredAt)}</time>
@@ -135,6 +153,7 @@ export function MailConversationTimeline({
                   </div>
                 </dl>
                 <MailMessageBody key={mail.id} message={mail} />
+                {operation?.provenance && <ReplySources sources={operation.provenance.sources} />}
                 {!!mail.attachments?.length && (
                   <p className="mail-conversation-source">
                     附件：
@@ -252,12 +271,14 @@ export function MailConversations({
   mailboxId = 'all',
   customerId = '',
   inboundOnly = false,
+  initialThread = '',
   onMailboxChange,
 }: {
   mailboxes: OutreachMailbox[];
   mailboxId?: string;
   customerId?: string;
   inboundOnly?: boolean;
+  initialThread?: string;
   onMailboxChange: (mailboxId: string) => void;
 }) {
   const [query, setQuery] = useState('');
@@ -296,7 +317,7 @@ export function MailConversations({
     setLoading(true);
     setListError('');
     setList(null);
-    selectConversation(null);
+    selectConversation(initialThread || null);
     const timeout = window.setTimeout(
       () => {
         void mailConversationsApi
@@ -320,7 +341,16 @@ export function MailConversations({
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [mailboxId, customerId, query, unread, inboundOnly, revision, selectConversation]);
+  }, [
+    mailboxId,
+    customerId,
+    query,
+    unread,
+    inboundOnly,
+    initialThread,
+    revision,
+    selectConversation,
+  ]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -598,6 +628,10 @@ export function MailConversations({
                       </button>
                     </div>
                   )}
+                  <ReceptionControls
+                    detail={shownDetail}
+                    onChange={() => setDetailRevision((v) => v + 1)}
+                  />
                   <MailConversationTimeline
                     {...shownDetail}
                     onReply={(id) =>
@@ -605,7 +639,7 @@ export function MailConversations({
                     }
                   />
                   <MailReplyComposer
-                    key={shownDetail.conversation.id}
+                    key={shownDetail.conversation.id + '-' + detailRevision}
                     detail={shownDetail}
                     targetMessageId={replyTarget?.id}
                     replyRequest={replyTarget?.request}

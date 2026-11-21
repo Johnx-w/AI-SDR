@@ -108,7 +108,15 @@ export async function handleOutreach({ request, url, service, readJson, idempote
   if (mailbox) {
     const [, id, action] = mailbox;
     if (!action && method === 'GET') return service.mailboxes.get(id);
-    if (action === 'verify' && method === 'POST') return service.mailboxes.verify(id);
+    if (action === 'verify' && method === 'POST') {
+      const mailbox = await service.mailboxes.verify(id);
+      if (url.searchParams.get('check') === 'both') {
+        const { folderCoverage } = await service.mailboxes.readMailbox(id, { checkOnly: true });
+        if (!folderCoverage?.inbox || !folderCoverage?.sent)
+          throw fail(409, 'SMTP 已连接，请在阿里邮箱核对 IMAP 收件箱及已发送文件夹');
+      }
+      return mailbox;
+    }
     if (action === 'preview' && method === 'POST') {
       const { question } = await readJson(request);
       if (typeof question !== 'string' || !question.trim() || question.length > 4000)

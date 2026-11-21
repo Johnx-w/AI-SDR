@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { PageHeading } from '../components/PageHeading';
 import { MailConversations } from '../components/MailConversations';
+import { MailReviewQueue } from '../components/MailReviewQueue';
 import { ReplyPreview } from '../components/ReplyPreview';
 import { MailMessageBody } from '../components/MailMessageBody';
 import { MailSignatureFields, defaultSignatureDesign } from '../components/MailSignatureFields';
@@ -47,7 +48,7 @@ import type {
 } from '../outreachApi';
 import '../outreach.css';
 
-type Tab = 'mailboxes' | 'campaigns' | 'deliveries' | 'conversations';
+type Tab = 'mailboxes' | 'campaigns' | 'deliveries' | 'conversations' | 'review';
 type MailboxInput = Omit<
   OutreachMailbox,
   'id' | 'configured' | 'smtpStatus' | 'lastCheckedAt' | 'lastError' | 'signature'
@@ -234,7 +235,7 @@ function MailboxEditor({
   const website = site || (domain ? 'https://' + domain : '');
   const identity = { website, email, brandName: brand || siteBrand(website) || domain };
   const allowedKnowledge = products.filter(
-    (p) => productApproved(p) && siteAllowsProduct(p, identity, true),
+    (p) => (productApproved(p) || knowledge.includes(p.id)) && siteAllowsProduct(p, identity, true),
   );
   const [displayName, setDisplayName] = useState(mailbox?.displayName || '');
   const [signature, setSignature] = useState(mailbox?.signature || '');
@@ -407,6 +408,7 @@ function MailboxEditor({
                 products={allowedKnowledge}
                 selected={knowledge}
                 onChange={setKnowledge}
+                approvedOnly
                 emptyText="请先在产品资料中审核并填写此官网或适用品牌。"
               />
               <Link to="/materials">管理产品资料</Link>
@@ -1073,7 +1075,7 @@ export function OutreachCommunication({
 }: { initial?: InitialPage; pages?: Pick<InitialPage, 'outreach' | 'records'> } = {}) {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = searchParams.get('tab');
-  const tab: Tab = ['mailboxes', 'campaigns', 'deliveries', 'conversations'].includes(
+  const tab: Tab = ['mailboxes', 'campaigns', 'deliveries', 'conversations', 'review'].includes(
     requestedTab || '',
   )
     ? (requestedTab as Tab)
@@ -1525,7 +1527,7 @@ export function OutreachCommunication({
           <RefreshCw size={15} className={loading ? 'outreach-spin' : ''} />
           刷新
         </button>
-        {tab !== 'conversations' && (
+        {['mailboxes', 'campaigns'].includes(tab) && (
           <button
             className="btn primary"
             disabled={!!busy}
@@ -1554,6 +1556,7 @@ export function OutreachCommunication({
         {(
           [
             { id: 'mailboxes', label: '邮箱管理', icon: Mail, count: mailboxes.length },
+            { id: 'review', label: '待审回信', icon: FileText, count: state?.reviewCount ?? null },
             { id: 'campaigns', label: '触达计划', icon: Send, count: state?.counts?.total ?? null },
             { id: 'deliveries', label: '发送记录', icon: Inbox, count: deliveryStats?.total || 0 },
             { id: 'conversations', label: '邮件会话', icon: MessageSquare, count: null },
@@ -1582,8 +1585,10 @@ export function OutreachCommunication({
       ) : (
         (state || tab === 'deliveries') && (
           <div role="tabpanel" id={`outreach-panel-${tab}`} aria-labelledby={`outreach-tab-${tab}`}>
+            {tab === 'review' && <MailReviewQueue count={state?.reviewCount} />}
             {tab === 'conversations' && (
               <MailConversations
+                initialThread={searchParams.get('thread') || ''}
                 mailboxes={mailboxes}
                 mailboxId={conversationMailboxId}
                 customerId={searchParams.get('customerId') || ''}
@@ -1967,7 +1972,6 @@ export function OutreachCommunication({
                           </Badge>
                         </div>
                         <div className="outreach-mailbox-coverage">
-                          <ReplyPreview id={mailbox.id} />
                           <span>负责产品</span>
                           <div className="outreach-product-tags">
                             {mailbox.productIds?.length ? (
@@ -1986,6 +1990,12 @@ export function OutreachCommunication({
                               </span>
                             )}
                           </div>
+                          {mailbox.replyMode && mailbox.replyMode !== 'manual' && (
+                            <Link to="/materials">
+                              回复资料 · 已选 {mailbox.knowledgeProductIds?.length || 0} 项
+                            </Link>
+                          )}
+                          <ReplyPreview id={mailbox.id} />
                         </div>
                         <div className="outreach-mailbox-signature">
                           <span>邮件签名</span>
@@ -2038,7 +2048,7 @@ export function OutreachCommunication({
                             onClick={() => void editMailbox(mailbox.id)}
                           >
                             <Settings2 size={15} />
-                            配置
+                            {mailbox.configured === false ? '连接邮箱' : '配置'}
                           </button>
                           <button
                             className="btn subtle"
@@ -2046,9 +2056,9 @@ export function OutreachCommunication({
                             onClick={() =>
                               void act(
                                 `verify-${mailbox.id}`,
-                                pathFor('mailboxes', mailbox.id, 'verify'),
+                                pathFor('mailboxes', mailbox.id, 'verify') + '?check=both',
                                 {},
-                                '邮箱连接检查已完成。',
+                                'SMTP 发件与 IMAP 收件、已发送文件夹均已验证。',
                               )
                             }
                           >
