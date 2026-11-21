@@ -70,7 +70,8 @@ const fallback = (zh, reason) => ({
 export function answerMailQuestion(knowledge, mailbox, input, now = Date.now()) {
   const question = String(input || '')
     .trim()
-    .slice(0, 4000);
+    .slice(0, 4000)
+    .replace(/\s+/gu, ' ');
   const zh = /[\u3400-\u9fff]/u.test(question);
   if (!question || mentionsOtherSite(question, mailbox))
     return fallback(zh, '问题超出当前官网资料范围');
@@ -112,6 +113,23 @@ export function answerMailQuestion(knowledge, mailbox, input, now = Date.now()) 
           const cell = cells.find((c) => a.field.test(c.field) && c.value);
           return cell ? [{ attr: a, cell }] : [];
         });
+        if (exact) {
+          for (const cell of cells.slice(1)) {
+            if (
+              !values.some((v) => v.cell === cell) &&
+              !/来源|待核|核对|思路|备注|source|warning/iu.test(cell.field) &&
+              named(question, cell.field)
+            )
+              values.push({
+                attr: { en: cell.field, commercial: commercial.test(cell.field) },
+                cell,
+              });
+          }
+          if (!values.length) {
+            const cell = cells.find((c) => /^(?:内容|原表条件|answer|value)$/iu.test(c.field));
+            if (cell) values.push({ attr: { en: cell.field, commercial: true }, cell });
+          }
+        }
         if (!values.length) continue;
         const rowCommercial = values.some((v) => v.attr.commercial);
         const extra = rowCommercial
@@ -185,14 +203,22 @@ export function answerMailQuestion(knowledge, mailbox, input, now = Date.now()) 
   const score = Math.max(...hits.map((h) => h.score)),
     best = hits.filter((h) => h.score === score);
   const automatic =
-    best.length === 1 && best[0].automatic && hits.every((h) => h.label === best[0].label);
+    best.length === 1 &&
+    best[0].automatic &&
+    hits.every((h) => h.label === best[0].label) &&
+    [...question.matchAll(/\b[a-z]+[-_]?\d+[a-z0-9_-]*\b/giu)].every((match) =>
+      named(best[0].label, match[0]),
+    ) &&
+    (question.match(/[?？]/gu) || []).length <= 1;
   return {
     automatic,
     reason: automatic ? '单一型号、已核实参数' : '请核对适用条件及客户问题后发送',
-    body: best
-      .slice(0, 4)
-      .map((hit) => hit.label + '\n' + hit.body)
-      .join('\n\n'),
+    body:
+      (zh ? '您好，\n\n' : 'Hello,\n\n') +
+      best
+        .slice(0, 4)
+        .map((hit) => hit.label + '\n' + hit.body)
+        .join('\n\n'),
     sources: best.slice(0, 4).flatMap((hit) => hit.sources),
   };
 }

@@ -35,7 +35,10 @@ export async function extractWorkbook(db, file) {
   checkArchive(file.bytes);
   let sheets;
   try {
-    sheets = await readWorkbook(file.bytes, { parseNumber: (value) => value });
+    // Excel displays numeric values to 15 significant digits. Text model codes stay verbatim.
+    sheets = await readWorkbook(file.bytes, {
+      parseNumber: (value) => String(Number(Number(value).toPrecision(15))),
+    });
   } catch {
     throw fail(400, '无法解析此 XLSX，请检查文件或用 Excel 另存为工作簿');
   }

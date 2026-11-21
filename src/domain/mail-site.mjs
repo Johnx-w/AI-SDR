@@ -19,6 +19,7 @@ export function siteAllowsProduct(product, mailbox, requireSite = false) {
   const brands = (product.brands || []).map((s) => s.toLowerCase().trim());
   const knownSender = mailbox.email?.toLowerCase().split('@')[1];
   if (names[knownSender] && knownSender !== domain) return false;
+  if (source && names[source] && source !== domain) return false;
   if (brands.length)
     return (
       !!domain &&
