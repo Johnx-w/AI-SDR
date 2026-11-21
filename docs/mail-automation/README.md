@@ -1,0 +1,23 @@
+# 多邮箱销售邮件
+
+本地功能分支为 `codex/production-mail-automation`。2026-11-22 通过 GitHub API 核对，远端 main、production 的成功部署 7891868583 和开发起点均为 `736e160955076ea19846487b1e3785e207cd886e`。本地回退标签为 `mail-automation-production-baseline-20261122`。
+
+## 正式基线盘点
+
+| 业务入口 | 保存的事实和现有能力 |
+| --- | --- |
+| 获客及主动开发 | 只接收正式获客任务已回读的客户。用客户官网的产品证据、已审核供货范围及获准邮箱生成首信。SQLite 按企业、域名、邮箱预留，实际沟通后写客户固定邮箱。 |
+| 未回复追信 | 首封由 SMTP 接受后，以发送时间加 72、168 小时各建一个任务。任务在原线程发送，发送前同步收件、核对人工往来及资料。 |
+| 沟通中心 | Nodemailer 发信，ImapFlow 读取收件箱与已发送，MailParser 解析 MIME。会话、原文、IMAP 游标、草稿修订及发送操作存 SQLite。 |
+| CRM | 已有关联会话、需求、负责人、停止联系及 T1/T3/T4 业务投影。飞书同步与本地收发分开。 |
+| 产品资料 | 已有原件哈希、PDF/图片候选提取、审批、版本控制和归档。正式基线未接入工作簿逐格提取或邮箱授权自动回信。 |
+| 访问 | 开发服务监听回环地址，公网 HTTPS 和认证由既有 Nginx 网关承担。本机打开沟通中心即可工作。 |
+
+## 设计依据
+
+- 使用同一发件箱，在原线程按计划跟进，客户回复后结束未回复序列。[HubSpot 序列编辑器](https://knowledge.hubspot.com/sequences/create-and-edit-sequences)
+- 自动应答和真人回复分开处理，在同一工作区展示需要处理的邮件和暂停状态。[Apollo 序列](https://knowledge.apollo.io/hc/en-us/articles/4409237165837-Sequences-Overview)
+- 阿里邮箱使用第三方客户端密码，SMTP 走 TLS 465，IMAP 走 TLS 993；连接测试与实际到件分别取证。[阿里邮箱客户端设置](https://help.aliyun.com/zh/document_detail/36576.html)
+- 工作簿解析采用 MIT 许可的 read-excel-file，锁定 9.3.20（2026-11-19 更新）。[组件文档与许可证](https://gitlab.com/catamphetamine/read-excel-file)
+
+本次开发复用产品、邮箱、会话、草稿和发送台账。在现有产品资料中审核工作簿，对外回信只读取邮箱已选的有效资料。来信处理记录其原消息、分类、所用资料版本和回复结果。验收使用独立的本地存储、模拟时钟和三个公司内部地址。
