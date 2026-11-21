@@ -251,3 +251,23 @@
     width: 100%;
   }
 }
+.workbook-controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 10px 0;
+}
+.workbook-grid details {
+  border-bottom: 1px solid var(--border, #dce3e9);
+  padding: 7px 0;
+}
+.workbook-grid summary {
+  cursor: pointer;
+}
+.workbook-grid details > div {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  gap: 10px;
+  margin: 10px 0;
+}

@@ -27,6 +27,7 @@ const factKeys = [
   'notes',
   'outreachFacts',
   'documentIds',
+  'cellEdits',
 ];
 const allowedKeys = new Set([
   ...factKeys,
@@ -169,6 +170,22 @@ function normalize(value) {
     safeUrl(url, '附件链接'),
   );
   const documentIds = list(value.documentIds, '原文件编号', 20, 67);
+  const edits = value.cellEdits ?? [];
+  if (!Array.isArray(edits) || edits.length > 500) throw fail(400, '每个产品最多校对 500 个单元格');
+  const cellEdits = edits.map((edit) => {
+    if (
+      !edit ||
+      !documentIds.includes(edit.documentId) ||
+      !/^[A-Z]{1,3}[1-9]\d{0,4}$/u.test(edit.ref)
+    )
+      throw fail(400, '校对单元格必须属于已关联工作簿');
+    return {
+      documentId: edit.documentId,
+      sheet: text(edit.sheet, '工作表', 100, true),
+      ref: edit.ref,
+      value: text(edit.value, '校对值', 4000),
+    };
+  });
   if (documentIds.some((id) => !/^pd_[a-f0-9]{64}$/u.test(id))) throw fail(400, '原文件编号无效');
   return {
     name: text(value.name, '产品名称', 160, true),
@@ -190,6 +207,7 @@ function normalize(value) {
     notes: text(value.notes, '备注', 4000),
     outreachFacts: outreachFacts(value.outreachFacts),
     ...(documentIds.length ? { documentIds } : {}),
+    ...(cellEdits.length ? { cellEdits } : {}),
   };
 }
 
@@ -265,6 +283,15 @@ export class ProductKnowledge {
           .get(id);
         if (!document || document.product_id !== prior?.id)
           throw fail(400, '原文件必须属于当前产品，请刷新资料后重试');
+      }
+      for (const edit of normalized.cellEdits || []) {
+        const row = this.db
+          .prepare(
+            'SELECT data FROM product_workbook_rows WHERE document_id=? AND sheet=? AND row_number=?',
+          )
+          .get(edit.documentId, edit.sheet, Number(edit.ref.match(/\d+$/u)[0]));
+        if (!row || !JSON.parse(row.data).some((cell) => cell.ref === edit.ref))
+          throw fail(400, '校对位置在原工作簿中不存在');
       }
       const changedFacts =
         prior &&

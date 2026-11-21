@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { WorkbookPreview, type CellEdit } from './WorkbookPreview';
 
 interface ProductDocument {
   id: string;
@@ -12,6 +13,7 @@ interface ProductDocument {
     warnings: string[];
     model: string;
     extractedAt: string;
+    sheets?: { name: string; rows: number }[];
   };
 }
 
@@ -39,11 +41,17 @@ export function ProductDocuments({
   documentIds,
   disabled,
   onUse,
+  cellEdits,
+  onEdit,
+  onRemove,
 }: {
   productId?: string;
   documentIds: string[];
   disabled: boolean;
   onUse: (id: string, specifications: string) => void;
+  cellEdits: CellEdit[];
+  onEdit: (edit: CellEdit, original: string) => void;
+  onRemove: (id: string) => void;
 }) {
   const [documents, setDocuments] = useState<ProductDocument[]>([]);
   const [busy, setBusy] = useState(false);
@@ -84,11 +92,11 @@ export function ProductDocuments({
     if (!file || busy || disabled) return;
     setError('');
     if (
-      !/\.(pdf|png|jpe?g)$/iu.test(file.name) ||
+      !/\.(xlsx|pdf|png|jpe?g)$/iu.test(file.name) ||
       file.size === 0 ||
       file.size > 10 * 1024 * 1024
     ) {
-      setError('请选择不超过 10 MB 的 PDF、PNG 或 JPG 文件');
+      setError('请选择不超过 10 MB 的 XLSX、PDF、PNG 或 JPG 文件');
       return;
     }
     setBusy(true);
@@ -99,11 +107,13 @@ export function ProductDocuments({
         reader.onerror = () => reject(new Error('无法读取所选文件'));
         reader.readAsDataURL(file);
       });
-      const contentType = /\.pdf$/iu.test(file.name)
-        ? 'application/pdf'
-        : /\.png$/iu.test(file.name)
-          ? 'image/png'
-          : 'image/jpeg';
+      const contentType = /\.xlsx$/iu.test(file.name)
+        ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        : /\.pdf$/iu.test(file.name)
+          ? 'application/pdf'
+          : /\.png$/iu.test(file.name)
+            ? 'image/png'
+            : 'image/jpeg';
       const result = await request<{ document: ProductDocument }>(base, 'POST', {
         name: file.name,
         contentType,
@@ -136,18 +146,16 @@ export function ProductDocuments({
   }
   return (
     <fieldset disabled={disabled || busy} className="knowledge-documents">
-      <legend>上传图纸与规格文件</legend>
+      <legend>产品原文件</legend>
       {!productId ? (
-        <p className="knowledge-form-note">
-          先填写产品名称并保存草稿，再打开产品上传 PDF、PNG/JPG。
-        </p>
+        <p className="knowledge-form-note">先保存产品草稿，再上传 Excel 工作簿、PDF 或图片。</p>
       ) : (
         <>
           <label className="knowledge-upload">
             选择原文件（单个不超过 10 MB，每个产品最多 20 份）
             <input
               type="file"
-              accept=".pdf,.png,.jpg,.jpeg"
+              accept=".xlsx,.pdf,.png,.jpg,.jpeg"
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 event.target.value = '';
@@ -156,10 +164,8 @@ export function ProductDocuments({
             />
           </label>
           <p className="knowledge-form-note">
-            上传仅保存原文件。点击“AI 提取”会将文件发送到 <Link to="/settings">API 连接</Link>{' '}
-            中配置的资料识别服务。
-            请对照原文件核对型号、尺寸、单位、公差和版本；不清楚的内容请删除或补充。
-            审核参数不代表授权向客户发送原文件。
+            Excel 在本地解析，保留工作表和单元格。图片和 PDF 使用{' '}
+            <Link to="/settings">资料识别服务</Link>。
           </p>
           {busy && <p role="status">正在处理文件，请稍候…</p>}
           {error && (
@@ -195,8 +201,22 @@ export function ProductDocuments({
                   className="btn secondary"
                   onClick={() => void extract(document)}
                 >
-                  AI 提取 · {document.name}
+                  {/\.xlsx$/iu.test(document.name) ? '解析工作簿' : 'AI 提取'} · {document.name}
                 </button>
+              ) : document.extraction.sheets ? (
+                <WorkbookPreview
+                  url={base + '/' + document.id}
+                  id={document.id}
+                  sheets={document.extraction.sheets}
+                  edits={cellEdits}
+                  onEdit={onEdit}
+                  linked={documentIds.includes(document.id)}
+                  onToggle={() =>
+                    documentIds.includes(document.id)
+                      ? onRemove(document.id)
+                      : onUse(document.id, '')
+                  }
+                />
               ) : (
                 <>
                   <p className="knowledge-form-note">

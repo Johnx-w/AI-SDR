@@ -23,6 +23,7 @@ import { createAcquisitionProvider } from './acquisition-provider.mjs';
 import { ApiConnections } from './api-connections.mjs';
 import { AcquisitionSchedules } from './acquisition-schedules.mjs';
 import { ProductCatalog } from './product-catalog.mjs';
+import { workbookPage } from './product-workbooks.mjs';
 import { ProductKnowledge } from './product-knowledge.mjs';
 import { MAX_PRODUCT_DOCUMENT_BYTES } from './product-documents.mjs';
 import { ProductKnowledgeFeishu } from './product-knowledge-feishu.mjs';
@@ -559,6 +560,20 @@ export function createApp({
           }
           throw new ApiError(405, '不支持的产品资料操作');
         }
+        const workbookRows = url.pathname.match(
+          /^\/api\/v1\/products\/knowledge\/(pk_[a-f0-9]{32})\/documents\/(pd_[a-f0-9]{64})\/rows$/,
+        );
+        if (workbookRows && request.method === 'GET')
+          return json(
+            response,
+            200,
+            workbookPage(
+              knowledge().db,
+              workbookRows[1],
+              workbookRows[2],
+              Object.fromEntries(url.searchParams),
+            ),
+          );
         const productDocuments = url.pathname.match(
           /^\/api\/v1\/products\/knowledge\/(pk_[a-f0-9]{32})\/documents(?:\/(pd_[a-f0-9]{64})\/(file|extract))?$/,
         );

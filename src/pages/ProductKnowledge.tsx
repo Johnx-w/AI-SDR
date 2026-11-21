@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Archive, ExternalLink, Plus, RefreshCw, Search } from 'lucide-react';
 import { PageHeading } from '../components/PageHeading';
 import { ProductDocuments } from '../components/ProductDocuments';
+import type { CellEdit } from '../components/WorkbookPreview';
 import { Badge, Empty, Modal } from '../components/ui';
 import type { OutreachFact } from '../outreachApi';
 import './ProductKnowledge.css';
@@ -51,6 +52,7 @@ interface ProductDraft {
   notes: string;
   outreachFacts: OutreachFact[];
   documentIds?: string[];
+  cellEdits?: CellEdit[];
 }
 interface ProductKnowledge extends ProductDraft {
   id: string;
@@ -677,6 +679,26 @@ export function ProductKnowledgePage() {
               key={editor.original?.id || editor.key}
               productId={editor.original?.id}
               documentIds={editor.value.documentIds || []}
+              cellEdits={editor.value.cellEdits || []}
+              onEdit={(edit, original) => {
+                const other = (editor.value.cellEdits || []).filter(
+                  (item) =>
+                    item.documentId !== edit.documentId ||
+                    item.sheet !== edit.sheet ||
+                    item.ref !== edit.ref,
+                );
+                change('cellEdits', edit.value === original ? other : [...other, edit]);
+              }}
+              onRemove={(id) =>
+                setEditor({
+                  ...editor,
+                  value: {
+                    ...editor.value,
+                    documentIds: editor.value.documentIds?.filter((item) => item !== id),
+                    cellEdits: editor.value.cellEdits?.filter((item) => item.documentId !== id),
+                  },
+                })
+              }
               disabled={saving || refreshRequired}
               onUse={useDocument}
             />
