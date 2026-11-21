@@ -39,6 +39,24 @@ const signatureDesign = {
   },
 };
 
+test('接待策略放在旧邮箱记录之外，回退后再升级也不会自动获得回信权限', async (t) => {
+  const { registry, config, path } = fixture(t);
+  const box = await registry.save({
+    ...settings,
+    replyMode: 'auto',
+    knowledgeProductIds: ['own'],
+    owner: 'Jo',
+  });
+  const saved = JSON.parse(readFileSync(path, 'utf8'));
+  for (const k of ['replyMode', 'knowledgeProductIds', 'owner', 'replyEnabledAt'])
+    assert.equal(Object.hasOwn(saved.mailboxes[0], k), false);
+  const reopened = new OutreachMailboxes(config).get(box.id);
+  assert.deepEqual(reopened.knowledgeProductIds, ['own']);
+  assert.equal(reopened.replyEnabledAt, box.replyEnabledAt);
+  delete saved.receptionSettings;
+  writeFileSync(path, JSON.stringify(saved));
+  assert.equal(new OutreachMailboxes(config).get(box.id).replyMode, 'manual');
+});
 test('structured signatures persist per account and follow identity edits without replacing old plain signatures', async (t) => {
   const { registry, config } = fixture(t);
   await registry.save({ ...settings, signature: 'Existing plain signature' });

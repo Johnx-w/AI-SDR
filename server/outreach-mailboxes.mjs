@@ -453,6 +453,18 @@ export class OutreachMailboxes {
         if ((document.schemaVersion ?? document.schema) !== 1 || !Array.isArray(document.mailboxes))
           throw fail();
         for (const record of document.mailboxes) {
+          const policy = Object.hasOwn(document.receptionSettings || {}, record.id)
+            ? document.receptionSettings[record.id]
+            : null;
+          if (
+            policy &&
+            (!plainObject(policy) ||
+              Object.keys(policy).some(
+                (key) =>
+                  !['owner', 'replyMode', 'knowledgeProductIds', 'replyEnabledAt'].includes(key),
+              ))
+          )
+            throw fail();
           const {
             credential,
             credentialProtection,
@@ -462,7 +474,7 @@ export class OutreachMailboxes {
             updatedAt,
             replyEnabledAt,
             ...settings
-          } = record;
+          } = { ...record, ...policy };
           const normalized = normalize({ ...settings, paused: settings.paused ?? false });
           if (
             this.records.has(normalized.id) ||
@@ -492,7 +504,10 @@ export class OutreachMailboxes {
           );
           this.records.set(normalized.id, {
             ...normalized,
-            replyEnabledAt: typeof replyEnabledAt === 'string' ? replyEnabledAt : null,
+            replyEnabledAt:
+              typeof replyEnabledAt === 'string' && Number.isFinite(Date.parse(replyEnabledAt))
+                ? replyEnabledAt
+                : null,
             credential: credential || null,
             credentialProtection: credential ? credentialProtection : null,
             verification: {
@@ -514,9 +529,17 @@ export class OutreachMailboxes {
     try {
       mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
       const temporary = this.path + '.' + randomUUID() + '.tmp';
+      // The production v1 reader validates every mailbox key and ignores extra top-level sections.
+      const receptionSettings = Object.create(null);
+      const mailboxes = [...records.values()].map(
+        ({ owner, replyMode, knowledgeProductIds, replyEnabledAt, ...mailbox }) => {
+          receptionSettings[mailbox.id] = { owner, replyMode, knowledgeProductIds, replyEnabledAt };
+          return mailbox;
+        },
+      );
       writeFileSync(
         temporary,
-        JSON.stringify({ schemaVersion: 1, mailboxes: [...records.values()] }, null, 2),
+        JSON.stringify({ schemaVersion: 1, mailboxes, receptionSettings }, null, 2),
         { flag: 'wx', mode: 0o600 },
       );
       renameSync(temporary, this.path);
