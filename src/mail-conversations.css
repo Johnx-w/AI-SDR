@@ -269,13 +269,10 @@
 .sales-inbox textarea {
   font-family: inherit;
 }
-.outreach-tabs:has(+ #outreach-panel-inbox) {
-  margin-bottom: 10px;
-}
 .mail-conversations-workspace {
-  display: flex;
-  flex-direction: column;
+  display: grid;
   position: relative;
+  grid-template-columns: var(--inbox-list-width) minmax(0, 1fr);
   height: var(--inbox-available, calc(100dvh - 252px));
   min-width: 0;
   overflow: hidden;
@@ -284,14 +281,7 @@
   background: #fff;
   box-shadow: none;
 }
-.inbox-panes {
-  flex: 1;
-  position: relative;
-  display: grid;
-  min-height: 0;
-  grid-template-columns: var(--inbox-list-width) minmax(0, 1fr);
-}
-.inbox-panes:has(.inbox-contact:not([data-contact='hide'])) {
+.mail-conversations-workspace:has(.inbox-contact:not([data-contact='hide'])) {
   grid-template-columns: var(--inbox-list-width) minmax(0, 1fr) clamp(232px, 20%, 288px);
 }
 .mail-conversation-list,
@@ -307,6 +297,7 @@
   background: white;
   overflow: hidden;
 }
+.inbox-list-head,
 .inbox-thread-tools,
 .inbox-contact > header {
   display: flex;
@@ -316,22 +307,6 @@
   padding: 0 16px;
   flex: none;
   font-size: 15px;
-}
-.inbox-list-toolbar {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  min-height: 48px;
-  padding: 4px 12px;
-  border-bottom: 1px solid var(--color-border);
-}
-.inbox-list-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  flex: 0 1 256px;
 }
 .inbox-list-head select {
   min-width: 0;
@@ -345,10 +320,23 @@
   min-height: 38px;
   padding: 4px 0;
 }
+.inbox-list-count {
+  margin-left: auto;
+  min-width: 26px;
+  text-align: center;
+  background: var(--color-surface-muted);
+  border-radius: 5px;
+  padding: 2px 8px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+}
 .inbox-scopes {
   display: flex;
-  gap: 4px;
-  flex: none;
+  gap: 8px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--color-border);
 }
 .inbox-scopes button,
 .inbox-compose-tabs > button {
@@ -369,11 +357,13 @@
   font-weight: 600;
 }
 .inbox-filters {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: 0;
-  flex: 1 1 300px;
+  padding: 8px 12px;
+  min-height: 50px;
+  border-bottom: 1px solid var(--color-border);
 }
 .inbox-filters label {
   display: flex;
@@ -466,7 +456,7 @@
   border-bottom: 1px solid var(--color-border);
   border-left: 3px solid transparent;
   width: 100%;
-  padding: 7px 12px;
+  padding: 10px 12px;
   color: var(--color-text);
   line-height: 1.45;
 }
@@ -596,9 +586,13 @@
 .inbox-pager {
   display: flex;
   align-items: center;
-  gap: 4px;
-  white-space: nowrap;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 12px;
   font-size: 12px;
+  border-top: 1px solid var(--color-border);
+  margin-top: auto;
   flex: none;
 }
 .inbox-pager button {
@@ -1115,7 +1109,6 @@
 }
 .inbox-sync-footer {
   display: grid;
-  margin-top: auto;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
   gap: 8px;
@@ -1184,8 +1177,8 @@
   outline-offset: -2px;
 }
 @container mail-center (max-width: 1139px) {
-  .inbox-panes,
-  .inbox-panes:has(.inbox-contact:not([data-contact='hide'])) {
+  .mail-conversations-workspace,
+  .mail-conversations-workspace:has(.inbox-contact:not([data-contact='hide'])) {
     grid-template-columns: clamp(272px, 32%, 336px) minmax(0, 1fr);
   }
   .inbox-contact {
@@ -1200,17 +1193,6 @@
     box-shadow: -8px 0 24px #26375c20;
   }
 }
-@container mail-center (max-width: 899px) {
-  .inbox-list-toolbar {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 0 16px;
-  }
-  .inbox-scopes,
-  .inbox-pager {
-    justify-self: end;
-  }
-}
 @container mail-center (max-width: 759px) {
   .mail-reply-panel[data-empty]:not(:focus-within) .mail-reply-actions {
     flex-direction: column;
@@ -1220,13 +1202,12 @@
   .mail-reply-panel[data-empty]:not(:focus-within) .inbox-send-status {
     max-width: 100%;
   }
-  .inbox-panes,
-  .inbox-panes:has(.inbox-contact:not([data-contact='hide'])) {
+  .mail-conversations-workspace,
+  .mail-conversations-workspace:has(.inbox-contact:not([data-contact='hide'])) {
     grid-template-columns: minmax(0, 1fr);
   }
-  .mail-conversations-workspace.has-selection > .inbox-list-toolbar,
-  .mail-conversations-workspace.has-selection .mail-conversation-list,
-  .mail-conversations-workspace.no-selection .mail-conversation-detail {
+  .mail-conversations-workspace.has-selection > .mail-conversation-list,
+  .mail-conversations-workspace.no-selection > .mail-conversation-detail {
     display: none;
   }
   .mail-conversation-list {
@@ -1263,17 +1244,6 @@
   }
 }
 @container mail-center (max-width: 479px) {
-  .inbox-list-toolbar {
-    row-gap: 4px;
-  }
-  .inbox-filters,
-  .inbox-pager {
-    grid-column: 1 / -1;
-  }
-  .inbox-pager {
-    width: 100%;
-    justify-content: space-between;
-  }
   .inbox-thread-tools {
     display: grid;
     grid-template-columns: 36px minmax(0, 1fr);

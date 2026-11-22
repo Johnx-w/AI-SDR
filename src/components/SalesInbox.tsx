@@ -452,7 +452,7 @@ export function SalesInbox({
         ref={workspace}
         className={`mail-conversations-workspace panel ${selectedId ? 'has-selection' : 'no-selection'}`}
       >
-        <div className="inbox-list-toolbar" role="group" aria-label="会话列表工具">
+        <aside className="mail-conversation-list" aria-label="邮件会话列表" aria-busy={loading}>
           <div className="inbox-list-head">
             <Inbox size={16} />
             {review ? (
@@ -474,6 +474,7 @@ export function SalesInbox({
                 )}
               </select>
             )}
+            <span className="inbox-list-count">{list?.total ?? '…'}</span>
           </div>
           {!review && (
             <div className="inbox-scopes" role="group" aria-label="会话筛选">
@@ -527,6 +528,71 @@ export function SalesInbox({
               </label>
             )}
           </div>
+          {loading ? (
+            <div className="mail-conversation-placeholder" role="status">
+              <LoaderCircle size={22} className="outreach-spin" />
+              正在读取邮件会话…
+            </div>
+          ) : listError && !list ? (
+            <Empty title="会话读取失败" detail="请重新读取列表，或检查服务是否正常。" />
+          ) : visibleThreads.length ? (
+            <div className="mail-conversation-items">
+              {visibleThreads.map((thread, index) => (
+                <button
+                  key={review ? thread.id + '-' + index : thread.id}
+                  className={`mail-conversation-row ${selectedId === thread.id ? 'selected' : ''} ${thread.unread ? 'unread' : ''}`}
+                  aria-pressed={selectedId === thread.id}
+                  onClick={() => selectConversation(thread.id)}
+                >
+                  <span className="mail-conversation-row-top">
+                    <InboxAvatar
+                      name={thread.participantName || thread.companyName || thread.participant}
+                    />
+                    <strong title={thread.participant}>
+                      {thread.participantName || thread.companyName || thread.participant}
+                    </strong>
+                    <time>{formatTime(thread.updatedAt)}</time>
+                  </span>
+                  <span className="mail-conversation-row-subject">
+                    {thread.unread && <i aria-label="未读" />}
+                    {thread.subject || '（无主题）'}
+                  </span>
+                  <span className="mail-conversation-preview">
+                    {thread.preview || '暂无正文摘要'}
+                  </span>
+                  <span className="mail-conversation-row-account">
+                    <span className="inbox-brand-label">
+                      {mailboxes.find(
+                        (box) => box.id === thread.mailboxId || box.email === thread.account,
+                      )?.brandName || thread.account}
+                    </span>
+                    {!review && <span>{thread.messageCount} 封</span>}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <Empty
+              title={
+                review
+                  ? '当前没有待审回信'
+                  : filtered
+                    ? '没有符合筛选的会话'
+                    : customerId && inboundOnly
+                      ? '暂无该客户的来信'
+                      : '暂无邮件会话'
+              }
+              detail={
+                review
+                  ? '需要审核的客户回信将在这里显示。'
+                  : filtered
+                    ? '可调整搜索词、选择其他邮箱或返回全部会话。'
+                    : customerId && inboundOnly
+                      ? '当前已同步的邮箱记录中没有该客户的来信，可同步邮件后重新查看。'
+                      : '可手动同步邮箱；系统发送的邮件也会在这里保存。'
+              }
+            />
+          )}
           {list && (
             <nav className="inbox-pager" aria-label={review ? '待审分页' : '会话分页'}>
               <span aria-live="polite">
@@ -551,168 +617,99 @@ export function SalesInbox({
               </div>
             </nav>
           )}
-        </div>
-        <div className="inbox-panes">
-          <aside className="mail-conversation-list" aria-label="邮件会话列表" aria-busy={loading}>
-            {loading ? (
-              <div className="mail-conversation-placeholder" role="status">
-                <LoaderCircle size={22} className="outreach-spin" />
-                正在读取邮件会话…
+          {!review && (
+            <div className="inbox-sync-footer">
+              <MailSyncSummary statuses={syncStatuses} />
+              <button
+                type="button"
+                className="inbox-sync-action"
+                aria-label="同步邮件"
+                title={mailboxId === 'all' ? '同步全部邮箱' : '同步所选邮箱'}
+                disabled={syncing || !scopeMailboxes.some((box) => box.configured)}
+                onClick={() => void sync()}
+              >
+                <RefreshCw
+                  size={13}
+                  aria-hidden="true"
+                  className={syncing ? 'outreach-spin' : undefined}
+                />
+                {syncing ? '同步中…' : '同步'}
+              </button>
+            </div>
+          )}
+        </aside>
+        {shownDetail ? (
+          <InboxThread
+            key={shownDetail.conversation.id}
+            detail={shownDetail}
+            identity={identity || undefined}
+            onBack={() => selectConversation(null)}
+            marking={marking}
+            onRead={() => void markRead(shownDetail.conversation)}
+            onRefresh={() => setDetailRevision((n) => n + 1)}
+            editorVersion={detailRevision}
+            onWorkflow={(id, workflow, move) => {
+              if (selected.current !== id) return;
+              setDetail((d) => (d && d.conversation.id === id ? { ...d, workflow } : d));
+              if (move) {
+                if (!review && folder && folder !== workflow.state) selectConversation(null);
+                setRevision((n) => n + 1);
+              }
+            }}
+            onCompleted={(value) => {
+              if (selected.current !== value.conversation.id) return;
+              setDetail(value);
+              if (review && value.replies?.[0]?.status === 'accepted')
+                setNotice('回复已被服务商接受。');
+              if (review) setRevision((n) => n + 1);
+              setList((current) =>
+                current
+                  ? {
+                      ...current,
+                      items: current.items.map((item) =>
+                        item.id === value.conversation.id ? value.conversation : item,
+                      ),
+                    }
+                  : current,
+              );
+            }}
+          />
+        ) : (
+          <section
+            className="mail-conversation-detail"
+            aria-label="邮件会话详情"
+            aria-busy={detailLoading}
+          >
+            {selectedId && (
+              <button
+                type="button"
+                className="mail-conversation-back inbox-icon"
+                aria-label="返回会话列表"
+                onClick={() => selectConversation(null)}
+              >
+                <ArrowLeft size={16} />
+              </button>
+            )}
+            {detailError ? (
+              <div className="outreach-alert error" role="alert">
+                {detailError}{' '}
+                <button className="btn subtle" onClick={() => setDetailRevision((n) => n + 1)}>
+                  重试读取
+                </button>
               </div>
-            ) : listError && !list ? (
-              <Empty title="会话读取失败" detail="请重新读取列表，或检查服务是否正常。" />
-            ) : visibleThreads.length ? (
-              <div className="mail-conversation-items">
-                {visibleThreads.map((thread, index) => (
-                  <button
-                    key={review ? thread.id + '-' + index : thread.id}
-                    className={`mail-conversation-row ${selectedId === thread.id ? 'selected' : ''} ${thread.unread ? 'unread' : ''}`}
-                    aria-pressed={selectedId === thread.id}
-                    onClick={() => selectConversation(thread.id)}
-                  >
-                    <span className="mail-conversation-row-top">
-                      <InboxAvatar
-                        name={thread.participantName || thread.companyName || thread.participant}
-                      />
-                      <strong title={thread.participant}>
-                        {thread.participantName || thread.companyName || thread.participant}
-                      </strong>
-                      <time>{formatTime(thread.updatedAt)}</time>
-                    </span>
-                    <span className="mail-conversation-row-subject">
-                      {thread.unread && <i aria-label="未读" />}
-                      {thread.subject || '（无主题）'}
-                    </span>
-                    <span className="mail-conversation-preview">
-                      {thread.preview || '暂无正文摘要'}
-                    </span>
-                    <span className="mail-conversation-row-account">
-                      <span className="inbox-brand-label">
-                        {mailboxes.find(
-                          (box) => box.id === thread.mailboxId || box.email === thread.account,
-                        )?.brandName || thread.account}
-                      </span>
-                      {!review && <span>{thread.messageCount} 封</span>}
-                    </span>
-                  </button>
-                ))}
+            ) : selectedId ? (
+              <div role="status" className="mail-conversation-placeholder">
+                <LoaderCircle className="outreach-spin" size={19} />
+                正在读取邮件正文…
               </div>
             ) : (
-              <Empty
-                title={
-                  review
-                    ? '当前没有待审回信'
-                    : filtered
-                      ? '没有符合筛选的会话'
-                      : customerId && inboundOnly
-                        ? '暂无该客户的来信'
-                        : '暂无邮件会话'
-                }
-                detail={
-                  review
-                    ? '需要审核的客户回信将在这里显示。'
-                    : filtered
-                      ? '可调整搜索词、选择其他邮箱或返回全部会话。'
-                      : customerId && inboundOnly
-                        ? '当前已同步的邮箱记录中没有该客户的来信，可同步邮件后重新查看。'
-                        : '可手动同步邮箱；系统发送的邮件也会在这里保存。'
-                }
-              />
-            )}
-            {!review && (
-              <div className="inbox-sync-footer">
-                <MailSyncSummary statuses={syncStatuses} />
-                <button
-                  type="button"
-                  className="inbox-sync-action"
-                  aria-label="同步邮件"
-                  title={mailboxId === 'all' ? '同步全部邮箱' : '同步所选邮箱'}
-                  disabled={syncing || !scopeMailboxes.some((box) => box.configured)}
-                  onClick={() => void sync()}
-                >
-                  <RefreshCw
-                    size={13}
-                    aria-hidden="true"
-                    className={syncing ? 'outreach-spin' : undefined}
-                  />
-                  {syncing ? '同步中…' : '同步'}
-                </button>
+              <div className="mail-conversation-welcome">
+                <Inbox size={30} />
+                <h3>选择一段邮件会话</h3>
               </div>
             )}
-          </aside>
-          {shownDetail ? (
-            <InboxThread
-              key={shownDetail.conversation.id}
-              detail={shownDetail}
-              identity={identity || undefined}
-              onBack={() => selectConversation(null)}
-              marking={marking}
-              onRead={() => void markRead(shownDetail.conversation)}
-              onRefresh={() => setDetailRevision((n) => n + 1)}
-              editorVersion={detailRevision}
-              onWorkflow={(id, workflow, move) => {
-                if (selected.current !== id) return;
-                setDetail((d) => (d && d.conversation.id === id ? { ...d, workflow } : d));
-                if (move) {
-                  if (!review && folder && folder !== workflow.state) selectConversation(null);
-                  setRevision((n) => n + 1);
-                }
-              }}
-              onCompleted={(value) => {
-                if (selected.current !== value.conversation.id) return;
-                setDetail(value);
-                if (review && value.replies?.[0]?.status === 'accepted')
-                  setNotice('回复已被服务商接受。');
-                if (review) setRevision((n) => n + 1);
-                setList((current) =>
-                  current
-                    ? {
-                        ...current,
-                        items: current.items.map((item) =>
-                          item.id === value.conversation.id ? value.conversation : item,
-                        ),
-                      }
-                    : current,
-                );
-              }}
-            />
-          ) : (
-            <section
-              className="mail-conversation-detail"
-              aria-label="邮件会话详情"
-              aria-busy={detailLoading}
-            >
-              {selectedId && (
-                <button
-                  type="button"
-                  className="mail-conversation-back inbox-icon"
-                  aria-label="返回会话列表"
-                  onClick={() => selectConversation(null)}
-                >
-                  <ArrowLeft size={16} />
-                </button>
-              )}
-              {detailError ? (
-                <div className="outreach-alert error" role="alert">
-                  {detailError}{' '}
-                  <button className="btn subtle" onClick={() => setDetailRevision((n) => n + 1)}>
-                    重试读取
-                  </button>
-                </div>
-              ) : selectedId ? (
-                <div role="status" className="mail-conversation-placeholder">
-                  <LoaderCircle className="outreach-spin" size={19} />
-                  正在读取邮件正文…
-                </div>
-              ) : (
-                <div className="mail-conversation-welcome">
-                  <Inbox size={30} />
-                  <h3>选择一段邮件会话</h3>
-                </div>
-              )}
-            </section>
-          )}
-        </div>
+          </section>
+        )}
       </div>
     </section>
   );
