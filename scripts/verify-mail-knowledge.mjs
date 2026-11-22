@@ -1,35 +1,42 @@
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { resolve, join, basename } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ProductKnowledge } from '../server/product-knowledge.mjs';
-import { workbookType, workbookPage } from '../server/product-workbooks.mjs';
+import { workbookPage } from '../server/product-workbooks.mjs';
+import { MaterialLibrary } from '../server/materials.mjs';
 import { answerMailQuestion } from '../server/mail-knowledge.mjs';
 
-export async function honeybadgerFixture(dir = String.raw`C:\Users\Johnson\Desktop\产品资料`) {
-  const knowledge = new ProductKnowledge();
+export async function honeybadgerFixture(
+  dir = String.raw`C:\Users\Johnson\Desktop\产品资料`,
+  databasePath = ':memory:',
+) {
+  if (databasePath !== ':memory:' && existsSync(databasePath))
+    throw new Error('验收数据库必须是新文件');
+  const knowledge = new ProductKnowledge(databasePath);
   const box = { website: 'https://honeybadgerblinds.com', knowledgeProductIds: [] };
+  const materials = new MaterialLibrary(knowledge, [{ ...box, brandName: 'Honey Badger Blinds' }]);
   const files = readdirSync(dir, { recursive: true }).filter(
     (f) => f.toLowerCase().endsWith('.xlsx') && !basename(f).startsWith('~$'),
   );
   assert.equal(files.length, 3, '需要三份验收工作簿');
   const imports = [];
   for (const name of files) {
-    const product = knowledge.save({
-      name: basename(name, '.xlsx'),
-      direction: 'materials',
-      brands: ['Honey Badger Blinds'],
-      sourceUrl: box.website,
-    });
-    const document = knowledge.documents.upload(product.id, {
+    const result = await materials.upload({
       name: basename(name),
-      contentType: workbookType,
-      contentBase64: readFileSync(join(dir, name)).toString('base64'),
+      bytes: readFileSync(join(dir, name)),
+      site: 'honeybadgerblinds.com',
+      key: randomUUID(),
     });
-    const { extraction } = await knowledge.documents.extract(product.id, document.id, { env: {} });
-    knowledge.save({
-      ...product,
-      documentIds: [document.id],
+    assert.equal(result.warning, '');
+    const {
+      product,
+      documents: [document],
+    } = materials.detail(result.id);
+    const { extraction } = document;
+    materials.edit(product.id, {
+      version: product.version,
       status: 'approved',
       approvedBy: '本地验收',
     });
@@ -39,8 +46,8 @@ export async function honeybadgerFixture(dir = String.raw`C:\Users\Johnson\Deskt
   return { knowledge, box, imports };
 }
 
-export async function verifyWorkbookAnswers(dir) {
-  const { knowledge, box, imports } = await honeybadgerFixture(dir);
+export async function verifyWorkbookAnswers(dir, databasePath) {
+  const { knowledge, box, imports } = await honeybadgerFixture(dir, databasePath);
   try {
     const answers = [];
     for (const [question, sheet, ref, value, automatic] of [
@@ -88,5 +95,22 @@ export async function verifyWorkbookAnswers(dir) {
     knowledge.close();
   }
 }
-if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url)
-  console.log(JSON.stringify(await verifyWorkbookAnswers(process.argv[2]), null, 2));
+if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+  const { imports, answers, foreignSitesBlocked } = await verifyWorkbookAnswers(
+    process.argv[2],
+    process.argv[3],
+  );
+  console.log(
+    JSON.stringify(
+      {
+        files: imports.length,
+        sheets: imports.reduce((n, f) => n + f.sheets.length, 0),
+        rows: imports.flatMap((f) => f.sheets).reduce((n, s) => n + s.rows, 0),
+        verifiedAnswers: answers.length,
+        foreignSitesBlocked,
+      },
+      null,
+      2,
+    ),
+  );
+}

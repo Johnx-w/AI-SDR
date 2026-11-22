@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { materialType, types, validateFile, extractText, videoLimit } from './material-formats.mjs';
 import { platformJson, providerBaseUrl } from './acquisition-config.mjs';
 import { extractWorkbook, workbookType } from './product-workbooks.mjs';
 
@@ -54,26 +55,8 @@ function fileInput(value) {
   const bytes = Buffer.from(base64, 'base64');
   if (bytes.toString('base64') !== base64 || bytes.length > MAX_PRODUCT_DOCUMENT_BYTES)
     throw fail(400, '文件内容无效或过大');
-  const type =
-    bytes.subarray(0, 5).toString() === '%PDF-'
-      ? 'application/pdf'
-      : bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
-        ? 'image/png'
-        : bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255
-          ? 'image/jpeg'
-          : bytes.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]))
-            ? workbookType
-            : '';
-  const extension =
-    type === workbookType
-      ? /\.xlsx$/iu
-      : type === 'application/pdf'
-        ? /\.pdf$/iu
-        : type === 'image/png'
-          ? /\.png$/iu
-          : /\.jpe?g$/iu;
-  if (!type || value.contentType !== type || !extension.test(value.name))
-    throw fail(400, '仅支持内容与扩展名一致的 PDF、PNG、JPG、XLSX 文件');
+  const type = materialType(value.name);
+  validateFile(value.name, value.contentType, bytes);
   return { name: value.name.trim(), contentType: type, bytes };
 }
 
@@ -125,6 +108,7 @@ export class ProductDocuments {
       id TEXT PRIMARY KEY, product_id TEXT NOT NULL, metadata TEXT NOT NULL,
       content BLOB NOT NULL, extraction TEXT
     ); CREATE INDEX IF NOT EXISTS product_documents_product ON product_documents(product_id);
+    CREATE INDEX IF NOT EXISTS product_documents_sha ON product_documents(json_extract(metadata,'$.sha256'));
     CREATE TABLE IF NOT EXISTS product_workbook_rows(
       document_id TEXT NOT NULL, sheet TEXT NOT NULL, row_number INTEGER NOT NULL, label TEXT NOT NULL,
       data TEXT NOT NULL, PRIMARY KEY(document_id,sheet,row_number)
@@ -156,6 +140,17 @@ export class ProductDocuments {
     if (!this.db.prepare('SELECT id FROM product_knowledge WHERE id=?').get(productId))
       throw fail(404, '请先保存产品资料，再上传文件');
     const file = fileInput(value);
+    return this.store(productId, file);
+  }
+  store(productId, file) {
+    validateFile(file.name, file.contentType, file.bytes);
+    if (
+      file.bytes.length >
+      (file.contentType.startsWith('video/') ? videoLimit : MAX_PRODUCT_DOCUMENT_BYTES)
+    )
+      throw fail(413, '文件超过大小上限');
+    if (!this.db.prepare('SELECT 1 FROM product_knowledge WHERE id=?').get(productId))
+      throw fail(404, '资料不存在');
     const sha256 = createHash('sha256').update(file.bytes).digest('hex');
     const id =
       'pd_' +
@@ -191,6 +186,32 @@ export class ProductDocuments {
       this.running.set(id, work);
       try {
         return await work;
+      } finally {
+        this.running.delete(id);
+      }
+    }
+    if (
+      file.contentType.startsWith('text/') ||
+      file.contentType === types.docx ||
+      file.contentType.startsWith('video/')
+    ) {
+      const task = (async () => {
+        const extraction = file.contentType.startsWith('video/')
+          ? {
+              facts: [],
+              warnings: ['预览视频后按时间点填写核对片段。'],
+              model: 'manual',
+              extractedAt: new Date().toISOString(),
+            }
+          : await extractText(file);
+        this.db
+          .prepare('UPDATE product_documents SET extraction=? WHERE id=? AND extraction IS NULL')
+          .run(JSON.stringify(extraction), id);
+        return this.list(productId).find((d) => d.id === id);
+      })();
+      this.running.set(id, task);
+      try {
+        return await task;
       } finally {
         this.running.delete(id);
       }

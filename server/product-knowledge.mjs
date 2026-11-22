@@ -28,6 +28,10 @@ const factKeys = [
   'outreachFacts',
   'documentIds',
   'cellEdits',
+  'materialOnly',
+  'materialCategory',
+  'keywords',
+  'sourceFacts',
 ];
 const allowedKeys = new Set([
   ...factKeys,
@@ -186,6 +190,21 @@ function normalize(value) {
       value: text(edit.value, '校对值', 4000),
     };
   });
+  if (value.materialOnly !== undefined && value.materialOnly !== true)
+    throw fail(400, '资料类型无效');
+  const keywords = list(value.keywords, '素材关键词', 32, 100);
+  const materialCategory = text(value.materialCategory, '素材品类', 100);
+  const sourceFacts = value.sourceFacts ?? [];
+  if (!Array.isArray(sourceFacts) || sourceFacts.length > 200)
+    throw fail(400, '最多可核对 200 个引用片段');
+  const checked = sourceFacts.map((f) => {
+    if (!f || !documentIds.includes(f.documentId)) throw fail(400, '引用原件必须属于当前资料');
+    return {
+      documentId: f.documentId,
+      location: text(f.location, '原件位置', 160, true),
+      text: text(f.text, '引用片段', 4000, true),
+    };
+  });
   if (documentIds.some((id) => !/^pd_[a-f0-9]{64}$/u.test(id))) throw fail(400, '原文件编号无效');
   return {
     name: text(value.name, '产品名称', 160, true),
@@ -206,21 +225,33 @@ function normalize(value) {
     approvedBy: text(value.approvedBy, '审核人', 100),
     notes: text(value.notes, '备注', 4000),
     outreachFacts: outreachFacts(value.outreachFacts),
+    ...(value.materialOnly ? { materialOnly: true } : {}),
+    ...(materialCategory ? { materialCategory } : {}),
+    ...(keywords.length ? { keywords } : {}),
+    ...(checked.length ? { sourceFacts: checked } : {}),
     ...(documentIds.length ? { documentIds } : {}),
     ...(cellEdits.length ? { cellEdits } : {}),
   };
 }
 
 // Company supply facts are separate from the acquisition search vocabulary.
-// Only the current product revision is retained; approval is for these exact facts.
+// Approval applies to the current facts. Previous revisions keep their document links for review.
 export class ProductKnowledge {
   constructor(path = ':memory:') {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
       CREATE TABLE IF NOT EXISTS product_knowledge(id TEXT PRIMARY KEY, data TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS material_updated ON product_knowledge(json_extract(data,'$.updatedAt') DESC,id);
       CREATE TABLE IF NOT EXISTS product_knowledge_requests(
         request_key TEXT PRIMARY KEY, body_hash TEXT NOT NULL, product_id TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS material_versions(
+        product_id TEXT NOT NULL, revision INTEGER NOT NULL, data TEXT NOT NULL,
+        PRIMARY KEY(product_id,revision)
+      ) WITHOUT ROWID;
+      CREATE TABLE IF NOT EXISTS material_upload_requests(
+        request_key TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, product_id TEXT NOT NULL, document_id TEXT NOT NULL
       );`);
     this.documents = new ProductDocuments(this.db);
   }
@@ -245,7 +276,7 @@ export class ProductKnowledge {
               (!product.effectiveDate || product.effectiveDate <= today))),
       );
   }
-  save(value, { expectedVersion, idempotencyKey } = {}) {
+  save(value, { expectedVersion, idempotencyKey, initialUpload = false } = {}) {
     const normalized = normalize(value);
     if (
       idempotencyKey !== undefined &&
@@ -256,7 +287,8 @@ export class ProductKnowledge {
     const bodyHash = createHash('sha256')
       .update(JSON.stringify(facts.length ? normalized : legacyFacts))
       .digest('hex');
-    this.db.exec('BEGIN IMMEDIATE');
+    const owned = !this.db.isTransaction;
+    if (owned) this.db.exec('BEGIN IMMEDIATE');
     try {
       if (idempotencyKey) {
         const request = this.db
@@ -266,12 +298,14 @@ export class ProductKnowledge {
           if (request.body_hash !== bodyHash) throw fail(409, '同一操作编号不能提交不同的产品资料');
           const existing = this.get(request.product_id);
           if (!existing) throw fail(409, '产品操作结果待核对，请刷新资料库');
-          this.db.exec('COMMIT');
+          if (owned) this.db.exec('COMMIT');
           return existing;
         }
       }
       const prior = value.id ? this.get(value.id) : null;
       if (value.id && !prior) throw fail(404, '产品资料不存在，请刷新资料库');
+      if (prior && !!prior.materialOnly !== !!normalized.materialOnly)
+        throw fail(400, '不能变更资料类型');
       const expected = expectedVersion ?? value.version;
       if (prior && (!Number.isInteger(expected) || expected !== prior.version))
         throw fail(409, '产品资料已更新，请刷新后再保存');
@@ -313,7 +347,7 @@ export class ProductKnowledge {
       const product = {
         id: prior?.id || 'pk_' + randomUUID().replaceAll('-', ''),
         ...normalized,
-        version: (prior?.version || 0) + 1,
+        version: initialUpload ? 1 : (prior?.version || 0) + 1,
         approvedBy: normalized.status === 'approved' ? normalized.approvedBy : '',
         approvedAt:
           normalized.status === 'approved' ? (approvedUnchanged ? prior.approvedAt : now) : '',
@@ -329,10 +363,14 @@ export class ProductKnowledge {
         this.db
           .prepare('INSERT INTO product_knowledge_requests VALUES(?,?,?)')
           .run(idempotencyKey, bodyHash, product.id);
-      this.db.exec('COMMIT');
+      if (prior && !initialUpload)
+        this.db
+          .prepare('INSERT OR IGNORE INTO material_versions VALUES(?,?,?)')
+          .run(prior.id, prior.version, JSON.stringify(prior));
+      if (owned) this.db.exec('COMMIT');
       return product;
     } catch (error) {
-      this.db.exec('ROLLBACK');
+      if (owned) this.db.exec('ROLLBACK');
       throw error;
     }
   }

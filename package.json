@@ -36,7 +36,9 @@
     "react-dom": "19.1.1",
     "react-router-dom": "7.18.4",
     "read-excel-file": "9.3.20",
-    "sanitize-html": "^2.18.1"
+    "sanitize-html": "^2.18.1",
+    "saxen": "11.2.0",
+    "unzipper-esm": "0.13.3"
   },
   "devDependencies": {
     "@types/react": "19.1.16",

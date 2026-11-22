@@ -11,7 +11,7 @@ function columnName(n) {
 }
 
 // Bound decompression before handing an uploaded Office ZIP to the workbook reader.
-function checkArchive(bytes) {
+export function checkOfficeArchive(bytes) {
   const end = bytes.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
   if (end < 0 || end + 22 > bytes.length) throw fail(400, '工作簿 ZIP 目录无效');
   const entries = bytes.readUInt16LE(end + 10);
@@ -32,7 +32,7 @@ function checkArchive(bytes) {
 }
 
 export async function extractWorkbook(db, file) {
-  checkArchive(file.bytes);
+  checkOfficeArchive(file.bytes);
   let sheets;
   try {
     // Excel displays numeric values to 15 significant digits. Text model codes stay verbatim.

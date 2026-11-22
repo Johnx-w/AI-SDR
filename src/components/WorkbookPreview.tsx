@@ -31,7 +31,7 @@ export function WorkbookPreview({
   edits: CellEdit[];
   onEdit: (edit: CellEdit, original: string) => void;
   linked: boolean;
-  onToggle: () => void;
+  onToggle?: () => void;
 }) {
   const [sheet, setSheet] = useState(sheets[0]?.name || ''),
     [page, setPage] = useState(1),
@@ -60,6 +60,7 @@ export function WorkbookPreview({
         <label>
           工作表
           <select
+            aria-label="工作表"
             value={sheet}
             onChange={(e) => {
               setSheet(e.target.value);
@@ -83,9 +84,11 @@ export function WorkbookPreview({
             }}
           />
         </label>
-        <button className="btn secondary" type="button" onClick={onToggle}>
-          {linked ? '移除此文件关联' : '关联工作簿并校对'}
-        </button>
+        {onToggle && (
+          <button className="btn secondary" type="button" onClick={onToggle}>
+            {linked ? '移除此文件关联' : '关联工作簿并校对'}
+          </button>
+        )}
       </div>
       {error && <p role="alert">{error}</p>}
       {result && (

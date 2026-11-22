@@ -7,8 +7,8 @@ const attributes = [
     en: 'Material',
   },
   {
-    query: /尺寸|幅宽|宽度|\b(?:size|width|dimensions?)\b/iu,
-    field: /尺寸|幅宽|宽度|size|width|dimension/iu,
+    query: /尺寸|幅宽|宽度|\b(?:size|wide|width|dimensions?)\b/iu,
+    field: /尺寸|幅宽|宽度|size|wide|width|dimension/iu,
     en: 'Dimensions',
   },
   {
@@ -88,6 +88,40 @@ export function answerMailQuestion(knowledge, mailbox, input, now = Date.now()) 
   const hits = [];
   for (const product of products) {
     const documents = knowledge.documents.list(product.id);
+    // Human-reviewed passages keep their source document and original locator.
+    for (const fact of product.sourceFacts || []) {
+      const doc = documents.find(
+        (d) => d.id === fact.documentId && product.documentIds?.includes(d.id),
+      );
+      if (!doc) continue;
+      const models = question.match(/\b[a-z]+(?:[-_]?[a-z]+)*[-_]?\d+[a-z0-9_-]*\b/giu) || [];
+      const attributeMatch = asks.some((a) => a.field?.test(fact.text) || a.query.test(fact.text));
+      const exact = models.length > 0 && models.every((model) => named(fact.text, model));
+      if (models.length && !exact) continue;
+      if (asks.length && !attributeMatch) continue;
+      if (!exact && ![product.name, ...(product.keywords || [])].some((k) => named(question, k)))
+        continue;
+      hits.push({
+        label: exact ? models.join(' / ') : product.name,
+        score: exact ? Math.max(...models.map((s) => s.length)) : 0,
+        body: fact.text,
+        automatic:
+          exact &&
+          asks.length === 1 &&
+          !commercial.test(question + ' ' + fact.text) &&
+          (zh || !/[\u3400-\u9fff]/u.test(fact.text)),
+        sources: [
+          {
+            productId: product.id,
+            version: product.version,
+            documentId: doc.id,
+            file: doc.name,
+            ref: fact.location,
+            value: fact.text,
+          },
+        ],
+      });
+    }
     for (const doc of documents.filter(
       (d) => product.documentIds?.includes(d.id) && d.extraction?.sheets,
     )) {

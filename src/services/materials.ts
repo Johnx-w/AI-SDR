@@ -1,0 +1,108 @@
+export const materialFormats = ['PDF', 'Word', 'Markdown', 'TXT', 'Excel', '图片', '视频'];
+export const acceptMaterials =
+  '.pdf,.docx,.xlsx,.md,.markdown,.txt,.jpg,.jpeg,.png,.gif,.webp,.mp4,.webm,.mov';
+export type Site = { site: string; brand: string };
+export type Reference = { documentId: string; location: string; text: string };
+export type Correction = { documentId: string; sheet: string; ref: string; value: string };
+export type Material = {
+  id: string;
+  name: string;
+  version: number;
+  status: string;
+  updatedAt: string;
+  category: string;
+  keywords: string[];
+  sites: string[];
+  documentId: string | null;
+  preview: (string | null)[] | null;
+  contentType: string | null;
+  size: number;
+  format: string;
+};
+export type MaterialList = {
+  items: Material[];
+  total: number;
+  page: number;
+  pageSize: number;
+  sites: Site[];
+  categories: string[];
+};
+export type StoredDocument = {
+  id: string;
+  name: string;
+  size: number;
+  contentType: string;
+  sha256: string;
+  createdAt: string;
+  extraction: null | {
+    facts: { text: string; page: number; location: string }[];
+    warnings: string[];
+    sheets?: { name: string; rows: number }[];
+    model: string;
+  };
+};
+export type Product = {
+  id: string;
+  version: number;
+  status: string;
+  name: string;
+  materialCategory?: string;
+  keywords?: string[];
+  cellEdits?: Correction[];
+  sourceFacts?: Reference[];
+  approvedBy: string;
+  specifications: string;
+  sourceUrl: string;
+  documentIds?: string[];
+  attachments: string[];
+};
+export type MaterialDetail = {
+  product: Product;
+  documents: StoredDocument[];
+  history: number[];
+  sites: string[];
+  siteOptions: Site[];
+  currentVersion: number;
+};
+export const materialApi = '/api/v1/materials';
+export const sourceUrl = (id: string, document: string) =>
+  materialApi + '/' + id + '/document/' + document;
+export async function materialsRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(materialApi + path, init);
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data) throw new Error(data?.error || '素材操作失败，请刷新后重试');
+  return data as T;
+}
+export const sendJson = <T>(path: string, method: string, body: unknown) =>
+  materialsRequest<T>(path, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+export async function uploadMaterial(
+  file: File,
+  options: { site?: string; category?: string; id?: string; version?: number },
+  key: string,
+) {
+  const q = new URLSearchParams({ name: file.name });
+  if (options.site) q.set('site', options.site);
+  if (options.category) q.set('category', options.category);
+  if (options.version) q.set('version', String(options.version));
+  return materialsRequest<{ id: string; documentId: string; warning: string; reused: boolean }>(
+    (options.id ? '/' + options.id + '/versions' : '') + '?' + q,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream', 'Idempotency-Key': key },
+      body: file,
+    },
+  );
+}
+export const fileSize = (n: number) =>
+  n >= 1048576
+    ? (n / 1048576).toFixed(1) + ' MB'
+    : n >= 1024
+      ? (n / 1024).toFixed(1) + ' KB'
+      : n + ' B';
+export const statusName = (s: string) =>
+  s === 'approved' ? '已审核' : s === 'archived' ? '已撤回' : '待审核';
+export const messageOf = (e: unknown) => (e instanceof Error ? e.message : '操作失败，请重试');

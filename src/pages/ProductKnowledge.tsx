@@ -1,938 +1,651 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Archive, ExternalLink, Plus, RefreshCw, Search } from 'lucide-react';
-import { PageHeading } from '../components/PageHeading';
-import { ProductDocuments } from '../components/ProductDocuments';
-import type { CellEdit } from '../components/WorkbookPreview';
-import { Badge, Empty, Modal } from '../components/ui';
-import type { OutreachFact } from '../outreachApi';
+import {
+  Upload,
+  History,
+  Eye,
+  Grid2X2,
+  List,
+  Search,
+  FileSpreadsheet,
+  FileText,
+  FileVideo,
+  FileImage,
+  FolderOpen,
+  ChevronDown,
+} from 'lucide-react';
+import { MaterialDialog, type MaterialView } from '../components/MaterialDetail';
+import {
+  acceptMaterials,
+  fileSize,
+  materialFormats,
+  materialsRequest,
+  messageOf,
+  sendJson,
+  sourceUrl,
+  statusName,
+  uploadMaterial,
+  type Material,
+  type MaterialList,
+} from '../services/materials';
 import './ProductKnowledge.css';
 
-const categoryLabels = {
-  ventilation: '透气窗',
-  shutters: '百叶窗',
-  indoor: '室内成品帘',
-  outdoor: '户外遮阳',
-  other: '其他',
-};
-const directionLabels = { finished: '成品', materials: '材料配件', samples: '样本展示' };
-const statusLabels = { draft: '待审核', approved: '已审核', archived: '已归档' };
-const factLabels: Record<OutreachFact['kind'], string> = {
-  product: '产品介绍',
-  price: '标准报价',
-  moq: 'MOQ',
-  stock: '库存',
-  leadTime: '交期',
-  freight: '运费',
-  payment: '付款条件',
-};
-const needsExpiry = (kind: OutreachFact['kind']) =>
-  ['price', 'stock', 'leadTime', 'freight'].includes(kind);
-const beijingInput = (value: string | null) =>
-  value ? new Date(Date.parse(value) + 8 * 3600000).toISOString().slice(0, 19) : '';
-
-interface ProductDraft {
-  name: string;
-  englishName: string;
-  category: keyof typeof categoryLabels;
-  direction: keyof typeof directionLabels;
-  deliveryForms: string[];
-  aliases: string[];
-  specifications: string;
-  moq: string;
-  leadTime: string;
-  brands: string[];
-  markets: string[];
-  sourceUrl: string;
-  attachments: string[];
-  status: keyof typeof statusLabels;
-  effectiveDate: string;
-  approvedBy: string;
-  notes: string;
-  outreachFacts: OutreachFact[];
-  documentIds?: string[];
-  cellEdits?: CellEdit[];
-}
-interface ProductKnowledge extends ProductDraft {
-  id: string;
-  version: number;
-  approvedAt: string;
-  createdAt: string;
-  updatedAt: string;
-}
-interface ProductList {
-  products: ProductKnowledge[];
-}
-interface SaveResult {
-  product: ProductKnowledge;
-  feishu?: { status: 'synced' | 'pending' | 'not_configured'; error?: string };
-}
-interface Editor {
-  original: ProductKnowledge | null;
-  value: ProductDraft;
-  key: string;
-}
-type ListField = 'deliveryForms' | 'aliases' | 'brands' | 'markets' | 'attachments';
-class ProductRequestError extends Error {
-  constructor(
-    message: string,
-    public status: number,
-  ) {
-    super(message);
-  }
-}
-
-const blankProduct = (): ProductDraft => ({
-  name: '',
-  englishName: '',
-  category: 'other',
-  direction: 'finished',
-  deliveryForms: [],
-  aliases: [],
-  specifications: '',
-  moq: '',
-  leadTime: '',
-  brands: [],
-  markets: [],
-  sourceUrl: '',
-  attachments: [],
-  status: 'draft',
-  effectiveDate: '',
-  approvedBy: '',
-  notes: '',
-  outreachFacts: [],
-});
-const splitList = (value: string) => [
-  ...new Set(
-    value
-      .split(/[,，\n]/)
-      .map((item) => item.trim())
-      .filter(Boolean),
-  ),
-];
-const sourceLink = (value: string) => {
-  try {
-    const url = new URL(value);
-    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password
-      ? url.href
-      : '';
-  } catch {
-    return '';
-  }
-};
-const timestamp = (value: string) => {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? '尚未记录'
-    : date.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
-};
-
-async function request<T>(
-  method = 'GET',
-  value?: object,
-  signal?: AbortSignal,
-  options?: { path?: string; key?: string },
-): Promise<T> {
-  const response = await fetch(options?.path || '/api/v1/products/knowledge', {
-    method,
-    ...(value
-      ? {
-          headers: {
-            'Content-Type': 'application/json',
-            ...(options?.key ? { 'Idempotency-Key': options.key } : {}),
-          },
-          body: JSON.stringify(value),
-        }
-      : {}),
-    signal: signal || AbortSignal.timeout(30000),
-  });
-  const body = await response.json().catch(() => null);
-  if (!response.ok)
-    throw new ProductRequestError(
-      body?.error || `产品资料操作失败（${response.status}）`,
-      response.status,
-    );
-  if (!body) throw new Error('服务未返回有效结果，请刷新列表核对');
-  return body as T;
-}
-
 export function ProductKnowledgePage() {
-  const [productParams, setProductParams] = useSearchParams();
-  const focusedProduct = productParams.get('product');
-  const [products, setProducts] = useState<ProductKnowledge[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
-  const [query, setQuery] = useState('');
-  useEffect(() => {
-    if (focusedProduct) setQuery(focusedProduct);
-  }, [focusedProduct]);
-  const requestedStatus = productParams.get('status') || '';
+  const [params, setParams] = useSearchParams();
+  const id = params.get('id') || params.get('product') || params.get('productId') || '';
+  const requestedStatus = params.get('status') || 'active';
   const status = ['active', 'draft', 'approved', 'archived', 'all'].includes(requestedStatus)
     ? requestedStatus
     : 'active';
-  const [editor, setEditor] = useState<Editor | null>(null);
-  const [formError, setFormError] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [refreshRequired, setRefreshRequired] = useState(false);
-  const [pendingSyncId, setPendingSyncId] = useState('');
-  const [listInputs, setListInputs] = useState<Record<ListField, string>>({
-    deliveryForms: '',
-    aliases: '',
-    brands: '',
-    markets: '',
-    attachments: '',
-  });
-
-  const load = useCallback(async (signal?: AbortSignal) => {
-    setLoading(true);
-    setError('');
-    try {
-      const result = await request<ProductList>('GET', undefined, signal);
-      if (!Array.isArray(result.products)) throw new Error('产品资料返回格式异常');
-      setProducts(result.products);
-    } catch (cause) {
-      if (!signal?.aborted) setError(cause instanceof Error ? cause.message : '无法读取产品资料');
-    } finally {
-      if (!signal?.aborted) setLoading(false);
-    }
-  }, []);
+  function setStatus(value: string) {
+    const next = new URLSearchParams(params);
+    if (value === 'active') next.delete('status');
+    else next.set('status', value);
+    setParams(next, { replace: true });
+  }
+  function showId(value: string) {
+    const next = new URLSearchParams(params);
+    next.delete('productId');
+    next.delete('product');
+    if (value) next.set('id', value);
+    else next.delete('id');
+    setParams(next);
+  }
+  const [data, setData] = useState<MaterialList | null>(null),
+    [query, setQuery] = useState(''),
+    [search, setSearch] = useState(''),
+    [site, setSite] = useState(''),
+    [categories, setCategories] = useState<string[]>([]),
+    [catSearch, setCatSearch] = useState(''),
+    [format, setFormat] = useState(''),
+    [page, setPage] = useState(1),
+    [size, setSize] = useState(20),
+    [reload, setReload] = useState(0),
+    [view, setView] = useState<'grid' | 'list'>('grid'),
+    [dialogView, setDialogView] = useState<MaterialView>('preview');
+  const [batch, setBatch] = useState(false),
+    [selection, setSelection] = useState<Map<string, Material>>(new Map()),
+    [editing, setEditing] = useState(false),
+    [drag, setDrag] = useState(false),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState(''),
+    [report, setReport] = useState(''),
+    [loading, setLoading] = useState(true);
+  const input = useRef<HTMLInputElement>(null),
+    bulkDialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
-    const controller = new AbortController();
-    void load(controller.signal);
-    return () => controller.abort();
-  }, [load]);
-
-  const shown = useMemo(() => {
-    const term = query.trim().toLowerCase();
-    return products.filter(
-      (product) =>
-        (status === 'all' ||
-          (status === 'active' ? product.status !== 'archived' : product.status === status)) &&
-        (!term ||
-          [product.name, product.englishName, product.id, ...product.aliases, ...product.brands]
-            .join(' ')
-            .toLowerCase()
-            .includes(term)),
-    );
-  }, [products, query, status]);
-
-  function openEditor(product?: ProductKnowledge) {
-    setFormError('');
-    setRefreshRequired(false);
-    setEditor({
-      original: product || null,
-      key: crypto.randomUUID(),
-      value: product
-        ? {
-            ...product,
-            outreachFacts: product.outreachFacts || [],
-            status: 'draft',
-            approvedBy: '',
-          }
-        : blankProduct(),
+    const t = setTimeout(() => {
+      setSearch(query.trim());
+      setPage(1);
+    }, 180);
+    return () => clearTimeout(t);
+  }, [query]);
+  useEffect(() => {
+    const c = new AbortController();
+    setError('');
+    setLoading(true);
+    const p = new URLSearchParams({
+      q: search,
+      site,
+      format,
+      status,
+      page: String(page),
+      pageSize: String(size),
     });
-    setListInputs({
-      deliveryForms: product?.deliveryForms.join('，') || '',
-      aliases: product?.aliases.join('，') || '',
-      brands: product?.brands.join('，') || '',
-      markets: product?.markets.join('，') || '',
-      attachments: product?.attachments.join('\n') || '',
-    });
+    categories.forEach((cat) => p.append('category', cat));
+    materialsRequest<MaterialList>('?' + p, { signal: c.signal })
+      .then((result) => {
+        if (!c.signal.aborted) {
+          setData(result);
+          if (result.page !== page) setPage(result.page);
+        }
+      })
+      .catch((e) => {
+        if (!c.signal.aborted) setError(messageOf(e));
+      })
+      .finally(() => {
+        if (!c.signal.aborted) setLoading(false);
+      });
+    return () => c.abort();
+  }, [search, site, format, status, page, size, categories, reload]);
+  useEffect(() => {
+    if (editing) bulkDialog.current?.showModal();
+  }, [editing]);
+  const refresh = useCallback(() => setReload((v) => v + 1), []);
+  function open(item: Material, mode: MaterialView) {
+    setDialogView(mode);
+    showId(item.id);
   }
-  function change<K extends keyof ProductDraft>(key: K, value: ProductDraft[K]) {
-    setEditor((current) => current && { ...current, value: { ...current.value, [key]: value } });
-  }
-  function changeList(key: ListField, value: string) {
-    setListInputs((current) => ({ ...current, [key]: value }));
-    change(
-      key,
-      key === 'attachments'
-        ? value
-            .split('\n')
-            .map((item) => item.trim())
-            .filter(Boolean)
-        : splitList(value),
-    );
-  }
-  function changeFact(id: string, values: Partial<OutreachFact>) {
-    if (editor)
-      change(
-        'outreachFacts',
-        editor.value.outreachFacts.map((fact) => (fact.id === id ? { ...fact, ...values } : fact)),
-      );
-  }
-  function useDocument(id: string, specifications: string) {
-    if (!editor) return;
-    const combined = [editor.value.specifications, specifications].filter(Boolean).join('\n\n');
-    if (combined.length > 12000) {
-      setFormError('合并后参数超过 12000 字符，请先精简候选参数或现有产品参数');
-      return;
-    }
-    setFormError('');
-    setEditor({
-      ...editor,
-      value: {
-        ...editor.value,
-        specifications: combined,
-        documentIds: [...new Set([...(editor.value.documentIds || []), id])],
-        status: 'draft',
-        approvedBy: '',
-      },
+  function toggleSelected(m: Material, on: boolean) {
+    setSelection((prev) => {
+      const next = new Map(prev);
+      if (on) next.set(m.id, m);
+      else next.delete(m.id);
+      return next;
     });
   }
-  function acceptSaved(result: SaveResult, requestedStatus?: ProductDraft['status']) {
-    setProducts((current) => [
-      ...current.filter((product) => product.id !== result.product.id),
-      result.product,
-    ]);
-    setPendingSyncId(result.feishu?.status === 'pending' ? result.product.id : '');
-    const saved =
-      requestedStatus === 'approved' && result.product.status === 'draft'
-        ? '资料变更已保存为待审核，请核对后再次审核。'
-        : '产品资料已保存。';
-    const sync =
-      result.feishu?.status === 'synced'
-        ? '已同步到飞书 T5。'
-        : result.feishu?.status === 'pending'
-          ? '飞书同步待核对，请勿重复新建。'
-          : '';
-    setNotice(saved + sync);
-  }
-  async function save(event: FormEvent) {
-    event.preventDefault();
-    if (!editor || saving || refreshRequired) return;
-    setSaving(true);
-    setFormError('');
-    try {
-      const result = await request<SaveResult>(
-        editor.original ? 'PUT' : 'POST',
-        {
-          ...editor.value,
-          ...(editor.original
-            ? { id: editor.original.id, expectedVersion: editor.original.version }
-            : {}),
-        },
-        undefined,
-        { key: editor.key },
-      );
-      acceptSaved(result, editor.value.status);
-      setEditor(null);
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : '保存失败';
-      if (!(cause instanceof ProductRequestError) || cause.status === 409 || cause.status >= 500) {
-        setRefreshRequired(true);
-        setFormError(
-          cause instanceof ProductRequestError && cause.status === 409
-            ? `${message}。请关闭并刷新列表，重新打开最新资料。`
-            : `${message}。保存结果尚未确认，请先关闭并刷新列表核对，再决定是否重试。`,
+  async function upload(files: File[]) {
+    if (!files.length || busy) return;
+    setBusy(true);
+    setError('');
+    setReport('');
+    let done = 0,
+      reused = 0;
+    const errors: string[] = [];
+    for (const [i, file] of files.entries()) {
+      setReport('正在导入 ' + (i + 1) + ' / ' + files.length + ' · ' + file.name);
+      try {
+        const key = crypto.randomUUID();
+        const result = await uploadMaterial(
+          file,
+          {
+            site: site === 'unassigned' ? '' : site,
+            category: categories.length === 1 ? categories[0] : undefined,
+          },
+          key,
         );
-      } else setFormError(message);
-    } finally {
-      setSaving(false);
+        done++;
+        if (result.reused) reused++;
+        if (result.warning) errors.push(file.name + ' · 原件已保存，' + result.warning);
+      } catch (e) {
+        errors.push(file.name + ' · ' + messageOf(e));
+      }
+    }
+    setBusy(false);
+    setReport(
+      [
+        '已导入 ' +
+          (done - reused) +
+          ' 份素材' +
+          (reused ? '，' + reused + ' 份原件已存在' : '') +
+          (files.length > done ? '，' + (files.length - done) + ' 份失败' : ''),
+        ...errors,
+      ].join('\n'),
+    );
+    if (done) {
+      setPage(1);
+      setStatus('active');
+      setFormat('');
+      setQuery('');
+      if (categories.length > 1) setCategories([]);
+      refresh();
     }
   }
-  async function archive(product: ProductKnowledge) {
-    if (saving) return;
-    setSaving(true);
+  async function bulk(changes: Record<string, unknown>) {
+    if (!selection.size || busy) return;
+    setBusy(true);
     setError('');
     try {
-      const result = await request<SaveResult>('PUT', {
-        ...product,
-        expectedVersion: product.version,
-        status: 'archived',
+      await sendJson('/bulk', 'POST', {
+        items: [...selection.values()].map(({ id, version }) => ({ id, version })),
+        changes,
       });
-      acceptSaved(result);
-    } catch (cause) {
-      setError(`${cause instanceof Error ? cause.message : '归档失败'}。请刷新列表核对当前状态。`);
+      setReport('已更新 ' + selection.size + ' 份素材');
+      setEditing(false);
+      setSelection(new Map());
+      refresh();
+    } catch (e) {
+      setError(messageOf(e));
     } finally {
-      setSaving(false);
+      setBusy(false);
     }
   }
-  async function retrySync() {
-    if (!pendingSyncId || saving) return;
-    setSaving(true);
-    setError('');
-    try {
-      const result = await request<SaveResult>('POST', undefined, undefined, {
-        path: `/api/v1/products/knowledge/${encodeURIComponent(pendingSyncId)}/sync`,
-      });
-      acceptSaved(result);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '飞书同步结果尚未确认，请稍后核对');
-    } finally {
-      setSaving(false);
-    }
+  function csv() {
+    const escape = (v: string) =>
+      '"' + (/^[\s]*[=+\-@]/.test(v) ? "'" : '') + v.replaceAll('"', '""') + '"';
+    const arr = [
+      ['素材名称', '品类', '关键词', '官网', '文件格式', '版本', '状态'],
+      ...[...selection.values()].map((m) => [
+        m.name,
+        m.category,
+        m.keywords.join('、'),
+        m.sites.join('、'),
+        m.format,
+        String(m.version),
+        statusName(m.status),
+      ]),
+    ];
+    const u = URL.createObjectURL(
+      new Blob(['\ufeff' + arr.map((row) => row.map(escape).join(',')).join('\r\n')], {
+        type: 'text/csv;charset=utf-8',
+      }),
+    );
+    const a = document.createElement('a');
+    a.href = u;
+    a.download = '素材清单.csv';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(u), 1000);
   }
-  function closeEditor() {
-    if (saving) return;
-    setEditor(null);
-    if (refreshRequired) void load();
-  }
-
+  const items = data?.items || [],
+    pages = Math.max(1, Math.ceil((data?.total || 0) / size));
+  const busyFiles = (e: React.DragEvent) => e.dataTransfer.types.includes('Files');
   return (
-    <div className="product-knowledge">
-      <PageHeading
-        eyebrow="PRODUCT KNOWLEDGE · T5"
-        title="产品资料库"
-        description="维护公司可供产品、规格依据和审核状态，供业务接待查阅"
-      >
-        <button className="btn secondary" onClick={() => void load()} disabled={loading || saving}>
-          <RefreshCw size={15} /> 刷新
-        </button>
-        <button
-          className="btn primary"
-          onClick={() => openEditor()}
-          disabled={loading || saving || !!error}
-        >
-          <Plus size={16} /> 新增产品资料
-        </button>
-      </PageHeading>
-
-      {error && (
-        <p className="knowledge-alert error" role="alert">
-          {error}
+    <main
+      className="materials"
+      aria-label="素材库"
+      onDragOver={(e) => {
+        if (busyFiles(e)) {
+          e.preventDefault();
+          if (!busy) setDrag(true);
+        }
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDrag(false);
+      }}
+      onDrop={(e) => {
+        if (busyFiles(e)) {
+          e.preventDefault();
+          setDrag(false);
+          void upload(Array.from(e.dataTransfer.files));
+        }
+      }}
+    >
+      <header className="mat-head">
+        <h1>素材库</h1>
+      </header>
+      <section className={'mat-entry' + (drag ? ' dragging' : '')}>
+        <div className="mat-entry-label">
+          <span className="mat-upload-icon">
+            <Upload size={21} />
+          </span>
+          <div>
+            <h2>素材上传入口</h2>
+            <p>拖入或选择文档、表格、图片和视频。</p>
+          </div>
+        </div>
+        <div className="mat-actions">
+          <button
+            type="button"
+            onClick={() => {
+              setBatch(!batch);
+              setSelection(new Map());
+            }}
+          >
+            {batch ? '退出批量管理' : '批量管理'}
+          </button>
+          <button className="mat-primary" disabled={busy} onClick={() => input.current?.click()}>
+            <Upload size={15} />
+            选择文件上传
+          </button>
+          <input
+            aria-label="选择本地文件"
+            hidden
+            ref={input}
+            type="file"
+            multiple
+            accept={acceptMaterials}
+            onChange={(e) => {
+              const files = Array.from(e.target.files || []);
+              e.target.value = '';
+              void upload(files);
+            }}
+          />
+        </div>
+      </section>
+      {report && (
+        <p role="status" className="mat-note">
+          {report}
         </p>
       )}
-      {notice && (
-        <div className="knowledge-alert knowledge-save-notice" role="status">
-          <span>{notice}</span>
-          {pendingSyncId && (
-            <button
-              className="btn secondary small"
-              disabled={saving}
-              onClick={() => void retrySync()}
+      {error && (
+        <p role="alert" className="mat-error">
+          {error} <button onClick={refresh}>重新读取</button>
+        </p>
+      )}
+      <section className="mat-filters" aria-label="素材筛选">
+        <label className="mat-search">
+          <Search size={16} />
+          <input
+            type="search"
+            value={query}
+            aria-label="搜索素材"
+            placeholder="搜索素材名称、关键词"
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </label>
+        <select
+          aria-label="品牌邮箱筛选"
+          value={site}
+          onChange={(e) => {
+            setSite(e.target.value);
+            setPage(1);
+          }}
+        >
+          <option value="">全部品牌邮箱</option>
+          <option value="unassigned">未分配</option>
+          {data?.sites.map((s) => (
+            <option value={s.site} key={s.site}>
+              {s.brand} · {s.site}
+            </option>
+          ))}
+        </select>
+        <details>
+          <summary>
+            {categories.length ? '品类 · ' + categories.length : '全部类别'}{' '}
+            <ChevronDown size={13} />
+          </summary>
+          <div className="mat-dropdown">
+            <input
+              aria-label="搜索品类"
+              value={catSearch}
+              onChange={(e) => setCatSearch(e.target.value)}
+              placeholder="搜索品类"
+            />
+            {data?.categories
+              .filter((c) => c.includes(catSearch))
+              .map((c) => (
+                <label key={c}>
+                  <input
+                    type="checkbox"
+                    checked={categories.includes(c)}
+                    onChange={(e) => {
+                      setCategories((prev) =>
+                        e.target.checked ? [...prev, c] : prev.filter((x) => x !== c),
+                      );
+                      setPage(1);
+                    }}
+                  />
+                  {c}
+                </label>
+              ))}
+          </div>
+        </details>
+        <details>
+          <summary>
+            筛选 <ChevronDown size={13} />
+          </summary>
+          <div className="mat-dropdown">
+            <label>
+              文件格式
+              <select
+                value={format}
+                onChange={(e) => {
+                  setFormat(e.target.value);
+                  setPage(1);
+                }}
+              >
+                <option value="">全部格式</option>
+                {[...materialFormats, '产品资料'].map((v) => (
+                  <option key={v}>{v}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              素材状态
+              <select
+                value={status}
+                onChange={(e) => {
+                  setStatus(e.target.value);
+                  setPage(1);
+                }}
+              >
+                {[
+                  ['active', '在用资料'],
+                  ['draft', '待审核'],
+                  ['approved', '已审核'],
+                  ['archived', '已撤回'],
+                  ['all', '所有状态'],
+                ].map(([v, n]) => (
+                  <option key={v} value={v}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </details>
+        <div className="mat-view">
+          <button aria-pressed={view === 'grid'} onClick={() => setView('grid')}>
+            <Grid2X2 size={14} />
+            宫格
+          </button>
+          <button aria-pressed={view === 'list'} onClick={() => setView('list')}>
+            <List size={14} />
+            列表
+          </button>
+        </div>
+      </section>
+      {(search || categories.length > 0 || format || site || status !== 'active') && (
+        <button
+          className="mat-clear"
+          onClick={() => {
+            setQuery('');
+            setSearch('');
+            setCategories([]);
+            setFormat('');
+            setSite('');
+            setStatus('active');
+            setPage(1);
+          }}
+        >
+          清除筛选
+        </button>
+      )}
+      {batch && (
+        <section className="mat-bulk">
+          <label>
+            <input
+              type="checkbox"
+              checked={!!items.length && items.every((m) => selection.has(m.id))}
+              onChange={(e) => {
+                const on = e.target.checked;
+                setSelection((prev) => {
+                  const result = new Map(prev);
+                  items.forEach((m) => (on ? result.set(m.id, m) : result.delete(m.id)));
+                  return result;
+                });
+              }}
+            />
+            全选当前页
+          </label>
+          <b>已选 {selection.size} 项</b>
+          <button disabled={!selection.size} onClick={csv}>
+            导出 CSV
+          </button>
+          <button disabled={!selection.size || busy} onClick={() => setEditing(true)}>
+            分配与归类
+          </button>
+          <button
+            disabled={!selection.size || busy}
+            onClick={() => void bulk({ status: 'archived' })}
+          >
+            撤回资料
+          </button>
+        </section>
+      )}
+      <section aria-busy={loading} className={'mat-grid ' + (view === 'list' ? 'mat-list' : '')}>
+        {items.map((m) => (
+          <article key={m.id}>
+            <div
+              className={
+                'mat-cover ' + (m.format === 'Excel' ? 'sheet' : m.format === 'PDF' ? 'pdf' : '')
+              }
             >
-              核对并重试飞书同步
-            </button>
-          )}
+              {m.documentId && m.contentType?.startsWith('image/') ? (
+                <img loading="lazy" alt={m.name} src={sourceUrl(m.id, m.documentId)} />
+              ) : m.documentId && m.contentType?.startsWith('video/') ? (
+                <video muted preload="none" src={sourceUrl(m.id, m.documentId)} />
+              ) : m.preview ? (
+                <div className="mat-sheet-cover" aria-label="工作簿内容预览">
+                  <span>
+                    <FileSpreadsheet size={15} />
+                    {m.preview[0]}
+                  </span>
+                  <table>
+                    <thead>
+                      <tr>
+                        {[1, 3, 5]
+                          .filter((n) => m.preview![n])
+                          .map((n) => (
+                            <th key={n}>{m.preview![n]}</th>
+                          ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        {[1, 3, 5]
+                          .filter((n) => m.preview![n])
+                          .map((n) => (
+                            <td key={n}>{m.preview![n + 1]}</td>
+                          ))}
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="mat-filemark">
+                  {m.format === 'Excel' ? (
+                    <FileSpreadsheet />
+                  ) : m.format === '视频' ? (
+                    <FileVideo />
+                  ) : m.format === '图片' ? (
+                    <FileImage />
+                  ) : (
+                    <FileText />
+                  )}
+                  <strong>{m.format}</strong>
+                </div>
+              )}
+              <button
+                className="mat-eye"
+                aria-label={'预览 ' + m.name}
+                onClick={() => open(m, 'preview')}
+              >
+                <Eye size={16} />
+              </button>
+              {batch && (
+                <input
+                  className="mat-pick"
+                  type="checkbox"
+                  aria-label={'选择 ' + m.name}
+                  checked={selection.has(m.id)}
+                  onChange={(e) => toggleSelected(m, e.target.checked)}
+                />
+              )}
+            </div>
+            <div className="mat-cardinfo">
+              <button className="mat-name" onClick={() => open(m, 'preview')}>
+                {m.name}
+              </button>
+              <div>
+                <span className="mat-kind">{m.category}</span>
+              </div>
+              <div className="mat-tags">
+                {m.keywords.slice(0, 3).map((t) => (
+                  <span key={t}>{t}</span>
+                ))}
+                {m.keywords.length > 3 && (
+                  <span title={m.keywords.join('、')}>+{m.keywords.length - 3}</span>
+                )}
+              </div>
+              <small>
+                {m.format} {m.size ? fileSize(m.size) : ''} · {m.updatedAt.slice(0, 10)} ·{' '}
+                {statusName(m.status)}
+              </small>
+              <footer>
+                <button onClick={() => open(m, 'history')}>
+                  <History size={13} />
+                  历史版本
+                </button>
+                <button onClick={() => open(m, 'edit')}>编辑</button>
+              </footer>
+            </div>
+          </article>
+        ))}
+      </section>
+      {!loading && !error && !items.length && (
+        <div className="mat-empty">
+          <FolderOpen size={30} />
+          <p>
+            {search || categories.length || format || site || status !== 'active'
+              ? '没有符合条件的素材'
+              : '尚未上传素材'}
+          </p>
         </div>
       )}
-
-      <section className="panel knowledge-list">
-        <div className="knowledge-toolbar">
-          <div className="search-field">
-            <Search size={16} />
-            <input
-              aria-label="搜索产品资料"
-              placeholder="搜索产品、编号、别名或品牌"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </div>
+      <footer className="mat-pages">
+        <span>
+          共 {data?.total || 0} 条 · 第 {data?.page || 1} / {pages} 页
+        </span>
+        <div>
           <select
-            aria-label="产品审核状态"
-            value={status}
-            onChange={(event) =>
-              setProductParams((current) => {
-                const next = new URLSearchParams(current);
-                if (event.target.value === 'active') next.delete('status');
-                else next.set('status', event.target.value);
-                return next;
-              })
-            }
+            aria-label="每页条数"
+            value={size}
+            onChange={(e) => {
+              setSize(Number(e.target.value));
+              setPage(1);
+            }}
           >
-            <option value="active">在用资料</option>
-            <option value="draft">待审核</option>
-            <option value="approved">已审核</option>
-            <option value="archived">已归档</option>
-            <option value="all">全部资料</option>
+            {[10, 20, 50].map((n) => (
+              <option value={n} key={n}>
+                {n} 条/页
+              </option>
+            ))}
           </select>
-          <span className="knowledge-count">
-            {shown.length} 条资料 · 已审核{' '}
-            {products.filter((product) => product.status === 'approved').length} 条
-          </span>
+          <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+            上一页
+          </button>
+          <button disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>
+            下一页
+          </button>
         </div>
-        {loading ? (
-          <p className="knowledge-loading" role="status">
-            正在读取产品资料…
-          </p>
-        ) : shown.length ? (
-          <div className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>产品</th>
-                  <th>品类与方向</th>
-                  <th>供货资料</th>
-                  <th>审核状态</th>
-                  <th>来源</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {shown.map((product) => (
-                  <tr key={product.id}>
-                    <td className="knowledge-name">
-                      <strong>{product.name}</strong>
-                      <span>{product.englishName || '英文名称待补充'}</span>
-                      <small>{product.id}</small>
-                    </td>
-                    <td>
-                      {categoryLabels[product.category]}
-                      <span className="knowledge-secondary">
-                        {directionLabels[product.direction]}
-                        {product.deliveryForms.length
-                          ? ` · ${product.deliveryForms.join('、')}`
-                          : ''}
-                      </span>
-                    </td>
-                    <td className="knowledge-summary">
-                      <span>{product.specifications || '规格参数待核实'}</span>
-                      <small>
-                        MOQ：{product.moq || '待核实'} · 常规交期：{product.leadTime || '待核实'}
-                      </small>
-                      {!!product.outreachFacts?.length && (
-                        <details className="knowledge-fact-summary">
-                          <summary>开发信可引用资料 · {product.outreachFacts.length} 条</summary>
-                          {product.outreachFacts.map((fact) => (
-                            <div key={fact.id}>
-                              <strong>{factLabels[fact.kind]}</strong>
-                              <p>{fact.text}</p>
-                              {fact.conditions && <p>适用条件：{fact.conditions}</p>}
-                              <small>
-                                {fact.validUntil
-                                  ? `有效期至 ${timestamp(fact.validUntil)}${Date.parse(fact.validUntil) <= Date.now() ? ' · 已过期' : ''}`
-                                  : '未设置到期时间'}
-                              </small>
-                            </div>
-                          ))}
-                        </details>
-                      )}
-                    </td>
-                    <td>
-                      <Badge tone={product.status === 'approved' ? 'success' : 'neutral'}>
-                        {statusLabels[product.status]}
-                      </Badge>
-                      <span className="knowledge-secondary">第 {product.version} 版</span>
-                      {product.status === 'approved' && (
-                        <small className="knowledge-secondary">审核：{product.approvedBy}</small>
-                      )}
-                    </td>
-                    <td>
-                      {sourceLink(product.sourceUrl) ? (
-                        <a
-                          className="text-link"
-                          href={sourceLink(product.sourceUrl)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          查看依据 <ExternalLink size={13} />
-                        </a>
-                      ) : (
-                        <span className="muted">待补充</span>
-                      )}
-                      <small className="knowledge-secondary">
-                        {product.attachments.length} 个附件链接
-                      </small>
-                    </td>
-                    <td>
-                      <div className="knowledge-actions">
-                        <button
-                          className="btn secondary small"
-                          onClick={() => openEditor(product)}
-                          disabled={saving}
-                        >
-                          查看 / 编辑
-                        </button>
-
-                        {product.status !== 'archived' && (
-                          <button
-                            className="btn secondary small"
-                            onClick={() => void archive(product)}
-                            disabled={saving}
-                            aria-label={`归档 ${product.name}`}
-                          >
-                            <Archive size={13} /> 归档
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          !error && (
-            <Empty
-              title={products.length ? '没有符合条件的产品资料' : '尚未登记产品资料'}
-              detail={
-                products.length
-                  ? '调整搜索或审核状态后再查看。'
-                  : '添加一项产品，填写已有资料及来源。未核实的规格、MOQ 和交期可以留空。'
-              }
-            />
-          )
-        )}
-      </section>
-
-      {editor && (
-        <Modal
-          wide
-          title={editor.original ? `产品资料 · ${editor.original.name}` : '新增产品资料'}
-          onClose={closeEditor}
+      </footer>
+      {id && (
+        <MaterialDialog
+          key={id}
+          id={id}
+          initialView={dialogView}
+          onClose={() => showId('')}
+          onChanged={refresh}
+        />
+      )}
+      {editing && (
+        <dialog
+          ref={bulkDialog}
+          className="mat-dialog compact"
+          aria-label="批量编辑素材"
+          onCancel={() => setEditing(false)}
         >
-          <form className="modal-body knowledge-form" onSubmit={(event) => void save(event)}>
-            {editor.original && (
-              <p className="knowledge-editor-meta">
-                编号 {editor.original.id} · 第 {editor.original.version} 版 · 最近更新{' '}
-                {timestamp(editor.original.updatedAt)}
-              </p>
-            )}
-            {editor.original?.status === 'approved' && (
-              <p className="knowledge-alert">
-                本次编辑按草稿打开。确认修改内容后，可重新选择“已审核”并填写审核人。
-              </p>
-            )}
-            {formError && (
-              <p className="knowledge-alert error" role="alert">
-                {formError}
-              </p>
-            )}
-            <fieldset disabled={saving || refreshRequired}>
-              <legend>产品与供货范围</legend>
-              <div className="knowledge-fields">
-                <label>
-                  产品名称 *
-                  <input
-                    required
-                    maxLength={160}
-                    value={editor.value.name}
-                    onChange={(event) => change('name', event.target.value)}
-                  />
-                </label>
-                <label>
-                  英文名称
-                  <input
-                    maxLength={160}
-                    value={editor.value.englishName}
-                    onChange={(event) => change('englishName', event.target.value)}
-                  />
-                </label>
-                <label>
-                  品类
-                  <select
-                    value={editor.value.category}
-                    onChange={(event) =>
-                      change('category', event.target.value as ProductDraft['category'])
-                    }
-                  >
-                    {Object.entries(categoryLabels).map(([key, label]) => (
-                      <option key={key} value={key}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  供货方向
-                  <select
-                    value={editor.value.direction}
-                    onChange={(event) =>
-                      change('direction', event.target.value as ProductDraft['direction'])
-                    }
-                  >
-                    {Object.entries(directionLabels).map(([key, label]) => (
-                      <option key={key} value={key}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  采购形态
-                  <input
-                    placeholder="例如：成品、型材；多个用逗号分隔"
-                    value={listInputs.deliveryForms}
-                    onChange={(event) => changeList('deliveryForms', event.target.value)}
-                  />
-                </label>
-                <label>
-                  产品别名
-                  <input
-                    placeholder="多个用逗号分隔"
-                    value={listInputs.aliases}
-                    onChange={(event) => changeList('aliases', event.target.value)}
-                  />
-                </label>
-                <label>
-                  适用品牌
-                  <input
-                    placeholder="多个用逗号分隔，未知留空"
-                    value={listInputs.brands}
-                    onChange={(event) => changeList('brands', event.target.value)}
-                  />
-                </label>
-                <label>
-                  适用市场
-                  <input
-                    placeholder="多个用逗号分隔，未知留空"
-                    value={listInputs.markets}
-                    onChange={(event) => changeList('markets', event.target.value)}
-                  />
-                </label>
-              </div>
-            </fieldset>
-            <ProductDocuments
-              key={editor.original?.id || editor.key}
-              productId={editor.original?.id}
-              documentIds={editor.value.documentIds || []}
-              cellEdits={editor.value.cellEdits || []}
-              onEdit={(edit, original) => {
-                const other = (editor.value.cellEdits || []).filter(
-                  (item) =>
-                    item.documentId !== edit.documentId ||
-                    item.sheet !== edit.sheet ||
-                    item.ref !== edit.ref,
-                );
-                change('cellEdits', edit.value === original ? other : [...other, edit]);
-              }}
-              onRemove={(id) =>
-                setEditor({
-                  ...editor,
-                  value: {
-                    ...editor.value,
-                    documentIds: editor.value.documentIds?.filter((item) => item !== id),
-                    cellEdits: editor.value.cellEdits?.filter((item) => item.documentId !== id),
-                  },
-                })
-              }
-              disabled={saving || refreshRequired}
-              onUse={useDocument}
-            />
-            <fieldset disabled={saving || refreshRequired}>
-              <legend>规格与资料依据</legend>
-              <div className="knowledge-fields">
-                <label className="knowledge-full">
-                  已核实参数
-                  <textarea
-                    rows={4}
-                    maxLength={12000}
-                    placeholder="记录适用产品、参数值、单位和范围，并在下方补充依据"
-                    value={editor.value.specifications}
-                    onChange={(event) => change('specifications', event.target.value)}
-                  />
-                </label>
-                <label>
-                  MOQ
-                  <input
-                    placeholder="已确认时填写数量及单位"
-                    value={editor.value.moq}
-                    onChange={(event) => change('moq', event.target.value)}
-                  />
-                </label>
-                <label>
-                  常规交期
-                  <input
-                    placeholder="已确认时填写适用条件"
-                    value={editor.value.leadTime}
-                    onChange={(event) => change('leadTime', event.target.value)}
-                  />
-                </label>
-                <label className="knowledge-full">
-                  来源链接
-                  <input
-                    type="url"
-                    placeholder="https://…"
-                    value={editor.value.sourceUrl}
-                    onChange={(event) => change('sourceUrl', event.target.value)}
-                  />
-                </label>
-                <label className="knowledge-full">
-                  附件链接
-                  <textarea
-                    rows={2}
-                    placeholder="图纸、规格书或目录链接，每行一个"
-                    value={listInputs.attachments}
-                    onChange={(event) => changeList('attachments', event.target.value)}
-                  />
-                </label>
-                {editor.value.attachments.some(sourceLink) && (
-                  <div className="knowledge-full knowledge-attachment-links">
-                    {editor.value.attachments.filter(sourceLink).map((url, index) => (
-                      <a
-                        key={url}
-                        className="text-link"
-                        href={sourceLink(url)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        查看附件 {index + 1} <ExternalLink size={13} />
-                      </a>
-                    ))}
-                  </div>
-                )}
-                <label className="knowledge-full">
-                  备注
-                  <textarea
-                    rows={2}
-                    placeholder="适用条件、资料缺项或待核实事项"
-                    value={editor.value.notes}
-                    onChange={(event) => change('notes', event.target.value)}
-                  />
-                </label>
-              </div>
-            </fieldset>
-            <fieldset disabled={saving || refreshRequired}>
-              <legend>开发信可引用资料</legend>
-              <p className="knowledge-form-note">
-                填写可直接对外使用的英文事实和适用条件，随本份产品资料一起审核。报价、库存、交期和运费须设置有效期；过期资料不会用于发信。
-              </p>
-              {editor.value.outreachFacts.map((fact, index) => (
-                <div className="knowledge-fact-editor" key={fact.id}>
-                  <div className="knowledge-fields">
-                    <label>
-                      资料 {index + 1} · 类型
-                      <select
-                        value={fact.kind}
-                        onChange={(event) =>
-                          changeFact(fact.id, { kind: event.target.value as OutreachFact['kind'] })
-                        }
-                      >
-                        {Object.entries(factLabels).map(([kind, label]) => (
-                          <option key={kind} value={kind}>
-                            {label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      有效期至（北京时间）{needsExpiry(fact.kind) ? ' *' : ''}
-                      <input
-                        type="datetime-local"
-                        step="1"
-                        required={needsExpiry(fact.kind)}
-                        value={beijingInput(fact.validUntil)}
-                        onChange={(event) =>
-                          changeFact(fact.id, {
-                            validUntil: event.target.value
-                              ? new Date(event.target.value + '+08:00').toISOString()
-                              : null,
-                          })
-                        }
-                      />
-                    </label>
-                    <label className="knowledge-full">
-                      可外发英文原句 *
-                      <textarea
-                        required
-                        rows={2}
-                        maxLength={1200}
-                        value={fact.text}
-                        onChange={(event) => changeFact(fact.id, { text: event.target.value })}
-                      />
-                    </label>
-                    <label className="knowledge-full">
-                      适用条件英文原句{fact.kind === 'price' ? ' *' : ''}
-                      <textarea
-                        required={fact.kind === 'price'}
-                        rows={2}
-                        maxLength={800}
-                        placeholder="报价请写全数量档位、规格、币种、计价单位及适用交易条件"
-                        value={fact.conditions}
-                        onChange={(event) =>
-                          changeFact(fact.id, { conditions: event.target.value })
-                        }
-                      />
-                    </label>
-                  </div>
-                  <button
-                    type="button"
-                    className="btn secondary small"
-                    onClick={() =>
-                      change(
-                        'outreachFacts',
-                        editor.value.outreachFacts.filter((item) => item.id !== fact.id),
-                      )
-                    }
-                    aria-label={`删除资料 ${index + 1}`}
-                  >
-                    删除此条
-                  </button>
-                </div>
-              ))}
-              <button
-                type="button"
-                className="btn secondary small"
-                disabled={editor.value.outreachFacts.length >= 30}
-                onClick={() =>
-                  change('outreachFacts', [
-                    ...editor.value.outreachFacts,
-                    {
-                      id: crypto.randomUUID(),
-                      kind: 'product',
-                      text: '',
-                      conditions: '',
-                      validUntil: null,
-                    },
-                  ])
-                }
-              >
-                <Plus size={14} /> 添加外发资料
+          <h2>分配与归类</h2>
+          <form
+            className="mat-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const f = new FormData(e.currentTarget),
+                changes: Record<string, string> = {};
+              if (f.get('category')) changes.category = String(f.get('category'));
+              if (f.get('site') !== '__keep__') changes.site = String(f.get('site'));
+              if (Object.keys(changes).length) void bulk(changes);
+            }}
+          >
+            <label>
+              所属官网
+              <select aria-label="所属官网" name="site" defaultValue="__keep__">
+                <option value="__keep__">保持原设置</option>
+                <option value="">未分配</option>
+                {data?.sites.map((s) => (
+                  <option value={s.site} key={s.site}>
+                    {s.brand}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              品类
+              <input name="category" placeholder="留空保持原设置" maxLength={100} />
+            </label>
+            {error && <p role="alert">{error}</p>}
+            <div className="mat-actions">
+              <button type="button" onClick={() => setEditing(false)}>
+                取消
               </button>
-            </fieldset>
-            <fieldset disabled={saving || refreshRequired}>
-              <legend>审核与生效</legend>
-              <div className="knowledge-fields">
-                <label>
-                  资料状态
-                  <select
-                    value={editor.value.status}
-                    onChange={(event) =>
-                      change('status', event.target.value as ProductDraft['status'])
-                    }
-                  >
-                    <option value="draft">待审核</option>
-                    <option value="approved">已审核</option>
-                  </select>
-                </label>
-                <label>
-                  生效日期
-                  <input
-                    type="date"
-                    required={editor.value.status === 'approved'}
-                    value={editor.value.effectiveDate}
-                    onChange={(event) => change('effectiveDate', event.target.value)}
-                  />
-                </label>
-                {editor.value.status === 'approved' && (
-                  <label className="knowledge-full">
-                    审核人 *
-                    <input
-                      required
-                      maxLength={100}
-                      value={editor.value.approvedBy}
-                      onChange={(event) => change('approvedBy', event.target.value)}
-                    />
-                  </label>
-                )}
-              </div>
-              <p className="knowledge-form-note">
-                审核前请对照原文件核对以上资料及来源，特别是型号、图号版本、尺寸、单位和公差。资料审核不代表原文件可外发，也不启用自动回信。已授权的邮件流程仅可使用适用的已审核资料；修改资料后需重新审核。
-              </p>
-            </fieldset>
-            <div className="modal-actions">
-              <button
-                type="button"
-                className="btn secondary"
-                disabled={saving}
-                onClick={closeEditor}
-              >
-                {refreshRequired ? '关闭并刷新核对' : '取消'}
-              </button>
-              <button className="btn primary" type="submit" disabled={saving || refreshRequired}>
-                {saving
-                  ? '正在保存…'
-                  : editor.value.status === 'approved'
-                    ? '审核并保存'
-                    : '保存草稿'}
+              <button className="mat-primary" disabled={busy}>
+                保存
               </button>
             </div>
           </form>
-        </Modal>
+        </dialog>
       )}
-    </div>
+    </main>
   );
 }
