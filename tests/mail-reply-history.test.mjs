@@ -154,6 +154,81 @@ test('历史回信没有本地首封也可筛选；不以主题补造父件或 C
   await assert.rejects(historyApi(store, 'kind=fake'), { status: 400 });
 });
 
+test('有回复仅列含外部客户回信证据的会话，分页总数及所有筛选与跟进历史一致', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  const store = new MailConversations({
+    db,
+    mailboxes: endpoints(),
+    customers: () => [{ id: 'buyer', name: 'A buyer', email: user }],
+  });
+  const list = (query) =>
+    handleOutreach({
+      request: { method: 'GET' },
+      url: new URL('/api/v1/outreach/conversations?' + query, 'http://local'),
+      service: { conversations: store },
+    });
+  const put = (n, patch = {}, mailbox = box) =>
+    store.putMessage(
+      mailbox,
+      incoming(n, {
+        inReplyTo: '<absent-' + n + '@company.example>',
+        ...patch,
+      }),
+    );
+  for (let n = 1; n <= 13; n++) put(n);
+  put(14, {
+    inReplyTo: undefined,
+    references: ['<headers-only@company.example>'],
+    unread: true,
+    subject: 'Special request',
+  });
+  put(15, { inReplyTo: '<m14@customer.example>', bodyText: 'Another question about samples' });
+  put(16, { inReplyTo: '<m14@customer.example>', classification: 'auto_reply' });
+  put(17, { to: other.email, toAddresses: [other.email] }, other);
+  put(18, { inReplyTo: undefined, subject: 'Re: Subject alone is not evidence' });
+  for (const [i, classification] of [
+    'auto_reply',
+    'unverified',
+    'hard_bounce',
+    'unsubscribe',
+    'complaint',
+  ].entries())
+    put(20 + i, { classification });
+  put(30, { from: other.email });
+  put(31, { from: other.email, subject: 'Re: [AI-SDR internal QA test]' });
+  put(32, { source: 'manual' });
+  store.putMessage(box, outgoing(33, {}));
+  const sameInbox = await list('hasReply=1&mailboxId=one&pageSize=10');
+  const last = await list('hasReply=1&mailboxId=one&pageSize=10&page=2');
+  const replyRows = await historyApi(store, 'kind=reply&mailboxId=one');
+  assert.equal(replyRows.total, 15);
+  assert.equal(sameInbox.total, 14);
+  assert.equal(sameInbox.items.length, 10);
+  assert.equal(sameInbox.hasMore, true);
+  assert.equal(last.total, 14);
+  assert.equal(last.items.length, 4);
+  assert.equal(last.hasMore, false);
+  const ids = [...sameInbox.items, ...last.items].map((item) => item.id);
+  assert.equal(new Set(ids).size, 14);
+  assert.deepEqual(new Set(ids), new Set(replyRows.items.map((item) => item.threadId)));
+  assert.equal((await list('hasReply=1')).total, 15);
+  assert.equal((await list('hasReply=1&mailboxId=two')).total, 1);
+  assert.ok((await list('inboundOnly=1&mailboxId=one')).total > 14);
+  const filtered = 'hasReply=1&inboundOnly=1&unread=1&mailboxId=one&q=samples&customerId=buyer';
+  const selected = await list(filtered + '&folder=open');
+  assert.equal(selected.total, 1);
+  const id = selected.items[0].id;
+  assert.ok(replyRows.items.some((m) => m.threadId === id && !m.hasLocalParent));
+  db.prepare("INSERT INTO mail_thread_workflow VALUES(?,'done',NULL,?)").run(id, at);
+  assert.equal((await list(filtered + '&folder=open')).total, 0);
+  assert.equal((await list(filtered + '&folder=done')).items[0].id, id);
+  assert.equal((await list('hasReply=1&customerId=unknown')).total, 0);
+  put(1, { classification: 'auto_reply' });
+  assert.equal((await list('hasReply=1&mailboxId=one')).total, 13);
+  assert.equal((await historyApi(store, 'kind=reply&mailboxId=one')).total, 14);
+});
+
 test('后续回信须同一个发件邮箱、收件对方及最近父件，并区分人工、自动和未知发件方式', async (t) => {
   const db = new DatabaseSync(':memory:');
   t.after(() => db.close());

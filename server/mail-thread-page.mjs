@@ -1,3 +1,4 @@
+import { replyHeaderKindSql } from './mail-reply-history.mjs';
 import { effectiveFolder } from './mail-thread-workflow.mjs';
 
 const json = (field) => "json_extract(t.data,'$." + field + "')";
@@ -41,7 +42,7 @@ export function listThreadPage(
   store,
   keys,
   lookup,
-  { customerId, query, unread, inboundOnly, folder, page, pageSize },
+  { customerId, query, unread, inboundOnly, hasReply, folder, page, pageSize },
 ) {
   const size = [10, 20, 25, 50, 100, 200].includes(Number(pageSize)) ? Number(pageSize) : 25;
   if (!keys.length) return { items: [], total: 0, page: 1, pageSize: size, hasMore: false };
@@ -55,7 +56,13 @@ export function listThreadPage(
     args.push(new Date(store.now()).toISOString(), folder);
   }
   if (unread) where.push(json('unread') + '=1');
-  if (inboundOnly)
+  if (hasReply) {
+    const known = store.mailboxes.list().map((box) => box.email.toLowerCase());
+    where.push(`t.id IN (SELECT h.thread_id FROM mailbox_reply_headers h
+      WHERE h.account_key IN (${keys.map(() => '?').join(',')}) AND h.direction='inbound' AND h.source='imap'
+      AND h.parent_id IS NOT NULL AND (${replyHeaderKindSql(known)})='reply')`);
+    args.push(...keys, ...known);
+  } else if (inboundOnly)
     where.push(
       "EXISTS(SELECT 1 FROM mailbox_reply_headers h WHERE h.thread_id=t.id AND h.direction='inbound')",
     );

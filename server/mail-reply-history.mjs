@@ -69,6 +69,14 @@ export function initializeReplyHistory(db) {
     if (!timeout) db.exec('PRAGMA busy_timeout=0');
   }
 }
+export function replyHeaderKindSql(known) {
+  const internal = 'h.sender IN (' + known.map(() => '?').join(',') + ')';
+  return `CASE WHEN ${internal} THEN CASE WHEN instr(lower(h.subject),'[ai-sdr internal qa ')>0 THEN 'test' ELSE 'internal' END
+    WHEN h.classification='hard_bounce' THEN 'bounce' WHEN h.classification='auto_reply' THEN 'notification'
+    WHEN h.classification IN ('unsubscribe','complaint','unverified') THEN h.classification
+    WHEN h.parent_id IS NULL THEN 'inquiry' ELSE 'reply' END`;
+}
+
 const kinds = new Set([
   'all',
   'reply',
@@ -103,11 +111,7 @@ export function listReplyHistory(
   if (!keys.length) return { items: [], total: 0, page, pageSize, mailboxes };
   const byKey = new Map(selected.map((box) => [keyFor(box), box]));
   const known = accounts.map((box) => box.email.toLowerCase());
-  const internal = 'h.sender IN (' + known.map(() => '?').join(',') + ')';
-  const classify = `CASE WHEN ${internal} THEN CASE WHEN instr(lower(h.subject),'[ai-sdr internal qa ')>0 THEN 'test' ELSE 'internal' END
-    WHEN h.classification='hard_bounce' THEN 'bounce' WHEN h.classification='auto_reply' THEN 'notification'
-    WHEN h.classification IN ('unsubscribe','complaint','unverified') THEN h.classification
-    WHEN h.parent_id IS NULL THEN 'inquiry' ELSE 'reply' END`;
+  const classify = replyHeaderKindSql(known);
   let where =
     `h.direction='inbound' AND h.source='imap' AND h.account_key IN (${keys.map(() => '?').join(',')})` +
     (kind === 'all' ? '' : ` AND (${classify})=?`);

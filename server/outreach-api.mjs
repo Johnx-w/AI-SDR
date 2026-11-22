@@ -59,6 +59,7 @@ export async function handleOutreach({
       q: url.searchParams.get('q') || '',
       unread: url.searchParams.get('unread') === '1',
       inboundOnly: url.searchParams.get('inboundOnly') === '1',
+      hasReply: url.searchParams.get('hasReply') === '1',
       folder: url.searchParams.get('folder') || '',
       page: url.searchParams.get('page'),
       pageSize: url.searchParams.get('pageSize'),

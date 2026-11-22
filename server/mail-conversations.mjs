@@ -82,7 +82,9 @@ export class MailConversations {
     );
     this.db
       .exec(`CREATE INDEX IF NOT EXISTS mailbox_thread_order ON mailbox_threads(account_key,json_extract(data,'$.updatedAt') DESC,id);
-      CREATE INDEX IF NOT EXISTS mailbox_inbound_thread ON mailbox_reply_headers(thread_id) WHERE direction='inbound';`);
+      CREATE INDEX IF NOT EXISTS mailbox_inbound_thread ON mailbox_reply_headers(thread_id) WHERE direction='inbound';
+      CREATE INDEX IF NOT EXISTS mailbox_reply_evidence ON mailbox_reply_headers(account_key,thread_id)
+        WHERE direction='inbound' AND source='imap' AND parent_id IS NOT NULL;`);
     this.db.exec(
       'CREATE TABLE IF NOT EXISTS mailbox_summary_migrations (version INTEGER PRIMARY KEY)',
     );
@@ -506,6 +508,7 @@ export class MailConversations {
       q = '',
       unread = false,
       inboundOnly = false,
+      hasReply = false,
       folder = '',
       page = 1,
       pageSize = 25,
@@ -519,6 +522,7 @@ export class MailConversations {
       query: text(q, 500).toLowerCase().trim(),
       unread,
       inboundOnly,
+      hasReply,
       folder,
       page,
       pageSize,
