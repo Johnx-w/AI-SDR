@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { knownReplyType } from './communication-rounds.mjs';
-import { siteAllowsProduct } from '../src/domain/mail-site.mjs';
+import { mailSite, mentionsOtherSite, siteAllowsProduct } from '../src/domain/mail-site.mjs';
 import { eligibleOutreachFacts, outreachMaterialVersion } from './outreach-content.mjs';
 import { createResearchProviders } from './research-providers.mjs';
 import {
@@ -28,12 +28,56 @@ const errorText = (error) =>
     ? error.message
     : '追信处理失败，请核对邮箱和模型连接';
 
+function checkFollowUpScope(body, mailbox, service) {
+  const normalize = (value) =>
+    String(value || '')
+      .normalize('NFKC')
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .trim();
+  const text = normalize(body);
+  const mentioned = (raw, source = text) => {
+    const name = normalize(raw);
+    return (
+      !!name &&
+      (/\p{Script=Han}/u.test(name)
+        ? source.includes(name)
+        : (' ' + source + ' ').includes(' ' + name + ' '))
+    );
+  };
+  const site = mailSite(mailbox.website);
+  const otherBrand = service.mailboxes
+    .list()
+    .some(
+      (other) =>
+        mailSite(other.website) !== site &&
+        (mentioned(mailSite(other.website)) ||
+          (normalize(other.brandName) !== normalize(mailbox.brandName) &&
+            mentioned(other.brandName))),
+    );
+  const products = service.products().filter((product) => !product.materialOnly);
+  const permitted = products
+    .filter((p) => mailbox.productIds?.includes(p.id) && siteAllowsProduct(p, mailbox))
+    .flatMap((p) => [normalize(p.name), normalize(p.englishName)]);
+  const otherProduct = products.some((p) =>
+    [p.name, p.englishName].some(
+      (name) => mentioned(name) && !permitted.some((allowed) => mentioned(name, allowed)),
+    ),
+  );
+  if (otherBrand || otherProduct || mentionsOtherSite(body, mailbox))
+    throw Object.assign(
+      new Error('追信包含其他品牌、官网或邮箱负责范围外的产品，请核对本步写作要求'),
+      { status: 409, code: 'FOLLOWUP_PRE_SEND_BLOCKED' },
+    );
+}
+
 export async function generateFollowUp({
   env,
   first,
   step,
   day,
   instruction,
+  mailbox,
   product,
   campaign,
   history,
@@ -61,6 +105,10 @@ export async function generateFollowUp({
           step,
           day,
           writingInstruction: instruction,
+          sender: {
+            brand: mailbox?.brandName ?? first.senderBrand,
+            website: mailbox?.website ?? first.senderWebsite,
+          },
           firstEmail: { subject: first.subject, body: first.bodyText },
           product: product.englishName || product.name,
           facts,
@@ -93,6 +141,13 @@ export async function generateFollowUp({
     ),
     '追信包含未经允许的商务内容',
   );
+  if (
+    mentionsOtherSite(
+      body,
+      mailbox || { website: first.senderWebsite || first.from?.split('@')[1] },
+    )
+  )
+    throw Object.assign(new Error('追信内容提到了其他品牌，请核对本步写作要求'), { status: 409 });
   return body.trim();
 }
 
@@ -471,12 +526,14 @@ export class OutreachFollowUps {
       step: item.step,
       day: item.day ?? legacyFollowUpStep(item.step)?.day,
       instruction: item.instruction ?? legacyFollowUpStep(item.step)?.instruction,
+      mailbox,
       product,
       campaign,
       history: detail.messages,
       now: s.now(),
     });
     assert(typeof body === 'string' && body.trim(), '追信内容为空');
+    checkFollowUpScope(body, mailbox, s);
     // Sync again after generation; a newly received reply invalidates the draft.
     await s.conversations.sync({ mailboxId: mailbox.id });
     const latestSync = s.conversations.syncState(mailbox);
@@ -558,6 +615,7 @@ export class OutreachFollowUps {
                 code: 'FOLLOWUP_PRE_SEND_BLOCKED',
                 status: 409,
               });
+            checkFollowUpScope(body, box, s);
           },
         },
       );

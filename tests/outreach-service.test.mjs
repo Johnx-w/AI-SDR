@@ -1569,6 +1569,45 @@ test('自定义三步在首封提交时冻结规则，重启后将各步要求�
   }
 });
 
+test('跟进生成及 SMTP 提交前校验邮件所属品牌、官网和可推产品', async (t) => {
+  const h = await followUpHarness();
+  t.after(() => h.service.close());
+  const item = h.service.followUps.pending()[0],
+    mailbox = h.boxes[0];
+  h.state.clock = Date.parse(item.dueAt);
+  h.boxes[1].brandName = 'Coastal Screens';
+  h.products.push({ id: 'canopy', name: '篷布轨道', englishName: 'Fabric canopy rails' });
+  for (const forbidden of [
+    'Shuangsheng Shutter',
+    'Coastal Screens',
+    'brand-b.example.org',
+    'Fabric canopy rails',
+  ]) {
+    h.service.generator.generateFollowUp = async () =>
+      `Would you like information on ${forbidden}?`;
+    await assert.rejects(h.service.followUps.dispatch(item, mailbox), {
+      code: 'FOLLOWUP_PRE_SEND_BLOCKED',
+    });
+    assert.equal(h.deliveries.length, 1);
+    assert.equal(h.service.followUps.get(item.id).status, 'pending');
+  }
+  // A website can be assigned to a new brand while SMTP is being prepared.
+  h.service.generator.generateFollowUp = async () => 'Would North Coast Supply be a good fit?';
+  const send = h.service.mailboxes.send;
+  h.service.mailboxes.send = async (...args) => {
+    h.boxes[1].brandName = 'North Coast Supply';
+    return send(...args);
+  };
+  await h.service.followUps.dispatch(item, mailbox);
+  assert.equal(h.deliveries.length, 1);
+  assert.equal(h.service.followUps.get(item.id).status, 'pending');
+  assert.match(h.service.followUps.get(item.id).reason, /其他品牌/u);
+  h.service.generator.generateFollowUp = async () => 'Could we help with PVC shutters?';
+  await h.service.followUps.dispatch(h.service.followUps.get(item.id), mailbox);
+  assert.equal(h.deliveries.length, 2);
+  assert.equal(h.service.followUps.get(item.id).status, 'accepted');
+});
+
 test('追信重启恢复保留发送结果未知，不重复发送或自动执行第二次', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'followups-restart-'));
   const h = await followUpHarness({ path: join(dir, 'outreach.sqlite') });
