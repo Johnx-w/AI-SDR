@@ -200,14 +200,12 @@ try {
     occurredAt: new Date().toISOString(),
   });
   await tab('收件箱').click();
-  await button('会话筛选与同步').click();
-  await button('同步邮件').click();
+  await page.locator('.inbox-sync-footer').getByRole('button', { name: '同步邮件' }).click();
   await page
     .getByRole('button', { name: /Track material/ })
     .first()
     .waitFor();
-  await button('会话筛选与同步').click();
-  await button('待审').click();
+  await page.getByRole('button', { name: /^待审草稿/ }).click();
   await page.getByRole('button', { name: /Track material/ }).click({ timeout: 20_000 });
   await page.getByText('查看回复依据 · 2', { exact: true }).click();
   await page.getByText(/mail-specimen.xlsx.*规格!B2/).waitFor();
@@ -217,8 +215,7 @@ try {
   assert.equal(sent[0].to, peer);
   assert.equal(sent[0].inReplyTo, '<browser-1@dealer.test>');
   assert.match(sent[0].text, /Material: Aluminium alloy/);
-  await button('会话筛选与同步').click();
-  await button('全部').click();
+  await button('返回全部会话').click();
   await page.getByRole('button', { name: /Track material/ }).click();
   await button('人工接管').click();
   await button('恢复邮箱接待').click();

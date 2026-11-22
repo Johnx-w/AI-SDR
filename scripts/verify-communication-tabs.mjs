@@ -70,10 +70,16 @@ try {
   const tab = (name) => page.getByRole('tab', { name: new RegExp(name) });
   const button = (name) => page.getByRole('button', { name, exact: true });
   const close = () => button('关闭弹窗').click();
+  const headingStyle = () =>
+    page.locator('.page-heading').evaluate((heading) => ({
+      title: getComputedStyle(heading.querySelector('h1')).fontSize,
+      description: !!heading.querySelector('p')?.getBoundingClientRect().height,
+    }));
   const label = (name) => page.getByLabel(name, { exact: true });
   await page.goto(base + '/inbox');
   await page.getByRole('heading', { name: box.email, exact: true }).waitFor();
   assert.equal(await page.getByRole('tab').count(), 4);
+  const mailboxesHeading = await headingStyle();
   await tab('跟进序列').click();
   const rules = page.getByRole('region', { name: '未回复跟进规则' });
   await rules.getByRole('button', { name: '编辑序列' }).waitFor();
@@ -169,10 +175,10 @@ try {
     .getByRole('button', { name: '查看邮件' })
     .click();
   assert.equal(await label('筛选会话邮箱').inputValue(), box.id);
-  await button('会话筛选与同步').click();
+  assert.deepEqual(await headingStyle(), mailboxesHeading);
+  assert.equal(mailboxesHeading.description, true);
   await button('未读').click();
   assert.equal(await label('筛选会话邮箱').inputValue(), box.id);
-  await button('会话筛选与同步').click();
   await button('全部').click();
   await page.getByRole('button', { name: /QA accepted first email/ }).click();
   await page
@@ -230,6 +236,7 @@ try {
       send.getBoundingClientRect().bottom <= innerHeight
     );
   });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
   await button('返回会话列表').click();
   await page.getByRole('button', { name: /QA accepted first email/ }).waitFor();
   const firstThreadId = linkedThread.get('thread');
@@ -261,10 +268,44 @@ try {
   assert.equal(await page.locator('.mail-conversation-row').count(), 25);
   const messageBody = page.getByRole('region', { name: '邮件会话详情' });
   await messageBody.getByText(first.bodyText, { exact: true }).waitFor();
-  const editor = label('回复正文');
-  await page.waitForFunction(
-    () => document.querySelector('.inbox-thread-scroll')?.clientHeight >= 300,
+  const title = messageBody.locator('.inbox-thread-tools h2');
+  assert.equal(await title.getAttribute('title'), first.subject);
+  assert.equal(
+    await messageBody.getByRole('heading', { name: first.subject, exact: true }).count(),
+    1,
   );
+  const contact = page.getByRole('complementary', { name: '联系人及接待设置' });
+  const contactWasClosed = !(await contact.isVisible());
+  if (contactWasClosed) await button('联系人资料').click();
+  await contact.getByText('负责人 · QA', { exact: true }).waitFor();
+  if (contactWasClosed) await button('关闭联系人资料').click();
+  const editor = label('回复正文');
+  await page.waitForFunction(() => {
+    const viewport = document.querySelector('.inbox-thread-scroll')?.getBoundingClientRect();
+    const body = document
+      .querySelector('.inbox-message[open] .mail-body-viewer')
+      ?.getBoundingClientRect();
+    return (
+      viewport &&
+      viewport.height >= 300 &&
+      body &&
+      body.top >= viewport.top &&
+      body.top + 20 <= viewport.bottom
+    );
+  });
+  for (const [selector, minimum] of [
+    ['.mail-conversation-row-top strong', 14],
+    ['.mail-conversation-row-subject', 14],
+    ['.mail-conversation-row-top time', 12],
+    ['.inbox-sender b', 14],
+    ['.inbox-message > summary time', 12],
+  ]) {
+    const size = await page
+      .locator(selector)
+      .first()
+      .evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
+    assert.ok(size >= minimum, selector + ' 字号 ' + size + ' 应至少为 ' + minimum);
+  }
   const draftBody = 'Draft retained while paging';
   assert.equal(await editor.innerText().then((t) => t.trim()), '');
   assert.equal(service.replies.draft(firstThreadId), null);
@@ -299,23 +340,134 @@ try {
   assert.equal(await editor.innerText().then((t) => t.trim()), '');
   await button('稍后处理').click();
   await button('1 小时后').click();
-  await pager.getByText('共 31 段 · 1 / 2').waitFor();
-  await button('稍后').click();
+  await pager.getByText('共 32 段 · 1 / 2').waitFor();
+  await label('其他处理状态').selectOption('later');
   await pager.getByText('共 1 段 · 1 / 1').waitFor();
   await page.getByRole('button', { name: /Fixture enquiry 30/ }).click();
   await button('标为完成').click();
-  await button('已完成').click();
+  await label('其他处理状态').selectOption('done');
   await page.getByRole('button', { name: /Fixture enquiry 30/ }).click();
   await page
     .locator('.inbox-team-note')
     .getByText('Discuss samples with sales colleagues.')
     .waitFor();
-  await button('重新打开').click();
-  await button('进行中').click();
+  await button('全部').click();
   await pager.getByText('共 32 段 · 1 / 2').waitFor();
+  await page.getByRole('button', { name: /Fixture enquiry 30/ }).click();
+  await button('重新打开').click();
+  await pager.getByText('共 32 段 · 1 / 2').waitFor();
+  // Real local IMAP records with distinct reply headers, across two configured accounts.
+  function seedReply(mailbox, suffix, minute, from, options = {}) {
+    const originalId = '<origin-' + suffix + '@brand.example>';
+    const subject = 'Panel request ' + suffix;
+    const receivedAt = new Date(Date.UTC(2026, 0, 3, 0, minute)).toISOString();
+    service.conversations.putMessage(mailbox, {
+      identity: 'origin-' + suffix,
+      messageId: originalId,
+      source: 'imap',
+      direction: 'outbound',
+      deliveryStatus: 'sent',
+      from: mailbox.email,
+      to: from,
+      occurredAt: '2026-01-02T00:00:00.000Z',
+      subject,
+      bodyText: 'Which panels do you need?',
+    });
+    service.conversations.putMessage(mailbox, {
+      identity: 'reply-' + suffix,
+      messageId: '<reply-' + suffix + '@dealer.example>',
+      inReplyTo: originalId,
+      source: 'imap',
+      direction: 'inbound',
+      deliveryStatus: 'received',
+      from,
+      to: mailbox.email,
+      occurredAt: receivedAt,
+      subject: 'Re: ' + subject,
+      bodyText: 'Please quote 72 mm panels for ' + suffix,
+      unread: minute % 2 === 0,
+      ...options,
+    });
+  }
+  service.transaction(() => {
+    for (let i = 0; i < 26; i++)
+      seedReply(
+        box,
+        'dealer-' + String(i).padStart(2, '0'),
+        i,
+        'dealer' + i + '@dealer.example',
+        i === 0
+          ? {
+              bodyText:
+                'Please quote 72 mm panels.\n' +
+                'Dimensions and finish for this room.\n'.repeat(50),
+            }
+          : {},
+      );
+    seedReply(mailboxes[1], 'other-mailbox', 26, 'other@dealer.example');
+    seedReply(box, 'internal', 27, mailboxes[1].email);
+    seedReply(box, 'bounce', 28, 'postmaster@dealer.example', {
+      subject: 'Delivery failure',
+      bodyText: 'User unknown',
+    });
+    seedReply(box, 'receipt', 29, 'no-reply@dealer.example', {
+      subject: 'Automatic reply',
+      bodyText: 'This is an automated message.',
+    });
+  });
+  const oldest = service.conversations.list({ mailboxId: box.id, q: 'Panel request dealer-00' })
+    .items[0].id;
+  await page.goto(
+    base +
+      '/inbox?' +
+      new URLSearchParams({ tab: 'inbox', mailboxId: box.id, thread: oldest, hasReply: '1' }),
+  );
+  await pager.getByText('共 26 段 · 1 / 2').waitFor();
+  assert.equal(await button('有回复').getAttribute('aria-pressed'), 'true');
+  await messageBody
+    .getByRole('heading', { name: 'Panel request dealer-00', exact: true })
+    .waitFor();
+  const titleTop = await title.evaluate((el) => el.getBoundingClientRect().top);
+  const scrollOffset = await messageBody.locator('.inbox-thread-scroll').evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+    return el.scrollTop;
+  });
+  assert.ok(scrollOffset > 0);
+  assert.equal(await title.evaluate((el) => el.getBoundingClientRect().top), titleTop);
+  assert.equal(await page.locator('.mail-conversation-row.selected').count(), 0);
+  await pager.getByRole('button', { name: '下一页' }).click();
+  await pager.getByText('共 26 段 · 2 / 2').waitFor();
+  await page
+    .locator('.mail-conversation-row.selected')
+    .getByText('Panel request dealer-00', { exact: true })
+    .waitFor();
+  await button('刷新').click();
+  await pager.getByText('共 26 段 · 2 / 2').waitFor();
+  await messageBody
+    .getByRole('heading', { name: 'Panel request dealer-00', exact: true })
+    .waitFor();
+  await label('搜索邮件会话').fill('dealer-01');
+  await pager.getByText('共 1 段 · 1 / 1').waitFor();
+  await label('筛选会话邮箱').selectOption(mailboxes[1].id);
+  await pager.getByText('共 0 段 · 1 / 1').waitFor();
+  assert.equal(await label('搜索邮件会话').inputValue(), 'dealer-01');
+  assert.equal(await button('有回复').getAttribute('aria-pressed'), 'true');
+  await label('筛选会话邮箱').selectOption('all');
+  await pager.getByText('共 1 段 · 1 / 1').waitFor();
+  await label('搜索邮件会话').fill('');
+  await pager.getByText('共 27 段 · 1 / 2').waitFor();
+  await button('未读').focus();
+  await page.keyboard.press('Enter');
+  const unreadCount = service.conversations.list({ unread: true }).total;
+  await pager.getByText('共 ' + unreadCount + ' 段 · 1 / ' + Math.ceil(unreadCount / 25)).waitFor();
+  assert.equal(await page.locator('.mail-conversation-row:not(.unread)').count(), 0);
+  await button('全部').click();
+  const allCount = service.conversations.list({}).total;
+  await pager.getByText('共 ' + allCount + ' 段 · 1 / ' + Math.ceil(allCount / 25)).waitFor();
+  assert.equal(allCount, 62);
   assert.deepEqual(failures, []);
   console.log(
-    'PASS 沟通中心四栏、邮箱配置、标签持久化与批量操作、筛选与刷新、三步序列、首封原文、所属计划、窄屏邮件往返、草稿签名、分页、内部备注与稍后/完成/重开',
+    'PASS 沟通中心四栏、邮箱配置、标签持久化与批量操作、筛选与刷新、三步序列、首封原文、所属计划、同字号、窄屏邮件往返、全部/未读/有回复与真实回信深链、草稿签名、分页、内部备注与稍后/完成/重开',
   );
 } finally {
   await browser?.close();
