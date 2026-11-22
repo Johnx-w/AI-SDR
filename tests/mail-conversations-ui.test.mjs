@@ -242,11 +242,10 @@ test('message display offers original layout and plain text without placing unsa
   assert.match(html, /原邮件/);
   assert.match(html, /纯文本/);
   assert.match(html, /Plain text alternative/);
+  assert.doesNotMatch(html, /加载图片|这封邮件包含外链图片/);
   assert.doesNotMatch(html, /<script|onerror=|src="https:\/\/track\.example/);
-  assert.match(mailFramePolicy(false), /script-src 'none'/);
-  assert.match(mailFramePolicy(false), /img-src data:;/);
-  assert.doesNotMatch(mailFramePolicy(false), /https:/);
-  assert.match(mailFramePolicy(true), /img-src data: https: http:/);
+  assert.match(mailFramePolicy(), /script-src 'none'/);
+  assert.match(mailFramePolicy(), /img-src data: https: http:/);
 });
 
 test('CID image resolution permits raster data only and links reject script or document data navigation', () => {

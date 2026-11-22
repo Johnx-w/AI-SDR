@@ -152,10 +152,24 @@ try {
   browser = await chromium.launch({ executablePath, headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'zh-CN' });
   const failures = [];
+  const remoteImageUrl = 'https://mail-image.example/qa.png';
+  const remoteImageRequests = [];
   page.on('pageerror', (e) => failures.push(e.message));
-  await page.route('**/*', (route) =>
-    new URL(route.request().url()).origin === base ? route.continue() : route.abort(),
-  );
+  await page.route('**/*', (route) => {
+    const url = new URL(route.request().url());
+    if (url.href === remoteImageUrl) {
+      remoteImageRequests.push(url.href);
+      return route.fulfill({
+        status: 200,
+        contentType: 'image/png',
+        body: Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+          'base64',
+        ),
+      });
+    }
+    return url.origin === base ? route.continue() : route.abort();
+  });
   page.setDefaultTimeout(10000);
   const tab = (name) => page.getByRole('tab', { name: new RegExp(name) });
   const button = (name) => page.getByRole('button', { name, exact: true });
@@ -445,7 +459,7 @@ try {
       };
     });
   assert.ok(rowPresentation.height >= 108 && rowPresentation.height <= 112, rowPresentation);
-  assert.equal(rowPresentation.senderWeight, '600');
+  assert.equal(rowPresentation.senderWeight, '500');
   assert.equal(rowPresentation.subjectClamp, '2');
   assert.ok(rowPresentation.metaTop >= rowPresentation.previewBottom - 1, rowPresentation);
   const draftBody = 'Draft retained while paging';
@@ -563,7 +577,9 @@ try {
         i === 25
           ? {
               bodyText: longReply.join('\n'),
-              bodyHtml: longReply.map((line) => '<div>' + line + '</div>').join(''),
+              bodyHtml:
+                longReply.map((line) => '<div>' + line + '</div>').join('') +
+                `<img src="${remoteImageUrl}" alt="远程图片自动加载验收">`,
               bodyFormatVersion: 2,
             }
           : i === 0
@@ -663,6 +679,12 @@ try {
     await selectedRow.click();
     const viewer = page.locator('.inbox-message[open] .mail-body-viewer');
     await viewer.frameLocator('iframe').getByText(longReply[0], { exact: true }).waitFor();
+    await viewer
+      .frameLocator('iframe')
+      .getByRole('img', { name: '远程图片自动加载验收' })
+      .waitFor();
+    assert.ok(remoteImageRequests.length > 0, '打开原邮件后应自动请求外链图片');
+    assert.equal(await button('加载图片').count(), 0);
     if (narrow) {
       await pageTitle.waitFor({ state: 'hidden' });
       assert.equal(await tab('收件箱').isVisible(), false);
@@ -730,7 +752,7 @@ try {
     .waitFor();
   assert.deepEqual(failures, []);
   console.log(
-    'PASS 沟通中心四栏、邮箱配置、标签持久化与批量操作、筛选与刷新、三步序列、首封原文、所属计划、同字号、窄屏邮件往返、全部/未读/有回复与真实回信深链、草稿签名、分页、内部备注与稍后/完成/重开',
+    'PASS 沟通中心四栏、邮箱配置、标签持久化与批量操作、筛选与刷新、三步序列、首封原文、外链图片自动加载、所属计划、统一字重、窄屏邮件往返、全部/未读/有回复与真实回信深链、草稿签名、分页、内部备注与稍后/完成/重开',
   );
 } finally {
   await browser?.close();

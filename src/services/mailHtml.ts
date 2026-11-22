@@ -26,8 +26,8 @@ export function splitMailQuote(value: string) {
     ? { body: value, quote: '' }
     : { body: value.slice(0, start), quote: value.slice(start) };
 }
-export const mailFramePolicy = (externalImages: boolean) =>
-  `default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data:${externalImages ? ' https: http:' : ''}; font-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; child-src 'none'; form-action 'none'; base-uri 'none'; navigate-to 'none'`;
+export const mailFramePolicy = () =>
+  `default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data: https: http:; font-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; child-src 'none'; form-action 'none'; base-uri 'none'; navigate-to 'none'`;
 const cidKey = (value: string) => {
   try {
     return decodeURIComponent(value.replace(/^cid:/i, ''))
@@ -59,7 +59,6 @@ export function safeMailLink(value: string) {
 export function makeMailFrame(
   bodyHtml: string,
   images: MailInlineImage[] = [],
-  externalImages = false,
   collapseQuotes = false,
 ) {
   if (typeof window === 'undefined' || !DOMPurify.isSupported) return null;
@@ -110,7 +109,6 @@ export function makeMailFrame(
       'download',
     ],
   }) as HTMLElement;
-  let remoteImages = 0;
   const imageUrl = (value: string) => {
     if (/^cid:/i.test(value)) return inlineImageSource(value, images);
     if (/^data:image\/(?:png|jpeg|gif|webp|avif|bmp);base64,[A-Za-z0-9+/]*={0,2}$/i.test(value))
@@ -118,8 +116,7 @@ export function makeMailFrame(
     try {
       const url = new URL(value.startsWith('//') ? `https:${value}` : value);
       if (!['https:', 'http:'].includes(url.protocol)) return '';
-      remoteImages++;
-      return externalImages ? url.href : '';
+      return url.href;
     } catch {
       return '';
     }
@@ -180,10 +177,10 @@ export function makeMailFrame(
     body.style.setProperty('height', 'auto', 'important');
     body.style.setProperty('min-height', '0', 'important');
   }
-  const prelude = `<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${escapeMailText(mailFramePolicy(externalImages))}"><meta name="referrer" content="no-referrer"><style>html{color-scheme:light;background:#fff;overflow-x:auto}body{margin:0;padding:4px;overflow-wrap:anywhere}img{max-width:100%;height:auto}table{max-width:100%}a{overflow-wrap:anywhere}</style>`;
+  const prelude = `<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${escapeMailText(mailFramePolicy())}"><meta name="referrer" content="no-referrer"><style>html{color-scheme:light;background:#fff;overflow-x:auto}body{margin:0;padding:4px;overflow-wrap:anywhere}img{max-width:100%;height:auto}table{max-width:100%}a{overflow-wrap:anywhere}</style>`;
   const source =
     '<!doctype html>' + root.outerHTML.replace(/<head[^>]*>/i, (head) => head + prelude);
-  return { srcDoc: source, remoteImages };
+  return { srcDoc: source };
 }
 export function sanitizeReplyHtml(value: string) {
   if (typeof window === 'undefined' || !DOMPurify.isSupported)
