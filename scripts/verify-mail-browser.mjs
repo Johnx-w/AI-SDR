@@ -200,24 +200,24 @@ try {
     occurredAt: new Date().toISOString(),
   });
   await tab('收件箱').click();
+  await button('会话筛选与同步').click();
   await button('同步邮件').click();
   await page
     .getByRole('button', { name: /Track material/ })
     .first()
     .waitFor();
+  await button('会话筛选与同步').click();
   await button('待审').click();
   await page.getByRole('button', { name: /Track material/ }).click({ timeout: 20_000 });
   await page.getByText('查看回复依据 · 2', { exact: true }).click();
   await page.getByText(/mail-specimen.xlsx.*规格!B2/).waitFor();
   await button('批准发送').click();
-  await page
-    .getByText(/已被服务商接受|服务商已接受/)
-    .first()
-    .waitFor();
+  await page.getByText('回复已被服务商接受。', { exact: true }).waitFor();
   assert.equal(sent.length, 1);
   assert.equal(sent[0].to, peer);
   assert.equal(sent[0].inReplyTo, '<browser-1@dealer.test>');
   assert.match(sent[0].text, /Material: Aluminium alloy/);
+  await button('会话筛选与同步').click();
   await button('全部').click();
   await page.getByRole('button', { name: /Track material/ }).click();
   await button('人工接管').click();

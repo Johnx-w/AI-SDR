@@ -30,7 +30,11 @@ const app = createApp({ env, outreachServiceFactory: () => service });
 let browser;
 try {
   const mailboxes = await boxes.import(
-    ['one', 'two'].map((prefix) => ({ email: prefix + '@brand.example', owner: 'QA' })),
+    ['one', 'two'].map((prefix) => ({
+      email: prefix + '@brand.example',
+      owner: 'QA',
+      signature: 'QA team',
+    })),
   );
   const box = mailboxes[0];
   while (!app.listening) {
@@ -72,7 +76,24 @@ try {
   assert.equal(await page.getByRole('tab').count(), 4);
   await tab('跟进序列').click();
   const rules = page.getByRole('region', { name: '未回复跟进规则' });
-  await rules.getByText('已进入序列的客户 0').waitFor();
+  await rules.getByRole('button', { name: '编辑序列' }).waitFor();
+  assert.equal(await rules.locator('ol li').count(), 3);
+  await button('编辑序列').click();
+  await label('序列名称').fill('QA 自定义跟进');
+  await button('添加步骤').click();
+  await label('跟进 3 天数').fill('7');
+  await label('跟进 3 写作要求').fill('询问是否需要样品。');
+  await button('保存序列').click();
+  await page.getByRole('alert').filter({ hasText: '同一天' }).waitFor();
+  await label('跟进 3 天数').fill('11');
+  await button('保存序列').click();
+  await rules.getByText('首封后第 11 天').waitFor();
+  await page.reload();
+  await rules.getByRole('heading', { name: 'QA 自定义跟进' }).waitFor();
+  await button('编辑序列').click();
+  await button('删除跟进 3').click();
+  await button('保存序列').click();
+  await rules.getByText('序列已保存').waitFor();
   assert.equal(await rules.locator('ol li').count(), 3);
   const campaign = service.saveCampaign({
     name: 'QA follow-up sequence',
@@ -148,8 +169,10 @@ try {
     .getByRole('button', { name: '查看邮件' })
     .click();
   assert.equal(await label('筛选会话邮箱').inputValue(), box.id);
+  await button('会话筛选与同步').click();
   await button('未读').click();
   assert.equal(await label('筛选会话邮箱').inputValue(), box.id);
+  await button('会话筛选与同步').click();
   await button('全部').click();
   await page.getByRole('button', { name: /QA accepted first email/ }).click();
   await page
@@ -198,6 +221,15 @@ try {
     .getByRole('region', { name: '邮件会话详情' })
     .getByText(first.bodyText, { exact: true })
     .waitFor();
+  await page.waitForFunction(() => {
+    const compose = document.querySelector('.inbox-compose');
+    const send = compose?.querySelector('footer .primary');
+    return (
+      !!send &&
+      compose.getBoundingClientRect().bottom <= innerHeight &&
+      send.getBoundingClientRect().bottom <= innerHeight
+    );
+  });
   await button('返回会话列表').click();
   await page.getByRole('button', { name: /QA accepted first email/ }).waitFor();
   const firstThreadId = linkedThread.get('thread');
@@ -218,7 +250,7 @@ try {
       });
     }
   });
-  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.setViewportSize({ width: 1397, height: 773 });
   await page.goto(
     base +
       '/inbox?' +
@@ -229,12 +261,13 @@ try {
   assert.equal(await page.locator('.mail-conversation-row').count(), 25);
   const messageBody = page.getByRole('region', { name: '邮件会话详情' });
   await messageBody.getByText(first.bodyText, { exact: true }).waitFor();
-  await page
-    .getByRole('region', { name: '回复邮件' })
-    .getByRole('button', { name: '回复', exact: true })
-    .click();
   const editor = label('回复正文');
+  await page.waitForFunction(
+    () => document.querySelector('.inbox-thread-scroll')?.clientHeight >= 300,
+  );
   const draftBody = 'Draft retained while paging';
+  assert.equal(await editor.innerText().then((t) => t.trim()), '');
+  assert.equal(service.replies.draft(firstThreadId), null);
   await editor.fill(draftBody);
   await pager.getByRole('button', { name: '下一页' }).click();
   await pager.getByText('共 32 段 · 2 / 2').waitFor();
@@ -251,10 +284,38 @@ try {
   await label('搜索邮件会话').fill('Fixture enquiry 30');
   await pager.getByText('共 1 段 · 1 / 1').waitFor();
   assert.equal(await page.locator('.mail-conversation-row').count(), 1);
-  assert.equal(service.replies.draft(firstThreadId).bodyText, draftBody);
+  assert.equal(service.replies.draft(firstThreadId).bodyText, draftBody + '\n\nQA team');
+  await label('搜索邮件会话').fill('');
+  await pager.getByText('共 32 段 · 1 / 2').waitFor();
+  await page.getByRole('button', { name: /Fixture enquiry 30/ }).click();
+  await button('内部备注').click();
+  await label('内部备注正文').fill('Discuss samples with sales colleagues.');
+  await button('添加备注').click();
+  await page
+    .locator('.inbox-team-note')
+    .getByText('Discuss samples with sales colleagues.')
+    .waitFor();
+  await button('回复客户').click();
+  assert.equal(await editor.innerText().then((t) => t.trim()), '');
+  await button('稍后处理').click();
+  await button('1 小时后').click();
+  await pager.getByText('共 31 段 · 1 / 2').waitFor();
+  await button('稍后').click();
+  await pager.getByText('共 1 段 · 1 / 1').waitFor();
+  await page.getByRole('button', { name: /Fixture enquiry 30/ }).click();
+  await button('标为完成').click();
+  await button('已完成').click();
+  await page.getByRole('button', { name: /Fixture enquiry 30/ }).click();
+  await page
+    .locator('.inbox-team-note')
+    .getByText('Discuss samples with sales colleagues.')
+    .waitFor();
+  await button('重新打开').click();
+  await button('进行中').click();
+  await pager.getByText('共 32 段 · 1 / 2').waitFor();
   assert.deepEqual(failures, []);
   console.log(
-    'PASS 沟通中心四栏、邮箱配置、标签持久化与批量操作、筛选与刷新、三步序列、首封原文、所属计划、窄屏邮件往返及会话翻页保留深链和草稿',
+    'PASS 沟通中心四栏、邮箱配置、标签持久化与批量操作、筛选与刷新、三步序列、首封原文、所属计划、窄屏邮件往返、草稿签名、分页、内部备注与稍后/完成/重开',
   );
 } finally {
   await browser?.close();
