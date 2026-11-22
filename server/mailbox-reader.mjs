@@ -21,6 +21,8 @@ const HEADERS = [
   'in-reply-to',
   'references',
   'auto-submitted',
+  'precedence',
+  'list-id',
   'x-autoreply',
   'x-autorespond',
 ];
@@ -119,6 +121,11 @@ function parseOptions() {
 }
 
 function automaticReply(headers) {
+  if (
+    headers?.has?.('list-id') ||
+    /^(?:bulk|list|junk)$/iu.test(String(headers?.get?.('precedence') || '').trim())
+  )
+    return true;
   return ['auto-submitted', 'x-autoreply', 'x-autorespond'].some((name) => {
     const value = headers?.get?.(name);
     return (Array.isArray(value) ? value : [value]).some(

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { setImmediate as yieldToRequests } from 'node:timers/promises';
 import { mailSyncFailure } from './mail-sync-errors.mjs';
 import { incomingClassification } from './communication-rounds.mjs';
+import { initializeReplyHistory, listReplyHistory } from './mail-reply-history.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -70,6 +71,11 @@ export class MailConversations {
         delivery_id TEXT PRIMARY KEY
       );
     `);
+    this.transaction(() => initializeReplyHistory(db));
+  }
+
+  replyHistory(filters) {
+    return listReplyHistory(this, filters, keyFor);
   }
 
   transaction(work) {
@@ -194,6 +200,64 @@ export class MailConversations {
     return thread;
   }
 
+  linkMessage(accountKey, input, id, externalId, preferredId) {
+    const references = [
+      ...new Set(
+        [
+          ...(Array.isArray(input.references) ? input.references.slice(-100) : []),
+          input.inReplyTo,
+          externalId,
+        ]
+          .map(messageId)
+          .filter(Boolean),
+      ),
+    ];
+    const linked = references
+      .map(
+        (reference) =>
+          this.db
+            .prepare(
+              'SELECT thread_id FROM mailbox_thread_links WHERE account_key=? AND external_id=?',
+            )
+            .get(accountKey, reference)?.thread_id,
+      )
+      .filter(Boolean);
+    if (preferredId || input.threadId) {
+      const forced = this.db
+        .prepare('SELECT account_key FROM mailbox_threads WHERE id=?')
+        .get(preferredId || input.threadId);
+      if (!forced || forced.account_key !== accountKey) throw fail(409, '回复会话与邮箱归属不一致');
+      linked.unshift(preferredId || input.threadId);
+    }
+    const matches = [...new Set(linked)];
+    const threadId = matches[0] || 'thread_' + hash([accountKey, references[0] || id]);
+    // A late parent can join replies that arrived before it, including separate pages.
+    let inherited = {};
+    for (const other of matches.slice(1)) {
+      const row = this.db.prepare('SELECT data FROM mailbox_threads WHERE id=?').get(other);
+      if (row) {
+        const thread = JSON.parse(row.data);
+        if (thread.customerId)
+          inherited = { customerId: thread.customerId, companyName: thread.companyName };
+      }
+      this.db
+        .prepare('UPDATE mailbox_thread_messages SET thread_id=? WHERE thread_id=?')
+        .run(threadId, other);
+      this.db
+        .prepare('UPDATE mailbox_thread_links SET thread_id=? WHERE thread_id=?')
+        .run(threadId, other);
+      this.db.prepare('DELETE FROM mailbox_threads WHERE id=?').run(other);
+    }
+    for (const reference of references)
+      this.db
+        .prepare(
+          `INSERT INTO mailbox_thread_links VALUES(?,?,?)
+      ON CONFLICT(account_key,external_id) DO UPDATE SET thread_id=excluded.thread_id`,
+        )
+        .run(accountKey, reference, threadId);
+    return { threadId, inherited };
+  }
+
   putMessage(mailbox, input, extra = {}, lookup) {
     const accountKey = keyFor(mailbox);
     const externalId = messageId(input.messageId);
@@ -231,6 +295,13 @@ export class MailConversations {
         enriched = {
           ...enriched,
           ...richFields,
+          inReplyTo: richFields.inReplyTo || old.inReplyTo,
+          references: richFields.references.length ? richFields.references : old.references || [],
+          classification:
+            input.direction === 'inbound' &&
+            (!old.classification || old.classification === 'normal')
+              ? incomingClassification(input)
+              : old.classification,
           attachments: input.attachments ? attachmentMetadata(input.attachments) : old.attachments,
         };
       }
@@ -240,12 +311,19 @@ export class MailConversations {
         input.direction === 'outbound' &&
         old.from === from
       ) {
-        enriched = { ...enriched, source: 'imap', deliveryStatus: 'sent' };
+        enriched = { ...enriched, sendOrigin: old.source, source: 'imap', deliveryStatus: 'sent' };
       }
       this.db
         .prepare('UPDATE mailbox_thread_messages SET data=? WHERE id=?')
         .run(JSON.stringify(enriched), id);
-      this.rebuild(prior.thread_id, mailbox, extra);
+      const changedHeaders =
+        (enriched.inReplyTo && enriched.inReplyTo !== old.inReplyTo) ||
+        (enriched.references?.length &&
+          JSON.stringify(old.references) !== JSON.stringify(enriched.references));
+      const inherited = changedHeaders
+        ? this.linkMessage(accountKey, enriched, id, externalId, prior.thread_id).inherited
+        : {};
+      this.rebuild(prior.thread_id, mailbox, { ...inherited, ...extra });
       return 0;
     }
     const occurredAt = Number.isFinite(Date.parse(input.occurredAt)) ? iso(input.occurredAt) : null;
@@ -254,53 +332,7 @@ export class MailConversations {
         code: 'MAILBOX_SYNC_INVALID',
       });
     }
-    const references = [
-      ...new Set(
-        [
-          ...(Array.isArray(input.references) ? input.references.slice(-100) : []),
-          input.inReplyTo,
-          externalId,
-        ]
-          .map(messageId)
-          .filter(Boolean),
-      ),
-    ];
-    const linked = references
-      .map(
-        (reference) =>
-          this.db
-            .prepare(
-              'SELECT thread_id FROM mailbox_thread_links WHERE account_key=? AND external_id=?',
-            )
-            .get(accountKey, reference)?.thread_id,
-      )
-      .filter(Boolean);
-    if (input.threadId) {
-      const forced = this.db
-        .prepare('SELECT account_key FROM mailbox_threads WHERE id=?')
-        .get(input.threadId);
-      if (!forced || forced.account_key !== accountKey) throw fail(409, '回复会话与邮箱归属不一致');
-      linked.unshift(input.threadId);
-    }
-    const matches = [...new Set(linked)];
-    const threadId = matches[0] || 'thread_' + hash([accountKey, references[0] || id]);
-    // A late parent can join replies that arrived before it, including separate pages.
-    let inherited = {};
-    for (const other of matches.slice(1)) {
-      const row = this.db.prepare('SELECT data FROM mailbox_threads WHERE id=?').get(other);
-      if (row) {
-        const thread = JSON.parse(row.data);
-        if (thread.customerId)
-          inherited = { customerId: thread.customerId, companyName: thread.companyName };
-      }
-      this.db
-        .prepare('UPDATE mailbox_thread_messages SET thread_id=? WHERE thread_id=?')
-        .run(threadId, other);
-      this.db
-        .prepare('UPDATE mailbox_thread_links SET thread_id=? WHERE thread_id=?')
-        .run(threadId, other);
-      this.db.prepare('DELETE FROM mailbox_threads WHERE id=?').run(other);
-    }
+    const { threadId, inherited } = this.linkMessage(accountKey, input, id, externalId);
     const data = {
       id,
       direction: input.direction,
@@ -322,13 +354,6 @@ export class MailConversations {
     this.db
       .prepare('INSERT INTO mailbox_thread_messages VALUES(?,?,?,?)')
       .run(id, accountKey, threadId, JSON.stringify(data));
-    for (const reference of references)
-      this.db
-        .prepare(
-          `INSERT INTO mailbox_thread_links VALUES(?,?,?)
-      ON CONFLICT(account_key,external_id) DO UPDATE SET thread_id=excluded.thread_id`,
-        )
-        .run(accountKey, reference, threadId);
     const thread = this.rebuild(threadId, mailbox, { ...inherited, ...extra });
     this.onMessage?.(mailbox, thread, data, lookup);
     return 1;
@@ -483,19 +508,29 @@ export class MailConversations {
     return { conversation: this.localCustomer(updated) };
   }
 
-  syncOne(mailbox) {
+  syncOne(mailbox, requestedSince, rescan = false) {
     const key = keyFor(mailbox);
     if (this.pending.has(key)) return this.pending.get(key);
-    const operation = this.performSync(mailbox).finally(() => this.pending.delete(key));
+    const operation = this.performSync(mailbox, requestedSince, rescan).finally(() =>
+      this.pending.delete(key),
+    );
     this.pending.set(key, operation);
     return operation;
   }
 
-  async performSync(mailbox) {
+  async performSync(mailbox, requestedSince, rescan) {
     const key = keyFor(mailbox);
     const row = this.db.prepare('SELECT data FROM mailbox_sync_state WHERE account_key=?').get(key);
     const prior = row ? JSON.parse(row.data) : {};
-    const since = prior.since || iso(this.now() - 30 * 86400000);
+    const extendWindow =
+      requestedSince && prior.since && Date.parse(requestedSince) < Date.parse(prior.since);
+    const since =
+      requestedSince && (extendWindow || rescan || !prior.since)
+        ? iso(requestedSince)
+        : prior.since || iso(this.now() - 30 * 86400000);
+    const checkpointIsCurrent = () =>
+      this.db.prepare('SELECT data FROM mailbox_sync_state WHERE account_key=?').get(key)?.data ===
+      row?.data;
     let stage = 'read';
     try {
       if (!mailbox.configured)
@@ -505,7 +540,7 @@ export class MailConversations {
       const batch = await this.mailboxes.readMailbox(mailbox.id, {
         // One bounded rescan upgrades previously cached text-only messages. Later
         // pages continue from their returned cursors, using the original window.
-        cursors: prior.contentVersion === 2 ? prior.cursors || {} : {},
+        cursors: !extendWindow && !rescan && prior.contentVersion === 2 ? prior.cursors || {} : {},
         since,
       });
       const current = this.mailboxes.list().find((item) => item.id === mailbox.id);
@@ -519,7 +554,9 @@ export class MailConversations {
       const lookup = this.customerLookup();
       stage = 'save';
       this.transaction(() => {
-        const cursors = { ...prior.cursors };
+        // Another reader may have committed this (or a newer) page while IMAP was open.
+        if (!checkpointIsCurrent()) return;
+        const cursors = extendWindow || rescan ? {} : { ...prior.cursors };
         for (const folder of batch.folders) {
           if (
             !folder.path ||
@@ -590,11 +627,18 @@ export class MailConversations {
       return imported;
     } catch (error) {
       const failure = mailSyncFailure(error, stage);
-      this.saveState(key, {
-        ...prior,
-        since,
-        error: failure.message,
-        lastError: { ...failure.diagnostic, message: failure.message, occurredAt: iso(this.now()) },
+      this.transaction(() => {
+        if (!checkpointIsCurrent()) return;
+        this.saveState(key, {
+          ...prior,
+          since: prior.since || since,
+          error: failure.message,
+          lastError: {
+            ...failure.diagnostic,
+            message: failure.message,
+            occurredAt: iso(this.now()),
+          },
+        });
       });
       return 0;
     }

@@ -25,3 +25,23 @@
   text-align: left;
   border-bottom: 1px solid var(--border);
 }
+.business-replies {
+  display: grid;
+  gap: 18px;
+}
+.business-replies td {
+  overflow-wrap: anywhere;
+}
+.business-replies td small {
+  display: block;
+}
+.business-view-picker,
+.business-page-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.business-page-controls {
+  justify-content: flex-end;
+}

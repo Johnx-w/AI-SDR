@@ -54,7 +54,7 @@ export function incomingClassification(message) {
   const subject = String(message.subject || '');
   if (
     /^(?:mailer-daemon|postmaster)@/iu.test(message.from) &&
-    /undeliverable|failure|undelivered|退信/iu.test(subject)
+    /undeliverable|failure|delivery failed|undelivered|退信|投递失败/iu.test(subject)
   )
     return 'hard_bounce';
   if (/^no-reply@mailsupport\.aliyun\.com$/iu.test(message.from) && /退信/u.test(subject))
