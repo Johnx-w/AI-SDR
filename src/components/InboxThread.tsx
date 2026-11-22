@@ -166,7 +166,9 @@ export function MailConversationTimeline({
                       </span>
                     )}
                     <span className="inbox-snippet">{mail.subject || '（无主题）'}</span>
-                    <time dateTime={at}>{timePart(at, clock)}</time>
+                    <time dateTime={at} title={date}>
+                      {timePart(at, clock)}
+                    </time>
                   </summary>
                   <MailMessageBody message={mail} collapseQuotes />
                   {operation?.provenance && <ReplySources sources={operation.provenance.sources} />}
@@ -333,8 +335,32 @@ export function InboxThread({
     const scroll = threadScroll.current;
     const message = scroll?.querySelector('.inbox-message[open]');
     if (!scroll || !message) return;
-    const relativeTop = message.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
-    if (relativeTop > scroll.clientHeight * 0.4) scroll.scrollTop += relativeTop - 12;
+    let alignedTop = scroll.scrollTop;
+    const alignLatest = () => {
+      scroll.scrollTop +=
+        message.getBoundingClientRect().top - scroll.getBoundingClientRect().top - 6;
+      alignedTop = scroll.scrollTop;
+    };
+    // HTML mail can grow after its sandboxed frame loads. Keep the opening in view
+    // until the reader interacts, then leave their chosen scroll position alone.
+    const observer = new ResizeObserver(alignLatest);
+    observer.observe(message);
+    const listeners = new AbortController();
+    const stop = () => {
+      observer.disconnect();
+      listeners.abort();
+    };
+    for (const event of ['wheel', 'touchstart', 'pointerdown', 'keydown'])
+      scroll.addEventListener(event, stop, { passive: true, signal: listeners.signal });
+    scroll.addEventListener(
+      'scroll',
+      () => {
+        if (Math.abs(scroll.scrollTop - alignedTop) > 1) stop();
+      },
+      { passive: true, signal: listeners.signal },
+    );
+    alignLatest();
+    return stop;
   }, [t.id, latest]);
   return (
     <>

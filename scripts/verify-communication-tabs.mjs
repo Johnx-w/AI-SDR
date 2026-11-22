@@ -3,17 +3,95 @@ import { randomInt } from 'node:crypto';
 import { existsSync, mkdtempSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { chromium } from 'playwright-core';
 import { createApp } from '../server/app.mjs';
 import { OutreachMailboxes } from '../server/outreach-mailboxes.mjs';
 import { OutreachService } from '../server/outreach-service.mjs';
 
+// Measure the visible glyphs in the message, including when the HTML body lives in a sandboxed iframe.
+function visibleReplyLines(viewer) {
+  const frame = viewer.querySelector('iframe');
+  const root = frame
+    ? frame.contentDocument?.body
+    : viewer.querySelector('.mail-conversation-body');
+  if (!root) return 0;
+  const pane = viewer.closest('.inbox-thread-scroll').getBoundingClientRect();
+  const bounds = (frame || root).getBoundingClientRect();
+  const left = Math.max(0, pane.left, bounds.left),
+    right = Math.min(innerWidth, pane.right, bounds.right);
+  const top = Math.max(0, pane.top, bounds.top),
+    bottom = Math.min(innerHeight, pane.bottom, bounds.bottom);
+  const dx = frame ? bounds.left + frame.clientLeft : 0,
+    dy = frame ? bounds.top + frame.clientTop : 0;
+  const lines = new Set();
+  const doc = root.ownerDocument;
+  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+    if (!text.textContent.trim()) continue;
+    const range = doc.createRange();
+    range.selectNodeContents(text);
+    for (const rect of range.getClientRects()) {
+      const l = Math.max(left, rect.left + dx),
+        r = Math.min(right, rect.right + dx);
+      const y = (rect.top + rect.bottom) / 2 + dy,
+        x = (l + r) / 2;
+      if (r - l < 3 || rect.top + dy < top - 0.5 || rect.bottom + dy > bottom + 0.5) continue;
+      const hit = document.elementFromPoint(x, y);
+      if (
+        frame
+          ? hit === frame && root.contains(doc.elementFromPoint(x - dx, y - dy))
+          : root.contains(hit)
+      )
+        lines.add(Math.round(y));
+    }
+  }
+  return lines.size;
+}
+
+function completeListRows(list) {
+  const bounds = list.getBoundingClientRect();
+  return [...list.querySelectorAll('.mail-conversation-row')].filter((row) => {
+    const r = row.getBoundingClientRect(),
+      x = (r.left + r.right) / 2;
+    return (
+      r.height > 0 &&
+      r.top >= Math.max(bounds.top, 0) - 0.5 &&
+      r.bottom <= Math.min(bounds.bottom, innerHeight) + 0.5 &&
+      [r.top + 1, r.bottom - 1].every((y) => row.contains(document.elementFromPoint(x, y)))
+    );
+  }).length;
+}
+
 const directory = mkdtempSync(join(tmpdir(), 'shadeflow-communication-'));
+let readerFails = false;
 const boxes = new OutreachMailboxes({
   env: {},
   path: join(directory, 'mailboxes.json'),
   seedPath: null,
+  protect: async () => ({
+    credential: 'fixture-handle',
+    credentialProtection: 'aes-256-gcm-local-key',
+  }),
+  unprotect: async () => 'synthetic',
+  transportFactory: () => ({ verify: async () => true, sendMail: assert.fail }),
+  mailboxReaderFactory: () => ({
+    read: async () => {
+      if (readerFails) throw new Error('Simulated mailbox connection failure');
+      return {
+        folders: ['INBOX', 'Sent'].map((path) => ({
+          path,
+          uidValidity: '1',
+          nextUid: 1,
+          sent: path === 'Sent',
+          messages: [],
+        })),
+        folderCoverage: { inbox: true, sent: true },
+        hasMore: false,
+      };
+    },
+  }),
+  imapFactory: assert.fail,
 });
 const customer = { id: 'test-buyer', name: 'QA buyer', email: 'buyer@dealer.example' };
 const service = new OutreachService({
@@ -26,7 +104,11 @@ const env = {
   CONNECTIONS_PATH: join(directory, 'connections.json'),
   BRANDING_CACHE_PATH: join(directory, 'brands.json'),
 };
-const app = createApp({ env, outreachServiceFactory: () => service });
+const app = createApp({
+  env,
+  dist: process.env.MAIL_BROWSER_DIST ? resolve(process.env.MAIL_BROWSER_DIST) : undefined,
+  outreachServiceFactory: () => service,
+});
 let browser;
 try {
   const mailboxes = await boxes.import(
@@ -34,9 +116,11 @@ try {
       email: prefix + '@brand.example',
       owner: 'QA',
       signature: 'QA team',
+      clientPassword: 'synthetic',
     })),
   );
   const box = mailboxes[0];
+  for (const mailbox of mailboxes) await boxes.verify(mailbox.id);
   while (!app.listening) {
     try {
       await new Promise((resolve, reject) => {
@@ -344,7 +428,8 @@ try {
   await pager.getByText('共 32 段 · 2 / 2').waitFor();
   await page.getByText('草稿已保存', { exact: true }).waitFor();
   await label('搜索邮件会话').fill('Fixture enquiry 30');
-  await pager.getByText('共 1 段 · 1 / 1').waitFor();
+  await label('共 1 段会话').waitFor();
+  assert.equal(await pager.isVisible(), false);
   assert.equal(await page.locator('.mail-conversation-row').count(), 1);
   assert.equal(service.replies.draft(firstThreadId).bodyText, draftBody + '\n\nQA team');
   await label('搜索邮件会话').fill('');
@@ -363,7 +448,7 @@ try {
   await button('1 小时后').click();
   await pager.getByText('共 32 段 · 1 / 2').waitFor();
   await label('其他处理状态').selectOption('later');
-  await pager.getByText('共 1 段 · 1 / 1').waitFor();
+  await label('共 1 段会话').waitFor();
   await page.getByRole('button', { name: /Fixture enquiry 30/ }).click();
   await button('标为完成').click();
   await label('其他处理状态').selectOption('done');
@@ -410,6 +495,27 @@ try {
       ...options,
     });
   }
+  const longReply = [
+    'Thank you for the panel information.',
+    'We are preparing a sample kit for our showroom.',
+    'Our clients asked to compare two finishes before choosing.',
+    'Could you confirm the panel material and the finish options?',
+    'We would like to check how the handles feel in person.',
+    'The team will review the drawings on Friday morning.',
+    'Please include the installation notes for the small display.',
+    'We can confirm the final quantities after the sample review.',
+    'Which mounting option would you suggest for this project?',
+    'The east display will represent a narrow living room window.',
+    'We have space for a second panel beside the timber samples.',
+    'Our installer is available to review the drawing next week.',
+    'Would a corner detail help explain the mounting options?',
+    'The headrail will be visible from the entrance to the showroom.',
+    'Please indicate which end caps should be on the sample board.',
+    'Let me know what dimensions you need before preparing the drawing.',
+    'I will share your suggestions with our installation team.',
+    'Best regards,',
+    'Jordan',
+  ];
   service.transaction(() => {
     for (let i = 0; i < 26; i++)
       seedReply(
@@ -417,13 +523,19 @@ try {
         'dealer-' + String(i).padStart(2, '0'),
         i,
         'dealer' + i + '@dealer.example',
-        i === 0
+        i === 25
           ? {
-              bodyText:
-                'Please quote 72 mm panels.\n' +
-                'Dimensions and finish for this room.\n'.repeat(50),
+              bodyText: longReply.join('\n'),
+              bodyHtml: longReply.map((line) => '<div>' + line + '</div>').join(''),
+              bodyFormatVersion: 2,
             }
-          : {},
+          : i === 0
+            ? {
+                bodyText:
+                  'Please quote 72 mm panels.\n' +
+                  'Dimensions and finish for this room.\n'.repeat(50),
+              }
+            : {},
       );
     seedReply(mailboxes[1], 'other-mailbox', 26, 'other@dealer.example');
     seedReply(box, 'internal', 27, mailboxes[1].email);
@@ -468,13 +580,13 @@ try {
     .getByRole('heading', { name: 'Panel request dealer-00', exact: true })
     .waitFor();
   await label('搜索邮件会话').fill('dealer-01');
-  await pager.getByText('共 1 段 · 1 / 1').waitFor();
+  await label('共 1 段会话').waitFor();
   await label('筛选会话邮箱').selectOption(mailboxes[1].id);
-  await pager.getByText('共 0 段 · 1 / 1').waitFor();
+  await label('共 0 段会话').waitFor();
   assert.equal(await label('搜索邮件会话').inputValue(), 'dealer-01');
   assert.equal(await button('有回复').getAttribute('aria-pressed'), 'true');
   await label('筛选会话邮箱').selectOption('all');
-  await pager.getByText('共 1 段 · 1 / 1').waitFor();
+  await label('共 1 段会话').waitFor();
   await label('搜索邮件会话').fill('');
   await pager.getByText('共 27 段 · 1 / 2').waitFor();
   await button('未读').focus();
@@ -486,6 +598,61 @@ try {
   const allCount = service.conversations.list({}).total;
   await pager.getByText('共 ' + allCount + ' 段 · 1 / ' + Math.ceil(allCount / 25)).waitFor();
   assert.equal(allCount, 62);
+  await service.conversations.sync({ mailboxId: box.id });
+  assert.equal(service.conversations.syncState(box).error, null);
+  const layoutResults = [];
+  for (const width of [1397, 541]) {
+    await page.setViewportSize({ width, height: 773 });
+    await page.goto(
+      base + '/inbox?' + new URLSearchParams({ tab: 'inbox', mailboxId: box.id, hasReply: '1' }),
+    );
+    const rows = page.locator('.mail-conversation-items');
+    const selectedRow = rows.getByRole('button', { name: /Panel request dealer-25/ });
+    await selectedRow.waitFor();
+    assert.equal(await page.locator('.mail-sync-summary').getAttribute('open'), null);
+    const completeRows = await rows.evaluate(completeListRows);
+    await selectedRow.click();
+    const viewer = page.locator('.inbox-message[open] .mail-body-viewer');
+    await viewer.frameLocator('iframe').getByText(longReply[0], { exact: true }).waitFor();
+    const htmlLines = await viewer.evaluate(visibleReplyLines);
+    await viewer.getByRole('button', { name: '纯文本' }).click();
+    await viewer.locator('.mail-conversation-body').waitFor();
+    const textLines = await viewer.evaluate(visibleReplyLines);
+    await viewer.getByRole('button', { name: '原邮件' }).click();
+    await viewer.frameLocator('iframe').getByText(longReply[0], { exact: true }).waitFor();
+    const back = button('返回会话列表');
+    if (await back.isVisible()) await back.click();
+    await rows.getByRole('button', { name: /Panel request dealer-24/ }).click();
+    await page
+      .locator('.inbox-message[open] .mail-conversation-body')
+      .getByText('Please quote 72 mm panels for dealer-24', { exact: true })
+      .waitFor();
+    if (await back.isVisible()) await back.click();
+    await rows.waitFor();
+    layoutResults.push({ width, height: 773, completeRows, htmlLines, textLines });
+  }
+  console.log('首屏度量', JSON.stringify(layoutResults));
+  for (const result of layoutResults) {
+    assert.ok(result.completeRows >= 4, JSON.stringify(result));
+    assert.ok(result.htmlLines >= 13 && result.textLines >= 10, JSON.stringify(result));
+  }
+  readerFails = true;
+  await button('同步邮件').click();
+  const syncStatus = page.locator('.mail-sync-summary');
+  await syncStatus.getByText('1 个邮箱同步异常', { exact: true }).waitFor();
+  if (!(await syncStatus.locator('[role="alert"]').isVisible()))
+    await syncStatus.locator('summary').first().click();
+  await syncStatus.locator('[role="alert"]').waitFor();
+  await syncStatus.locator('summary').first().click();
+  await page
+    .locator('.mail-conversation-items')
+    .getByRole('button', { name: /Panel request dealer-25/ })
+    .click();
+  await page
+    .locator('.inbox-message[open]')
+    .frameLocator('iframe')
+    .getByText(longReply[0], { exact: true })
+    .waitFor();
   assert.deepEqual(failures, []);
   console.log(
     'PASS 沟通中心四栏、邮箱配置、标签持久化与批量操作、筛选与刷新、三步序列、首封原文、所属计划、同字号、窄屏邮件往返、全部/未读/有回复与真实回信深链、草稿签名、分页、内部备注与稍后/完成/重开',

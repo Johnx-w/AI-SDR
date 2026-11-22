@@ -460,6 +460,7 @@ export function SalesInbox({
             ) : (
               <select
                 aria-label="筛选会话邮箱"
+                title={mailboxes.find((box) => box.id === mailboxId)?.email || '全部邮箱'}
                 value={mailboxId}
                 onChange={(e) => onMailboxChange(e.target.value, query)}
               >
@@ -474,22 +475,24 @@ export function SalesInbox({
                 )}
               </select>
             )}
-            <span className="inbox-list-count">{list?.total ?? '…'}</span>
+            <span className="inbox-list-count" aria-label={`共 ${list?.total ?? '…'} 段会话`}>
+              {list?.total ?? '…'}
+            </span>
+            {!review && (
+              <div className="inbox-scopes" role="group" aria-label="会话筛选">
+                {primaryViews.map(([key, label]) => (
+                  <button
+                    type="button"
+                    key={key}
+                    aria-pressed={view === key}
+                    onClick={() => switchView(key)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-          {!review && (
-            <div className="inbox-scopes" role="group" aria-label="会话筛选">
-              {primaryViews.map(([key, label]) => (
-                <button
-                  type="button"
-                  key={key}
-                  aria-pressed={view === key}
-                  onClick={() => switchView(key)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          )}
           <div className="inbox-filters">
             {!review && (
               <label>
@@ -537,39 +540,49 @@ export function SalesInbox({
             <Empty title="会话读取失败" detail="请重新读取列表，或检查服务是否正常。" />
           ) : visibleThreads.length ? (
             <div className="mail-conversation-items">
-              {visibleThreads.map((thread, index) => (
-                <button
-                  key={review ? thread.id + '-' + index : thread.id}
-                  className={`mail-conversation-row ${selectedId === thread.id ? 'selected' : ''} ${thread.unread ? 'unread' : ''}`}
-                  aria-pressed={selectedId === thread.id}
-                  onClick={() => selectConversation(thread.id)}
-                >
-                  <span className="mail-conversation-row-top">
-                    <InboxAvatar
-                      name={thread.participantName || thread.companyName || thread.participant}
-                    />
-                    <strong title={thread.participant}>
-                      {thread.participantName || thread.companyName || thread.participant}
-                    </strong>
-                    <time>{formatTime(thread.updatedAt)}</time>
-                  </span>
-                  <span className="mail-conversation-row-subject">
-                    {thread.unread && <i aria-label="未读" />}
-                    {thread.subject || '（无主题）'}
-                  </span>
-                  <span className="mail-conversation-preview">
-                    {thread.preview || '暂无正文摘要'}
-                  </span>
-                  <span className="mail-conversation-row-account">
-                    <span className="inbox-brand-label">
-                      {mailboxes.find(
-                        (box) => box.id === thread.mailboxId || box.email === thread.account,
-                      )?.brandName || thread.account}
+              {visibleThreads.map((thread, index) => {
+                const brand =
+                  mailboxes.find(
+                    (box) => box.id === thread.mailboxId || box.email === thread.account,
+                  )?.brandName || thread.account;
+                return (
+                  <button
+                    key={review ? thread.id + '-' + index : thread.id}
+                    className={`mail-conversation-row ${selectedId === thread.id ? 'selected' : ''} ${thread.unread ? 'unread' : ''}`}
+                    aria-pressed={selectedId === thread.id}
+                    onClick={() => selectConversation(thread.id)}
+                  >
+                    <span className="mail-conversation-row-top">
+                      <InboxAvatar
+                        name={thread.participantName || thread.companyName || thread.participant}
+                      />
+                      <strong title={thread.participant}>
+                        {thread.participantName || thread.companyName || thread.participant}
+                      </strong>
+                      <time dateTime={thread.updatedAt}>{formatTime(thread.updatedAt)}</time>
                     </span>
-                    {!review && <span>{thread.messageCount} 封</span>}
-                  </span>
-                </button>
-              ))}
+                    <span className="mail-conversation-row-subject" title={thread.subject}>
+                      {thread.unread && <i aria-label="未读" />}
+                      {thread.subject || '（无主题）'}
+                    </span>
+                    <span className="mail-conversation-row-summary">
+                      <span className="mail-conversation-preview">
+                        {thread.preview || '暂无正文摘要'}
+                      </span>
+                      {(mailboxId === 'all' || review) && brand && (
+                        <span className="inbox-brand-label" title={thread.account}>
+                          {brand}
+                        </span>
+                      )}
+                      {!review && thread.messageCount > 1 && (
+                        <span className="mail-conversation-row-count">
+                          {thread.messageCount} 封
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           ) : (
             <Empty
@@ -593,7 +606,7 @@ export function SalesInbox({
               }
             />
           )}
-          {list && (
+          {list && list.total > list.pageSize && (
             <nav className="inbox-pager" aria-label={review ? '待审分页' : '会话分页'}>
               <span aria-live="polite">
                 共 {list.total} {review ? '项' : '段'} · {page} /{' '}
