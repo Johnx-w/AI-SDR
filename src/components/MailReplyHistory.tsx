@@ -167,6 +167,7 @@ export function MailReplyHistory({ revision }: { revision: number }) {
                             tab: 'inbox',
                             thread: r.threadId,
                             mailboxId: r.mailboxId,
+                            ...(r.kind === 'reply' ? { hasReply: '1' } : {}),
                           })
                         }
                       >
