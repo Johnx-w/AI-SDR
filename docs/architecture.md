@@ -1,8 +1,8 @@
 # 架构与运行
 
-当前口径：2026-11-11。React／TypeScript 网页通过同源 Node.js HTTP 接口操作后端，业务执行不依赖开发用 MCP 或 Codex OAuth。阿里云服务器持久库采用 Node.js 内置 SQLite，修改先写数据库，再由后台每分钟同步飞书，包含 T2 当前评级和 T12 当前评估；当前为单用户、单进程版本。
+架构基线记录于 2026-11-11，邮件工作区与素材库更新于 2026-11-22。React／TypeScript 网页通过同源 Node.js HTTP 接口操作后端，业务执行不依赖开发用 MCP 或 Codex OAuth。阿里云服务器持久库采用 Node.js 内置 SQLite，修改先写数据库，再由后台每分钟同步飞书，包含 T2 当前评级和 T12 当前评估；当前为单用户、单进程版本。
 
-业务行为分别见 [获客](acquisition.md)、[客户与产品数据](customer-data.md)、[评分](assessment.md)、[邮件沟通](outreach-first-touch.md)。[AI 业务员设计](ai-sales-agent-design.md) 区分已实现的首封追信与待实现的来信自动接待。
+业务行为分别见 [获客](acquisition.md)、[客户与产品数据](customer-data.md)、[评分](assessment.md)、[邮件沟通](outreach-first-touch.md)。按邮箱选材、审核、自动接待和回退流程见[多邮箱销售邮件](mail-automation/README.md)。
 
 2026-11-10 已完成本地实现：删除采购需求及重复沟通记录的手工界面，任务页只读；后台复用邮件证据和关联，接通 T1 自动整理与首封未回复追信。云端以实际部署为准。详见 [ADR-0025](adr/0025-automatic-business-records-with-read-only-followups.md)。
 
@@ -31,20 +31,20 @@
 
 以下列出接口入口和关键约束，字段以对应 server 路由及现有测试为准。
 
-| 范围       | 入口与用途                                                                                                                          |
-| ---------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| 健康与连接 | GET /api/health；GET／PUT /api/v1/connections                                                                                       |
-| 获客       | /api/v1/acquisition 下的 status、locations、products、search-preview、jobs、schedules                                               |
-| 批量任务   | GET／POST /jobs，GET /jobs/:id，POST /jobs/:id/stop、resume                                                                         |
-| 定时计划   | GET／POST /schedules，POST /schedules/:id/pause、resume、close                                                                      |
-| 客户读取   | GET /api/v1/leads/real/list、/:id、/metrics；POST /api/v1/leads/real/refresh；GET /api/v1/leads/real 用于完整快照／导出兼容         |
-| 评估与补充 | GET /api/v1/assessments/rules；GET／POST /api/v1/leads/real/:id/assessments、supplements                                            |
-| 产品资料   | GET／POST／PUT /api/v1/products/knowledge；POST /api/v1/products/knowledge/:id/sync                                                 |
-| 产品原文件 | GET／POST /api/v1/products/knowledge/:id/documents；GET /:documentId/file；POST /:documentId/extract（后两项接在 documents 路径下） |
-| 客户业务   | GET /api/v1/business 及 schema、conversations、messages、demands、tasks；POST /sync；旧手工写入、任务 preflight/action 返回 405     |
-| 邮件       | /api/v1/outreach 下的邮箱、计划、会话和发送记录；会话提供 sync、read、draft 和 reply                                                |
+| 范围       | 入口与用途                                                                                                                              |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| 健康与连接 | GET /api/health；GET／PUT /api/v1/connections                                                                                           |
+| 获客       | /api/v1/acquisition 下的 status、locations、products、search-preview、jobs、schedules                                                   |
+| 批量任务   | GET／POST /jobs，GET /jobs/:id，POST /jobs/:id/stop、resume                                                                             |
+| 定时计划   | GET／POST /schedules，POST /schedules/:id/pause、resume、close                                                                          |
+| 客户读取   | GET /api/v1/leads/real/list、/:id、/metrics；POST /api/v1/leads/real/refresh；GET /api/v1/leads/real 用于完整快照／导出兼容             |
+| 评估与补充 | GET /api/v1/assessments/rules；GET／POST /api/v1/leads/real/:id/assessments、supplements                                                |
+| 素材管理   | `/api/v1/materials` 负责分页筛选、上传、批量管理、审核和版本；产品主键延用现有知识库                                                    |
+| 素材原件   | `/api/v1/materials/:id/document/:documentId` 读取原件，`/rows` 分页读取工作簿；`/:id/versions` 上传新版本                               |
+| 客户业务   | GET /api/v1/business 及 schema、conversations、messages、demands、tasks；POST /sync；旧手工写入、任务 preflight/action 返回 405         |
+| 邮件       | `/api/v1/outreach` 下的 `mailboxes`、`mailbox-tags`、`campaigns`、`sequences`、`conversations`、`reception`、`reply-history` 及发送台账 |
 
-新增业务操作使用持久幂等编号；编辑核对当前版本。旧评估历史重试返回 410；旧固定邮箱试点 /api/v1/mail/\*、已移除搜索词生成接口返回 404。邮件读取／同步不自动回复，也不修改原邮箱已读；人工回信由 reply 入口单独发送。
+新增业务操作使用持久幂等编号；编辑核对当前版本。旧评估历史重试返回 410；旧固定邮箱试点 /api/v1/mail/\*、已移除搜索词生成接口返回 404。查看收件箱只读取缓存。正常业务服务同步新来信后按邮箱策略登记接待、生成草稿或自动回复，人工发送走 reply 入口。实数查看实例使用独立的只读 IMAP 同步路径，停用发信及自动接待。
 
 `POST /api/v1/outreach/campaigns/:id/follow-ups` 接受 enable、disable、pause、resume，在所属计划控制追信。独立 `outreach_followups` 表与首封共用 SQLite 和邮箱限额；首封成功入账与创建两次安排在同一事务完成，已完成首封计划仍可继续追信。每分钟后台收信，发送前再次完整核对，记录失败只补记录；旧人工任务不进入执行器。
 
@@ -63,29 +63,29 @@ T1/T3 与独立 T4 目标分别同步，共享同一份去重日志，避免多�
 3. **请求轮询。** 同一筛选条件的后台刷新复用在途请求或等请求结束后再发，不让通用状态刷新中止列表请求。用超过一个刷新周期的响应复测加载、筛选切换和迟到结果，确认旧请求不会覆盖当前页面。
 4. **耗时验收。** 使用与线上体量和大字段分布相近的脱敏数据，用实际页面入口或 API 重复测量首屏、最慢筛选和后续页。记录数据规模、耗时中位数、最慢一次及响应大小，分别观察冷启动和正常运行。改动前后使用同一数据及条件，确认结果正确且查询没有可复现的耗时退化。发布后再用同一提交抽查线上只读接口，同时核对返回结果、状态码和耗时。
 
-四个常用页面可用 `npm run build`、`node scripts/benchmark-page-opens.mjs` 复测。脚本在独立临时库生成 1,111 家客户、1,203 条业务消息、41 个计划及 1,203 条含大字段的发送记录，不使用真实账号。设置 `PLAYWRIGHT_MODULE` 为已安装 Playwright（或 playwright-core）的入口文件并备有 Chromium 时，同一脚本还会以 40 ms 网络延迟、10 Mbps 下行测硬加载和站内点击，到真实数据行／指定档案绘制为止，超出 700 ms 即失败。接口计时不等于浏览器耗时；云端达标需在部署后独立验证。
+客户库、客户档案、邮箱管理、触达计划、收件箱、跟进序列可用 `npm run build`、`node scripts/benchmark-page-opens.mjs` 复测。脚本在独立临时库生成 1,111 家客户、1,203 条业务消息、41 个计划及 1,203 条含大字段的发送记录，不使用真实账号。设置 `PLAYWRIGHT_MODULE` 为已安装 Playwright（或 playwright-core）的入口文件并备有 Chromium 时，同一脚本还会以 40 ms 网络延迟、10 Mbps 下行测硬加载和站内点击，到真实数据行／指定档案绘制为止，超出 700 ms 即失败。接口计时不等于浏览器耗时；云端达标需在部署后独立验证。
 
-客户库、客户档案、当前触达计划与发送记录的同源直接导航，使用同一套页面组件和本地 SQLite 数据生成首屏 HTML，再由浏览器接管交互。首屏含客户数据，不允许缓存；跨站、嵌入和维护期间只提供静态外壳。浏览器端继续按原接口更新。后台计划准备按客户查历史发送；额度和镜像统计只读发送状态、账号及时间，不反复载入历史邮件正文。
+客户库、客户档案、当前触达计划与邮箱管理的同源直接导航，使用同一套页面组件和本地 SQLite 数据生成首屏 HTML，再由浏览器接管交互。首屏含客户数据，不允许缓存；跨站、嵌入和维护期间只提供静态外壳。浏览器端继续按原接口更新。后台计划准备按客户查历史发送；额度和镜像统计只读发送状态、账号及时间，不反复载入历史邮件正文。
 
 后台收信每轮按邮箱构建客户邮件地址映射，不逐会话重读客户档案或导入历史发送；重复消息通过账号与原始邮件编号核对，仍拒绝冲突归属。逐会话处理之间让出事件循环，使前台读取不必等待整批同步结束。
 
 首次打开内嵌样式；浏览器实际载入带指纹的样式文件后，后续首屏复用静态缓存，不重复传输整份样式。标记只含公开的样式文件名，客户数据仍不落浏览器磁盘缓存。接管交互时复用同一次首屏查询结果，筛选、手动刷新、恢复可见及定时读取继续按原接口运行。历史导入只为新增编号匹配研究证据；已有客户继续核对顺序、修复旧摘要，保留本地档案修改。
 
-在同一标签页内返回触达计划或发送记录时，先显示内存中最近读取且与当前筛选、页码一致的一页，同时向服务器核对更新。进入 API 连接设置后清除这两页，重新打开标签页也会重新读取。总览、客户库或沟通中心首次可见后，后台预读尚未打开的默认第一页，范围限于 8 个客户摘要、20 个计划和 20 条发送记录。鼠标移入或键盘聚焦客户行时按编号预读该客户本地档案，点击沿用同一请求。浏览器支持 Brotli 时，较大的列表与档案 JSON 压缩传输。
+在同一标签页内返回触达计划时，先显示内存中最近读取且与当前筛选、页码一致的一页，同时向服务器核对更新。进入 API 连接设置后清除计划缓存，重新打开标签页也会重新读取。总览、客户库或沟通中心首次可见后，后台预读尚未打开的默认第一页，范围限于 8 个客户摘要及 20 个计划。鼠标移入或键盘聚焦客户行时按编号预读该客户本地档案，点击沿用同一请求。浏览器支持 Brotli 时，较大的列表与档案 JSON 压缩传输。
 
 客户列表后台预读可在分页查询中指定 `include=dossiers`。SQLite 用相同筛选、排序和分页读取当前最多 8 份完整档案。页面只保留当前页匹配编号和版本的预读结果，普通列表、轮询和首屏 HTML 仍只带摘要；单条读取与后台预读采用相同的资料修正及开发状态。四个页面的公网打开目标为 1.5 秒，同时记录首次打开和已读后的返回耗时。
 
 前端静态 JS 和 CSS 在 Vite 写出最终文件后生成 Brotli 副本。构建回归测试覆盖首页懒加载及其样式，并逐字节比对解压内容。修复前的入口曾使用长期缓存，修复版使用新的带指纹入口地址，用户正常打开首页即可获取。
 
-### 上传图纸与产品规格
+### 素材库
 
-先在产品资料库保存产品草稿，再在「查看 / 编辑」上传 PDF、PNG/JPG，单文件最多 10 MB，每个产品最多保留 20 份原文件。同一产品上传相同内容会返回已有文件；不同内容作为独立文件保留，SHA-256、文件名和上传时间可供核对，不覆盖旧原文件。
+从 `/materials` 上传原件，新素材直接进入待审核。XLSX、DOCX、Markdown 和 TXT 由本地解析。PDF 和图片可核对原件，也可显式提取候选。视频可按时间点人工校对。上传新版本、恢复历史版本及撤回均保留原版本轨迹。[素材操作与验收](mail-automation/README.md#素材库与业务员操作)
 
 在 API 连接的「产品资料 · 图纸与规格识别」填写 `DOCUMENT_MODEL_BASE_URL`、`DOCUMENT_MODEL_API_KEY`、`DOCUMENT_MODEL_MODEL`。服务须支持 Responses API、图片/PDF 输入及 JSON Schema 输出；基础地址包括服务商所需的 `/v1`（例如 `https://api.openai.com/v1`）。本功能不自动借用企业研究模型。文件输入协议参见 [OpenAI File inputs](https://developers.openai.com/api/docs/guides/file-inputs) 和 [Images and vision](https://developers.openai.com/api/docs/guides/images-vision)。
 
 上传只写入本地库；用户点击 AI 提取才将原文件发送到已配置的模型服务。AI 结果单独保存为候选，保留页序号、位置、模型和提取时间。模糊标注及不确定归属列为提示；价格、MOQ、交期等需人工另行填写并沿用其适用条件和有效期规则。超过 60 条参数的文件应拆分，不能视为完整提取。网络失败、截断或无效输出不改动产品资料，原文件保留，可重试；成功结果重试直接复用。
 
-用户下载原文件核对，编辑候选后点「加入待审核参数」，再保存草稿或审核。仅纳入产品记录的参数参与原有审核与版本流程；上传及提取本身不产生产品事实或发送权限。已审核内容或所关联原文件改变后退回待审核，需再次审核。产品的 `documentIds` 只能引用本产品的文件；原文件不会自动成为邮件附件。此功能只打通资料准备，自动回信运行链路仍按 ADR-0019 待实现。后续接待只能读取已审核、生效的产品资料，不能读取候选结果作为供货事实。
+在「原件与校对」保存带位置的校对结果，填写审核人并审核通过。资料变更后按新版本审核。邮箱只能选择本站有效资料作为回复依据。原文件保存在资料库，回复按所选来源生成，不自动附加原件。
 
 原文件二进制和候选结果存放在产品资料 SQLite 的 `product_documents` 表，与产品资料一起备份；适用的通用飞书镜像仅保存原文件编号，不上传私有图纸。领导原 T5 已停止接收网页产品资料镜像，见 [产品数据边界](customer-data.md#业务表和数据归属)。首版不解析 CAD，也不建立向量库。
 
