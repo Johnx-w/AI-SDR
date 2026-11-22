@@ -10,12 +10,12 @@ import { OutreachMailboxes } from '../server/outreach-mailboxes.mjs';
 import { OutreachService } from '../server/outreach-service.mjs';
 
 // Measure the visible glyphs in the message, including when the HTML body lives in a sandboxed iframe.
-function visibleReplyLines(viewer) {
+function visibleReply(viewer) {
   const frame = viewer.querySelector('iframe');
   const root = frame
     ? frame.contentDocument?.body
     : viewer.querySelector('.mail-conversation-body');
-  if (!root) return 0;
+  if (!root) throw new Error('邮件正文未加载');
   const pane = viewer.closest('.inbox-thread-scroll').getBoundingClientRect();
   const bounds = (frame || root).getBoundingClientRect();
   const left = Math.max(0, pane.left, bounds.left),
@@ -46,7 +46,13 @@ function visibleReplyLines(viewer) {
         lines.add(Math.round(y));
     }
   }
-  return lines.size;
+  return {
+    lines: lines.size,
+    paneWidth: Math.round(pane.width),
+    paneHeight: Math.round(pane.height),
+    bodyWidth: Math.round(right - left),
+    bodyHeight: Math.round(bottom - top),
+  };
 }
 
 function completeListRows(list) {
@@ -275,7 +281,9 @@ try {
     .getByRole('region', { name: '邮件会话详情' })
     .getByText(first.bodyText, { exact: true })
     .waitFor();
-  await page.getByRole('link', { name: '邮箱设置' }).click();
+  const contact = page.getByRole('complementary', { name: '联系人及接待设置' });
+  if (!(await contact.isVisible())) await button('联系人资料').click();
+  await contact.getByRole('link', { name: '邮箱设置' }).click();
   await label('发件邮箱').waitFor();
   assert.equal(await label('发件邮箱').inputValue(), box.email);
   await close();
@@ -379,7 +387,6 @@ try {
     await messageBody.getByRole('heading', { name: first.subject, exact: true }).count(),
     1,
   );
-  const contact = page.getByRole('complementary', { name: '联系人及接待设置' });
   const contactWasClosed = !(await contact.isVisible());
   if (contactWasClosed) await button('联系人资料').click();
   await contact.getByText('负责人 · QA', { exact: true }).waitFor();
@@ -601,8 +608,13 @@ try {
   await service.conversations.sync({ mailboxId: box.id });
   assert.equal(service.conversations.syncState(box).error, null);
   const layoutResults = [];
-  for (const width of [1397, 541]) {
-    await page.setViewportSize({ width, height: 773 });
+  const readingViewports = [
+    { width: 1600, height: 900, minBodyWidth: 900, minBodyHeight: 395 },
+    { width: 1397, height: 773, minBodyWidth: 775, minBodyHeight: 368 },
+    { width: 541, height: 773, minBodyWidth: 465, minBodyHeight: 460 },
+  ];
+  for (const { width, height, minBodyWidth, minBodyHeight } of readingViewports) {
+    await page.setViewportSize({ width, height });
     await page.goto(
       base + '/inbox?' + new URLSearchParams({ tab: 'inbox', mailboxId: box.id, hasReply: '1' }),
     );
@@ -610,31 +622,64 @@ try {
     const selectedRow = rows.getByRole('button', { name: /Panel request dealer-25/ });
     await selectedRow.waitFor();
     assert.equal(await page.locator('.mail-sync-summary').getAttribute('open'), null);
+    const narrow = width === 541;
+    const pageTitle = page.locator('.page-heading h1');
+    if (narrow) {
+      await pageTitle.waitFor();
+      await tab('收件箱').waitFor();
+      assert.equal(await button('有回复').getAttribute('aria-pressed'), 'true');
+    }
     const completeRows = await rows.evaluate(completeListRows);
     await selectedRow.click();
     const viewer = page.locator('.inbox-message[open] .mail-body-viewer');
     await viewer.frameLocator('iframe').getByText(longReply[0], { exact: true }).waitFor();
-    const htmlLines = await viewer.evaluate(visibleReplyLines);
+    if (narrow) {
+      await pageTitle.waitFor({ state: 'hidden' });
+      assert.equal(await tab('收件箱').isVisible(), false);
+      assert.equal(await rows.isVisible(), false);
+    }
+    const html = await viewer.evaluate(visibleReply);
+    assert.equal(await contact.isVisible(), false, '正常进入会话时保留完整阅读宽度');
     await viewer.getByRole('button', { name: '纯文本' }).click();
     await viewer.locator('.mail-conversation-body').waitFor();
-    const textLines = await viewer.evaluate(visibleReplyLines);
+    const plain = await viewer.evaluate(visibleReply);
+    await button('联系人资料').click();
+    await contact.getByText('负责人 · QA', { exact: true }).waitFor();
+    if (narrow) await page.keyboard.press('Escape');
+    else await button('关闭联系人资料').click();
+    await contact.waitFor({ state: 'hidden' });
+    assert.equal(await button('联系人资料').getAttribute('aria-expanded'), 'false');
+    assert.equal((await viewer.evaluate(visibleReply)).paneWidth, plain.paneWidth);
     await viewer.getByRole('button', { name: '原邮件' }).click();
     await viewer.frameLocator('iframe').getByText(longReply[0], { exact: true }).waitFor();
     const back = button('返回会话列表');
-    if (await back.isVisible()) await back.click();
+    if (narrow) {
+      await back.click();
+      await pageTitle.waitFor();
+      await tab('收件箱').waitFor();
+      assert.equal(await label('筛选会话邮箱').inputValue(), box.id);
+      assert.equal(await button('有回复').getAttribute('aria-pressed'), 'true');
+    }
     await rows.getByRole('button', { name: /Panel request dealer-24/ }).click();
     await page
       .locator('.inbox-message[open] .mail-conversation-body')
       .getByText('Please quote 72 mm panels for dealer-24', { exact: true })
       .waitFor();
-    if (await back.isVisible()) await back.click();
+    if (narrow) await back.click();
     await rows.waitFor();
-    layoutResults.push({ width, height: 773, completeRows, htmlLines, textLines });
+    const result = { width, height, completeRows, html, plain };
+    for (const body of [html, plain]) {
+      assert.ok(
+        body.bodyWidth >= minBodyWidth && body.bodyHeight >= minBodyHeight,
+        JSON.stringify(result),
+      );
+    }
+    layoutResults.push(result);
   }
   console.log('首屏度量', JSON.stringify(layoutResults));
   for (const result of layoutResults) {
     assert.ok(result.completeRows >= 4, JSON.stringify(result));
-    assert.ok(result.htmlLines >= 13 && result.textLines >= 10, JSON.stringify(result));
+    assert.ok(result.html.lines >= 13 && result.plain.lines >= 10, JSON.stringify(result));
   }
   readerFails = true;
   await button('同步邮件').click();

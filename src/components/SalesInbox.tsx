@@ -163,6 +163,7 @@ export function SalesInbox({
   const loadedFilter = useRef(filterKey);
   const mounted = useRef(true);
   const workspace = useRef<HTMLDivElement>(null);
+  const openedRow = useRef<HTMLButtonElement | null>(null);
   const selected = useRef<string | null>(initialThread || null);
   const linkedThread = useRef(initialThread);
   const selectConversation = useCallback((id: string | null) => {
@@ -172,6 +173,17 @@ export function SalesInbox({
     setDetail(null);
     setDetailError('');
   }, []);
+  function backToList() {
+    selectConversation(null);
+    requestAnimationFrame(() => {
+      const row = openedRow.current?.isConnected
+        ? openedRow.current
+        : workspace.current?.querySelector<HTMLButtonElement>(
+            '.mail-conversation-row, .inbox-scopes button',
+          );
+      row?.focus({ preventScroll: true });
+    });
+  }
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -550,7 +562,10 @@ export function SalesInbox({
                     key={review ? thread.id + '-' + index : thread.id}
                     className={`mail-conversation-row ${selectedId === thread.id ? 'selected' : ''} ${thread.unread ? 'unread' : ''}`}
                     aria-pressed={selectedId === thread.id}
-                    onClick={() => selectConversation(thread.id)}
+                    onClick={(event) => {
+                      openedRow.current = event.currentTarget;
+                      selectConversation(thread.id);
+                    }}
                   >
                     <span className="mail-conversation-row-top">
                       <InboxAvatar
@@ -656,7 +671,7 @@ export function SalesInbox({
             key={shownDetail.conversation.id}
             detail={shownDetail}
             identity={identity || undefined}
-            onBack={() => selectConversation(null)}
+            onBack={backToList}
             marking={marking}
             onRead={() => void markRead(shownDetail.conversation)}
             onRefresh={() => setDetailRevision((n) => n + 1)}
@@ -698,7 +713,7 @@ export function SalesInbox({
                 type="button"
                 className="mail-conversation-back inbox-icon"
                 aria-label="返回会话列表"
-                onClick={() => selectConversation(null)}
+                onClick={backToList}
               >
                 <ArrowLeft size={16} />
               </button>

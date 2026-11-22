@@ -259,12 +259,23 @@
   --inbox-canvas: #f5f6fa;
   --inbox-lavender: #eff1ff;
   color: var(--color-text);
-  --inbox-list-width: clamp(300px, 28%, 360px);
+  --inbox-list-width: clamp(280px, 23%, 324px);
   font-size: 15px;
   line-height: 1.5;
 }
 main:has(> .outreach-page #outreach-panel-inbox) {
   padding-top: 12px;
+}
+#outreach-panel-inbox {
+  margin-inline: -12px;
+}
+@media (min-width: 1101px) {
+  .outreach-page:has(> #outreach-panel-inbox) > .page-heading > div:first-child {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 16px;
+  }
 }
 .outreach-page:has(> #outreach-panel-inbox) > .page-heading {
   margin-bottom: 8px;
@@ -295,6 +306,12 @@ main:has(> .outreach-page #outreach-panel-inbox) {
     grid-row: 1;
     width: auto;
   }
+  .outreach-page:has(#outreach-panel-inbox .has-selection) > :is(.page-heading, .outreach-tabs) {
+    display: none;
+  }
+  main:has(#outreach-panel-inbox .has-selection) {
+    padding-top: 4px;
+  }
 }
 .sales-inbox button,
 .sales-inbox input,
@@ -314,8 +331,10 @@ main:has(> .outreach-page #outreach-panel-inbox) {
   background: #fff;
   box-shadow: none;
 }
-.mail-conversations-workspace:has(.inbox-contact:not([data-contact='hide'])) {
-  grid-template-columns: var(--inbox-list-width) minmax(0, 1fr) clamp(232px, 20%, 288px);
+@container mail-center (min-width: 1500px) {
+  .mail-conversations-workspace:has(.inbox-contact:not([hidden])) {
+    grid-template-columns: var(--inbox-list-width) minmax(0, 1fr) 288px;
+  }
 }
 .mail-conversation-list,
 .mail-conversation-detail,
@@ -722,6 +741,20 @@ main:has(> .outreach-page #outreach-panel-inbox) {
   margin-left: auto;
   flex: none;
 }
+.inbox-tool-end .inbox-contact-toggle span {
+  display: none;
+}
+@container mail-reader (min-width: 640px) {
+  .inbox-tool-end .inbox-contact-toggle {
+    width: auto;
+    padding-inline: 8px;
+    gap: 5px;
+  }
+  .inbox-tool-end .inbox-contact-toggle span {
+    display: inline;
+    font-size: 13px;
+  }
+}
 .mail-conversation-back {
   display: none;
 }
@@ -956,7 +989,7 @@ main:has(> .outreach-page #outreach-panel-inbox) {
   gap: 4px;
   min-height: 32px;
 }
-.inbox-contact[data-contact='hide'] {
+.inbox-contact[hidden] {
   display: none;
 }
 .mail-reception-controls {
@@ -1268,15 +1301,8 @@ main:has(> .outreach-page #outreach-panel-inbox) {
   outline: 2px solid var(--color-primary);
   outline-offset: -2px;
 }
-@container mail-center (max-width: 1139px) {
-  .mail-conversations-workspace,
-  .mail-conversations-workspace:has(.inbox-contact:not([data-contact='hide'])) {
-    grid-template-columns: clamp(272px, 32%, 336px) minmax(0, 1fr);
-  }
-  .inbox-contact {
-    display: none;
-  }
-  .inbox-contact[data-contact='show'] {
+@container mail-center (width < 1500px) {
+  .inbox-contact:not([hidden]) {
     position: absolute;
     inset: 0 0 0 auto;
     z-index: 7;
@@ -1294,8 +1320,7 @@ main:has(> .outreach-page #outreach-panel-inbox) {
   .mail-reply-panel[data-empty]:not(:focus-within) .inbox-send-status {
     max-width: 100%;
   }
-  .mail-conversations-workspace,
-  .mail-conversations-workspace:has(.inbox-contact:not([data-contact='hide'])) {
+  .mail-conversations-workspace {
     grid-template-columns: minmax(0, 1fr);
   }
   .mail-conversations-workspace.has-selection > .mail-conversation-list,
@@ -1336,13 +1361,11 @@ main:has(> .outreach-page #outreach-panel-inbox) {
 }
 @container mail-center (max-width: 479px) {
   .inbox-thread-tools {
-    display: grid;
-    grid-template-columns: 36px minmax(0, 1fr);
-    gap: 0 6px;
-    padding-block: 4px;
+    min-height: 48px;
+    gap: 2px;
   }
   .inbox-tool-end {
-    grid-column: 1 / -1;
+    gap: 0;
   }
   .inbox-thread-title {
     display: -webkit-box;
@@ -1363,18 +1386,6 @@ main:has(> .outreach-page #outreach-panel-inbox) {
 }
 @media (max-height: 719px) {
   @container mail-center (max-width: 759px) {
-    .inbox-thread-tools:not(:has(.inbox-thread-title:focus)) {
-      display: flex;
-      min-height: 44px;
-      padding-block: 0;
-    }
-    .inbox-thread-tools:not(:has(.inbox-thread-title:focus)) .inbox-thread-title {
-      display: block;
-      white-space: nowrap;
-    }
-    .inbox-tool-end {
-      gap: 0;
-    }
     .inbox-compose {
       max-height: 65%;
     }

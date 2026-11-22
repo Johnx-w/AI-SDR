@@ -240,10 +240,12 @@ try {
   assert.match(sent[0].text, /Material: Aluminium alloy/);
   await button('返回全部会话').click();
   await page.getByRole('button', { name: /Track material/ }).click();
+  await button('联系人资料').click();
   await button('人工接管').click();
   await button('恢复邮箱接待').click();
   await button('人工接管').waitFor();
   await page.reload();
+  await button('联系人资料').click();
   await button('人工接管').waitFor();
   assert.equal(crm.view().conversations[0].ownership, 'auto');
   assert.equal(crm.view().messages.length, 2);

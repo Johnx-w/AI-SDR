@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -273,7 +273,7 @@ export function InboxThread({
 }: ThreadProps) {
   const t = detail.conversation,
     wf = detail.workflow;
-  const [contact, setContact] = useState<boolean | null>(null),
+  const [contact, setContact] = useState(false),
     [noteMode, setNoteMode] = useState(false);
   const [later, setLater] = useState(false),
     [busy, setBusy] = useState(false),
@@ -307,7 +307,12 @@ export function InboxThread({
     } else sizeToggle.current?.focus({ preventScroll: true });
   }
   const noteAttempt = useRef<{ body: string; id: string } | null>(null);
-  const contactPanel = useRef<HTMLElement>(null);
+  const contactPanelId = useId();
+  const contactToggle = useRef<HTMLButtonElement>(null);
+  const contactClose = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (contact) contactClose.current?.focus({ preventScroll: true });
+  }, [contact]);
   const owner = detail.reception?.owner || identity?.owner;
   const subject = t.subject || '（无主题）';
   async function move(state: InboxFolder, hours?: number) {
@@ -342,8 +347,9 @@ export function InboxThread({
       setBusy(false);
     }
   }
-  function toggleContact() {
-    if (contactPanel.current) setContact(getComputedStyle(contactPanel.current).display === 'none');
+  function closeContact() {
+    setContact(false);
+    contactToggle.current?.focus({ preventScroll: true });
   }
   const title =
     [...detail.messages]
@@ -392,11 +398,7 @@ export function InboxThread({
   }, [t.id, latest]);
   return (
     <>
-      <section
-        className="mail-conversation-detail"
-        aria-label="邮件会话详情"
-        data-contact={contact === null ? 'auto' : contact ? 'show' : 'hide'}
-      >
+      <section className="mail-conversation-detail" aria-label="邮件会话详情">
         <div className="inbox-thread-tools">
           <button
             className="inbox-icon mail-conversation-back"
@@ -474,13 +476,17 @@ export function InboxThread({
               </>
             )}
             <button
-              className="inbox-icon"
+              className="inbox-icon inbox-contact-toggle"
+              ref={contactToggle}
               aria-label="联系人资料"
+              aria-controls={contactPanelId}
+              aria-expanded={contact}
               title="联系人资料"
               type="button"
-              onClick={toggleContact}
+              onClick={() => setContact(!contact)}
             >
               <PanelRight size={16} />
+              <span>联系人</span>
             </button>
           </div>
         </div>
@@ -591,19 +597,26 @@ export function InboxThread({
         </dialog>
       </section>
       <aside
-        ref={contactPanel}
+        id={contactPanelId}
         className="inbox-contact"
         aria-label="联系人及接待设置"
-        data-contact={contact === null ? 'auto' : contact ? 'show' : 'hide'}
+        hidden={!contact}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape' && !event.defaultPrevented) {
+            event.stopPropagation();
+            closeContact();
+          }
+        }}
       >
         <header>
           <ContactRound size={16} />
           <b>联系人</b>
           <button
             className="inbox-icon"
+            ref={contactClose}
             type="button"
             aria-label="关闭联系人资料"
-            onClick={() => setContact(false)}
+            onClick={closeContact}
           >
             <X size={14} />
           </button>
