@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { generateMailDraft } from '../server/mail-assisted-draft.mjs';
 import { OutreachService } from '../server/outreach-service.mjs';
 const peer = 'buyer@dealer.test';
 function harness(t, mode = 'auto') {
@@ -285,4 +286,174 @@ test('历史导入、系统回执、退信及退订不生成回信，接管恢�
   await h.sync();
   assert.equal(h.s.reception.list().total, 0);
   await assert.rejects(h.s.reception.ownership(threadId, 'resume'), /退订/);
+});
+
+test('手动或历史来信按当前邮箱匹配资料起草，保存来源及签名，发信须另行审核', async (t) => {
+  const h = harness(t, 'manual'),
+    box = h.s.mailboxes.get('own');
+  box.paused = true;
+  box.knowledgeProductIds = ['selected'];
+  h.s.answerQuestion = (sender, question) => {
+    assert.equal(sender.email, box.email);
+    assert.deepEqual(sender.knowledgeProductIds, ['selected']);
+    assert.match(question, /material/);
+    return {
+      sources: [
+        {
+          productId: 'selected',
+          documentId: 'sheet',
+          version: h.version,
+          field: 'Material',
+          ref: 'C8',
+          value: 'aluminium',
+        },
+      ],
+    };
+  };
+  h.incoming();
+  await h.sync();
+  const id = h.thread().id,
+    sourceId = h.s.conversations.detail(id).messages[0].id;
+  assert.equal(h.s.reception.row(sourceId), undefined);
+  const model = {
+    name: 'deepseek-flash',
+    generate: async (messages) => {
+      const data = JSON.parse(messages[1].content);
+      assert.deepEqual(data.evidence, [{ field: 'Material', value: 'aluminium' }]);
+      return JSON.stringify({ body: 'The material is aluminium.', sourceIndexes: [0] });
+    },
+  };
+  await assert.rejects(
+    generateMailDraft(
+      h.s,
+      id,
+      { sourceId, expectedRevision: 0 },
+      {
+        name: model.name,
+        generate: async () =>
+          JSON.stringify({ body: 'The material is titanium.', sourceIndexes: [0] }),
+      },
+    ),
+    { status: 502 },
+  );
+  const { draft } = await generateMailDraft(h.s, id, { sourceId, expectedRevision: 0 }, model);
+  assert.equal(draft.provenance.model, 'deepseek-flash');
+  assert.equal(draft.provenance.automatic, false);
+  assert.equal(draft.provenance.sources[0].ref, 'C8');
+  assert.match(draft.bodyText, /aluminium.*Sales office/s);
+  assert.equal(h.s.replies.operations(id).length, 0);
+  assert.equal(h.sends.length, 0);
+  await assert.rejects(
+    generateMailDraft(h.s, id, { sourceId, expectedRevision: draft.revision }, model),
+    { status: 409 },
+  );
+  box.paused = false;
+  h.version++;
+  await assert.rejects(async () => h.approve(draft), { status: 409 });
+  assert.equal(h.sends.length, 0);
+  h.version--;
+  await h.approve(draft);
+  assert.equal(h.sends.length, 1);
+});
+
+test('输入原信发生变化或生成期间有人工编辑，保留现稿且不投递', async (t) => {
+  const h = harness(t);
+  h.incoming();
+  await h.sync();
+  const id = h.thread().id,
+    sourceId = h.s.conversations.detail(id).messages[0].id;
+  let release;
+  const pending = new Promise((resolve) => {
+    release = resolve;
+  });
+  const model = { name: 'deepseek-flash', generate: () => pending };
+  const promised = generateMailDraft(h.s, id, { sourceId, expectedRevision: 0 }, model);
+  assert.equal(h.s.reception.row(sourceId).state, 'attention');
+  await h.s.reception.tick();
+  h.s.replies.saveDraft(id, {
+    replyToMessageId: sourceId,
+    expectedRevision: 0,
+    bodyText: 'My manual draft',
+  });
+  release(JSON.stringify({ body: 'What detail should we confirm?', sourceIndexes: [] }));
+  await assert.rejects(promised, { status: 409 });
+  assert.equal(h.s.replies.draft(id).bodyText, 'My manual draft');
+  assert.equal(h.sends.length, 0);
+  h.s.replies.deleteDraft(id, { revision: h.s.replies.draft(id).revision });
+  const changed = {
+    name: model.name,
+    generate: async () => {
+      h.now += 5000;
+      h.incoming({ inReplyTo: '<m1@dealer.test>' });
+      await h.sync();
+      return JSON.stringify({ body: 'Could you confirm the model?', sourceIndexes: [] });
+    },
+  };
+  await assert.rejects(generateMailDraft(h.s, id, { sourceId, expectedRevision: 0 }, changed), {
+    status: 409,
+  });
+  assert.equal(h.s.replies.draft(id), null);
+});
+
+test('无匹配资料时仅生成澄清草稿，拒绝虚假参数、越界品牌、伪造引用及模型缺失', async (t) => {
+  const h = harness(t, 'manual');
+  h.s.answerQuestion = () => ({ sources: [] });
+  h.incoming();
+  await h.sync();
+  const id = h.thread().id,
+    sourceId = h.s.conversations.detail(id).messages[0].id;
+  const input = { sourceId, expectedRevision: 0 };
+  await assert.rejects(generateMailDraft(h.s, id, input, null), { status: 503 });
+  for (const [body, sourceIndexes] of [
+    ['The material is aluminium.', []],
+    ['We can ship within 48 hours.', []],
+    ['What about Shuangsheng Shutter?', []],
+    ['What model?', [3]],
+  ]) {
+    await assert.rejects(
+      generateMailDraft(h.s, id, input, {
+        name: 'deepseek-flash',
+        generate: async () => JSON.stringify({ body, sourceIndexes }),
+      }),
+      { status: 502 },
+    );
+    assert.equal(h.s.replies.draft(id), null);
+  }
+  const { draft } = await generateMailDraft(h.s, id, input, {
+    name: 'deepseek-flash',
+    generate: async () =>
+      JSON.stringify({
+        body: 'Thank you for your inquiry. Could you clarify the model?',
+        sourceIndexes: [],
+      }),
+  });
+  assert.deepEqual(draft.provenance.sources, []);
+  assert.match(draft.provenance.reason, /没有引用产品资料/);
+  assert.equal(h.sends.length, 0);
+});
+
+test('非正常客户来信及停止联系不进入模型', async (t) => {
+  for (const classification of [
+    'unsubscribe',
+    'hard_bounce',
+    'auto_reply',
+    'complaint',
+    'unverified',
+  ]) {
+    const h = harness(t, 'manual');
+    h.incoming({ classification });
+    await h.sync();
+    const id = h.thread().id,
+      sourceId = h.s.conversations.detail(id).messages[0].id;
+    await assert.rejects(
+      generateMailDraft(
+        h.s,
+        id,
+        { sourceId, expectedRevision: 0 },
+        { name: 'deepseek-flash', generate: assert.fail },
+      ),
+      { status: 409 },
+    );
+    assert.equal(h.s.replies.draft(id), null);
+  }
 });

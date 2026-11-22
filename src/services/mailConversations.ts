@@ -60,6 +60,7 @@ export interface MailReplyAttachment {
   size: number;
   contentBase64: string;
 }
+
 export interface MailDraftContent {
   replyToMessageId: string;
   bodyHtml: string;
@@ -68,7 +69,13 @@ export interface MailDraftContent {
 }
 export interface MailReplyDraft extends MailDraftContent {
   edited?: boolean;
-  provenance?: { sources: ReplySource[] };
+  provenance?: {
+    sources: ReplySource[];
+    sourceId?: string;
+    generator?: 'model';
+    model?: string;
+    reason?: string;
+  };
   revision: number;
   updatedAt?: string;
 }
@@ -89,6 +96,7 @@ export interface MailReplyRecord {
   idempotencyKey?: string;
 }
 export interface MailReplyContext {
+  draftModel?: string | null;
   mailboxId: string;
   from: string;
   to: string;
@@ -218,6 +226,15 @@ export const mailConversationsApi = {
     return outreachApi<{ draft: MailReplyDraft | null }>(
       `/conversations/${encodeURIComponent(id)}/draft`,
       { signal },
+    );
+  },
+  generateDraft(id: string, sourceId: string, expectedRevision: number) {
+    return outreachApi<{ draft: MailReplyDraft }>(
+      `/conversations/${encodeURIComponent(id)}/generate-draft`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ sourceId, expectedRevision }),
+      },
     );
   },
   saveDraft(id: string, draft: MailDraftContent & { revision?: number }) {

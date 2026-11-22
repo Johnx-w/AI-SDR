@@ -15,6 +15,7 @@ const root = resolve('.codex-tmp');
 mkdirSync(root, { recursive: true });
 const dir = mkdtempSync(join(root, 'browser-')),
   env = {
+    DEEPSEEK_API_KEY: 'local-browser-fixture',
     PRODUCT_KNOWLEDGE_DB_PATH: join(dir, 'knowledge.sqlite'),
     OUTREACH_DB_PATH: join(dir, 'outreach.sqlite'),
     CONNECTIONS_PATH: join(dir, 'connections.json'),
@@ -80,11 +81,33 @@ const service = new OutreachService({
     await crm.saveConversation({ ...c, ownership, owner });
   },
 });
+let modelCalls = 0;
+let finishModel;
+const modelGate = new Promise((resolve) => {
+  finishModel = resolve;
+});
 const app = createApp({
   env,
   outreachServiceFactory: () => service,
-  fetchImpl: async () => {
-    throw Error('本验收仅使用本地测试数据');
+  fetchImpl: async (url, init) => {
+    assert.equal(
+      String(url),
+      'https://api.deepseek.com/chat/completions',
+      '本验收只允许本地模拟的起草请求',
+    );
+    modelCalls++;
+    const payload = JSON.parse(init.body);
+    assert.match(payload.model, /deepseek/i);
+    const data = JSON.parse(payload.messages.find((message) => message.role === 'user').content);
+    assert.equal(data.website, 'honeybadgerblinds.com');
+    const material = data.evidence.findIndex((source) => source.value === 'Aluminium alloy');
+    assert.ok(material >= 0, '应使用已校对的已选资料');
+    await modelGate;
+    const content = JSON.stringify({
+      body: 'The referenced track uses Aluminium alloy. What length do you need?',
+      sourceIndexes: [material],
+    });
+    return Response.json({ choices: [{ finish_reason: 'stop', message: { content } }] });
   },
 });
 await new Promise((r) => app.listen(0, '127.0.0.1', r));
@@ -227,6 +250,87 @@ try {
   assert.equal(service.reception.list().total, 0);
   assert.deepEqual(pageErrors, []);
   console.log('PASS 待审列表、原信及来源、批准一次、CRM 实际消息、人工接管、恢复与刷新回读');
+  // Historical mail in this isolated mailbox predates automatic reception.
+  const subject = 'Historical product specification';
+  service.conversations.putMessage(mailbox, {
+    identity: 'assist-incoming',
+    messageId: '<assist@dealer.test>',
+    direction: 'inbound',
+    from: peer,
+    to: me,
+    toAddresses: [me],
+    subject,
+    bodyText: 'What material is ZX-01 made of?',
+    source: 'imap',
+    deliveryStatus: 'received',
+    occurredAt: '2025-01-12T09:00:00Z',
+  });
+  const thread = service.conversations.list({ mailboxId: mailbox.id, q: subject }).items[0];
+  const source = service.conversations.messages(thread.id)[0];
+  const threadUrl =
+    base +
+    '/inbox?' +
+    new URLSearchParams({ tab: 'inbox', thread: thread.id, mailboxId: mailbox.id });
+  await page.goto(threadUrl);
+  const editor = label('回复正文'),
+    assist = button('AI起草');
+  await editor.waitFor();
+  for (const viewport of [
+    { width: 390, height: 667 },
+    { width: 1440, height: 1000 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await assist.waitFor();
+    assert.equal(await assist.innerText(), 'AI起草');
+  }
+  const manual = 'We are reviewing your request.';
+  await editor.fill(manual);
+  assert.ok(await assist.isDisabled());
+  await page.getByText('草稿已保存', { exact: true }).waitFor();
+  assert.match(service.replies.draft(thread.id).bodyText, /We are reviewing your request/);
+  await button('丢弃草稿').click();
+  const competing = 'Draft from the second browser.';
+  await page.waitForFunction(() => !document.querySelector('.inbox-draft-assist')?.disabled);
+  service.replies.saveDraft(thread.id, {
+    replyToMessageId: source.id,
+    bodyText: competing,
+    bodyHtml: competing,
+    attachments: [],
+  });
+  await assist.click();
+  await page.getByRole('alert').filter({ hasText: '已有草稿' }).waitFor();
+  assert.equal(await editor.innerText(), competing);
+  assert.equal(service.replies.draft(thread.id).bodyText, competing);
+  assert.equal(modelCalls, 0);
+  await button('丢弃草稿').click();
+  const sentBefore = sent.length;
+  await assist.click();
+  await page.locator('.inbox-draft-assist[aria-busy="true"]').waitFor();
+  assert.equal(await editor.isEditable(), false);
+  finishModel();
+  await page.getByText('AI草稿 · 待审核', { exact: true }).waitFor();
+  assert.match(await editor.innerText(), /Aluminium alloy/);
+  await page.getByText('查看回复依据 · 1', { exact: true }).click();
+  await page.getByText(/mail-specimen.xlsx.*规格!B2/).waitFor();
+  const composer = page.getByRole('region', { name: '回复邮件' });
+  assert.doesNotMatch(await composer.innerText(), /DeepSeek/i);
+  assert.equal(await composer.locator('[title*="deepseek" i]').count(), 0);
+  const generated = service.replies.draft(thread.id);
+  assert.equal(generated.replyToMessageId, source.id);
+  assert.equal(generated.provenance.generator, 'model');
+  assert.equal(generated.provenance.automatic, false);
+  assert.equal(generated.provenance.sources[0].value, 'Aluminium alloy');
+  await page.reload();
+  await page.getByText('AI草稿 · 待审核', { exact: true }).waitFor();
+  assert.match(await editor.innerText(), /Aluminium alloy/);
+  assert.ok(await assist.isDisabled());
+  assert.equal(modelCalls, 1);
+  assert.equal(sent.length, sentBefore);
+  assert.deepEqual(service.replies.operations(thread.id), []);
+  assert.deepEqual(pageErrors, []);
+  console.log(
+    'PASS 桌面及手机端 AI起草仅生成待审核草稿，保护已有/并发草稿，模型替身按已选资料引用，刷新后保留且未新增发信',
+  );
 } catch (e) {
   console.error(
     '测试收件处理',
@@ -240,6 +344,7 @@ try {
   }
   throw e;
 } finally {
+  finishModel();
   await browser?.close();
   await service.close();
   await new Promise((r) => app.close(r));

@@ -2,6 +2,7 @@ import { parseArgs } from 'node:util';
 import { existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { createApp } from '../server/app.mjs';
+import { mailDraftModel } from '../server/mail-draft-model.mjs';
 import { OutreachMailboxes } from '../server/outreach-mailboxes.mjs';
 import { syncReadonlyMail } from './sync-mail-readonly.mjs';
 
@@ -35,6 +36,13 @@ const app = createApp({
     throw new Error('本地资料与邮箱查看使用本地数据库');
   },
   localMailInspection: {
+    draftModel: mailDraftModel(
+      {
+        DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY,
+        DEEPSEEK_MODEL: process.env.DEEPSEEK_MODEL,
+      },
+      globalThis.fetch,
+    ),
     sync: async (accounts) => {
       const results = [];
       for (const { id } of accounts) {

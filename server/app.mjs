@@ -33,6 +33,7 @@ import { searchPlan } from './search-plan.mjs';
 import { OutreachMailboxes } from './outreach-mailboxes.mjs';
 import { OutreachService } from './outreach-service.mjs';
 import { handleOutreach } from './outreach-api.mjs';
+import { mailDraftModel } from './mail-draft-model.mjs';
 import { handleMaterials } from './materials-api.mjs';
 import { recordOutreachInBusiness } from './outreach-business.mjs';
 import { recordMailConversation } from './mail-conversation-business.mjs';
@@ -481,7 +482,9 @@ export function createApp({
             (request.method === 'PATCH' &&
               /^\/api\/v1\/outreach\/conversations\/[\w-]+\/workflow$/.test(url.pathname)) ||
             (request.method === 'POST' &&
-              /^\/api\/v1\/outreach\/conversations\/[\w-]+\/notes$/.test(url.pathname)) ||
+              /^\/api\/v1\/outreach\/conversations\/[\w-]+\/(?:notes|generate-draft)$/.test(
+                url.pathname,
+              )) ||
             (['PUT', 'DELETE'].includes(request.method) &&
               /^\/api\/v1\/outreach\/conversations\/[\w-]+\/draft$/.test(url.pathname)) ||
             /^\/api\/v1\/(?:materials(?:\/|$)|outreach\/(?:mailbox-tags(?:\/|$)|conversations\/[\w-]+\/read$|mailboxes\/[\w-]+\/preview$))/.test(
@@ -529,6 +532,9 @@ export function createApp({
               request,
               url,
               service: outreach(),
+              draftModel: localMailInspection
+                ? localMailInspection.draftModel
+                : mailDraftModel(connections.environment(), fetchImpl),
               localMailInspection: !!localMailInspection,
               readJson: (input) =>
                 readJson(

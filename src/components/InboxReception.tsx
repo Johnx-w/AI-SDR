@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { outreachApi } from '../outreachApi';
-import { ReplySources } from './ReplyPreview';
 import { mailConversationsApi, type MailConversationDetail } from '../services/mailConversations';
 
 export function ReceptionControls({
@@ -75,7 +74,6 @@ export function ReceptionControls({
           )}
       </div>
       {error && <p role="alert">{error}</p>}
-      {detail.draft?.provenance && <ReplySources sources={detail.draft.provenance.sources} />}
     </div>
   );
 }

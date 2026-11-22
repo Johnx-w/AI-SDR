@@ -8,11 +8,12 @@ export interface ReplySource {
   value: string;
   version: number;
 }
-export function ReplySources({ sources }: { sources: ReplySource[] }) {
-  if (!sources.length) return null;
+export function ReplySources({ sources, reason }: { sources: ReplySource[]; reason?: string }) {
+  if (!sources.length) return reason ? <p className="mail-source-reason">{reason}</p> : null;
   return (
     <details className="mail-conversation-source">
       <summary>查看回复依据 · {sources.length}</summary>
+      {reason && <p>{reason}</p>}
       {sources.map((s, i) => (
         <p key={i}>
           {s.file} · v{s.version} · {s.sheet && s.sheet + '!'}

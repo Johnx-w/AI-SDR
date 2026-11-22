@@ -275,6 +275,7 @@ export function InboxThread({
     [error, setError] = useState('');
   const [note, setNote] = useState(''),
     [replyTarget, setReplyTarget] = useState<{ id: string; request: number } | null>(null);
+  const [draftActionHost, setDraftActionHost] = useState<HTMLSpanElement | null>(null);
   const noteAttempt = useRef<{ body: string; id: string } | null>(null);
   const contactPanel = useRef<HTMLElement>(null);
   const owner = detail.reception?.owner || identity?.owner;
@@ -461,6 +462,7 @@ export function InboxThread({
                 内部备注
               </button>
             )}
+            <span className="inbox-draft-action-slot" hidden={noteMode} ref={setDraftActionHost} />
             {!noteMode && detail.replyContext?.signature && (
               <details className="inbox-signature">
                 <summary>签名</summary>
@@ -479,6 +481,7 @@ export function InboxThread({
           <div hidden={noteMode}>
             <MailReplyComposer
               key={editorVersion}
+              actionHost={draftActionHost}
               detail={detail}
               targetMessageId={replyTarget?.id}
               replyRequest={replyTarget?.request}

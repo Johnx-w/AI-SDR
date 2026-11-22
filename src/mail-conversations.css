@@ -423,6 +423,36 @@
   color: var(--color-primary-text);
 }
 .inbox-later,
+.inbox-draft-action-slot {
+  margin-left: auto;
+}
+.inbox-draft-action-slot + .inbox-signature {
+  margin-left: 0;
+}
+.inbox-draft-assist {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--color-primary-text);
+  font: inherit;
+  font-size: 13px;
+  padding: 4px;
+  white-space: nowrap;
+}
+.inbox-draft-assist:disabled {
+  color: var(--color-text-muted);
+}
+.mail-reply-panel :is(.mail-conversation-source, .mail-source-reason) {
+  margin: 4px 12px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.mail-reply-panel .mail-conversation-source summary {
+  cursor: pointer;
+  color: var(--color-primary-text);
+}
 .inbox-signature {
   position: relative;
 }

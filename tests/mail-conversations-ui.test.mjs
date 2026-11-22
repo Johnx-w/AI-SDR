@@ -309,15 +309,22 @@ test('draft operations remain separate from explicit reply sending and preserve 
   assert.equal(requests[2].init.method, 'DELETE');
   assert.deepEqual(JSON.parse(requests[2].init.body), { revision: 4 });
   assert.doesNotMatch(requests.map((request) => request.path).join(' '), /\/reply\b/);
+  await mailConversationsApi.generateDraft('thread/a', 'message-1', 0);
+  assert.equal(requests[3].path, '/conversations/thread%2Fa/generate-draft');
+  assert.equal(requests[3].init.method, 'POST');
+  assert.deepEqual(JSON.parse(requests[3].init.body), {
+    sourceId: 'message-1',
+    expectedRevision: 0,
+  });
   await mailConversationsApi.reply('thread/a', {
     ...content,
     draftRevision: 4,
     idempotencyKey: 'exact-operation-key',
   });
-  assert.equal(requests[3].path, '/conversations/thread%2Fa/reply');
-  assert.equal(requests[3].init.method, 'POST');
-  assert.equal(JSON.parse(requests[3].init.body).draftRevision, 4);
-  assert.equal(JSON.parse(requests[3].init.body).idempotencyKey, 'exact-operation-key');
+  assert.equal(requests[4].path, '/conversations/thread%2Fa/reply');
+  assert.equal(requests[4].init.method, 'POST');
+  assert.equal(JSON.parse(requests[4].init.body).draftRevision, 4);
+  assert.equal(JSON.parse(requests[4].init.body).idempotencyKey, 'exact-operation-key');
 });
 
 test('reply result separates SMTP acceptance, archive failure and unknown outcome without claiming recipient delivery', () => {

@@ -1,3 +1,4 @@
+import { guardAssistedDraft } from './mail-assisted-draft.mjs';
 import { createHash } from 'node:crypto';
 import { customerReplyText } from './communication-rounds.mjs';
 import { renderMailboxSignature, signaturePlainTextHtml } from '../src/domain/mail-signature.mjs';
@@ -193,6 +194,17 @@ export class MailReception {
       return '客户已由业务员接管或关闭会话';
     return '';
   }
+  hasLaterContact(detail, m) {
+    return detail.messages.some(
+      (other) =>
+        other.id !== m.id &&
+        timestamp(other) >= timestamp(m) &&
+        ((other.direction === 'outbound' && !this.isOwnSequenceMail(other.messageId)) ||
+          (other.direction === 'inbound' &&
+            other.classification !== 'auto_reply' &&
+            timestamp(other) > timestamp(m))),
+    );
+  }
   inspect(row, except = '', humanDraft = false) {
     const detail = this.s.conversations.detail(row.thread_id);
     const box = this.s.mailboxes.get(row.mailbox_id);
@@ -217,18 +229,7 @@ export class MailReception {
     }
     if (this.operation(row.thread_id, m.id, except))
       throw fail('本封来信已有回信提交，请核对原邮件');
-    if (
-      detail.messages.some(
-        (other) =>
-          other.id !== m.id &&
-          timestamp(other) >= timestamp(m) &&
-          ((other.direction === 'outbound' && !this.isOwnSequenceMail(other.messageId)) ||
-            (other.direction === 'inbound' &&
-              other.classification !== 'auto_reply' &&
-              timestamp(other) > timestamp(m))),
-      )
-    )
-      throw fail('会话已有更新的来信或发信');
+    if (this.hasLaterContact(detail, m)) throw fail('会话已有更新的来信或发信');
     return { box, detail, m };
   }
   answer(row, inspected) {
@@ -280,6 +281,8 @@ export class MailReception {
       (thread.customerId && this.s.customerMailState(thread.customerId).context?.doNotContact)
     )
       throw fail('客户已退订或停止联系');
+    if (draft.provenance?.generator === 'model')
+      return guardAssistedDraft(this.s, { id, source, draft, origin, key });
     const row = this.row(source);
     if (!row) return;
     const prior = this.operation(id, source, key);
@@ -362,6 +365,10 @@ export class MailReception {
     }
     const { box, m } = inspected;
     let draft = this.s.replies.draft(row.thread_id);
+    if (draft?.provenance?.generator === 'model') {
+      this.finish(source, 'attention', '会话中有待业务员处理的模型草稿');
+      return;
+    }
     if (
       draft &&
       (!draft.provenance || draft.edited) &&

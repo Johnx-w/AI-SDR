@@ -1,4 +1,5 @@
 import { listSequences, sequenceDetail } from './outreach-sequences.mjs';
+import { generateMailDraft } from './mail-assisted-draft.mjs';
 import { addInternalNote, threadWorkflow, updateThreadWorkflow } from './mail-thread-workflow.mjs';
 import { sequencePolicy, saveSequencePolicy } from './outreach-sequence-policy.mjs';
 
@@ -11,6 +12,7 @@ export async function handleOutreach({
   readJson,
   idempotencyKey,
   localMailInspection,
+  draftModel,
 }) {
   const path = url.pathname.slice('/api/v1/outreach'.length),
     method = request.method;
@@ -73,7 +75,7 @@ export async function handleOutreach({
   if (path === '/reception' && method === 'GET')
     return service.reception.list(Object.fromEntries(url.searchParams));
   const conversation = path.match(
-    /^\/conversations\/([\w-]+)(?:\/(read|draft|reply|ownership|regenerate|workflow|notes))?$/,
+    /^\/conversations\/([\w-]+)(?:\/(read|draft|reply|ownership|regenerate|generate-draft|workflow|notes))?$/,
   );
   if (conversation) {
     const [, id, action] = conversation;
@@ -90,6 +92,7 @@ export async function handleOutreach({
       );
       const recordIds = new Set(records.map((m) => m.id));
       const extras = service.replies.detailExtras(id);
+      extras.replyContext = { ...extras.replyContext, draftModel: draftModel?.name || null };
       if (localMailInspection && extras.replyContext.canReply)
         extras.replyContext = {
           ...extras.replyContext,
@@ -126,6 +129,8 @@ export async function handleOutreach({
     if (action === 'read' && method === 'POST')
       return service.conversations.markRead(id, (await readJson(request)).unread);
     if (action === 'draft' && method === 'GET') return { draft: service.replies.draft(id) };
+    if (action === 'generate-draft' && method === 'POST')
+      return generateMailDraft(service, id, await readJson(request), draftModel);
     if (action === 'draft' && method === 'PUT')
       return { draft: service.replies.saveDraft(id, await readJson(request)) };
     if (action === 'draft' && method === 'DELETE') {
