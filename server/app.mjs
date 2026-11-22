@@ -33,6 +33,7 @@ import { searchPlan } from './search-plan.mjs';
 import { OutreachMailboxes } from './outreach-mailboxes.mjs';
 import { OutreachService } from './outreach-service.mjs';
 import { handleOutreach } from './outreach-api.mjs';
+import { handleMaterials } from './materials-api.mjs';
 import { recordOutreachInBusiness } from './outreach-business.mjs';
 import { recordMailConversation } from './mail-conversation-business.mjs';
 import { validateContactEdit } from './lead-contacts.mjs';
@@ -112,6 +113,7 @@ export function createApp({
   nativeImpl,
   outreachServiceFactory,
   brandingOptions,
+  localMailInspection,
 } = {}) {
   const publicOrigin = env.PUBLIC_ORIGIN;
   if (publicOrigin) {
@@ -458,6 +460,26 @@ export function createApp({
         }
         apiRequests++;
         admitted = true;
+        if (localMailInspection && !['GET', 'HEAD'].includes(request.method)) {
+          if (request.method === 'POST' && url.pathname === '/api/v1/outreach/conversations/sync') {
+            const input = await readJson(request);
+            if (input?.mailboxId !== undefined && typeof input.mailboxId !== 'string')
+              throw new ApiError(400, '请选择有效邮箱');
+            const accounts = outreach().conversations.selected(input?.mailboxId || 'all');
+            const result = await localMailInspection.sync(accounts);
+            return json(response, 200, {
+              imported: result.reduce((n, item) => n + item.imported, 0),
+              mailboxes: outreach()
+                .mailboxes.list()
+                .map((box) => outreach().conversations.syncState(box)),
+            });
+          }
+          const localEdit =
+            /^\/api\/v1\/(?:materials(?:\/|$)|outreach\/(?:mailbox-tags(?:\/|$)|conversations\/[\w-]+\/read$|mailboxes\/[\w-]+\/preview$))/.test(
+              url.pathname,
+            );
+          if (!localEdit) throw new ApiError(403, '本次本地实数查看支持资料管理和只读收信。');
+        }
         if (url.pathname === '/api/v1/overview') {
           if (request.method !== 'GET') throw new ApiError(405, '总览仅支持读取');
           if (url.searchParams.get('summary') === 'reminders') {
@@ -486,7 +508,9 @@ export function createApp({
         if (url.pathname.startsWith('/api/v1/outreach/')) {
           const reply =
             request.method === 'GET' &&
-            ['/api/v1/outreach/state', '/api/v1/outreach/deliveries'].includes(url.pathname)
+            /^\/api\/v1\/outreach\/(?:state|reply-history|sequences(?:\/[\w-]+)?)$/.test(
+              url.pathname,
+            )
               ? pageJson
               : json;
           return await reply(
@@ -552,6 +576,19 @@ export function createApp({
           }
           throw new ApiError(405, '不支持的配置操作');
         }
+        if (url.pathname === '/api/v1/materials' || url.pathname.startsWith('/api/v1/materials/'))
+          return await handleMaterials({
+            request,
+            response,
+            url,
+            knowledge: knowledge(),
+            env: connections.environment(),
+            fetchImpl,
+            readJson,
+            json,
+            onChange: () => outbound?.refreshProductMaterials?.(),
+            sites: () => outreach().mailboxes.list(),
+          });
         if (url.pathname === '/api/v1/products/knowledge') {
           if (request.method === 'GET')
             return json(response, 200, {
@@ -1045,7 +1082,7 @@ export function createApp({
       const initialRoute =
         pathname === '/leads' ||
         (pathname === '/inbox' &&
-          ['campaigns', 'deliveries'].includes(url.searchParams.get('tab') || 'campaigns'));
+          ['campaigns', 'mailboxes'].includes(url.searchParams.get('tab') || 'mailboxes'));
       if (initialRoute) response.setHeader('Cache-Control', 'private, no-store');
       let rendered = false;
       if (
@@ -1079,20 +1116,15 @@ export function createApp({
               initial.detail = { ...detail, version, lead };
             }
           } else {
-            const tab = url.searchParams.get('tab');
-            const records = tab === 'deliveries';
-            const viewKey = ['deliveries', 'mailboxes', 'conversations', 'review'].includes(tab)
-              ? 'view=' + tab
-              : 'view=current&status=all&q=&page=1&pageSize=20';
+            const tab = url.searchParams.get('tab') || 'mailboxes';
+            const viewKey =
+              tab === 'mailboxes'
+                ? 'view=mailboxes'
+                : 'view=current&status=all&q=&page=1&pageSize=20';
             initial.outreach = {
               ...(await outreach().state(new URLSearchParams(viewKey))),
               viewKey,
             };
-            if (records)
-              initial.records = {
-                key: 'page=1&pageSize=20&group=all&q=',
-                data: outreach().listDeliveries(),
-              };
           }
           content = Buffer.from(
             await renderPage(url.pathname + url.search, initial, request.headers.cookie),
@@ -1170,6 +1202,7 @@ export function createApp({
     if (env.OUTREACH_DB_PATH || jobs().outreachJobs().length) outreach().start();
   };
   server.on('listening', () => {
+    if (localMailInspection) return;
     startBackground();
     maintenanceTimer = setInterval(startBackground, 1000);
     maintenanceTimer.unref();
