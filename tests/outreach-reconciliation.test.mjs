@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OutreachService } from '../server/outreach-service.mjs';
+import { saveSequencePolicy } from '../server/outreach-sequence-policy.mjs';
 import { handleOutreach } from '../server/outreach-api.mjs';
 
 const at = '2026-11-12T02:00:00.000Z';
@@ -132,6 +133,11 @@ test('首封结果未知时等待已发件证据，追信到期相对于实际�
   h.service.putDelivery(delivery('unknown', { followUpAtSubmission: true }));
   await h.service.reconcileDelivery('unknown');
   assert.equal(h.service.followUps.all().length, 0);
+  saveSequencePolicy(h.service, {
+    revision: 1,
+    name: '之后的首封',
+    steps: [{ day: 11, instruction: '确认需求' }],
+  });
   const actual = '2026-11-12T02:06:00.000Z';
   h.respond(batch([sent({ occurredAt: actual })]));
   await h.service.reconcileDelivery('unknown');

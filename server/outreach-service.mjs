@@ -1643,16 +1643,12 @@ export class OutreachService {
     }
     const pending = {
       ...d,
-      followUpAtSubmission:
-        latestCampaign.mode === 'production' && latestCampaign.followUpEnabled === true,
       status: 'sending',
       attemptedAt: iso(this.now),
       messageId: `<${d.id}@${m.email.split('@')[1]}>`,
     };
     const claimed = this.transaction(() => {
       if (this.delivery(d.id).status !== 'queued') return false;
-      if (pending.followUpAtSubmission)
-        pending.sequencePolicyRevision = this.followUps.policy().revision;
       this.putDelivery(pending);
       return true;
     });
@@ -1680,7 +1676,9 @@ export class OutreachService {
                 ? '客户数据来源已改变，邮件尚未提交发送'
                 : '') ||
               (c.mode === 'production' && this.materialReason(d, campaign)) ||
-              (campaign.status !== 'active' || campaign.revision !== c.revision
+              (campaign.status !== 'active' ||
+              campaign.revision !== c.revision ||
+              !this.acquisitionAllowed(campaign)
                 ? '计划已暂停或更新，邮件尚未提交发送'
                 : '') ||
               (c.mode === 'production' && campaign.approvedRevision !== c.revision
@@ -1694,6 +1692,15 @@ export class OutreachService {
                 : '');
             if (reason)
               throw Object.assign(fail(409, reason), { code: 'OUTREACH_PRE_SEND_BLOCKED' });
+            // Freeze the policy immediately before SMTP handoff, after transport setup.
+            this.transaction(() => {
+              pending.submittedAt = iso(this.now);
+              pending.followUpAtSubmission =
+                campaign.mode === 'production' && campaign.followUpEnabled === true;
+              if (pending.followUpAtSubmission)
+                pending.sequencePolicyRevision = this.followUps.policy().revision;
+              this.putDelivery(pending);
+            });
           },
         },
       );

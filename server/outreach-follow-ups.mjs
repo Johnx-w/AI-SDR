@@ -290,7 +290,7 @@ export class OutreachFollowUps {
           `SELECT 1 FROM mail_reply_operations WHERE conversation_id=? AND status IN ('sending','unknown','accepted')
       AND json_extract(data,'$.createdAt')>=? LIMIT 1`,
         )
-        .get(detail.conversation.id, first.sentAt)
+        .get(detail.conversation.id, first.submittedAt || first.sentAt)
     )
       return { status: 'cancelled', reason: '本会话已有回信提交，结束本轮追信' };
     const ownMessages = new Set(
@@ -303,8 +303,10 @@ export class OutreachFollowUps {
     );
     const later = detail.messages.filter(
       (m) =>
-        Date.parse(m.receivedAt || m.occurredAt) >= Date.parse(first.sentAt) &&
-        !ownMessages.has(m.messageId),
+        !ownMessages.has(m.messageId) &&
+        (Date.parse(m.receivedAt || m.occurredAt) >= Date.parse(first.sentAt) ||
+          ownMessages.has(m.inReplyTo) ||
+          m.references?.some((id) => ownMessages.has(id))),
     );
     if (
       later.some(

@@ -110,7 +110,8 @@ function harness(path = ':memory:') {
           boxes.find((box) => box.id === value.id),
           value,
         ),
-      send: async (id, mail) => {
+      send: async (id, mail, options) => {
+        options?.beforeSend?.();
         state.sent.push({ id, ...mail });
         if (state.error) throw state.error;
         return { accepted: [mail.to], messageId: mail.messageId };
