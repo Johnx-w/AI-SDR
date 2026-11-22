@@ -237,6 +237,20 @@ try {
     );
   });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
+  await page.setViewportSize({ width: 390, height: 667 });
+  const readingPane = page.locator('.inbox-thread-scroll');
+  await page.waitForFunction(
+    () => document.querySelector('.inbox-thread-scroll')?.clientHeight >= 150,
+  );
+  const idleReadingHeight = await readingPane.evaluate((element) => element.clientHeight);
+  await label('回复正文').focus();
+  await button('正文格式').waitFor();
+  assert.ok((await readingPane.evaluate((element) => element.clientHeight)) < idleReadingHeight);
+  const sendBounds = await page.locator('.inbox-compose footer .primary').boundingBox();
+  assert.ok(
+    sendBounds && sendBounds.y + sendBounds.height <= 667,
+    '短屏手机展开编辑后可看到发送按钮',
+  );
   await button('返回会话列表').click();
   await page.getByRole('button', { name: /QA accepted first email/ }).waitFor();
   const firstThreadId = linkedThread.get('thread');
