@@ -869,7 +869,7 @@ function CampaignEditor({
               name="followUpEnabled"
               defaultChecked={campaign ? campaign.followUpEnabled === true : true}
             />
-            首封未回复自动跟进（第3天、第7天）
+            按沟通中心的跟进序列自动跟进未回复客户
           </label>
         </div>
         <p className="outreach-hint">
@@ -2225,7 +2225,7 @@ export function OutreachCommunication({
                             ? '已暂停'
                             : '已开启'
                           : '未开启'}
-                        。开启后成功发送的首封，未获真人回复时于第3天、第7天各跟进一次。
+                        。开启后成功发送的首封将采用当时的跟进序列，在客户回信时停止。
                       </p>
                       <button
                         className="btn secondary"

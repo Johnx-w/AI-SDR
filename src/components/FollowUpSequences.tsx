@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { outreachApi, type OutreachDelivery, type OutreachMailbox } from '../outreachApi';
 import { Badge, Empty, Modal } from './ui';
 import { MailMessageBody } from './MailMessageBody';
+import { SequencePolicyPanel } from './SequencePolicy';
 
 interface Sequence {
   id: string;
@@ -24,11 +25,20 @@ interface Recipient {
   from: string;
   to: string;
   sentAt: string;
-  followUps: { step: number; status: string; dueAt: string; sentAt?: string; reason?: string }[];
+  followUps: {
+    day: number;
+    step: number;
+    instruction: string;
+    policyName: string;
+    status: string;
+    dueAt: string;
+    sentAt?: string;
+    reason?: string;
+  }[];
 }
 interface SequenceDetail {
   sequence: Sequence;
-  steps: { step: number; offsetHours: number }[];
+  steps: { step: number; day: number; offsetHours: number }[];
   items: Recipient[];
   page: number;
   pageSize: number;
@@ -153,7 +163,7 @@ function SequenceSteps({
 }) {
   const [data, setData] = useState<SequenceDetail | null>(null),
     [page, setPage] = useState(1),
-    [step, setStep] = useState(1),
+    [day, setDay] = useState(0),
     [rev, setRev] = useState(0),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false),
@@ -241,14 +251,14 @@ function SequenceSteps({
               <h3>邮件步骤</h3>
               {data.steps.map((item) => (
                 <button
-                  className={step === item.step ? 'selected' : ''}
-                  key={item.step}
-                  onClick={() => setStep(item.step)}
-                  aria-pressed={step === item.step}
+                  className={day === item.day ? 'selected' : ''}
+                  key={item.day}
+                  onClick={() => setDay(item.day)}
+                  aria-pressed={day === item.day}
                 >
                   <Mail size={15} />
                   <span>
-                    <strong>{item.step === 0 ? '首封开发信' : '未回复跟进 ' + item.step}</strong>
+                    <strong>{item.day === 0 ? '首封开发信' : '未回复跟进'}</strong>
                     <small>
                       {item.step === 0
                         ? '实际发送'
@@ -262,28 +272,28 @@ function SequenceSteps({
               <div className="sequence-rule">
                 <Clock3 size={17} />
                 <p>
-                  {step === 0
+                  {day === 0
                     ? '首封邮件由触达计划生成并发送。'
                     : '按首封实际发出时间计算第 ' +
-                      (data.steps.find((x) => x.step === step)?.offsetHours || 0) / 24 +
+                      day +
                       ' 天。同一邮箱沿原线程跟进，客户回复、退订或接管会终止后续自动跟进。'}
                 </p>
               </div>
-              <h3>{step === 0 ? '已发送的客户' : '客户执行情况'}</h3>
+              <h3>{day === 0 ? '已发送的客户' : '客户执行情况'}</h3>
               {data.items.length ? (
                 <div className="outreach-table-wrap">
                   <table className="outreach-table">
                     <thead>
                       <tr>
                         <th>客户</th>
-                        <th>{step ? '计划时间（北京）' : '发送时间（北京）'}</th>
+                        <th>{day ? '计划时间（北京）' : '发送时间（北京）'}</th>
                         <th>执行情况</th>
                         <th>邮件</th>
                       </tr>
                     </thead>
                     <tbody>
                       {data.items.map((row) => {
-                        const task = row.followUps.find((f) => f.step === step);
+                        const task = row.followUps.find((f) => f.day === day);
                         const mailboxId =
                           row.mailboxId ||
                           mailboxes.find((m) => m.email.toLowerCase() === row.from?.toLowerCase())
@@ -298,9 +308,16 @@ function SequenceSteps({
                               <strong>{row.companyName || row.to}</strong>
                               <small>{row.to}</small>
                             </td>
-                            <td>{when(step ? task?.dueAt : row.sentAt)}</td>
+                            <td>{when(day ? task?.dueAt : row.sentAt)}</td>
                             <td>
-                              {step ? (task ? status(task.status) : '未创建') : '首封已发'}
+                              {day ? (task ? status(task.status) : '无此步骤') : '首封已发'}
+                              {task?.instruction && (
+                                <details>
+                                  <summary>写作要求</summary>
+                                  <small>{task.policyName}</small>
+                                  <p>{task.instruction}</p>
+                                </details>
+                              )}
                               {task?.reason && <small>{task.reason}</small>}
                               {task?.sentAt && <small>{when(task.sentAt)}</small>}
                             </td>
@@ -381,10 +398,12 @@ export function FollowUpSequences({
       <div className="outreach-section-heading">
         <div>
           <h2>跟进序列</h2>
-          <p>按触达计划查看首封、第 3 天和第 7 天的邮件。</p>
+          <p>设置未回复客户的跟进节奏和每封邮件的写作要求。</p>
         </div>
         <Link to="/inbox?tab=campaigns">打开触达计划</Link>
       </div>
+      <SequencePolicyPanel refreshToken={refreshToken} />
+      <h3 className="sequence-campaign-heading">计划执行情况</h3>
       {error ? (
         <div className="outreach-alert error" role="alert">
           {error}
@@ -427,37 +446,9 @@ export function FollowUpSequences({
           <Pager page={data.page} size={data.pageSize} total={data.total} change={setPage} />
         </div>
       ) : (
-        <section className="panel sequence-policy" aria-label="未回复跟进规则">
-          <header>
-            <h3>未回复跟进规则</h3>
-            <span>已进入序列的客户 0</span>
-          </header>
-          <ol>
-            <li>
-              <Mail size={17} />
-              <div>
-                <strong>首封开发信</strong>
-                <p>由触达计划发送，以实际发送时间开始计时。</p>
-              </div>
-            </li>
-            <li>
-              <Clock3 size={17} />
-              <div>
-                <strong>第 3 天 · 第一次跟进</strong>
-                <p>客户尚未回复时，从负责邮箱在原线程发送。</p>
-              </div>
-            </li>
-            <li>
-              <Clock3 size={17} />
-              <div>
-                <strong>第 7 天 · 最后一次跟进</strong>
-                <p>首封发出满 7 天仍未收到回复时，再跟进一次。</p>
-              </div>
-            </li>
-          </ol>
-          <p>客户回复、退订或人工接管后，停止剩余自动跟进。</p>
-          <Link to="/inbox?tab=campaigns">前往触达计划</Link>
-        </section>
+        <p className="sequence-empty-plan">
+          暂无触达计划。启用跟进后，可在这里查看每位客户的排期和执行结果。
+        </p>
       )}
     </section>
   );
