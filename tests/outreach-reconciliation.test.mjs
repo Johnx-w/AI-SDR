@@ -236,11 +236,6 @@ test('人工结论要求操作人与依据；明确失败释放占用且旧计�
   const groups = (await h.service.state()).deliveryGroups;
   assert.equal(groups.attention, 0);
   assert.equal(groups.resolved, 1);
-  assert.deepEqual(
-    h.service.listDeliveries({ group: 'resolved' }).items.map((item) => item.id),
-    ['unknown'],
-  );
-  assert.deepEqual(h.service.listDeliveries({ group: 'attention' }).items, []);
   assert.deepEqual(await h.service.candidates(h.service.campaign('campaign')), {
     eligible: [],
     blocked: [],

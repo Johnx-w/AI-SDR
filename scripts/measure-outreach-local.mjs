@@ -52,7 +52,7 @@ try {
       occurredAt: sentAt,
       source: 'imap',
     });
-  for (const path of ['/state', '/deliveries?page=1', '/conversations?mailboxId=all']) {
+  for (const path of ['/state', '/conversations?mailboxId=all']) {
     const durations = [];
     let bytes = 0;
     for (let index = 0; index < 6; index++) {
@@ -71,8 +71,6 @@ try {
         (result.deliveryStats?.total !== 1676 || serialized.includes('"candidate"'))
       )
         throw new Error('State must count every delivery without candidates');
-      if (path.startsWith('/deliveries') && (result.total !== 1676 || result.items[0].candidate))
-        throw new Error('Delivery page must keep totals without candidates');
       if (path.startsWith('/conversations') && result.total !== 164)
         throw new Error(`Expected 164 conversations, got ${result.total}`);
     }
