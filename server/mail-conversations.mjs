@@ -1,3 +1,4 @@
+import { initializeThreadSearch, listThreadPage } from './mail-thread-page.mjs';
 import { createHash } from 'node:crypto';
 import { setImmediate as yieldToRequests } from 'node:timers/promises';
 import { mailSyncFailure } from './mail-sync-errors.mjs';
@@ -16,6 +17,7 @@ const messageId = (value) => {
   return /^<[^<>\s@]+@[^<>\s@]+>$/u.test(id) ? id : '';
 };
 const keyFor = (mailbox) => hash([mailbox.id, address(mailbox.email)]);
+export { keyFor as mailboxAccountKey };
 const iso = (value) => new Date(value).toISOString();
 const attachmentMetadata = (value) =>
   Array.isArray(value)
@@ -71,7 +73,14 @@ export class MailConversations {
         delivery_id TEXT PRIMARY KEY
       );
     `);
-    this.transaction(() => initializeReplyHistory(db));
+    initializeReplyHistory(db);
+    initializeThreadSearch(db);
+    this.db.function('mail_text_fold', { deterministic: true }, (value) =>
+      String(value ?? '').toLowerCase(),
+    );
+    this.db
+      .exec(`CREATE INDEX IF NOT EXISTS mailbox_thread_order ON mailbox_threads(account_key,json_extract(data,'$.updatedAt') DESC,id);
+      CREATE INDEX IF NOT EXISTS mailbox_inbound_thread ON mailbox_reply_headers(thread_id) WHERE direction='inbound';`);
   }
 
   replyHistory(filters) {
@@ -299,8 +308,12 @@ export class MailConversations {
           references: richFields.references.length ? richFields.references : old.references || [],
           classification:
             input.direction === 'inbound' &&
-            (!old.classification || old.classification === 'normal')
-              ? incomingClassification(input)
+            (!old.classification || ['normal', 'unverified'].includes(old.classification))
+              ? incomingClassification({
+                  ...input,
+                  bodyText: input.bodyText || old.bodyText,
+                  bodyHtml: input.bodyHtml || old.bodyHtml,
+                })
               : old.classification,
           attachments: input.attachments ? attachmentMetadata(input.attachments) : old.attachments,
         };
@@ -441,46 +454,32 @@ export class MailConversations {
   }
 
   list(
-    { mailboxId = 'all', customerId = '', q = '', unread = false, inboundOnly = false } = {},
-    customers = this.customerLookup(),
+    {
+      mailboxId = 'all',
+      customerId = '',
+      q = '',
+      unread = false,
+      inboundOnly = false,
+      page = 1,
+      pageSize = 25,
+    } = {},
+    lookup = this.customerLookup(),
   ) {
     this.importDeliveries();
-    const selected = this.selected(mailboxId);
-    const query = text(q, 500).toLowerCase().trim();
-    const items = selected
-      .flatMap((mailbox) =>
-        this.db
-          .prepare('SELECT data FROM mailbox_threads WHERE account_key=?')
-          .all(keyFor(mailbox))
-          .map((row) => this.localCustomer(JSON.parse(row.data), customers)),
-      )
-      .filter(
-        (thread) =>
-          (!customerId || thread.customerId === customerId) &&
-          (!inboundOnly ||
-            this.messages(thread.id).some((message) => message.direction === 'inbound')) &&
-          (!unread || thread.unread) &&
-          (!query ||
-            [thread.account, thread.participant, thread.subject, thread.preview, thread.companyName]
-              .join(' ')
-              .toLowerCase()
-              .includes(query) ||
-            this.messages(thread.id).some((message) =>
-              [message.subject, message.from, message.to, message.bodyText]
-                .join(' ')
-                .toLowerCase()
-                .includes(query),
-            )),
-      )
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
+    const keys = this.selected(mailboxId).map(keyFor);
+    const result = listThreadPage(this, keys, lookup, {
+      customerId,
+      query: text(q, 500).toLowerCase().trim(),
+      unread,
+      inboundOnly,
+      page,
+      pageSize,
+    });
     return {
-      items: items.slice(0, 200),
-      total: items.length,
-      hasMore: items.length > 200,
+      ...result,
       mailboxes: this.mailboxes.list().map((mailbox) => this.syncState(mailbox)),
     };
   }
-
   detail(id) {
     this.importDeliveries();
     const row = this.db.prepare('SELECT account_key,data FROM mailbox_threads WHERE id=?').get(id);
@@ -609,7 +608,7 @@ export class MailConversations {
         });
       });
       if (this.recordCommunication) {
-        for (const thread of this.list({ mailboxId: mailbox.id }, lookup).items) {
+        for (const thread of this.list({ mailboxId: mailbox.id, pageSize: 200 }, lookup).items) {
           await yieldToRequests();
           if (this.closed || !this.mailboxes.list().some((current) => keyFor(current) === key))
             break;

@@ -19,6 +19,7 @@ export function mailSite(url) {
 }
 export const siteBrand = (website) => names[mailSite(website)] || '';
 export function siteAllowsProduct(product, mailbox, requireSite = false) {
+  if (product.materialOnly && !requireSite) return false;
   const domain = mailSite(mailbox.website),
     source = mailSite(product.sourceUrl || '');
   const brands = (product.brands || []).map((s) => s.toLowerCase().trim());

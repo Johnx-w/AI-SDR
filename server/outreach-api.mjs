@@ -1,11 +1,33 @@
+import { listSequences, sequenceDetail } from './outreach-sequences.mjs';
+
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
 export async function handleOutreach({ request, url, service, readJson, idempotencyKey }) {
   const path = url.pathname.slice('/api/v1/outreach'.length),
     method = request.method;
+  if (path === '/sequences' && method === 'GET') return listSequences(service.db, url.searchParams);
+  const sequence = path.match(/^\/sequences\/([\w-]+)$/);
+  if (sequence && method === 'GET')
+    return sequenceDetail(service.db, sequence[1], url.searchParams);
+  const tagRoute = path.match(/^\/mailbox-tags(?:\/([\w-]+)(\/merge)?)?$/);
+  if (tagRoute) {
+    const [, id, merge] = tagRoute;
+    if (!id && method === 'GET') return service.tags.list();
+    const input = method === 'DELETE' ? {} : await readJson(request);
+    return service.transaction(() => {
+      if (id === 'assign' && !merge && method === 'POST') service.tags.assign(input || {});
+      else if (!id && method === 'POST') service.tags.save(input?.name);
+      else if (id && merge && method === 'POST' && typeof input?.targetId === 'string')
+        service.tags.remove(id, input.targetId);
+      else if (id && !merge && method === 'PATCH') service.tags.save(input?.name, id);
+      else if (id && !merge && method === 'DELETE') service.tags.remove(id);
+      else throw fail(400, '无效的邮箱标签操作');
+      return service.tags.list();
+    });
+  }
+  if (path === '/reply-history' && method === 'GET')
+    return service.conversations.replyHistory(Object.fromEntries(url.searchParams));
   if (path === '/state' && method === 'GET') return service.state(url.searchParams);
-  if (path === '/deliveries' && method === 'GET')
-    return service.listDeliveries(Object.fromEntries(url.searchParams));
   const delivery = path.match(/^\/deliveries\/([\w-]+)$/);
   if (delivery && method === 'GET') return service.deliveryRecord(delivery[1]);
   const deliveryAction = path.match(/^\/deliveries\/([\w-]+)\/(reconcile|resolve)$/);
@@ -25,6 +47,8 @@ export async function handleOutreach({ request, url, service, readJson, idempote
       q: url.searchParams.get('q') || '',
       unread: url.searchParams.get('unread') === '1',
       inboundOnly: url.searchParams.get('inboundOnly') === '1',
+      page: url.searchParams.get('page'),
+      pageSize: url.searchParams.get('pageSize'),
     });
   if (path === '/conversations/sync' && method === 'POST') {
     const body = await readJson(request);

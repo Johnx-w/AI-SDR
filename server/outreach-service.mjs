@@ -10,14 +10,15 @@ import {
   eligibleOutreachFacts,
 } from './outreach-content.mjs';
 import { OutreachFollowUps } from './outreach-follow-ups.mjs';
+import { MailboxTags } from './mailbox-tags.mjs';
 import { initializeOutreachBounces, recordOutreachBounces } from './outreach-bounces.mjs';
-import { MailConversations } from './mail-conversations.mjs';
+import { MailConversations, mailboxAccountKey } from './mail-conversations.mjs';
 import { MailReplies } from './mail-replies.mjs';
 import { MailReception } from './mail-reception.mjs';
 
 import { siteAllowsProduct } from '../src/domain/mail-site.mjs';
 import { renderMailboxSignature, signaturePlainTextHtml } from '../src/domain/mail-signature.mjs';
-import { deliveryGroup, deliveryGroupLabels } from '../src/domain/outreach-status.mjs';
+import { deliveryGroup } from '../src/domain/outreach-status.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -28,9 +29,6 @@ const iso = (now) => new Date(now()).toISOString();
 const outcomeSql = "CASE WHEN state='failed' THEN json_extract(data,'$.resolution.outcome') END";
 const draftSql =
   "CASE WHEN state='draft' THEN coalesce(json_extract(data,'$.subject'),'')!='' ELSE 0 END";
-const recordSearchSql = ['companyName', 'to', 'from', 'subject']
-  .map((field) => `coalesce(json_extract(data,'$.${field}'),'')`)
-  .join(" || ' ' || ");
 const terminal = new Set(['accepted', 'failed', 'unknown', 'blocked', 'skipped', 'cancelled']);
 const customerSkipCodes = new Set([
   'match_unverified',
@@ -100,6 +98,9 @@ export class OutreachService {
   } = {}) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
+    this.db.function('mail_account_key', { deterministic: true }, (id, email) =>
+      mailboxAccountKey({ id, email }),
+    );
     // SQLite's built-in lower only handles ASCII; preserve the former browser search semantics.
     this.db.function('outreach_lower', { deterministic: true }, (value) =>
       String(value ?? '').toLowerCase(),
@@ -115,7 +116,7 @@ export class OutreachService {
       CREATE TABLE IF NOT EXISTS outreach_deliveries(id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,state TEXT NOT NULL,data TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS outreach_delivery_campaign ON outreach_deliveries(campaign_id,state);
       CREATE INDEX IF NOT EXISTS outreach_counts ON outreach_deliveries(campaign_id,state,${outcomeSql},${draftSql});
-      CREATE INDEX IF NOT EXISTS outreach_record_search ON outreach_deliveries((${recordSearchSql}),state,id);
+      DROP INDEX IF EXISTS outreach_record_search;
       CREATE INDEX IF NOT EXISTS outreach_customer_deliveries ON outreach_deliveries(campaign_id,json_extract(data,'$.customerId'));
       CREATE INDEX IF NOT EXISTS outreach_activity ON outreach_deliveries(state,id,json_extract(data,'$.mailboxId'),json_extract(data,'$.sentAt'),json_extract(data,'$.attemptedAt'),json_extract(data,'$.createdAt'));
       CREATE TABLE IF NOT EXISTS outreach_reservations(identity TEXT PRIMARY KEY,delivery_id TEXT NOT NULL);
@@ -148,6 +149,11 @@ export class OutreachService {
         };
       });
     this.followUps = new OutreachFollowUps(this, recordFollowUp);
+    this.tags = new MailboxTags(this.db, mailboxes);
+    this.db
+      .exec(`CREATE INDEX IF NOT EXISTS outreach_sequence_pending ON outreach_followups(json_extract(data,'$.campaignId'),state);
+      CREATE INDEX IF NOT EXISTS outreach_sequence_first ON outreach_followups(json_extract(data,'$.firstId'),json_extract(data,'$.step'));
+      CREATE INDEX IF NOT EXISTS outreach_sequence_contacts ON outreach_deliveries(campaign_id,state,json_extract(data,'$.sentAt') DESC,id);`);
     this.preparing = new Map();
     this.conversations = new MailConversations({
       db: this.db,
@@ -282,51 +288,6 @@ export class OutreachService {
       )
       .all(...params)
       .map((r) => JSON.parse(r.data));
-  }
-  listDeliveries({ page = 1, pageSize = 20, status = 'all', group = 'all', q = '' } = {}) {
-    const size = [10, 20, 50, 100].includes(Number(pageSize)) ? Number(pageSize) : 20;
-    const requestedPage = Number.isSafeInteger(Number(page)) && Number(page) > 0 ? Number(page) : 1;
-    const where = [],
-      params = [];
-    if (status !== 'all') {
-      where.push('state = ?');
-      params.push(status);
-    }
-    if (group !== 'all') {
-      if (group === 'sent') where.push("state = 'accepted' AND bounce.delivery_id IS NULL");
-      else if (group === 'failed')
-        where.push("(state = 'failed' OR bounce.delivery_id IS NOT NULL)");
-      else if (group === 'skipped') where.push("state = 'skipped'");
-      else {
-        if (!Object.hasOwn(deliveryGroupLabels, group)) throw fail(400, '请选择有效的发送状态');
-        where.push(
-          "outreach_delivery_group(state, CASE WHEN state='draft' THEN json_extract(data, '$.subject') END, json_extract(data, '$.resolution.outcome')) = ?",
-        );
-        params.push(group);
-      }
-    }
-    const query = String(q).trim();
-    if (query) {
-      where.push(`instr(outreach_lower(${recordSearchSql}), ?) > 0`);
-      params.push(query.toLowerCase());
-    }
-    const clause = where.length ? ` WHERE ${where.join(' AND ')}` : '';
-    const source = `FROM outreach_deliveries ${query ? 'INDEXED BY outreach_record_search' : ''} LEFT JOIN outreach_delivery_bounces AS bounce
-      ON bounce.delivery_id = outreach_deliveries.id AND state = 'accepted'`;
-    const total = this.db
-      .prepare(`SELECT count(*) AS total ${source}${clause}`)
-      .get(...params).total;
-    const totalPages = Math.max(1, Math.ceil(total / size));
-    const currentPage = Math.min(requestedPage, totalPages);
-    const items = this.db
-      .prepare(
-        `SELECT json_remove(data, '$.candidate', '$.bodyText', '$.bodyHtml') AS data,
-          bounce.received_at AS bouncedAt ${source}${clause}
-          ORDER BY outreach_deliveries.rowid DESC LIMIT ? OFFSET ?`,
-      )
-      .all(...params, size, (currentPage - 1) * size)
-      .map(({ data, bouncedAt }) => ({ ...JSON.parse(data), ...(bouncedAt ? { bouncedAt } : {}) }));
-    return { items, total, page: currentPage, pageSize: size, totalPages };
   }
   delivery(id) {
     const row = this.db.prepare('SELECT data FROM outreach_deliveries WHERE id=?').get(id);
@@ -467,7 +428,7 @@ export class OutreachService {
         ? this.campaignPage(params)
         : { campaigns: [], filtered: 0, page: 1 };
       const products = this.products().map(
-        ({ id, name, label, category, approved, status, brands, sourceUrl }) => ({
+        ({ id, name, label, category, approved, status, brands, sourceUrl, materialOnly }) => ({
           id,
           name,
           label,
@@ -475,6 +436,7 @@ export class OutreachService {
           approved,
           brands,
           sourceUrl,
+          materialOnly,
           status,
         }),
       );
@@ -569,7 +531,7 @@ export class OutreachService {
       lastError: '',
       sendWindow: input.sendWindow === undefined ? (prior?.sendWindow ?? null) : input.sendWindow,
     };
-    c.productScopes = this.products()
+    c.productScopes = this.salesProducts()
       .filter(
         (product) =>
           (c.filters.products.length
@@ -633,7 +595,7 @@ export class OutreachService {
             box.signature?.trim() &&
             box.displayName?.trim(),
         );
-      const products = this.products().filter(
+      const products = this.salesProducts().filter(
         (product) =>
           product.status === 'approved' &&
           boxes.some((box) => box.productIds?.includes(product.id)),
@@ -752,6 +714,9 @@ export class OutreachService {
   isReserved(candidate, ignoreDelivery) {
     const { identities, blocked } = this.contactState(ignoreDelivery);
     return this.identities(candidate).some((k) => identities.has(k) || blocked.has(k));
+  }
+  salesProducts() {
+    return this.products().filter((p) => !p.materialOnly);
   }
   materialReason(delivery, campaign = this.campaign(delivery.campaignId)) {
     if (delivery.mode !== 'production' || !delivery.candidate) return '';
@@ -877,8 +842,8 @@ export class OutreachService {
       leads: eligibleLeads,
       mailboxes: automaticSenders,
       products: c.acquisitionSource
-        ? this.products().filter((product) => c.filters.products.includes(product.id))
-        : this.products(),
+        ? this.salesProducts().filter((product) => c.filters.products.includes(product.id))
+        : this.salesProducts(),
       // Once a draft is reviewed its sender stays fixed. Workload only allocates
       // new customers; it must not move a queued email between accounts.
       campaign: existing
