@@ -445,7 +445,6 @@ try {
       .evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
     assert.ok(size >= minimum, selector + ' 字号 ' + size + ' 应至少为 ' + minimum);
   }
-  const rowHeights = [];
   for (const [enquiry, lines] of [
     [29, 1],
     [30, 2],
@@ -474,9 +473,8 @@ try {
     assert.equal(layout.senderWeight, '500');
     assert.equal(layout.previewWeight, '400');
     assert.equal(await row.locator('.inbox-brand-label, .mail-conversation-row-count').count(), 0);
-    rowHeights.push(layout.height);
+    assert.equal(layout.height, 147, '长短摘要的会话行均为 147 px');
   }
-  assert.ok(rowHeights[1] > rowHeights[0], '长短摘要随内容改变列表项高度');
   const draftBody = 'Draft retained while paging';
   assert.equal(await editor.innerText().then((t) => t.trim()), '');
   assert.equal(service.replies.draft(firstThreadId), null);
@@ -692,6 +690,16 @@ try {
       assert.equal(await button('有回复').getAttribute('aria-pressed'), 'true');
     }
     const completeRows = await rows.evaluate(completeListRows);
+    const listHeight = await rows.evaluate((list) => list.clientHeight);
+    assert.equal(completeRows, Math.floor(listHeight / 147), '可见区域应排满固定高度的会话行');
+    assert.deepEqual(
+      await rows
+        .locator('.mail-conversation-row')
+        .evaluateAll((items) =>
+          Array.from(new Set(items.map((item) => item.getBoundingClientRect().height))),
+        ),
+      [147],
+    );
     await selectedRow.click();
     const viewer = page.locator('.inbox-message[open] .mail-body-viewer');
     const frame = viewer.frameLocator('iframe');
@@ -767,7 +775,7 @@ try {
   }
   console.log('首屏度量', JSON.stringify(layoutResults));
   for (const result of layoutResults) {
-    assert.ok(result.completeRows >= (result.width === 541 ? 2 : 3), JSON.stringify(result));
+    assert.ok(result.completeRows >= 2, JSON.stringify(result));
     assert.ok(result.html.lines >= 10 && result.plain.lines >= 10, JSON.stringify(result));
   }
   readerFails = true;
