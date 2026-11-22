@@ -307,6 +307,80 @@ test('A07 已提交SMTP后关闭获客计划，保留首封结果并停止下一
   assert.equal(h.service.deliveries(undefined, ['queued', 'sending', 'unknown']).length, 0);
 });
 
+test('首封在 SMTP 提交边界冻结跟进策略，准备连接及等待应答时发布的版本分别生效', async (t) => {
+  const h = await smtpHarness(t);
+  const job = h.create({ auto_follow_up: true });
+  await h.capture(job.id, buyer('policy-boundary'));
+  h.state.beforeTransport = () => {
+    h.state.beforeTransport = null;
+    saveSequencePolicy(h.service, {
+      revision: 1,
+      name: '提交前生效',
+      steps: [{ day: 2, instruction: '询问应用场景' }],
+    });
+  };
+  h.state.afterSubmit = () => {
+    h.state.afterSubmit = null;
+    saveSequencePolicy(h.service, { revision: 2, name: '下一封首信生效', steps: [] });
+  };
+  await h.pump();
+  const [first] = h.service.deliveries(undefined, ['accepted']);
+  assert.equal(h.state.sent.length, 1);
+  assert.equal(first.sequencePolicyRevision, 2);
+  assert.equal(h.service.followUps.policy().revision, 3);
+  assert.deepEqual(
+    h.service.followUps.all().map(({ day, policyRevision }) => ({ day, policyRevision })),
+    [{ day: 2, policyRevision: 2 }],
+  );
+});
+
+for (const direction of ['inbound', 'outbound']) {
+  const action = direction === 'inbound' ? '客户回信' : '业务员手动回信';
+  test(`首封已交 SMTP、成功应答前收到同线程${action}，到期也不会自动追信`, async (t) => {
+    const h = await smtpHarness(t);
+    const job = h.create({ auto_follow_up: true });
+    await h.capture(job.id, buyer('acknowledgement-race'));
+    h.service.generator.generateFollowUp = async () => 'Would you consider this model?';
+    h.state.afterSubmit = () => {
+      h.state.afterSubmit = null;
+      const [mail] = h.state.sent;
+      const mailbox = h.mailboxes.get('box');
+      h.state.now += 5000;
+      const at = new Date(h.state.now).toISOString();
+      h.service.conversations.putMessage(mailbox, {
+        identity: 'earlier-than-acknowledgement',
+        messageId: '<reply-before-acknowledgement@example.org>',
+        inReplyTo: mail.messageId,
+        references: [mail.messageId],
+        direction,
+        from: direction === 'inbound' ? mail.to : mailbox.email,
+        to: direction === 'inbound' ? mailbox.email : mail.to,
+        subject: 'Re: ' + mail.subject,
+        bodyText:
+          direction === 'inbound'
+            ? 'Please send the specifications.'
+            : 'I will send the specifications.',
+        classification: 'normal',
+        source: 'imap',
+        deliveryStatus: direction === 'inbound' ? 'received' : 'sent',
+        occurredAt: at,
+        receivedAt: at,
+      });
+      h.state.now += 5000;
+    };
+    await h.pump();
+    const [first] = h.service.deliveries(undefined, ['accepted']);
+    assert.equal(h.state.sent.length, 1);
+    assert.equal(h.state.now, h.state.sent[0].submittedAt + 10000);
+    for (const day of [3, 7]) {
+      h.state.now = Date.parse(first.sentAt) + day * 86400000;
+      await h.pump(0);
+      assert.equal(h.state.sent.length, 1);
+    }
+    assert.equal(h.service.followUps.pending().length, 0);
+  });
+}
+
 test('A08 两个获客任务共享邮箱每日2封和30秒间隔，次日继续剩余客户', async (t) => {
   const h = await smtpHarness(t);
   await h.mailboxes.save({ id: 'box', dailyLimit: 2, intervalSeconds: 30 });
