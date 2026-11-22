@@ -237,6 +237,13 @@ try {
     );
   });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
+  await page.setViewportSize({ width: 541, height: 773 });
+  await page.waitForFunction(() => {
+    const workspace = document
+      .querySelector('.mail-conversations-workspace')
+      ?.getBoundingClientRect();
+    return workspace && workspace.height >= 515 && workspace.bottom <= innerHeight;
+  });
   await page.setViewportSize({ width: 390, height: 667 });
   const readingPane = page.locator('.inbox-thread-scroll');
   await page.waitForFunction(

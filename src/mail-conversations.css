@@ -263,6 +263,18 @@
   font-size: 15px;
   line-height: 1.5;
 }
+.outreach-tabs:has(+ #outreach-panel-inbox) {
+  margin-bottom: 8px;
+}
+@media (max-width: 760px) {
+  main:has(> .outreach-page #outreach-panel-inbox) {
+    padding-top: 12px;
+  }
+  .outreach-page:has(> #outreach-panel-inbox) > .page-heading {
+    row-gap: 8px;
+    margin-bottom: 8px;
+  }
+}
 .sales-inbox button,
 .sales-inbox input,
 .sales-inbox select,
