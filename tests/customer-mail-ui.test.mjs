@@ -69,7 +69,7 @@ function inbox(list, { error = '', loading = false } = {}) {
 }
 
 test('客户没有来信时明确提示空状态，读取失败和加载中不冒充没有来信', () => {
-  const empty = { items: [], mailboxes: [] };
+  const empty = { items: [], mailboxes: [], total: 0, page: 1, pageSize: 25 };
   assert.match(inbox(empty).html, /暂无该客户的来信/);
   assert.match(inbox(empty).html, /当前已同步的邮箱记录中没有该客户的来信/);
   assert.match(inbox(empty).html, /href="\/inbox\?tab=inbox"/);
@@ -82,7 +82,13 @@ test('客户没有来信时明确提示空状态，读取失败和加载中不�
 });
 
 test('点击客户邮件后的列表请求带来信筛选，并默认选中最新会话', async () => {
-  const value = { items: [{ id: 'latest-incoming' }], mailboxes: [] };
+  const value = {
+    items: [{ id: 'latest-incoming' }],
+    mailboxes: [],
+    total: 1,
+    page: 1,
+    pageSize: 25,
+  };
   const view = inbox(value, { loading: true });
   const previousWindow = globalThis.window;
   const timers = [];
@@ -93,7 +99,15 @@ test('点击客户邮件后的列表请求带来信筛选，并默认选中最�
     timers[0]();
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(view.requests, [
-      { mailboxId: 'all', customerId: 'buyer', q: '', unread: false, inboundOnly: true },
+      {
+        mailboxId: 'all',
+        customerId: 'buyer',
+        q: '',
+        unread: false,
+        inboundOnly: true,
+        page: 1,
+        pageSize: 25,
+      },
     ]);
     assert.equal(view.states[5], 'latest-incoming');
   } finally {

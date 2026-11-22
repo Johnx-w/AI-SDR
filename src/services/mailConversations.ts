@@ -113,7 +113,9 @@ export interface MailboxSyncStatus {
 export interface MailConversationList {
   items: MailThread[];
   mailboxes: MailboxSyncStatus[];
-  total?: number;
+  total: number;
+  page: number;
+  pageSize: number;
   hasMore?: boolean;
 }
 
@@ -149,12 +151,18 @@ export const mailConversationsApi = {
       mailboxId: string;
       customerId?: string;
       q: string;
+      page: number;
+      pageSize: number;
       unread: boolean;
       inboundOnly?: boolean;
     },
     signal?: AbortSignal,
   ) {
-    const params = new URLSearchParams({ mailboxId: filters.mailboxId });
+    const params = new URLSearchParams({
+      mailboxId: filters.mailboxId,
+      page: String(filters.page),
+      pageSize: String(filters.pageSize),
+    });
     if (filters.customerId) params.set('customerId', filters.customerId);
     if (filters.q.trim()) params.set('q', filters.q.trim());
     if (filters.unread) params.set('unread', '1');

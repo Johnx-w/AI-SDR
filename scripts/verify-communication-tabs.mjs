@@ -200,9 +200,61 @@ try {
     .waitFor();
   await button('返回会话列表').click();
   await page.getByRole('button', { name: /QA accepted first email/ }).waitFor();
+  const firstThreadId = linkedThread.get('thread');
+  service.transaction(() => {
+    for (let i = 0; i < 31; i++) {
+      service.conversations.putMessage(box, {
+        identity: 'page-fixture-' + i,
+        messageId: '<page-' + i + '@dealer.example>',
+        direction: 'inbound',
+        source: 'imap',
+        deliveryStatus: 'received',
+        from: 'contact' + i + '@dealer.example',
+        to: box.email,
+        occurredAt: new Date(Date.UTC(2026, 0, 2, 0, i)).toISOString(),
+        subject: 'Fixture enquiry ' + i,
+        bodyText: 'Enquiry body ' + i,
+        unread: true,
+      });
+    }
+  });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(
+    base +
+      '/inbox?' +
+      new URLSearchParams({ tab: 'inbox', thread: firstThreadId, mailboxId: box.id }),
+  );
+  const pager = page.getByRole('navigation', { name: '会话分页' });
+  await pager.getByText('共 32 段 · 1 / 2').waitFor();
+  assert.equal(await page.locator('.mail-conversation-row').count(), 25);
+  const messageBody = page.getByRole('region', { name: '邮件会话详情' });
+  await messageBody.getByText(first.bodyText, { exact: true }).waitFor();
+  await page
+    .getByRole('region', { name: '回复邮件' })
+    .getByRole('button', { name: '回复', exact: true })
+    .click();
+  const editor = label('回复正文');
+  const draftBody = 'Draft retained while paging';
+  await editor.fill(draftBody);
+  await pager.getByRole('button', { name: '下一页' }).click();
+  await pager.getByText('共 32 段 · 2 / 2').waitFor();
+  assert.equal(await page.locator('.mail-conversation-row').count(), 7);
+  assert.equal(await editor.innerText(), draftBody);
+  await button('刷新').click();
+  await pager.getByText('共 32 段 · 2 / 2').waitFor();
+  assert.equal(await editor.innerText(), draftBody);
+  await pager.getByRole('button', { name: '上一页' }).click();
+  await pager.getByText('共 32 段 · 1 / 2').waitFor();
+  await pager.getByRole('button', { name: '下一页' }).click();
+  await pager.getByText('共 32 段 · 2 / 2').waitFor();
+  await page.getByText('草稿已保存', { exact: true }).waitFor();
+  await label('搜索邮件会话').fill('Fixture enquiry 30');
+  await pager.getByText('共 1 段 · 1 / 1').waitFor();
+  assert.equal(await page.locator('.mail-conversation-row').count(), 1);
+  assert.equal(service.replies.draft(firstThreadId).bodyText, draftBody);
   assert.deepEqual(failures, []);
   console.log(
-    'PASS 沟通中心四栏、邮箱配置、标签持久化与批量操作、筛选与刷新、三步序列、首封原文、所属计划及窄屏邮件往返',
+    'PASS 沟通中心四栏、邮箱配置、标签持久化与批量操作、筛选与刷新、三步序列、首封原文、所属计划、窄屏邮件往返及会话翻页保留深链和草稿',
   );
 } finally {
   await browser?.close();

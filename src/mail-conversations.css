@@ -207,12 +207,6 @@
   margin-left: auto;
   white-space: nowrap;
 }
-.mail-conversation-list-note {
-  margin: 14px 18px;
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--color-text-muted);
-}
 .mail-conversation-detail {
   position: relative;
   min-width: 0;
@@ -951,7 +945,16 @@
   justify-self: start;
 }
 .inbox-pager {
+  flex-wrap: wrap;
   justify-content: space-between;
+  border-top: 1px solid var(--color-border);
+  font-size: 12px;
+}
+.inbox-pager button:disabled {
+  opacity: 0.45;
+}
+.inbox-pager button:not(:disabled) {
+  color: var(--color-primary-text);
 }
 .sales-inbox .mail-conversation-detail,
 .inbox-contact {

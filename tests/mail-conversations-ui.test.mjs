@@ -63,6 +63,8 @@ test('mail lookup encodes account and search filters while writes are limited to
       q: '  samples & quotes  ',
       unread: true,
       inboundOnly: true,
+      page: 3,
+      pageSize: 25,
     },
     controller.signal,
   );
@@ -73,6 +75,8 @@ test('mail lookup encodes account and search filters while writes are limited to
   assert.equal(url.searchParams.get('q'), 'samples & quotes');
   assert.equal(url.searchParams.get('unread'), '1');
   assert.equal(url.searchParams.get('inboundOnly'), '1');
+  assert.equal(url.searchParams.get('page'), '3');
+  assert.equal(url.searchParams.get('pageSize'), '25');
   assert.equal(requests[0].init.signal, controller.signal);
   assert.equal(requests[0].init.method, undefined);
   await mailConversationsApi.detail('thread/a b', controller.signal);

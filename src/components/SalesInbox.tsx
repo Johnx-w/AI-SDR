@@ -127,6 +127,7 @@ export function MailConversationTimeline({
                       ? (
                           {
                             auto_reply: '系统通知',
+                            unverified: '待核实回执',
                             hard_bounce: '退信',
                             unsubscribe: '退订',
                             complaint: '投诉',
@@ -306,8 +307,9 @@ export function SalesInbox({
   const [notice, setNotice] = useState('');
   const [revision, setRevision] = useState(0);
   const [detailRevision, setDetailRevision] = useState(0);
-  const [reviewPage, setReviewPage] = useState(1);
-  const [reviewTotal, setReviewTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const filterKey = JSON.stringify([mailboxId, customerId, query, unread, inboundOnly]);
+  const loadedFilter = useRef(filterKey);
   const mounted = useRef(true);
   const selected = useRef<string | null>(initialThread || null);
   const linkedThread = useRef(initialThread);
@@ -337,6 +339,8 @@ export function SalesInbox({
         const result: Promise<MailConversationList> = review
           ? outreachApi<{
               total: number;
+              page: number;
+              pageSize: number;
               items: {
                 threadId: string;
                 sourceId: string;
@@ -346,13 +350,11 @@ export function SalesInbox({
                 receivedAt: string;
                 reason: string;
               }[];
-            }>('/reception?page=' + reviewPage, { signal: controller.signal }).then((result) => {
-              if (!controller.signal.aborted) {
-                setReviewTotal(result.total);
-                const lastPage = Math.max(1, Math.ceil(result.total / 20));
-                if (reviewPage > lastPage) setReviewPage(lastPage);
-              }
+            }>('/reception?page=' + page, { signal: controller.signal }).then((result) => {
               return {
+                page: result.page,
+                pageSize: result.pageSize,
+                total: result.total,
                 mailboxes: [],
                 items: result.items.map((ticket) => ({
                   id: ticket.threadId,
@@ -368,14 +370,24 @@ export function SalesInbox({
               };
             })
           : mailConversationsApi.list(
-              { mailboxId, customerId, q: query, unread, inboundOnly },
+              { mailboxId, customerId, q: query, unread, inboundOnly, page, pageSize: 25 },
               controller.signal,
             );
         void result
           .then((value) => {
             if (controller.signal.aborted) return;
+            const lastPage = Math.max(1, Math.ceil(value.total / value.pageSize));
+            const actualPage = Math.min(lastPage, value.page);
+            if (actualPage !== page) {
+              setPage(actualPage);
+              return;
+            }
             setList(value);
-            const retained = value.items.find((t) => t.id === selected.current)?.id;
+            const retained =
+              !review && loadedFilter.current === filterKey
+                ? selected.current
+                : value.items.find((t) => t.id === selected.current)?.id;
+            loadedFilter.current = filterKey;
             const first = value.items[0]?.id;
             const wide =
               typeof window.matchMedia === 'function' &&
@@ -407,7 +419,8 @@ export function SalesInbox({
     unread,
     inboundOnly,
     review,
-    reviewPage,
+    page,
+    filterKey,
     queueCount,
     refreshToken,
     revision,
@@ -473,6 +486,7 @@ export function SalesInbox({
             }
           : value,
       );
+      if (unread) setRevision((value) => value + 1);
     } catch (reason) {
       if (mounted.current && selected.current === thread.id) setDetailError(errorText(reason));
     } finally {
@@ -540,6 +554,7 @@ export function SalesInbox({
               type="button"
               aria-pressed={!review && !unread}
               onClick={() => {
+                setPage(1);
                 setUnread(false);
                 if (review) onReviewChange?.(false);
               }}
@@ -550,6 +565,7 @@ export function SalesInbox({
               type="button"
               aria-pressed={!review && unread}
               onClick={() => {
+                setPage(1);
                 setUnread(true);
                 if (review) onReviewChange?.(false);
               }}
@@ -560,8 +576,8 @@ export function SalesInbox({
               type="button"
               aria-pressed={review}
               onClick={() => {
+                setPage(1);
                 setUnread(false);
-                setReviewPage(1);
                 onReviewChange?.(true);
               }}
             >
@@ -594,7 +610,10 @@ export function SalesInbox({
                   aria-label="搜索邮件会话"
                   placeholder="搜索客户、邮件主题或正文"
                   value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+                  onChange={(e) => {
+                    setPage(1);
+                    setQuery(e.target.value);
+                  }}
                 />
               </label>
             </div>
@@ -656,31 +675,29 @@ export function SalesInbox({
               }
             />
           )}
-          {list?.hasMore && (
-            <p className="mail-conversation-list-note">
-              当前显示最近 {list.items.length} 个会话，请按邮箱或关键词缩小范围。
-            </p>
-          )}
-          {review && (reviewPage > 1 || reviewTotal > 20) && (
-            <div className="inbox-pager">
-              <button
-                type="button"
-                disabled={reviewPage === 1}
-                onClick={() => setReviewPage((p) => p - 1)}
-              >
-                上一页
-              </button>
-              <span>
-                {reviewPage} / {Math.max(1, Math.ceil(reviewTotal / 20))}
+          {list && (
+            <nav className="inbox-pager" aria-label={review ? '待审分页' : '会话分页'}>
+              <span aria-live="polite">
+                共 {list.total} {review ? '项' : '段'} · {page} /{' '}
+                {Math.max(1, Math.ceil(list.total / list.pageSize))}
               </span>
-              <button
-                type="button"
-                disabled={reviewPage * 20 >= reviewTotal}
-                onClick={() => setReviewPage((p) => p + 1)}
-              >
-                下一页
-              </button>
-            </div>
+              <div>
+                <button
+                  type="button"
+                  disabled={loading || page <= 1}
+                  onClick={() => setPage(page - 1)}
+                >
+                  上一页
+                </button>
+                <button
+                  type="button"
+                  disabled={loading || page * list.pageSize >= list.total}
+                  onClick={() => setPage(page + 1)}
+                >
+                  下一页
+                </button>
+              </div>
+            </nav>
           )}
           {!review && (
             <div className="inbox-sync">
