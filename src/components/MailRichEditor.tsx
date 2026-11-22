@@ -4,10 +4,12 @@ import { safeMailLink, sanitizeReplyHtml } from '../services/mailHtml';
 
 export function MailRichEditor({
   initialHtml,
+  formatting,
   disabled,
   onChange,
 }: {
   initialHtml: string;
+  formatting: boolean;
   disabled?: boolean;
   onChange: (value: { bodyHtml: string; bodyText: string }) => void;
 }) {
@@ -44,7 +46,12 @@ export function MailRichEditor({
   }
   return (
     <div className={`mail-rich-editor ${disabled ? 'disabled' : ''}`}>
-      <div className="mail-editor-tools" role="toolbar" aria-label="回复正文格式">
+      <div
+        hidden={!formatting}
+        className="mail-editor-tools"
+        role="toolbar"
+        aria-label="回复正文格式"
+      >
         {[
           { command: 'bold', label: '加粗', Icon: Bold },
           { command: 'italic', label: '斜体', Icon: Italic },

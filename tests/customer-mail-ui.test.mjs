@@ -107,6 +107,7 @@ test('点击客户邮件后的列表请求带来信筛选，并默认选中最�
         inboundOnly: true,
         page: 1,
         pageSize: 25,
+        folder: 'open',
       },
     ]);
     assert.equal(view.states[5], 'latest-incoming');

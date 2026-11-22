@@ -19,8 +19,11 @@ const loadModule = createModuleLoader((specifier) =>
 const { mailConversationsApi } = loadModule(
   new URL('../src/services/mailConversations.ts', import.meta.url),
 );
-const { SalesInbox, MailConversationTimeline, MailSyncSummary } = loadModule(
+const { SalesInbox, MailSyncSummary } = loadModule(
   new URL('../src/components/SalesInbox.tsx', import.meta.url),
+);
+const { MailConversationTimeline } = loadModule(
+  new URL('../src/components/InboxThread.tsx', import.meta.url),
 );
 const {
   mailFramePolicy,
@@ -105,6 +108,7 @@ test('mail timeline preserves original participants and plain text while disting
       {
         id: 'incoming',
         direction: 'inbound',
+        fromName: 'Alice Buyer',
         from: 'buyer@customer.example',
         to: 'sales@our.example',
         subject: 'Product enquiry',
@@ -126,6 +130,7 @@ test('mail timeline preserves original participants and plain text while disting
       },
     ],
   });
+  assert.match(html, /Alice Buyer/);
   assert.match(html, /已收到/);
   assert.match(html, /服务商已接受/);
   assert.match(html, /提交结果不代表对方已收到/);
@@ -206,10 +211,10 @@ test('mail conversation entry shows the requested account, local-cache scope and
     onMailboxChange() {},
   });
   assert.match(html, /<option value="mailbox-2" selected="">support@our\.example<\/option>/);
-  assert.match(html, /待审/);
-  assert.match(html, /aria-label="刷新本地邮件缓存"/);
-  assert.match(html, /<button[^>]*>[\s\S]*?同步邮件<\/button>/);
-  assert.match(html, /未读/);
+  assert.match(html, /会话筛选与同步/);
+  assert.match(html, /进行中/);
+  assert.match(html, /稍后/);
+  assert.match(html, /已完成/);
   assert.match(html, /正在读取邮件会话/);
   assert.match(html, /选择一段邮件会话/);
   assert.doesNotMatch(html, /<textarea|审核并发送|回复邮件/);

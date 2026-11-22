@@ -1,11 +1,18 @@
 import { outreachApi } from '../outreachApi';
 import type { ReplySource } from '../components/ReplyPreview';
 
+export type InboxFolder = 'open' | 'later' | 'done';
+export interface InboxWorkflow {
+  state: InboxFolder;
+  snoozeUntil?: string | null;
+  notes: { id: string; body: string; createdAt: string; author?: string }[];
+}
 export interface MailThread {
   id: string;
   mailboxId: string;
   account: string;
   participant: string;
+  participantName?: string;
   subject: string;
   updatedAt: string;
   unread: boolean;
@@ -20,6 +27,7 @@ export interface MailMessage {
   id: string;
   direction: 'inbound' | 'outbound';
   from: string;
+  fromName?: string;
   to: string;
   subject: string;
   bodyText: string;
@@ -120,6 +128,7 @@ export interface MailConversationList {
 }
 
 export interface MailConversationDetail {
+  workflow?: InboxWorkflow;
   reception?: {
     sourceId?: string;
     state?: string;
@@ -153,6 +162,7 @@ export const mailConversationsApi = {
       q: string;
       page: number;
       pageSize: number;
+      folder?: InboxFolder;
       unread: boolean;
       inboundOnly?: boolean;
     },
@@ -163,6 +173,7 @@ export const mailConversationsApi = {
       page: String(filters.page),
       pageSize: String(filters.pageSize),
     });
+    if (filters.folder) params.set('folder', filters.folder);
     if (filters.customerId) params.set('customerId', filters.customerId);
     if (filters.q.trim()) params.set('q', filters.q.trim());
     if (filters.unread) params.set('unread', '1');
@@ -182,6 +193,18 @@ export const mailConversationsApi = {
         body: JSON.stringify({ mailboxId }),
       },
     );
+  },
+  workflow(id: string, state: InboxFolder, snoozeUntil?: string) {
+    return outreachApi<InboxWorkflow>(`/conversations/${encodeURIComponent(id)}/workflow`, {
+      method: 'PATCH',
+      body: JSON.stringify({ state, snoozeUntil }),
+    });
+  },
+  note(id: string, body: string, clientId: string) {
+    return outreachApi<InboxWorkflow>(`/conversations/${encodeURIComponent(id)}/notes`, {
+      method: 'POST',
+      body: JSON.stringify({ body, clientId }),
+    });
   },
   markRead(id: string) {
     return outreachApi<{ conversation: MailThread }>(
