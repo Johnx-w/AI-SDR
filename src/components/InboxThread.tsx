@@ -284,6 +284,30 @@ export function InboxThread({
   const [writing, setWriting] = useState(false);
   const compose = useRef<HTMLDialogElement>(null);
   const sizeToggle = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const dialog = compose.current;
+    if (!dialog) return;
+    const viewport = window.visualViewport;
+    const revealWritingArea = () => {
+      if (
+        dialog.matches(':modal') ||
+        !dialog.querySelector('[contenteditable="true"]:focus, textarea:focus')
+      )
+        return;
+      const bottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
+      if (dialog.getBoundingClientRect().bottom > bottom)
+        dialog.scrollIntoView({ block: 'end', behavior: 'instant' });
+    };
+    const observer = new ResizeObserver(revealWritingArea);
+    observer.observe(dialog);
+    dialog.addEventListener('focusin', revealWritingArea);
+    viewport?.addEventListener('resize', revealWritingArea);
+    return () => {
+      observer.disconnect();
+      dialog.removeEventListener('focusin', revealWritingArea);
+      viewport?.removeEventListener('resize', revealWritingArea);
+    };
+  }, []);
   function resizeComposer(expand: boolean) {
     const dialog = compose.current;
     if (!dialog) return;

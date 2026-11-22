@@ -240,6 +240,9 @@
   font-size: 15px;
   line-height: 1.5;
 }
+.outreach-page:has(#outreach-panel-inbox) > .outreach-tabs {
+  margin-bottom: 16px;
+}
 @media (max-width: 760px) {
   .outreach-page:has(#outreach-panel-inbox .has-selection) > :is(.page-heading, .outreach-tabs) {
     display: none;
@@ -258,7 +261,7 @@
   display: grid;
   position: relative;
   grid-template-columns: var(--inbox-list-width) minmax(0, 1fr);
-  height: var(--inbox-available, calc(100dvh - 252px));
+  height: calc(100dvh - 96px);
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--color-border);
@@ -467,7 +470,6 @@
   min-height: 0;
   overflow: auto;
   flex: 1;
-  overscroll-behavior: contain;
 }
 .mail-conversation-row {
   position: relative;
@@ -706,7 +708,6 @@
   flex: 1;
   overflow: auto;
   padding: 8px clamp(12px, 2%, 24px);
-  overscroll-behavior: contain;
 }
 .inbox-subject a {
   margin-left: 8px;
@@ -1267,6 +1268,9 @@
   .mail-conversations-workspace {
     grid-template-columns: minmax(0, 1fr);
   }
+  .mail-conversations-workspace.has-selection {
+    height: var(--inbox-available, calc(100dvh - 72px));
+  }
   .mail-conversations-workspace.has-selection > .mail-conversation-list,
   .mail-conversations-workspace.no-selection > .mail-conversation-detail {
     display: none;
@@ -1286,6 +1290,7 @@
   }
   .inbox-thread-scroll {
     padding: 12px;
+    overscroll-behavior: contain;
   }
   .inbox-compose {
     margin: 0 8px 8px;

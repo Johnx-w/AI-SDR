@@ -577,6 +577,11 @@ try {
     'Please indicate which end caps should be on the sample board.',
     'Let me know what dimensions you need before preparing the drawing.',
     'I will share your suggestions with our installation team.',
+    'They will fit the display in two stages.',
+    'For the first stage we only need the sample hardware.',
+    'Can you pack the fittings by room?',
+    'Please label the spare parts separately.',
+    'We can send you the final delivery address on Friday.',
     'Best regards,',
     'Jordan',
   ];
@@ -669,8 +674,8 @@ try {
   assert.equal(service.conversations.syncState(box).error, null);
   const layoutResults = [];
   const readingViewports = [
-    { width: 1600, height: 900, minBodyHeight: 395 },
-    { width: 1397, height: 773, minBodyHeight: 300 },
+    { width: 1600, height: 900, minBodyHeight: 535 },
+    { width: 1397, height: 773, minBodyHeight: 435 },
     { width: 541, height: 773, minBodyHeight: 460 },
   ];
   for (const { width, height, minBodyHeight } of readingViewports) {
@@ -689,6 +694,12 @@ try {
       await tab('收件箱').waitFor();
       assert.equal(await button('有回复').getAttribute('aria-pressed'), 'true');
     }
+    const workspace = page.locator('.mail-conversations-workspace');
+    const workspaceHeight = await workspace.evaluate((el) => el.getBoundingClientRect().height);
+    const initialRows = await rows.evaluate(completeListRows);
+    assert.ok(initialRows >= (narrow ? 2 : 3), JSON.stringify({ width, initialRows }));
+    assert.ok(workspaceHeight >= height - 100, JSON.stringify({ height, workspaceHeight }));
+    await workspace.evaluate((el) => el.scrollIntoView({ block: 'end', behavior: 'instant' }));
     const completeRows = await rows.evaluate(completeListRows);
     const listHeight = await rows.evaluate((list) => list.clientHeight);
     assert.equal(completeRows, Math.floor(listHeight / 147), '可见区域应排满固定高度的会话行');
@@ -760,7 +771,7 @@ try {
       .waitFor();
     if (narrow) await back.click();
     await rows.waitFor();
-    const result = { width, height, completeRows, html, plain };
+    const result = { width, height, workspaceHeight, initialRows, completeRows, html, plain };
     const workspaceWidth = await page
       .locator('.mail-conversations-workspace')
       .evaluate((el) => el.clientWidth);
@@ -773,9 +784,9 @@ try {
     }
     layoutResults.push(result);
   }
-  console.log('首屏度量', JSON.stringify(layoutResults));
+  console.log('首屏及完整工作区度量', JSON.stringify(layoutResults));
   for (const result of layoutResults) {
-    assert.ok(result.completeRows >= 2, JSON.stringify(result));
+    assert.ok(result.completeRows >= 3, JSON.stringify(result));
     assert.ok(result.html.lines >= 10 && result.plain.lines >= 10, JSON.stringify(result));
   }
   readerFails = true;
