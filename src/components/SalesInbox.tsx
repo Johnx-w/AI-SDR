@@ -571,31 +571,29 @@ export function SalesInbox({
                       <InboxAvatar
                         name={thread.participantName || thread.companyName || thread.participant}
                       />
+                      {thread.unread && <i aria-label="未读" />}
                       <strong title={thread.participant}>
                         {thread.participantName || thread.companyName || thread.participant}
                       </strong>
                       <time dateTime={thread.updatedAt}>{formatTime(thread.updatedAt)}</time>
                     </span>
-                    <span className="mail-conversation-row-subject" title={thread.subject}>
-                      {thread.unread && <i aria-label="未读" />}
-                      {thread.subject || '（无主题）'}
-                    </span>
-                    <span className="mail-conversation-row-summary">
-                      <span className="mail-conversation-preview">
-                        {thread.preview || '暂无正文摘要'}
+                    {thread.preview?.trim() && (
+                      <span className="mail-conversation-preview">{thread.preview}</span>
+                    )}
+                    <span className="mail-conversation-row-meta">
+                      <span className="mail-conversation-row-subject" title={thread.subject}>
+                        {thread.subject || '（无主题）'}
                       </span>
-                      <span className="mail-conversation-row-meta">
-                        {(mailboxId === 'all' || review) && brand && (
-                          <span className="inbox-brand-label" title={thread.account}>
-                            {brand}
-                          </span>
-                        )}
-                        {!review && thread.messageCount > 1 && (
-                          <span className="mail-conversation-row-count">
-                            {thread.messageCount} 封
-                          </span>
-                        )}
-                      </span>
+                      {(mailboxId === 'all' || review) && brand && (
+                        <span className="inbox-brand-label" title={thread.account}>
+                          {brand}
+                        </span>
+                      )}
+                      {!review && thread.messageCount > 1 && (
+                        <span className="mail-conversation-row-count">
+                          {thread.messageCount} 封
+                        </span>
+                      )}
                     </span>
                   </button>
                 );

@@ -177,7 +177,8 @@ export function makeMailFrame(
     body.style.setProperty('height', 'auto', 'important');
     body.style.setProperty('min-height', '0', 'important');
   }
-  const prelude = `<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${escapeMailText(mailFramePolicy())}"><meta name="referrer" content="no-referrer"><style>html{color-scheme:light;background:#fff;overflow-x:auto}body{margin:0;padding:4px;overflow-wrap:anywhere}img{max-width:100%;height:auto}table{max-width:100%}a{overflow-wrap:anywhere}</style>`;
+  const appFont = getComputedStyle(document.documentElement).fontFamily;
+  const prelude = `<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${escapeMailText(mailFramePolicy())}"><meta name="referrer" content="no-referrer"><style>:where(html){font-family:${appFont};font-size:16px;line-height:1.6}html{color-scheme:light;background:#fff;overflow-x:auto}body{margin:0;padding:4px;overflow-wrap:anywhere}img{max-width:100%;height:auto}table{max-width:100%}a{overflow-wrap:anywhere}</style>`;
   const source =
     '<!doctype html>' + root.outerHTML.replace(/<head[^>]*>/i, (head) => head + prelude);
   return { srcDoc: source };

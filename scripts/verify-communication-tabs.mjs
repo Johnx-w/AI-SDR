@@ -389,7 +389,10 @@ try {
         to: box.email,
         occurredAt: new Date(Date.UTC(2026, 0, 2, 0, i)).toISOString(),
         subject: 'Fixture enquiry ' + i,
-        bodyText: 'Enquiry body ' + i,
+        bodyText:
+          i === 30
+            ? 'Could you confirm the finish, mounting options and lead time for our showroom samples before we place the order?'
+            : 'Enquiry body ' + i,
         unread: true,
       });
     }
@@ -442,26 +445,38 @@ try {
       .evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
     assert.ok(size >= minimum, selector + ' 字号 ' + size + ' 应至少为 ' + minimum);
   }
-  const rowPresentation = await page
-    .locator('.mail-conversation-row')
-    .first()
-    .evaluate((row) => {
-      const subject = row.querySelector('.mail-conversation-row-subject');
-      const preview = row.querySelector('.mail-conversation-preview');
-      const meta = row.querySelector('.mail-conversation-row-meta');
+  const rowHeights = [];
+  for (const [enquiry, lines] of [
+    [29, 1],
+    [30, 2],
+  ]) {
+    const row = page.getByRole('button', { name: new RegExp('Fixture enquiry ' + enquiry) });
+    const layout = await row.evaluate((element) => {
+      const sender = element.querySelector('.mail-conversation-row-top strong');
+      const preview = element.querySelector('.mail-conversation-preview');
+      const previewBounds = preview.getBoundingClientRect();
+      const subject = element
+        .querySelector('.mail-conversation-row-subject')
+        .getBoundingClientRect();
       return {
-        height: row.getBoundingClientRect().height,
-        senderWeight: getComputedStyle(row.querySelector('.mail-conversation-row-top strong'))
-          .fontWeight,
-        subjectClamp: getComputedStyle(subject).webkitLineClamp,
-        previewBottom: preview.getBoundingClientRect().bottom,
-        metaTop: meta.getBoundingClientRect().top,
+        height: element.getBoundingClientRect().height,
+        lines: Math.round(previewBounds.height / parseFloat(getComputedStyle(preview).lineHeight)),
+        senderWeight: getComputedStyle(sender).fontWeight,
+        previewWeight: getComputedStyle(preview).fontWeight,
+        ordered:
+          sender.getBoundingClientRect().bottom < previewBounds.top &&
+          previewBounds.bottom < subject.top,
+        fullWidth: previewBounds.left === subject.left && previewBounds.right === subject.right,
       };
     });
-  assert.ok(rowPresentation.height >= 108 && rowPresentation.height <= 112, rowPresentation);
-  assert.equal(rowPresentation.senderWeight, '500');
-  assert.equal(rowPresentation.subjectClamp, '2');
-  assert.ok(rowPresentation.metaTop >= rowPresentation.previewBottom - 1, rowPresentation);
+    assert.equal(layout.lines, lines);
+    assert.ok(layout.ordered && layout.fullWidth, JSON.stringify(layout));
+    assert.equal(layout.senderWeight, '500');
+    assert.equal(layout.previewWeight, '400');
+    assert.equal(await row.locator('.inbox-brand-label, .mail-conversation-row-count').count(), 0);
+    rowHeights.push(layout.height);
+  }
+  assert.ok(rowHeights[1] > rowHeights[0], '长短摘要随内容改变列表项高度');
   const draftBody = 'Draft retained while paging';
   assert.equal(await editor.innerText().then((t) => t.trim()), '');
   assert.equal(service.replies.draft(firstThreadId), null);
@@ -579,6 +594,7 @@ try {
               bodyText: longReply.join('\n'),
               bodyHtml:
                 longReply.map((line) => '<div>' + line + '</div>').join('') +
+                '<table style="font: italic 13px/20px Georgia, serif"><tr><td>Finish reference</td></tr></table>' +
                 `<img src="${remoteImageUrl}" alt="远程图片自动加载验收">`,
               bodyFormatVersion: 2,
             }
@@ -655,11 +671,11 @@ try {
   assert.equal(service.conversations.syncState(box).error, null);
   const layoutResults = [];
   const readingViewports = [
-    { width: 1600, height: 900, minBodyWidth: 900, minBodyHeight: 395 },
-    { width: 1397, height: 773, minBodyWidth: 775, minBodyHeight: 300 },
-    { width: 541, height: 773, minBodyWidth: 440, minBodyHeight: 460 },
+    { width: 1600, height: 900, minBodyHeight: 395 },
+    { width: 1397, height: 773, minBodyHeight: 300 },
+    { width: 541, height: 773, minBodyHeight: 460 },
   ];
-  for (const { width, height, minBodyWidth, minBodyHeight } of readingViewports) {
+  for (const { width, height, minBodyHeight } of readingViewports) {
     await page.setViewportSize({ width, height });
     await page.goto(
       base + '/inbox?' + new URLSearchParams({ tab: 'inbox', mailboxId: box.id, hasReply: '1' }),
@@ -678,7 +694,24 @@ try {
     const completeRows = await rows.evaluate(completeListRows);
     await selectedRow.click();
     const viewer = page.locator('.inbox-message[open] .mail-body-viewer');
-    await viewer.frameLocator('iframe').getByText(longReply[0], { exact: true }).waitFor();
+    const frame = viewer.frameLocator('iframe');
+    const appFont = await page.locator('html').evaluate((el) => getComputedStyle(el).fontFamily);
+    const typography = (el) => {
+      const { fontFamily, fontSize, lineHeight, fontStyle } = getComputedStyle(el);
+      return { fontFamily, fontSize, lineHeight, fontStyle };
+    };
+    assert.deepEqual(await frame.getByText(longReply[0], { exact: true }).evaluate(typography), {
+      fontFamily: appFont,
+      fontSize: '16px',
+      lineHeight: '25.6px',
+      fontStyle: 'normal',
+    });
+    assert.deepEqual(await frame.getByText('Finish reference').evaluate(typography), {
+      fontFamily: 'Georgia, serif',
+      fontSize: '13px',
+      lineHeight: '20px',
+      fontStyle: 'italic',
+    });
     await viewer
       .frameLocator('iframe')
       .getByRole('img', { name: '远程图片自动加载验收' })
@@ -720,9 +753,13 @@ try {
     if (narrow) await back.click();
     await rows.waitFor();
     const result = { width, height, completeRows, html, plain };
+    const workspaceWidth = await page
+      .locator('.mail-conversations-workspace')
+      .evaluate((el) => el.clientWidth);
     for (const body of [html, plain]) {
       assert.ok(
-        body.bodyWidth >= minBodyWidth && body.bodyHeight >= minBodyHeight,
+        body.bodyWidth >= workspaceWidth * (narrow ? 0.87 : 0.64) &&
+          body.bodyHeight >= minBodyHeight,
         JSON.stringify(result),
       );
     }
@@ -731,7 +768,7 @@ try {
   console.log('首屏度量', JSON.stringify(layoutResults));
   for (const result of layoutResults) {
     assert.ok(result.completeRows >= (result.width === 541 ? 2 : 3), JSON.stringify(result));
-    assert.ok(result.html.lines >= 13 && result.plain.lines >= 10, JSON.stringify(result));
+    assert.ok(result.html.lines >= 10 && result.plain.lines >= 10, JSON.stringify(result));
   }
   readerFails = true;
   await button('同步邮件').click();
