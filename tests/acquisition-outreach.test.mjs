@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { BatchJobs, validateAutoFirstTouch } from '../server/batch-jobs.mjs';
 import { AcquisitionSchedules } from '../server/acquisition-schedules.mjs';
 import { acquisitionOutreachSources } from '../server/acquisition-outreach.mjs';
+import { saveSequencePolicy } from '../server/outreach-sequence-policy.mjs';
 import { OutreachService } from '../server/outreach-service.mjs';
 import { OutreachMailboxes } from '../server/outreach-mailboxes.mjs';
 import { withApp } from './helpers/http.mjs';
@@ -928,10 +929,47 @@ test('新轮次启动时停止旧轮次待发首封，保留已发送历史', as
     h.service.syncAcquisition();
     const old = h.service.campaign(`acquisition-${first.id}`);
     const current = h.service.campaign(`acquisition-${second.id}`);
-    assert.equal(old.status, 'cancelled');
+    assert.equal(old.status, 'completed');
     assert.equal(old.acquisitionSource.roundId, first.id);
     assert.equal(current.status, 'active');
     assert.equal(h.service.deliveries(undefined, ['accepted']).length, 1);
+  } finally {
+    await h.close();
+  }
+});
+
+test('定时获客自然换轮仍按原首封的自定义日期同线程跟进，定时计划暂停时暂缓', async () => {
+  const h = harness();
+  try {
+    const plan = h.plan();
+    h.plans.save({ ...h.plans.get(plan.id), input: { ...input, auto_follow_up: true } });
+    const rule = saveSequencePolicy(h.service, {
+      ...h.service.followUps.policy(),
+      steps: [{ day: 2, instruction: '确认采购需求' }],
+    });
+    const first = h.create({}, plan.id);
+    await h.capture(first.id, buyer('retained'));
+    h.options.mailboxes.readMailbox = async () => ({ folders: [], hasMore: false });
+    h.service.generator.generateFollowUp = async ({ instruction }) => {
+      assert.equal(instruction, rule.steps[0].instruction);
+      return 'Would you consider this model?';
+    };
+    await h.pump();
+    const sent = h.service.deliveries(undefined, ['accepted'])[0];
+    assert.ok(sent);
+    h.jobs.finish(h.jobs.get(first.id), 'target_reached');
+    h.create({}, plan.id);
+    h.service.syncAcquisition();
+    h.plans.control(plan.id, 'pause');
+    h.state.now = Date.parse(sent.sentAt) + 2 * 86400000;
+    await h.pump(0);
+    assert.equal(h.state.sent.length, 1);
+    assert.equal(h.service.followUps.pending().length, 1);
+    h.plans.control(plan.id, 'resume');
+    await h.pump(60);
+    assert.equal(h.state.sent.length, 2, JSON.stringify(h.service.followUps.all()));
+    assert.equal(h.state.sent[1].inReplyTo, sent.messageId);
+    assert.equal(h.service.followUps.all()[0].policyRevision, rule.revision);
   } finally {
     await h.close();
   }

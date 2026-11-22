@@ -468,7 +468,7 @@ export class OutreachService {
           campaign?.followUpEnabled &&
           !campaign.followUpPaused &&
           ['active', 'completed'].includes(campaign.status) &&
-          this.acquisitionAllowed(campaign)
+          this.acquisitionAllowed(campaign, true)
         );
       }).length,
     };
@@ -630,22 +630,30 @@ export class OutreachService {
         updatedAt: iso(this.now),
         lastRefreshAt: null,
       });
-      if (source.status === 'cancelled') {
+      if (source.status === 'cancelled' || source.status === 'completed') {
         for (const delivery of this.deliveries(id, ['draft', 'queued', 'blocked'])) {
-          this.putDelivery({ ...delivery, status: 'cancelled', reason: '获客自动首发已取消' });
+          this.putDelivery({
+            ...delivery,
+            status: 'cancelled',
+            reason:
+              source.status === 'completed'
+                ? '本轮首发已结束，新获客轮次已开始'
+                : '获客自动首发已取消',
+          });
           this.release(delivery.id);
         }
       }
     }
   }
-  acquisitionAllowed(campaign) {
+  acquisitionAllowed(campaign, followUp = false) {
     return (
       !campaign.acquisitionSource ||
       this.acquisitionSources().some(
         (source) =>
           source.jobId === campaign.acquisitionSource.jobId &&
           source.scope === this.getScope() &&
-          source.status === 'active',
+          (source.status === 'active' ||
+            (followUp && source.status === 'completed' && source.followUpsAllowed)),
       )
     );
   }
@@ -1394,7 +1402,7 @@ export class OutreachService {
   }
   canDispatch(c, d, m) {
     if (this.isMaintaining()) return false;
-    if (!this.acquisitionAllowed(c)) return false;
+    if (!this.acquisitionAllowed(c, Boolean(d.firstId))) return false;
     if (!m || m.paused || m.smtpStatus !== 'connected' || !m.configured) return false;
     if (c.mode === 'internal_test') return true;
     if (c.approvedRevision !== c.revision || !this.inWindow(c)) return false;

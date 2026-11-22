@@ -349,7 +349,11 @@ export class OutreachFollowUps {
       )
     )
       return { reason: '前次发送结果待核实，不继续追信' };
-    if (c.followUpPaused || !['active', 'completed'].includes(c.status) || !s.acquisitionAllowed(c))
+    if (
+      c.followUpPaused ||
+      !['active', 'completed'].includes(c.status) ||
+      !s.acquisitionAllowed(c, true)
+    )
       return { reason: '所属发送计划已暂停' };
     return null;
   }
