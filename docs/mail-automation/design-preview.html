@@ -1,0 +1,3309 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>沟通中心 · AI-SDR</title>
+    <style>
+      :root {
+        --ink: #19272b;
+        --muted: #667579;
+        --line: #dde4e3;
+        --teal: #146652;
+        --soft: #e5f2ec;
+        --bg: #f6f8f7;
+        --paper: #fff;
+        --shadow: 0 12px 48px #19272b21;
+        font-family: Inter, 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', Arial, sans-serif;
+        color: var(--ink);
+        font-size: 14px;
+        font-synthesis: none;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+      }
+      button,
+      input,
+      textarea,
+      select {
+        font: inherit;
+        color: inherit;
+      }
+      button,
+      summary,
+      select {
+        cursor: pointer;
+      }
+      button {
+        border: none;
+        background: none;
+      }
+      a {
+        color: var(--teal);
+      }
+      button:focus-visible,
+      a:focus-visible,
+      input:focus-visible,
+      select:focus-visible,
+      textarea:focus-visible,
+      summary:focus-visible {
+        outline: 2px solid #278271;
+        outline-offset: 2px;
+      }
+      button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+      button:hover:not(:disabled) {
+        filter: brightness(0.96);
+      }
+      h1,
+      h2,
+      h3,
+      h4,
+      p {
+        margin: 0;
+      }
+      svg {
+        display: inline-block;
+        vertical-align: middle;
+        flex-shrink: 0;
+      }
+      input,
+      textarea,
+      select {
+        max-width: 100%;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .action {
+        display: inline-flex;
+        gap: 7px;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid #d8dfdd;
+        border-radius: 7px;
+        background: white;
+        padding: 8px 13px;
+        font-weight: 540;
+        line-height: 1.35;
+        white-space: nowrap;
+      }
+      .action.primary {
+        border-color: var(--teal);
+        background: var(--teal);
+        color: white;
+      }
+      .icon-only {
+        padding: 7px;
+      }
+      .chip {
+        display: inline-flex;
+        gap: 4px;
+        align-items: center;
+        border-radius: 5px;
+        padding: 3px 7px;
+        font-size: 12px;
+        background: var(--soft);
+        color: var(--teal);
+        white-space: nowrap;
+      }
+      .tabs {
+        display: flex;
+        gap: 14px;
+        border-bottom: 1px solid var(--line);
+      }
+      .tabs button {
+        padding: 9px 5px;
+        color: var(--muted);
+      }
+      .tabs .active {
+        color: var(--ink);
+        box-shadow: inset 0 -2px var(--teal);
+      }
+      .panel,
+      .table-wrap {
+        background: white;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+      }
+      .table-wrap {
+        overflow: auto;
+      }
+      .data-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .data-table :is(td, th) {
+        padding: 13px 16px;
+        text-align: left;
+        border-bottom: 1px solid var(--line);
+      }
+      .data-table th {
+        font-weight: 540;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .module {
+        padding: 26px 32px;
+        min-height: 100%;
+      }
+      .module-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 22px;
+      }
+      .module-head h1 {
+        font-size: 25px;
+      }
+      .top {
+        height: 62px;
+        background: #172c2c;
+        color: #f2f7f2;
+        display: flex;
+        align-items: center;
+        padding: 0 21px;
+        gap: 33px;
+        border-bottom: 1px solid #0e2221;
+      }
+      .wordmark {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        letter-spacing: -1px;
+        font-size: 23px;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+      .brandmark {
+        width: 32px;
+        height: 32px;
+        background: #d4f29b;
+        border-radius: 9px;
+        display: grid;
+        place-items: center;
+        color: #18332d;
+      }
+      .top nav {
+        display: flex;
+        align-self: stretch;
+        align-items: center;
+        gap: 5px;
+      }
+      .nav-item {
+        color: #becdca;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 9px 16px;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: 550;
+      }
+      .nav-item:hover,
+      .nav-item.on {
+        background: #344d48;
+        color: #fff;
+      }
+      .topright {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 15px;
+      }
+      .demo {
+        color: #d1dcd5;
+        font-size: 12px;
+        white-space: nowrap;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .demo i {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #c5e893;
+      }
+      .toptool {
+        padding: 6px;
+        color: #d5e0dd;
+      }
+      .avatar {
+        display: inline-grid;
+        place-items: center;
+        border-radius: 50%;
+        font:
+          650 12px/1 Inter,
+          'Segoe UI',
+          sans-serif;
+        width: 32px;
+        height: 32px;
+        flex-shrink: 0;
+        letter-spacing: -0.3px;
+      }
+      .me {
+        background: #cbded2;
+        color: #355543;
+      }
+      .topright > .avatar {
+        border: 2px solid #567569;
+      }
+      .stage {
+        height: calc(100dvh - 62px);
+        overflow: auto;
+        background: #fff;
+      }
+      .fr {
+        display: grid;
+        grid-template-columns: 185px 300px minmax(340px, 1fr) 221px;
+        height: 100%;
+        min-height: 440px;
+        overflow: hidden;
+      }
+      .fr.no-contact {
+        grid-template-columns: 185px 300px minmax(340px, 1fr);
+      }
+      .fr-folders,
+      .fr-list,
+      .fr-thread,
+      .fr-contact {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .fr-folders,
+      .fr-list,
+      .fr-thread {
+        border-right: 1px solid var(--line);
+      }
+      .fr-folders {
+        background: #f4f6f4;
+        padding: 21px 11px 12px;
+        gap: 0;
+        overflow: auto;
+      }
+      .fr-team {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        font-weight: 650;
+        padding: 0 4px 20px;
+      }
+      .fr-team small {
+        display: block;
+        font-size: 11px;
+        color: var(--muted);
+        font-weight: 450;
+        margin-top: 3px;
+      }
+      .teamicon {
+        display: grid;
+        place-items: center;
+        width: 33px;
+        height: 33px;
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        color: #4e695e;
+      }
+      .compose {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 9px;
+        background: #fff;
+        border: 1px solid #ccd5d1;
+        box-shadow: 0 1px 2px #19392c08;
+        border-radius: 7px;
+        font-weight: 600;
+      }
+      .groupname {
+        font-size: 11px;
+        color: #62716a;
+        margin: 25px 8px 8px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+      }
+      .folder {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        width: 100%;
+        padding: 9px 9px;
+        text-align: left;
+        color: #47564f;
+        font-size: 13px;
+        border-radius: 6px;
+      }
+      .folder:hover {
+        background: #e9eeea;
+      }
+      .folder.on {
+        background: #dcebe2;
+        color: #204d3d;
+        font-weight: 650;
+      }
+      .folder .n {
+        margin-left: auto;
+        font-size: 11px;
+        font-variant-numeric: tabular-nums;
+        color: #66786e;
+      }
+      .point {
+        display: inline-block;
+        width: 9px;
+        height: 9px;
+        border-radius: 3px;
+        flex-shrink: 0;
+      }
+      .fr-bottom {
+        margin-top: auto;
+        padding-top: 24px;
+      }
+      .fr-bottom button {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: #576860;
+        font-size: 12px;
+      }
+      .fr-list {
+        background: white;
+      }
+      .list-title {
+        padding: 20px 16px 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .list-title h1 {
+        font-size: 21px;
+        line-height: 1.3;
+        letter-spacing: -0.7px;
+      }
+      .count {
+        background: #eff3ef;
+        font-size: 11px;
+        color: #67786d;
+        padding: 3px 6px;
+        border-radius: 5px;
+        font-weight: 650;
+      }
+      .fr-viewtabs {
+        display: flex;
+        gap: 17px;
+        padding: 0 16px;
+        border-bottom: 1px solid var(--line);
+      }
+      .fr-viewtabs button {
+        color: #748078;
+        padding: 8px 0 10px;
+        font-size: 12px;
+      }
+      .fr-viewtabs .on {
+        color: #235944;
+        box-shadow: inset 0 -2px #34755a;
+        font-weight: 600;
+      }
+      .filterbox {
+        margin: 10px 14px;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        color: #738077;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #fbfcfb;
+        padding: 6px 9px;
+      }
+      .filterbox input {
+        width: 100%;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        font-size: 12px;
+      }
+      .fr-items {
+        overflow: auto;
+        border-top: 1px solid var(--line);
+        flex: 1;
+      }
+      .conv {
+        position: relative;
+        display: block;
+        width: 100%;
+        text-align: left;
+        border-bottom: 1px solid #e7ebe8;
+        padding: 13px 15px 12px 21px;
+        background: white;
+      }
+      .conv.on {
+        background: #eef5ef;
+        box-shadow: inset 3px 0 #337c59;
+      }
+      .conv:hover {
+        background: #f6f8f5;
+      }
+      .conv .who {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        font-size: 13px;
+        line-height: 22px;
+      }
+      .who strong {
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        overflow: hidden;
+      }
+      .who .avatar {
+        height: 23px;
+        width: 23px;
+        font-size: 9px;
+      }
+      .conv time {
+        margin-left: auto;
+        white-space: nowrap;
+        font-size: 11px;
+        color: #68766f;
+      }
+      .dotunread {
+        position: absolute;
+        left: 9px;
+        top: 22px;
+        width: 5px;
+        height: 5px;
+        background: #328560;
+        border-radius: 50%;
+      }
+      .subj,
+      .snippet {
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      .subj {
+        font-size: 13px;
+        font-weight: 600;
+        margin: 5px 0;
+      }
+      .snippet {
+        font-size: 12px;
+        color: #768078;
+      }
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 10px;
+        line-height: 1.35;
+        padding: 2px 6px;
+        font-weight: 550;
+        border-radius: 4px;
+        margin: 8px 4px 0 0;
+        background: #ecf0ec;
+        color: #506353;
+      }
+      .tag.amber {
+        background: #f8edd2;
+        color: #876321;
+      }
+      .tag.lilac {
+        background: #eee9f7;
+        color: #755396;
+      }
+      .tag.blue {
+        background: #e6eef7;
+        color: #476887;
+      }
+      .tag.rose {
+        background: #fae7e4;
+        color: #96574e;
+      }
+      .fr-empty {
+        padding: 30px 18px;
+        text-align: center;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .fr-tools {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        height: 51px;
+        flex-shrink: 0;
+        padding: 0 19px;
+        border-bottom: 1px solid var(--line);
+      }
+      .iconbtn {
+        display: inline-grid;
+        place-items: center;
+        padding: 6px;
+        border-radius: 5px;
+        color: #596960;
+      }
+      .iconbtn:hover {
+        background: #edf2ed;
+      }
+      .fr-tools .assign {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 12px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 4px 7px;
+        color: #48554c;
+      }
+      .fr-tools .avatar {
+        width: 19px;
+        height: 19px;
+        font-size: 8px;
+      }
+      .spacer {
+        flex: 1;
+      }
+      .fr-thread {
+        background: #fcfdfb;
+        min-height: 0;
+      }
+      .fr-message-area {
+        flex: 1;
+        overflow: auto;
+        min-height: 0;
+        padding: 24px clamp(17px, 2vw, 35px) 20px;
+      }
+      .fr-thread-title {
+        font-size: clamp(21px, 1.8vw, 30px);
+        line-height: 1.2;
+        letter-spacing: -1px;
+        font-weight: 650;
+        color: #1f2b24;
+      }
+      .topic-line {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        margin-top: 7px;
+      }
+      .topic-line .tag {
+        font-size: 11px;
+        margin: 0;
+      }
+      .thread-date {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: #89938a;
+        font-size: 10px;
+        margin: 21px 0 15px;
+        text-align: center;
+      }
+      .thread-date:before,
+      .thread-date:after {
+        content: '';
+        height: 1px;
+        background: #e0e6df;
+        flex: 1;
+      }
+      .fr-card {
+        background: white;
+        border: 1px solid #dce3da;
+        border-radius: 8px;
+        margin-bottom: 10px;
+      }
+      .fr-card summary {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 10px 13px;
+        font-size: 12px;
+        list-style: none;
+      }
+      .fr-card summary span:nth-last-child(2) {
+        color: var(--muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex: 1;
+      }
+      .fr-card .mailhead {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 15px 16px 0;
+      }
+      .mailhead strong {
+        font-size: 13px;
+      }
+      .mailhead small {
+        display: block;
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 3px;
+        overflow-wrap: anywhere;
+      }
+      .mailhead time {
+        white-space: nowrap;
+        font-size: 10px;
+        color: var(--muted);
+        margin-left: auto;
+      }
+      .mailbody {
+        padding: 10px 16px 15px;
+        line-height: 1.55;
+        font-size: 13px;
+        color: #34403b;
+        white-space: pre-line;
+        overflow-wrap: anywhere;
+      }
+      .internal {
+        background: #fff8df;
+        border: 1px solid #ede2af;
+        border-radius: 7px;
+        padding: 10px 13px;
+        font-size: 12px;
+        line-height: 1.5;
+        color: #685a36;
+      }
+      .internal b {
+        display: inline-flex;
+        gap: 5px;
+        align-items: center;
+        margin-bottom: 2px;
+        color: #635533;
+      }
+      .fr-compose-wrap {
+        background: #fcfdfb;
+        padding: 9px clamp(17px, 2vw, 35px) 18px;
+      }
+      .fr-compose {
+        border: 1px solid #bfcfc2;
+        border-radius: 8px;
+        background: white;
+        box-shadow: 0 2px 6px #1d3c230b;
+        padding: 0 12px 9px;
+      }
+      .fr-compose.note {
+        background: #fffae7;
+      }
+      .reply-tabs {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        border-bottom: 1px solid #e9ede7;
+        height: 34px;
+      }
+      .reply-tabs button {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 11px;
+        height: 100%;
+        padding: 0 2px;
+        color: var(--muted);
+      }
+      .reply-tabs .on {
+        color: #365b46;
+        box-shadow: inset 0 -2px #72997a;
+        font-weight: 600;
+      }
+      .fr-compose textarea {
+        border: 0;
+        outline: 0;
+        background: transparent;
+        width: 100%;
+        height: 72px;
+        min-height: 45px;
+        resize: vertical;
+        padding: 11px 1px;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+      .fr-send {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .fr-send .action {
+        font-size: 12px;
+        padding: 6px 13px;
+      }
+      .fr-send .muted {
+        font-size: 11px;
+      }
+      .fr-contact {
+        overflow: auto;
+        background: white;
+      }
+      .fr-contact .ct-title {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 0 16px;
+        height: 51px;
+        border-bottom: 1px solid var(--line);
+        flex-shrink: 0;
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .ct-body {
+        padding: 18px 16px;
+      }
+      .ct-hero .avatar {
+        height: 49px;
+        width: 49px;
+        font-size: 18px;
+        border-radius: 13px;
+      }
+      .ct-hero h3 {
+        font-size: 18px;
+        margin: 10px 0 4px;
+        letter-spacing: -0.35px;
+      }
+      .ct-hero small {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .ct-section {
+        padding: 18px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .ct-section:last-child {
+        border-bottom: 0;
+      }
+      .ct-section h4 {
+        font-size: 12px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .ct-section dl {
+        margin: 12px 0 0;
+        font-size: 12px;
+      }
+      .ct-section dt {
+        color: #7b857f;
+        font-size: 11px;
+        margin: 11px 0 3px;
+      }
+      .ct-section dd {
+        margin: 0;
+        overflow-wrap: anywhere;
+      }
+      .ct-section .tag {
+        margin-top: 9px;
+      }
+      .ct-seq {
+        font-size: 12px;
+        line-height: 1.5;
+        color: #506158;
+        margin-top: 9px;
+      }
+      .ct-link {
+        color: var(--teal);
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 12px;
+        padding: 8px 0 0;
+      }
+      .mobile-btn {
+        display: none;
+      }
+      dialog {
+        color: var(--ink);
+        width: min(480px, 92vw);
+        max-height: 88dvh;
+        padding: 0;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        box-shadow: var(--shadow);
+        overflow: auto;
+      }
+      dialog::backdrop {
+        background: #1425214f;
+      }
+      .dlg-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--line);
+      }
+      .dlg-head h2 {
+        font-size: 17px;
+      }
+      .dlg-body {
+        padding: 20px;
+      }
+      .field {
+        display: grid;
+        gap: 6px;
+        margin: 0 0 14px;
+        font-size: 13px;
+      }
+      .field :is(input, select, textarea) {
+        padding: 9px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        width: 100%;
+        background: #fff;
+      }
+      .field textarea {
+        min-height: 88px;
+      }
+      .choices {
+        display: grid;
+        gap: 6px;
+      }
+      .choices button,
+      .source-link {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        text-align: left;
+        padding: 10px 12px;
+        background: #f4f7f3;
+        border-radius: 6px;
+      }
+      .source-link {
+        text-decoration: none;
+        color: var(--ink);
+        font-size: 13px;
+        justify-content: space-between;
+      }
+      .toast {
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 9px 18px;
+        border-radius: 7px;
+        color: white;
+        background: #243e36;
+        z-index: 90;
+        box-shadow: var(--shadow);
+        font-size: 13px;
+        pointer-events: none;
+      }
+      .toast:empty {
+        display: none;
+      }
+      @media (min-width: 1580px) {
+        .fr {
+          grid-template-columns: 208px 335px minmax(420px, 1fr) 260px;
+        }
+        .fr.no-contact {
+          grid-template-columns: 208px 335px minmax(420px, 1fr);
+        }
+      }
+      @media (max-width: 1190px) {
+        .fr,
+        .fr.no-contact {
+          grid-template-columns: 166px 264px minmax(300px, 1fr);
+        }
+        .fr-contact {
+          display: none;
+        }
+        .top {
+          gap: 18px;
+        }
+        .nav-item {
+          padding: 8px 12px;
+        }
+        .fr-tools {
+          padding: 0 12px;
+        }
+      }
+      @media (max-width: 850px) {
+        .fr,
+        .fr.no-contact {
+          grid-template-columns: 215px minmax(280px, 1fr);
+        }
+        .fr-folders {
+          display: none;
+        }
+        .mobile-btn.folders-btn {
+          display: inline-grid;
+        }
+        .top {
+          padding: 0 12px;
+          gap: 12px;
+        }
+        .topright {
+          gap: 2px;
+        }
+        .toptool {
+          display: inline-grid;
+        }
+        .nav-item {
+          padding: 8px;
+        }
+        .module {
+          padding: 20px 16px;
+        }
+        .fr-tools {
+          gap: 3px;
+        }
+        .top .demo {
+          font-size: 0;
+        }
+      }
+      @media (max-width: 620px) {
+        .top {
+          height: 88px;
+          display: grid;
+          grid-template-columns: 1fr auto;
+          grid-template-rows: 41px 44px;
+          gap: 0;
+          padding: 1px 12px 2px;
+        }
+        .wordmark {
+          font-size: 18px;
+        }
+        .brandmark {
+          width: 24px;
+          height: 24px;
+          border-radius: 6px;
+        }
+        .brandmark svg {
+          width: 17px;
+        }
+        .top nav {
+          grid-row: 2;
+          grid-column: 1/-1;
+          justify-content: space-between;
+          gap: 0;
+        }
+        .topright {
+          grid-column: 2;
+          grid-row: 1;
+        }
+        .top .demo {
+          font-size: 11px;
+        }
+        .topright > .avatar {
+          width: 24px;
+          height: 24px;
+          margin-left: 10px;
+          font-size: 10px;
+        }
+        .nav-item {
+          font-size: 12px;
+          gap: 4px;
+        }
+        .nav-item svg {
+          width: 15px;
+        }
+        .stage {
+          height: calc(100dvh - 88px);
+        }
+        .fr,
+        .fr.no-contact {
+          display: flex;
+          height: 100%;
+          min-height: 0;
+        }
+        .fr-list {
+          flex: 1;
+        }
+        .fr-thread {
+          display: none;
+          flex: 1;
+          overflow: hidden;
+        }
+        .fr.mobile-detail .fr-thread {
+          display: flex;
+        }
+        .fr.mobile-detail .fr-list {
+          display: none;
+        }
+        .mobile-btn.back-btn {
+          display: inline-grid;
+        }
+        .fr-compose-wrap {
+          padding: 6px 12px 10px;
+        }
+        .fr-message-area {
+          padding: 18px 12px;
+        }
+        .fr-compose textarea {
+          height: 60px;
+        }
+        .fr-card .mailhead {
+          padding: 12px 10px 0;
+        }
+        .mailbody {
+          padding: 10px;
+        }
+        .fr-tools .assign {
+          font-size: 11px;
+        }
+        .module {
+          padding: 16px 12px;
+        }
+        .module-head {
+          align-items: flex-start;
+          flex-wrap: wrap;
+        }
+      }
+
+      .fr {
+        grid-template-rows: minmax(0, 1fr);
+      }
+      .fr-folders,
+      .fr-list,
+      .fr-contact {
+        min-height: 0;
+      }
+      .fr-compose-wrap {
+        flex-shrink: 0;
+      }
+      .fr-card summary {
+        min-width: 0;
+      }
+      .fr-card summary b {
+        white-space: nowrap;
+      }
+      .fr-list .conv time {
+        line-height: 1.4;
+      }
+      .ct-section dd .mail-link {
+        overflow-wrap: anywhere;
+      }
+      .fr-review {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        margin: 8px 0 0;
+        color: #75522d;
+        font-size: 12px;
+        font-weight: 600;
+      }
+    </style>
+    <!--
+ISC License
+
+Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2022 as part of Feather (MIT). All other copyright (c) for Lucide are held by Lucide Contributors 2022.
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+-->
+  </head>
+  <body>
+    <header class="top">
+      <div class="wordmark">
+        <span class="brandmark" aria-hidden="true"
+          ><svg width="23" height="23" viewBox="0 0 24 24" fill="none">
+            <path d="M3 16 10 4h5L8 16zm7 4 7-12h5l-7 12z" fill="currentColor" /></svg></span
+        >AI-SDR
+      </div>
+      <nav id="modules" aria-label="工作区导航"></nav>
+      <div class="topright">
+        <span class="demo"><i></i>模拟工作区</span
+        ><button class="toptool" aria-label="设计参考" onclick="references()"></button
+        ><span class="avatar me" title="Olivia Chen">OC</span>
+      </div>
+    </header>
+    <main id="stage" class="stage"></main>
+    <dialog id="modal" aria-labelledby="modal-title">
+      <div class="dlg-head">
+        <h2 id="modal-title"></h2>
+        <button class="iconbtn" aria-label="关闭" onclick="closeModal()">✕</button>
+      </div>
+      <div id="modal-body" class="dlg-body"></div>
+    </dialog>
+    <div id="toast" role="status" class="toast"></div>
+    <script>
+      // Inline icon paths from Lucide, licensed under ISC.
+      const ICONS = {
+        'arrow-left': '<path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path>',
+        'arrow-up-right': '<path d="M7 7h10v10"></path><path d="M7 17 17 7"></path>',
+        'at-sign':
+          '<circle cx="12" cy="12" r="4"></circle><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"></path>',
+        badge:
+          '<path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z"></path>',
+        bath: '<path d="M10 4 8 6"></path><path d="M17 19v2"></path><path d="M2 12h20"></path><path d="M7 19v2"></path><path d="M9 5 7.621 3.621A2.121 2.121 0 0 0 4 5v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"></path>',
+        bell: '<path d="M10.268 21a2 2 0 0 0 3.464 0"></path><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"></path>',
+        blinds:
+          '<path d="M3 3h18"></path><path d="M20 7H8"></path><path d="M20 11H8"></path><path d="M10 19h10"></path><path d="M8 15h12"></path><path d="M4 3v14"></path><circle cx="4" cy="19" r="2"></circle>',
+        bold: '<path d="M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8"></path>',
+        book: '<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20"></path>',
+        'book-open':
+          '<path d="M12 7v14"></path><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"></path>',
+        box: '<path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"></path><path d="m3.3 7 8.7 5 8.7-5"></path><path d="M12 22V12"></path>',
+        check: '<path d="M20 6 9 17l-5-5"></path>',
+        'chevron-down': '<path d="m6 9 6 6 6-6"></path>',
+        circle: '<circle cx="12" cy="12" r="10"></circle>',
+        'circle-check': '<circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path>',
+        'circle-dot':
+          '<circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="1"></circle>',
+        'circle-help':
+          '<circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path>',
+        clock:
+          '<circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline>',
+        contact:
+          '<path d="M16 2v2"></path><path d="M7 22v-2a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2"></path><path d="M8 2v2"></path><circle cx="12" cy="11" r="3"></circle><rect x="3" y="4" width="18" height="18" rx="2"></rect>',
+        'contact-round':
+          '<path d="M16 2v2"></path><path d="M17.915 22a6 6 0 0 0-12 0"></path><path d="M8 2v2"></path><circle cx="12" cy="12" r="4"></circle><rect x="3" y="4" width="18" height="18" rx="2"></rect>',
+        delete:
+          '<path d="M10 5a2 2 0 0 0-1.344.519l-6.328 5.74a1 1 0 0 0 0 1.481l6.328 5.741A2 2 0 0 0 10 19h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2z"></path><path d="m12 9 6 6"></path><path d="m18 9-6 6"></path>',
+        expand:
+          '<path d="m21 21-6-6m6 6v-4.8m0 4.8h-4.8"></path><path d="M3 16.2V21m0 0h4.8M3 21l6-6"></path><path d="M21 7.8V3m0 0h-4.8M21 3l-6 6"></path><path d="M3 7.8V3m0 0h4.8M3 3l6 6"></path>',
+        eye: '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"></path><circle cx="12" cy="12" r="3"></circle>',
+        'file-pen-line':
+          '<path d="m18 5-2.414-2.414A2 2 0 0 0 14.172 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2"></path><path d="M21.378 12.626a1 1 0 0 0-3.004-3.004l-4.01 4.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z"></path><path d="M8 18h1"></path>',
+        'file-text':
+          '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="M10 9H8"></path><path d="M16 13H8"></path><path d="M16 17H8"></path>',
+        files:
+          '<path d="M20 7h-3a2 2 0 0 1-2-2V2"></path><path d="M9 18a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h7l4 4v10a2 2 0 0 1-2 2Z"></path><path d="M3 7.6v12.8A1.6 1.6 0 0 0 4.6 22h9.8"></path>',
+        filter: '<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>',
+        flame:
+          '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"></path>',
+        focus:
+          '<circle cx="12" cy="12" r="3"></circle><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path>',
+        folder:
+          '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path>',
+        folders:
+          '<path d="M20 17a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3.9a2 2 0 0 1-1.69-.9l-.81-1.2a2 2 0 0 0-1.67-.9H8a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2Z"></path><path d="M2 8v11a2 2 0 0 0 2 2h14"></path>',
+        hash: '<line x1="4" x2="20" y1="9" y2="9"></line><line x1="4" x2="20" y1="15" y2="15"></line><line x1="10" x2="8" y1="3" y2="21"></line><line x1="16" x2="14" y1="3" y2="21"></line>',
+        history:
+          '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M12 7v5l4 2"></path>',
+        house:
+          '<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"></path><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>',
+        inbox:
+          '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path>',
+        key: '<path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"></path><path d="m21 2-9.6 9.6"></path><circle cx="7.5" cy="15.5" r="5.5"></circle>',
+        list: '<path d="M3 12h.01"></path><path d="M3 18h.01"></path><path d="M3 6h.01"></path><path d="M8 12h13"></path><path d="M8 18h13"></path><path d="M8 6h13"></path>',
+        'lock-keyhole':
+          '<circle cx="12" cy="16" r="1"></circle><rect x="3" y="10" width="18" height="12" rx="2"></rect><path d="M7 10V7a5 5 0 0 1 10 0v3"></path>',
+        mail: '<rect width="20" height="16" x="2" y="4" rx="2"></rect><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>',
+        'mail-plus':
+          '<path d="M22 13V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v12c0 1.1.9 2 2 2h8"></path><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path><path d="M19 16v6"></path><path d="M16 19h6"></path>',
+        mailbox:
+          '<path d="M22 17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9.5C2 7 4 5 6.5 5H18c2.2 0 4 1.8 4 4v8Z"></path><polyline points="15,9 18,9 18,11"></polyline><path d="M6.5 5C9 5 11 7 11 9.5V17a2 2 0 0 1-2 2"></path><line x1="6" x2="7" y1="10" y2="10"></line>',
+        map: '<path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z"></path><path d="M15 5.764v15"></path><path d="M9 3.236v15"></path>',
+        option: '<path d="M3 3h6l6 18h6"></path><path d="M14 3h7"></path>',
+        'panel-left':
+          '<rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M9 3v18"></path>',
+        'panel-right':
+          '<rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M15 3v18"></path>',
+        'panels-top-left':
+          '<rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M3 9h18"></path><path d="M9 21V9"></path>',
+        pencil:
+          '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path>',
+        pill: '<path d="m10.5 20.5 10-10a4.95 4.95 0 1 0-7-7l-10 10a4.95 4.95 0 1 0 7 7Z"></path><path d="m8.5 8.5 7 7"></path>',
+        plus: '<path d="M5 12h14"></path><path d="M12 5v14"></path>',
+        pointer:
+          '<path d="M22 14a8 8 0 0 1-8 8"></path><path d="M18 11v-1a2 2 0 0 0-2-2a2 2 0 0 0-2 2"></path><path d="M14 10V9a2 2 0 0 0-2-2a2 2 0 0 0-2 2v1"></path><path d="M10 9.5V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v10"></path><path d="M18 11a2 2 0 1 1 4 0v3a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path>',
+        repeat:
+          '<path d="m17 2 4 4-4 4"></path><path d="M3 11v-1a4 4 0 0 1 4-4h14"></path><path d="m7 22-4-4 4-4"></path><path d="M21 13v1a4 4 0 0 1-4 4H3"></path>',
+        replace:
+          '<path d="M14 4a2 2 0 0 1 2-2"></path><path d="M16 10a2 2 0 0 1-2-2"></path><path d="M20 2a2 2 0 0 1 2 2"></path><path d="M22 8a2 2 0 0 1-2 2"></path><path d="m3 7 3 3 3-3"></path><path d="M6 10V5a3 3 0 0 1 3-3h1"></path><rect x="2" y="14" width="8" height="8" rx="2"></rect>',
+        'replace-all':
+          '<path d="M14 14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2"></path><path d="M14 4a2 2 0 0 1 2-2"></path><path d="M16 10a2 2 0 0 1-2-2"></path><path d="M20 14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2"></path><path d="M20 2a2 2 0 0 1 2 2"></path><path d="M22 8a2 2 0 0 1-2 2"></path><path d="m3 7 3 3 3-3"></path><path d="M6 10V5a 3 3 0 0 1 3-3h1"></path><rect x="2" y="14" width="8" height="8" rx="2"></rect>',
+        reply:
+          '<polyline points="9 17 4 12 9 7"></polyline><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path>',
+        'rotate-ccw':
+          '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path>',
+        save: '<path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"></path><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"></path><path d="M7 3v4a1 1 0 0 0 1 1h7"></path>',
+        search: '<circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path>',
+        section:
+          '<path d="M16 5a4 3 0 0 0-8 0c0 4 8 3 8 7a4 3 0 0 1-8 0"></path><path d="M8 19a4 3 0 0 0 8 0c0-4-8-3-8-7a4 3 0 0 1 8 0"></path>',
+        send: '<path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"></path><path d="m21.854 2.147-10.94 10.939"></path>',
+        settings:
+          '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle>',
+        share:
+          '<path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path><polyline points="16 6 12 2 8 6"></polyline><line x1="12" x2="12" y1="2" y2="15"></line>',
+        sheet:
+          '<rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect><line x1="3" x2="21" y1="9" y2="9"></line><line x1="3" x2="21" y1="15" y2="15"></line><line x1="9" x2="9" y1="9" y2="21"></line><line x1="15" x2="15" y1="9" y2="21"></line>',
+        signature:
+          '<path d="m21 17-2.156-1.868A.5.5 0 0 0 18 15.5v.5a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1c0-2.545-3.991-3.97-8.5-4a1 1 0 0 0 0 5c4.153 0 4.745-11.295 5.708-13.5a2.5 2.5 0 1 1 3.31 3.284"></path><path d="M3 21h18"></path>',
+        slice:
+          '<path d="M11 16.586V19a1 1 0 0 1-1 1H2L18.37 3.63a1 1 0 1 1 3 3l-9.663 9.663a1 1 0 0 1-1.414 0L8 14"></path>',
+        split:
+          '<path d="M16 3h5v5"></path><path d="M8 3H3v5"></path><path d="M12 22v-8.3a4 4 0 0 0-1.172-2.872L3 3"></path><path d="m15 9 6-6"></path>',
+        'square-pen':
+          '<path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z"></path>',
+        'sticky-note':
+          '<path d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8Z"></path><path d="M15 3v4a2 2 0 0 0 2 2h4"></path>',
+        table:
+          '<path d="M12 3v18"></path><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M3 9h18"></path><path d="M3 15h18"></path>',
+        tag: '<path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"></path><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"></circle>',
+        tags: '<path d="m15 5 6.3 6.3a2.4 2.4 0 0 1 0 3.4L17 19"></path><path d="M9.586 5.586A2 2 0 0 0 8.172 5H3a1 1 0 0 0-1 1v5.172a2 2 0 0 0 .586 1.414L8.29 18.29a2.426 2.426 0 0 0 3.42 0l3.58-3.58a2.426 2.426 0 0 0 0-3.42z"></path><circle cx="6.5" cy="9.5" r=".5" fill="currentColor"></circle>',
+        target:
+          '<circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle>',
+        text: '<path d="M17 6.1H3"></path><path d="M21 12.1H3"></path><path d="M15.1 18H3"></path>',
+        type: '<polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="9" x2="15" y1="20" y2="20"></line><line x1="12" x2="12" y1="4" y2="20"></line>',
+        underline:
+          '<path d="M6 4v6a6 6 0 0 0 12 0V4"></path><line x1="4" x2="20" y1="20" y2="20"></line>',
+        'user-round':
+          '<circle cx="12" cy="8" r="5"></circle><path d="M20 21a8 8 0 0 0-16 0"></path>',
+        'user-round-minus':
+          '<path d="M2 21a8 8 0 0 1 13.292-6"></path><circle cx="10" cy="8" r="5"></circle><path d="M22 19h-6"></path>',
+        workflow:
+          '<rect width="8" height="8" x="3" y="3" rx="2"></rect><path d="M7 11v4a2 2 0 0 0 2 2h4"></path><rect width="8" height="8" x="13" y="13" rx="2"></rect>',
+        x: '<path d="M18 6 6 18"></path><path d="m6 6 12 12"></path>',
+      };
+    </script>
+    <script>
+      'use strict';
+      const pages = {
+        inbox: ['沟通中心', 'inbox'],
+        sequences: ['跟进序列', 'workflow'],
+        knowledge: ['产品资料', 'book-open'],
+        accounts: ['邮箱账号', 'mail-plus'],
+      };
+      const stage = document.getElementById('stage');
+      const modal = document.getElementById('modal');
+      let toastTimer;
+      function icon(name, size = 18) {
+        const key = String(name)
+          .replace(/([a-z])([A-Z])/g, '$1-$2')
+          .replace(/[_\s]/g, '-')
+          .toLowerCase();
+        const d = ICONS[key] || ICONS['circle-dot'];
+        return (
+          '<svg aria-hidden="true" width="' +
+          Number(size) +
+          '" height="' +
+          Number(size) +
+          '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">' +
+          d +
+          '</svg>'
+        );
+      }
+      function esc(s) {
+        return String(s ?? '').replace(
+          /[&<>"']/g,
+          (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
+        );
+      }
+      function toast(s) {
+        const t = document.getElementById('toast');
+        t.textContent = s;
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => (t.textContent = ''), 2500);
+      }
+      function openModal(title, bodyHtml) {
+        document.getElementById('modal-title').textContent = title;
+        document.getElementById('modal-body').innerHTML = bodyHtml;
+        if (!modal.open) modal.showModal();
+      }
+      function closeModal() {
+        if (modal.open) modal.close();
+      }
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+          const r = modal.getBoundingClientRect();
+          if (
+            e.clientX < r.left ||
+            e.clientX > r.right ||
+            e.clientY < r.top ||
+            e.clientY > r.bottom
+          )
+            closeModal();
+        }
+      });
+      function references() {
+        openModal(
+          '设计参考',
+          '<div class="choices">' +
+            [
+              ['Front · 团队收件箱', 'https://help.front.com/en/articles/3889728'],
+              [
+                'Apollo · 跟进序列',
+                'https://knowledge.apollo.io/hc/en-us/articles/4409237165837-Sequences-Overview',
+              ],
+              [
+                'Intercom · 知识资料',
+                'https://www.intercom.com/help/en/articles/9357912-knowledge-explained',
+              ],
+              [
+                'Instantly · 邮箱账号',
+                'https://help.instantly.ai/en/articles/11991261-getting-started-with-the-email-accounts-dashboard',
+              ],
+            ]
+              .map(
+                ([name, url]) =>
+                  '<a class="source-link" target="_blank" rel="noopener" href="' +
+                  url +
+                  '">' +
+                  name +
+                  icon('arrow-up-right', 15) +
+                  '</a>',
+              )
+              .join('') +
+            '</div>',
+        );
+      }
+      const boxNames = ['Honey Badger', 'Shuangsheng', 'Shutter Blinds'];
+      const boxColors = ['#739c66', '#ba8952', '#859ac0'];
+      const boxEmails = [
+        'sl01@honeybadgerblinds.com',
+        'sl01@shuangshengshutter.com',
+        'sl01@shutterblindssolutions.com',
+      ];
+      const tags = {
+        样品询价: 'amber',
+        产品规格: 'blue',
+        报价: 'lilac',
+        交期确认: 'rose',
+        订单跟进: '',
+        一般咨询: '',
+      };
+      const seed = [
+        [
+          'Emma Wilson',
+          'A211 fabric samples',
+          'Northline Interiors',
+          'London, UK',
+          0,
+          '样品询价',
+          '10:42',
+          'Hi Olivia, thanks for sharing the swatch book.',
+          'Hi Olivia,\n\nThanks for sharing the swatch book. We’re specifying the A211 fabric for a new residential project in London.\n\nCould you confirm the composition and arrange two sample cuts in the neutral colours?\n\nBest,\nEmma',
+          'Sourcing Manager',
+        ],
+        [
+          'James Carter',
+          'Plantation shutter specifications',
+          'Carter Shutters',
+          'Melbourne, AU',
+          1,
+          '产品规格',
+          '10:18',
+          'Could you share the louvre sizes?',
+          'Hi Olivia,\n\nCould you share the louvre sizes available for plantation shutters? Our installers would like to review the options this week.\n\nThanks,\nJames',
+          'Purchasing Lead',
+        ],
+        [
+          'Sofia Rossi',
+          'Roller shade lead times',
+          'Forma Studio',
+          'Milan, IT',
+          2,
+          '交期确认',
+          '09:56',
+          'We’re planning a November installation.',
+          'Hello,\n\nWe’re planning a November installation. What lead time should we allow for your indoor roller shades?\n\nBest regards,\nSofia',
+          'Project Designer',
+        ],
+        [
+          'Liam Brooks',
+          'Re: Curtain track options',
+          'Arc Window Co.',
+          'Bristol, UK',
+          0,
+          '报价',
+          '09:31',
+          'Thank you for the track drawings.',
+          'Hi team,\n\nThank you for the track drawings. Please share an indicative quotation for 120 metres including end stops.\n\nRegards,\nLiam',
+          'Buyer',
+        ],
+        [
+          'Mia Chen',
+          'Swatch set received',
+          'West & Pine',
+          'Vancouver, CA',
+          2,
+          '订单跟进',
+          '昨天',
+          'The sample kit arrived this morning.',
+          'Hi Olivia,\n\nThe sample kit arrived this morning. We’ll review the fabrics with our client on Friday.\n\nThank you,\nMia',
+          'Studio Director',
+        ],
+        [
+          'Noah Miller',
+          'Shutter finish options',
+          'Miller Home',
+          'Austin, US',
+          1,
+          '产品规格',
+          '昨天',
+          'Do you offer a satin finish?',
+          'Hello,\n\nDo you offer a satin finish for the plantation shutters? A finish chart would be very helpful.\n\nNoah',
+          'Operations Manager',
+        ],
+        [
+          'Ava Laurent',
+          'Ceiling track sample',
+          'Atelier Rivage',
+          'Lyon, FR',
+          0,
+          '样品询价',
+          '周四',
+          'We’d like to see a sample of the track.',
+          'Hello,\n\nWe’d like to see a sample of the ceiling track for our curtain display. Could you contact us about a sample?\n\nAva',
+          'Design Lead',
+        ],
+        [
+          'Oliver Reed',
+          'Honeycomb shade collection',
+          'Reed Interiors',
+          'Bath, UK',
+          2,
+          '一般咨询',
+          '周四',
+          'Please send the indoor collection details.',
+          'Hi,\n\nPlease send the indoor shade collection details for our new showroom.\n\nOliver',
+          'Owner',
+        ],
+        [
+          'Grace Lin',
+          'Updated delivery address',
+          'Harbor House',
+          'Seattle, US',
+          0,
+          '订单跟进',
+          '周三',
+          'Please use our studio address.',
+          'Hi Olivia,\n\nPlease use our studio address for the sample delivery. I will confirm the full address tomorrow.\n\nGrace',
+          'Buyer',
+        ],
+        [
+          'Lucas Braun',
+          'Re: Shutter catalog',
+          'Studio Linden',
+          'Berlin, DE',
+          1,
+          '一般咨询',
+          '周二',
+          'We have everything we need for now.',
+          'Hello,\n\nThanks for your time. We have everything we need for now.\n\nLucas',
+          'Designer',
+        ],
+      ];
+      const avs = [
+        ['#e0e7fa', '#4f6091'],
+        ['#f1e4d6', '#986841'],
+        ['#e9dff0', '#815e8b'],
+        ['#dceae2', '#497259'],
+        ['#f4e3df', '#9c6659'],
+      ];
+      const convs = seed.map((a, i) => ({
+        id: i,
+        name: a[0],
+        subject: a[1],
+        company: a[2],
+        city: a[3],
+        box: a[4],
+        tag: a[5],
+        time: a[6],
+        snippet: a[7],
+        body: a[8],
+        role: a[9],
+        status: i === 8 ? 'later' : i === 9 ? 'done' : 'open',
+        mine: i % 3 !== 1,
+        assigned: i % 3 === 1 ? '未分配' : 'Olivia Chen',
+        unread: i % 2 === 0 && i !== 0,
+        mention: i === 0 || i === 3,
+        sub: i % 3 === 0,
+        email:
+          a[0].split(' ')[0].toLowerCase() +
+          '@' +
+          a[2].toLowerCase().replace(/[^a-z]/g, '') +
+          '.example',
+        history: [],
+        notes: i === 0 ? ['@Olivia Chen  客户需要两份中性色布样，回复前请核对样品库存。'] : [],
+        draft: '',
+        noteDraft: '',
+        replyMode: 'reply',
+      }));
+      convs.forEach((c) => {
+        c.events = c.notes.map((body) => ({ body, note: true, author: 'Daniel Park' }));
+      });
+      convs[1].review = true;
+      convs[1].draft =
+        'Hi James,\n\nWhich louvre size is your installation team considering, and what are the opening dimensions? I can check the matching options with our team.\n\nBest,\nOlivia';
+      convs[3].review = true;
+      convs[3].draft =
+        'Hi Liam,\n\nThanks for confirming you received the drawings. For the 120-metre quotation, will your team need ceiling or wall mounting, and how many separate runs are planned?\n\nBest,\nOlivia';
+      function frTakeover() {
+        const c = current();
+        c.manual = !c.manual;
+        closeModal();
+        renderInbox();
+        toast(c.manual ? '已切换为人工接待' : '已恢复邮箱接待策略');
+      }
+      const fr = { folder: 'all', status: 'open', q: '', id: 0, mobile: false, contact: true };
+      const statuses = { open: '进行中', later: '稍后', done: '已完成' };
+      const filters = {
+        all: ['全部会话', 'inbox'],
+        review: ['待审草稿', 'file-pen-line'],
+        mine: ['分配给我', 'user-round'],
+        mention: ['提及我的', 'at-sign'],
+        sub: ['我订阅的', 'bell'],
+        unassigned: ['未分配', 'user-round-minus'],
+      };
+      function avatar(name, i = 0, extra = '') {
+        const c = avs[i % avs.length];
+        return `<span class="avatar ${extra}" style="background:${c[0]};color:${c[1]}">${esc(
+          name
+            .trim()
+            .split(/\s+/)
+            .map((w) => w[0])
+            .slice(0, 2)
+            .join('')
+            .toUpperCase(),
+        )}</span>`;
+      }
+      function folderMatches(c, id) {
+        return (
+          id === 'all' ||
+          (id === 'review' && c.review) ||
+          (id === 'mine' && c.mine) ||
+          (id === 'mention' && c.mention) ||
+          (id === 'sub' && c.sub) ||
+          (id === 'unassigned' && c.assigned === '未分配') ||
+          id === 'box' + c.box
+        );
+      }
+      function folderName() {
+        return filters[fr.folder]?.[0] || boxNames[Number(fr.folder.slice(3))];
+      }
+      function visibleConvs() {
+        return convs.filter(
+          (c) =>
+            folderMatches(c, fr.folder) &&
+            c.status === fr.status &&
+            (!fr.q ||
+              [c.name, c.company, c.subject, c.body, c.tag].some((x) =>
+                x.toLowerCase().includes(fr.q.toLowerCase()),
+              )),
+        );
+      }
+      function folderBtn(id) {
+        const box = id.startsWith('box'),
+          n = Number(id.slice(3));
+        const label = box ? boxNames[n] : filters[id][0];
+        let count = convs.filter((c) => folderMatches(c, id) && c.status === 'open').length;
+        return `<button class="folder ${id === fr.folder ? 'on' : ''}" onclick="frFolder('${id}')">${box ? '<i class="point" style="background:' + boxColors[n] + '"></i>' : icon(filters[id][1], 16)}${esc(label)}<span class="n">${count}</span></button>`;
+      }
+      function folderItems() {
+        return (
+          '<div class="groupname">我的工作区</div>' +
+          Object.keys(filters).map(folderBtn).join('') +
+          '<div class="groupname">共享收件箱</div>' +
+          boxNames.map((_, i) => folderBtn('box' + i)).join('')
+        );
+      }
+      function frFolder(id) {
+        closeModal();
+        fr.folder = id;
+        fr.q = '';
+        fr.status = 'open';
+        fr.mobile = false;
+        renderInbox();
+      }
+      function frStatus(id) {
+        fr.status = id;
+        fr.mobile = false;
+        renderInbox();
+      }
+      function frSelect(id) {
+        fr.id = id;
+        fr.mobile = true;
+        const c = convs.find((c) => c.id === id);
+        c.unread = false;
+        renderInbox();
+      }
+      function iconButton(name, title, cb, cls = '') {
+        return `<button class="iconbtn ${cls}" aria-label="${title}" title="${title}" onclick="${cb}">${icon(name, 17)}</button>`;
+      }
+      function tag(s) {
+        return `<span class="tag ${tags[s] || ''}">${esc(s)}</span>`;
+      }
+      function threadList() {
+        return (
+          visibleConvs()
+            .map(
+              (c) =>
+                `<button class="conv ${c.id === fr.id ? 'on' : ''}" onclick="frSelect(${c.id})">${c.unread ? '<i class="dotunread"></i>' : ''}<div class="who">${avatar(c.name, c.id)}<strong>${esc(c.name)}</strong><time>${esc(c.time)}</time></div><div class="subj">${esc(c.subject)}</div><div class="snippet">${esc(c.snippet)}</div>${tag(c.tag)}</button>`,
+            )
+            .join('') || '<div class="fr-empty">此视图暂无会话</div>'
+        );
+      }
+      function current() {
+        return convs.find((c) => c.id === fr.id);
+      }
+      function contact(c) {
+        return `<div class="ct-body"><div class="ct-hero">${avatar(c.name, c.id)}<h3>${esc(c.name)}</h3><small>${esc(c.role)}</small></div><div class="ct-section"><h4>${icon('contact-round', 15)} 联系人资料</h4><dl><dt>公司</dt><dd>${esc(c.company)}</dd><dt>邮箱</dt><dd>${esc(c.email)}</dd><dt>所在地</dt><dd>${esc(c.city)}</dd></dl></div><div class="ct-section"><h4>${icon('mailbox', 15)} 负责邮箱</h4><dl><dd>${esc(boxNames[c.box])}</dd><dt>${esc(boxEmails[c.box])}</dt></dl><button class="ct-link" onclick="frTakeover()">${c.manual ? '恢复邮箱策略' : '人工接管'}</button>${c.manual ? '<span class="tag amber">人工接待中</span>' : ''}</div>${c.newMail ? '' : `<div class="ct-section"><h4>${icon('workflow', 15)} 跟进序列</h4><div class="ct-seq">${['布艺帘轨道 · 经销商开发', '透气窗 · 安装商初次触达', '室内遮阳帘 · 合作跟进'][c.box]}</div><span class="tag">客户已回复 · 退出序列</span><br><button class="ct-link" onclick="closeModal();frOpenSequence(${c.box})">查看序列 ${icon('arrow-up-right', 13)}</button></div>`}</div>`;
+      }
+      function frOwner() {
+        openModal(
+          '分配会话',
+          '<div class="choices">' +
+            ['Olivia Chen', 'Daniel Park', '未分配']
+              .map(
+                (n) =>
+                  `<button onclick="frAssign('${n}')">${icon('user-round', 16)}${n}${current().assigned === n ? icon('check', 15) : ''}</button>`,
+              )
+              .join('') +
+            '</div>',
+        );
+      }
+      function frAssign(n) {
+        current().assigned = n;
+        current().mine = n === 'Olivia Chen';
+        closeModal();
+        renderInbox();
+        toast('会话负责人已更新');
+      }
+      function frChangeStatus(s) {
+        current().status = s;
+        closeModal();
+        fr.mobile = false;
+        renderInbox();
+        toast('会话已移至「' + statuses[s] + '」');
+      }
+      function frLater() {
+        openModal(
+          '稍后处理',
+          '<div class="choices">' +
+            ['今天下午', '明天上午', '下周一']
+              .map((n) => `<button onclick="frSnooze('${n}')">${icon('clock', 16)}${n}</button>`)
+              .join('') +
+            '</div>',
+        );
+      }
+      function frSnooze(n) {
+        current().wake = n;
+        frChangeStatus('later');
+      }
+      function frContact() {
+        if (innerWidth <= 1190) openModal('联系人', contact(current()));
+        else {
+          fr.contact = !fr.contact;
+          renderInbox();
+        }
+      }
+      function frMode(mode) {
+        current().replyMode = mode;
+        renderInbox();
+        document.getElementById('fr-draft')?.focus();
+      }
+      function frWrite(c, body, note) {
+        c.events.push({ body, note, author: 'Olivia Chen' });
+        if (!note) c.snippet = body;
+      }
+      function frSend() {
+        const c = current(),
+          note = c.replyMode === 'note',
+          key = note ? 'noteDraft' : 'draft';
+        if (!c[key].trim()) return;
+        frWrite(c, c[key].trim(), note);
+        c[key] = '';
+        if (!note) c.review = false;
+        renderInbox();
+        const area = document.querySelector('.fr-message-area');
+        if (area) area.scrollTop = area.scrollHeight;
+        toast(note ? '团队备注已添加' : '回复已加入模拟会话');
+      }
+      function frCompose() {
+        openModal(
+          '新邮件',
+          `<form onsubmit="return frNew(event)"><label class="field">发件邮箱<select name="box">${boxEmails.map((e, i) => '<option value="' + i + '">' + e + '</option>').join('')}</select></label><label class="field">收件人<input name="to" type="email" required placeholder="buyer@example.com"></label><label class="field">主题<input required name="subject" maxlength="160"></label><label class="field">正文<textarea name="body" required></textarea></label><button class="action primary">${icon('send', 14)} 模拟发送</button></form>`,
+        );
+      }
+      function frNew(e) {
+        e.preventDefault();
+        const f = new FormData(e.target),
+          id = convs.length;
+        const addr = f.get('to'),
+          subject = f.get('subject').trim(),
+          body = f.get('body').trim();
+        if (!subject || !body) return false;
+        convs.unshift({
+          ...convs[0],
+          id,
+          name: addr.split('@')[0],
+          email: addr,
+          subject,
+          box: Number(f.get('box')),
+          body: '',
+          snippet: body,
+          history: [],
+          notes: [],
+          events: [{ body, note: false, author: 'Olivia Chen' }],
+          status: 'open',
+          assigned: 'Olivia Chen',
+          mine: true,
+          role: '联系人',
+          company: addr.split('@')[1],
+          city: '尚未填写',
+          time: '刚刚',
+          tag: '一般咨询',
+          mention: false,
+          sub: true,
+          draft: '',
+          noteDraft: '',
+          replyMode: 'reply',
+          unread: false,
+          newMail: true,
+          review: false,
+          manual: false,
+        });
+        Object.assign(fr, { folder: 'all', status: 'open', id, q: '', mobile: true });
+        closeModal();
+        renderInbox();
+        toast('邮件已加入模拟会话');
+        return false;
+      }
+      function frTemplate() {
+        openModal(
+          '插入回复模板',
+          '<div class="choices">' +
+            ['确认样品需求', '询问订单数量']
+              .map(
+                (n, i) => `<button onclick="frInsert(${i})">${icon('file-text', 15)}${n}</button>`,
+              )
+              .join('') +
+            '</div>',
+        );
+      }
+      function frInsert(i) {
+        const c = current();
+        c.replyMode = 'reply';
+        c.draft =
+          'Hi ' +
+          c.name.split(' ')[0] +
+          ',\\n\\n' +
+          (i
+            ? 'Could you share the expected order quantity for this project?'
+            : 'Could you confirm your preferred colours and the delivery address for the samples?') +
+          '\\n\\nBest,\\nOlivia';
+        c.draft = c.draft.replaceAll('\\n', '\n');
+        closeModal();
+        renderInbox();
+      }
+      function renderInbox() {
+        const listScroll = document.querySelector('.fr-items')?.scrollTop || 0;
+        const items = visibleConvs();
+        if (!items.some((c) => c.id === fr.id)) fr.id = items[0]?.id ?? -1;
+        const c = current(),
+          note = c?.replyMode === 'note';
+        stage.innerHTML = `<div class="fr ${fr.contact ? '' : 'no-contact'} ${fr.mobile && c ? 'mobile-detail' : ''}"><aside class="fr-folders"><div class="fr-team"><div class="teamicon">${icon('panels-top-left', 19)}</div><div>销售工作区<small>Sales Workspace</small></div></div><button class="compose" onclick="frCompose()">${icon('square-pen', 16)} 写邮件</button>${folderItems()}<div class="fr-bottom"><button onclick="references()">${icon('book-open', 15)} 设计参考 ${icon('arrow-up-right', 12)}</button></div></aside><section class="fr-list"><div class="list-title">${iconButton('panel-left', '选择收件箱', "openModal('收件箱',folderItems())", 'mobile-btn folders-btn')}<h1>${esc(folderName())}</h1><span class="count">${items.length}</span><span class="spacer"></span>${iconButton('square-pen', '写邮件', 'frCompose()', 'mobile-btn folders-btn')}</div><div class="fr-viewtabs">${Object.entries(
+          statuses,
+        )
+          .map(
+            ([k, v]) =>
+              '<button class="' +
+              (fr.status === k ? 'on' : '') +
+              '" onclick="frStatus(\'' +
+              k +
+              '\')">' +
+              v +
+              '</button>',
+          )
+          .join(
+            '',
+          )}</div><label class="filterbox">${icon('search', 14)}<input id="fr-search" aria-label="搜索会话" placeholder="搜索会话" value="${esc(fr.q)}"></label><div class="fr-items">${threadList()}</div></section>${c ? `<article class="fr-thread"><div class="fr-tools">${iconButton('arrow-left', '返回列表', 'fr.mobile=false;renderInbox()', 'mobile-btn back-btn')}<button class="assign" onclick="frOwner()">${avatar(c.assigned, c.id + 3)}${esc(c.assigned)} ${icon('chevron-down', 12)}</button><div class="spacer"></div>${iconButton('clock', '稍后处理', 'frLater()')}${iconButton(c.status === 'done' ? 'rotate-ccw' : 'circle-check', c.status === 'done' ? '重新打开' : '标为完成', c.status === 'done' ? "frChangeStatus('open')" : "frChangeStatus('done')")}${iconButton('panel-right', '联系人资料', 'frContact()')}</div><section class="fr-message-area"><h2 class="fr-thread-title">${esc(c.subject)}</h2><div class="topic-line"><span class="tag" style="background:#edf1ec;color:#506551">${icon('inbox', 12)} ${boxNames[c.box]}</span>${tag(c.tag)}</div><div class="thread-date">${c.time.includes(':') ? '今天 · 11 月 22 日' : esc(c.time)}</div>${!c.newMail ? `<details class="fr-card"><summary><span class="avatar me" style="width:23px;height:23px;font-size:9px">OC</span><b>Olivia Chen</b><span>${c.id === 0 ? 'Fabric swatches for your project' : 'Following up on our introduction'}</span>${icon('chevron-down', 12)}</summary><p class="mailbody">Hi ${esc(c.name.split(' ')[0])},\n\nI’m following up on the collection we discussed. Which options would you like to review?\n\nBest,\nOlivia</p></details><div class="fr-card"><div class="mailhead">${avatar(c.name, c.id)}<div><strong>${esc(c.name)}</strong><small>发给 ${boxEmails[c.box]}</small></div><time>${esc(c.time)}</time></div><p class="mailbody">${esc(c.body)}</p></div>` : ''}${c.events.map((event) => (event.note ? '<div class="internal" style="margin-top:8px"><b>' + icon('lock-keyhole', 12) + ' ' + esc(event.author) + ' · 内部备注</b><p>' + esc(event.body) + '</p></div>' : '<div class="fr-card" style="margin-top:9px"><div class="mailhead"><span class="avatar me">OC</span><div><strong>Olivia Chen</strong><small>发给 ' + esc(c.email) + '</small></div><time>刚刚</time></div><p class="mailbody">' + esc(event.body) + '</p></div>')).join('')}</section><div class="fr-compose-wrap"><div class="fr-compose ${note ? 'note' : ''}"><div class="reply-tabs"><button class="${note ? '' : 'on'}" onclick="frMode('reply')">${icon('reply', 14)} 回复客户</button><button class="${note ? 'on' : ''}" onclick="frMode('note')">${icon('sticky-note', 14)} 内部备注</button></div>${!note && c.review ? '<div class="fr-review">' + icon('file-pen-line', 13) + ' 待审核回复</div>' : ''}<textarea id="fr-draft" aria-label="${note ? '内部备注正文' : '回复正文'}" placeholder="${note ? '添加团队可见的备注…' : '回复 ' + esc(c.name) + '…'}">${esc(note ? c.noteDraft : c.draft)}</textarea><div class="fr-send">${note ? '' : iconButton('files', '插入回复模板', 'frTemplate()')}<span class="muted">${note ? '仅团队可见' : boxNames[c.box]}</span><div class="spacer"></div><button id="fr-send" class="action primary" onclick="frSend()" ${(note ? c.noteDraft : c.draft).trim() ? '' : 'disabled'}>${icon(note ? 'plus' : 'send', 13)} ${note ? '添加备注' : c.review ? '批准并模拟发送' : '模拟发送'}</button></div></div></div></article>${fr.contact ? '<aside class="fr-contact"><div class="ct-title">' + icon('contact-round', 16) + ' 联系人</div>' + contact(c) + '</aside>' : ''}` : '<div class="fr-empty">选择会话以查看邮件</div>'}</div>`;
+        document.querySelector('.fr-items').scrollTop = listScroll;
+        const search = document.querySelector('#fr-search');
+        search.oninput = () => {
+          const pos = search.selectionStart;
+          fr.q = search.value;
+          renderInbox();
+          const inp = document.querySelector('#fr-search');
+          inp.focus();
+          inp.setSelectionRange(pos, pos);
+        };
+        const d = document.querySelector('#fr-draft');
+        if (d)
+          d.oninput = () => {
+            c[note ? 'noteDraft' : 'draft'] = d.value;
+            document.querySelector('#fr-send').disabled = !d.value.trim();
+          };
+      }
+      function go(name) {
+        if (!Object.hasOwn(pages, name)) name = 'inbox';
+        closeModal();
+        if (location.hash !== '#' + name) location.hash = name;
+        else displayPage();
+      }
+      function displayPage() {
+        const key = location.hash.slice(1),
+          p = Object.hasOwn(pages, key) ? key : 'inbox';
+        document.title = pages[p][0] + ' · AI-SDR';
+        document.getElementById('modules').innerHTML = Object.entries(pages)
+          .map(
+            ([k, [label, i]]) =>
+              `<button class="nav-item ${p === k ? 'on' : ''}" ${p === k ? 'aria-current="page"' : ''} onclick="go('${k}')">${icon(i, 16)}${label}</button>`,
+          )
+          .join('');
+        document.querySelector('.toptool').innerHTML = icon('circle-help', 17);
+        stage.scrollTop = 0;
+        ({
+          inbox: renderInbox,
+          sequences: renderSequences,
+          knowledge: renderKnowledge,
+          accounts: renderAccounts,
+        })[p]();
+      }
+      window.addEventListener('hashchange', displayPage);
+    </script>
+    <script>
+      (() => {
+        const templates = [
+          [
+            '布艺帘轨道 · 经销商开发',
+            'Honey Badger Blinds',
+            'curtain track systems',
+            'SL01@honeybadgerblinds.com',
+            true,
+          ],
+          [
+            '透气窗 · 安装商初次触达',
+            'Shuangsheng Shutter',
+            'plantation shutters',
+            'sl01@shuangshengshutter.com',
+            true,
+          ],
+          [
+            '室内遮阳帘 · 合作跟进',
+            'Shutter & Blinds Solutions',
+            'indoor shades',
+            'SL01@shutterblindssolutions.com',
+            false,
+          ],
+        ];
+        const people = [
+          ['Emma Wilson', 'Northline Interiors', 'emma@northlineinteriors.example'],
+          ['Oliver Mason', 'Alder & Co.', 'oliver@alder.example'],
+          ['Sofia Chen', 'Rowan Studio', 'sofia@rowan.example'],
+          ['Liam Parker', 'Vista Drapery', 'liam@vista.example'],
+          ['Isla Turner', 'Kinfolk Interiors', 'isla@kinfolk.example'],
+          ['Theo Morgan', 'Sable Workshop', 'theo@sable.example'],
+        ];
+        function sequence([name, brand, product, from, active], id) {
+          return {
+            name,
+            brand,
+            product,
+            from,
+            active,
+            members:
+              id === 0
+                ? [
+                    { p: 0, step: 1, replied: true },
+                    { p: 1, step: 0 },
+                    { p: 2, step: 2 },
+                    { p: 3, step: 1 },
+                  ]
+                : [{ p: id + 1, step: 1 }],
+            delays: [0, 3, 4],
+            enabled: [true, true, true],
+            subject: 'A question about {{company}}’s ' + product,
+            bodies: [
+              'Hi {{first_name}},\n\nI noticed {{company}} works with custom window treatments. How do you source ' +
+                product +
+                ' when a project calls for a different finish or profile?\n\nI work with ' +
+                brand +
+                '. Would it be useful to see a short overview of our range?',
+              'Hi {{first_name}},\n\nFollowing up on my note about ' +
+                product +
+                '. Is there a particular specification your team checks first when comparing options for a project?\n\nI can send the relevant product sheet if that would help.',
+              'Hi {{first_name}},\n\nOne last question about ' +
+                product +
+                ' for {{company}}. Would you like me to send a brief range overview, or is someone else on your team the right contact?\n\nThanks for pointing me in the right direction.',
+            ],
+          };
+        }
+        const seqs = templates.map(sequence);
+        let current = 0,
+          tab = '编辑器',
+          list = false,
+          exp = [false, true, false],
+          filter = 'all',
+          outline = false;
+        const seq = () => seqs[current],
+          stage = () => document.querySelector('#stage'),
+          title = ['首次开发', '第一次跟进', '第二次跟进'];
+        const $ = (id) => document.getElementById('ap-' + id);
+        const style = document.createElement('style');
+        style.textContent = `
+.ap-root{--ap-border:#dfdfdd;--ap-gray:#706e6a;--ap-dark:#282823;--ap-accent:#e8f221;background:white;color:var(--ap-dark);height:100%;min-height:0;overflow:auto;font-size:13px;line-height:1.5}
+.ap-root *,.ap-form *{box-sizing:border-box}.ap-header{padding:22px 30px 0;border-bottom:1px solid var(--ap-border)}.ap-crumb,.ap-crumb button{font-size:12px;color:var(--ap-gray)}.ap-crumb{display:flex;gap:10px;align-items:center}.ap-link,.ap-tab,.ap-crumb button{border:0;background:none;padding:0;cursor:pointer;color:inherit;font:inherit}.ap-link:hover,.ap-crumb button:hover{text-decoration:underline}.ap-title-row,.ap-tools,.ap-stephead,.ap-subject,.ap-cardfoot,.ap-listtoolbar,.ap-person,.ap-drawer-actions,.ap-ss-row{display:flex;align-items:center;gap:12px}.ap-title-row{justify-content:space-between;flex-wrap:wrap;margin:8px 0 15px}.ap-title-row h1,.ap-list-head h1{font-size:clamp(21px,2vw,29px);margin:0;font-weight:650;letter-spacing:-.045em;line-height:1.4}.ap-buttons,.ap-tags{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.ap-btn{border:1px solid var(--ap-border,#d9d9d4);background:white;border-radius:7px;color:#302f2c;padding:7px 12px;min-height:33px;font:inherit;font-size:12px;font-weight:550;display:inline-flex;gap:7px;align-items:center;justify-content:center;cursor:pointer;white-space:nowrap}.ap-btn:hover{background:#f5f5f0}.ap-btn:disabled{opacity:.5;cursor:not-allowed}.ap-btn.ap-yellow{background:#e5ef23;border-color:#dce51e}.ap-btn.ap-yellow:hover{background:#dce61c}.ap-btn.ap-dark{background:#33332e;color:#fff;border-color:#33332e}.ap-btn.ap-dark:hover{background:#171713}
+.ap-tabs{display:flex;gap:24px;overflow:auto}.ap-tab{color:#62605c;font-size:13px;padding:8px 2px 12px;border-bottom:2px solid transparent;white-space:nowrap}.ap-tab.ap-selected{color:#24241f;border-bottom-color:#24241f;font-weight:650}.ap-tools,.ap-listtoolbar{padding:13px 29px;justify-content:space-between;border-bottom:1px solid var(--ap-border)}.ap-tools .ap-tags{color:var(--ap-gray);font-size:12px}.ap-canvas{padding:16px max(20px,4%) 34px;min-height:calc(100% - 184px);background:#f6f6f5}
+.ap-flow{max-width:1030px;margin:auto;position:relative;display:flex;align-items:center;flex-direction:column}.ap-flow::before{content:'';position:absolute;top:15px;bottom:15px;width:1px;background:#b6b6b1;left:50%}.ap-wait,.ap-end{z-index:1;border-radius:16px;display:flex;align-items:center;justify-content:center;gap:7px;color:#53534c;font-size:11px;font-weight:550;background:#e8e8e5;padding:4px 12px;border:none}.ap-wait{margin:14px 0 13px;cursor:pointer}.ap-wait:first-child{margin-top:0;cursor:default}.ap-wait:hover{background:#dfdfda}.ap-end{margin-top:18px}.ap-card{position:relative;z-index:1;background:#fff;border:1px solid #dbdbd5;border-radius:11px;width:100%;overflow:hidden}.ap-card.ap-open{border-color:#a6a69b;box-shadow:0 2px 6px #21211d0a}.ap-stephead{justify-content:space-between;gap:8px;padding:13px 16px 6px}.ap-stephead button.ap-stepname{color:#282823;background:transparent;border:0;text-align:left;font:inherit;font-size:14px;font-weight:650;display:flex;align-items:center;gap:9px;cursor:pointer}.ap-step-stat{color:var(--ap-gray);font-size:11px;margin-left:auto}.ap-chevron{display:grid;place-items:center;border:none;cursor:pointer;background:none;width:28px;height:24px;color:var(--ap-gray)}
+.ap-subject{padding:7px 18px 15px;gap:10px;min-width:0}.ap-subject strong{font-weight:550;overflow-wrap:anywhere}.ap-switch{border:0;border-radius:10px;width:29px;height:17px;padding:2px;display:flex;align-items:center;justify-content:flex-start;background:#c8c8c4;cursor:pointer;flex:none}.ap-switch.ap-on{background:#393a34;justify-content:flex-end}.ap-switch::after{content:'';height:13px;width:13px;background:white;border-radius:100%}.ap-variant{background:#f0f0ec;font-size:10px;font-weight:bold;padding:1px 5px;border-radius:3px}.ap-subject .ap-time{margin-left:auto;white-space:nowrap;color:var(--ap-gray);font-size:11px}.ap-letter{margin:0 18px 12px;padding:14px 18px;background:#fafaf7;border:1px solid #e7e7df;border-radius:7px}.ap-letter-meta{color:#62615a;font-size:11px;display:flex;align-items:center;gap:7px}.ap-body{font-family:Arial,sans-serif;font-size:13px;line-height:1.6;white-space:pre-wrap;margin:10px 0;color:#383832}.ap-token{background:#f0efdc;border-radius:3px;padding:1px 3px;color:#655e31}.ap-cardfoot{border-top:1px solid #efefeb;padding:9px 18px;justify-content:flex-end}.ap-outline{padding:10px 25px;background:#fffef5;display:flex;flex-wrap:wrap;gap:12px;border-bottom:1px solid var(--ap-border)}.ap-outline button{font:inherit;color:#4c4930;background:transparent;border:0;cursor:pointer}.ap-out{padding:24px 30px}.ap-list-head{padding:24px 30px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px}.ap-listtoolbar{border-top:1px solid var(--ap-border);justify-content:flex-start}.ap-listtoolbar select,.ap-form select,.ap-form input[type=text],.ap-form textarea{border:1px solid #d8d8d1;background:#fff;border-radius:6px;padding:8px 10px;font:inherit;color:#292a23}
+.ap-gridwrap{overflow:auto}.ap-grid{width:100%;border-collapse:collapse;font-size:13px;text-align:left}.ap-grid th,.ap-grid td{padding:13px 17px;border-bottom:1px solid #e8e8e4;white-space:nowrap}.ap-grid th{font-size:11px;font-weight:600;color:#77766e;background:#fafaf9}.ap-grid td{color:#484840}.ap-grid td:first-child,.ap-grid th:first-child{padding-left:30px}.ap-grid .ap-name{font-weight:625;color:#24241f}.ap-status{display:inline-flex;align-items:center;gap:5px;border-radius:20px;color:#297053;background:#e6f4eb;padding:2px 8px;font-size:11px}.ap-status.ap-paused{background:#f0eeeb;color:#716a61}.ap-status::before{content:'';width:5px;height:5px;border-radius:50%;background:currentColor}.ap-person{gap:9px;line-height:1.5}.ap-avatar{width:30px;height:30px;display:grid;place-items:center;background:#e8e4ef;color:#61536e;font-size:11px;border-radius:8px;font-weight:650}.ap-small{color:#77776d;font-size:11px}.ap-ss{max-width:700px;border:1px solid var(--ap-border);border-radius:10px;padding:4px 20px}.ap-ss-row{justify-content:space-between;padding:15px 0;align-items:flex-start}.ap-ss-row+.ap-ss-row{border-top:1px solid var(--ap-border)}.ap-ss-row span:last-child{text-align:right}.ap-h2{font-size:16px;margin:0 0 12px}.ap-h2:not(:first-child){margin-top:25px}
+.ap-form{display:grid;gap:14px;color:#33342e;font-size:13px}.ap-form label.ap-field{display:grid;gap:5px;font-weight:550}.ap-form :is(input,textarea,select){width:100%}.ap-form textarea{resize:vertical;min-height:170px;line-height:1.55}.ap-form .ap-body{margin:4px 0}.ap-form .ap-field input:disabled{color:#7e7d72;background:#f5f5f1}.ap-drawer-actions{justify-content:flex-end;margin-top:3px}.ap-form .ap-check{display:flex;gap:9px;align-items:center;padding:8px 0;border-bottom:1px solid #e7e7e1}.ap-form .ap-check input{width:auto}.ap-previewhead{font-size:12px;color:#68685e;display:grid;gap:5px;padding:12px 0;border-bottom:1px solid #dddcd4}
+@media(max-width:780px){.ap-step-stat{display:none}.ap-header,.ap-list-head,.ap-out{padding-left:16px;padding-right:16px}.ap-canvas{padding:14px 10px}.ap-tools{padding:10px 15px}.ap-subject .ap-time{display:none}.ap-title-row{align-items:flex-start}.ap-tabs{gap:17px}.ap-letter{padding:10px;margin:0 10px 10px}.ap-stephead,.ap-subject{padding-left:12px;padding-right:12px}.ap-cardfoot{padding:8px}.ap-tools .ap-tags{font-size:11px}}
+`;
+        document.head.appendChild(style);
+        const btn = (cmd, label, cl = '', n = '') =>
+          '<button type="button" class="ap-btn ' +
+          cl +
+          '" data-ap="' +
+          cmd +
+          '" data-n="' +
+          n +
+          '">' +
+          label +
+          '</button>';
+        const activeTag = (s) =>
+          '<span class="ap-status ' +
+          (s.active ? '' : 'ap-paused') +
+          '">' +
+          (s.active ? '已启用' : '已暂停') +
+          '</span>';
+        const fullSubject = (s, i) => (i ? 'Re: ' : '') + s.subject;
+        const day = (s, i) => s.delays.slice(0, i + 1).reduce((a, b) => a + b, 0);
+        const interpolate = (str, p) =>
+          str
+            .replaceAll('{{first_name}}', people[p][0].split(' ')[0])
+            .replaceAll('{{company}}', people[p][1]);
+        const highlight = (str) =>
+          esc(str).replace(
+            /\{\{(?:first_name|company)\}\}/g,
+            (t) => '<span class="ap-token">' + t + '</span>',
+          );
+        const memberName = (p) =>
+          '<span class="ap-person"><span class="ap-avatar">' +
+          people[p][0]
+            .split(' ')
+            .map((x) => x[0])
+            .join('') +
+          '</span><span>' +
+          people[p][0] +
+          '<br><span class="ap-small">' +
+          people[p][1] +
+          '</span></span></span>';
+        const isFinished = (m) => Boolean(m.replied);
+        function listPage() {
+          const rows = seqs
+            .map((s, n) => [s, n])
+            .filter(([s]) => filter === 'all' || (filter === 'active') === s.active);
+          return (
+            '<div class="ap-list-head"><h1>跟进序列</h1>' +
+            btn('create', '＋ 新建序列', 'ap-yellow') +
+            '</div><div class="ap-listtoolbar"><label>序列状态 &nbsp;<select id="ap-filter"><option value="all">全部状态</option><option value="active">已启用</option><option value="paused">已暂停</option></select></label><span class="ap-small">' +
+            rows.length +
+            ' 个序列</span></div><div class="ap-gridwrap"><table class="ap-grid"><thead><tr><th>序列名称</th><th>状态</th><th>步骤</th><th>联系人</th><th>已回复</th><th>负责人</th></tr></thead><tbody>' +
+            rows
+              .map(
+                ([s, n]) =>
+                  '<tr><td><button class="ap-name ap-link" data-ap="open" data-n="' +
+                  n +
+                  '">' +
+                  esc(s.name) +
+                  '</button><br><span class="ap-small">' +
+                  esc(s.brand) +
+                  '</span></td><td>' +
+                  activeTag(s) +
+                  '</td><td>3 封邮件</td><td>' +
+                  s.members.length +
+                  '</td><td>' +
+                  s.members.filter(isFinished).length +
+                  '</td><td>SL01</td></tr>',
+              )
+              .join('') +
+            '</tbody></table>' +
+            (!rows.length ? '<p class="ap-out">当前筛选下没有序列。</p>' : '') +
+            '</div>'
+          );
+        }
+        function editor(s) {
+          const cards = s.bodies
+            .map((body, i) => {
+              const waitText = i ? '等待 ' + s.delays[i] + ' 天' : '联系人加入后立即开始';
+              return (
+                (i
+                  ? '<button class="ap-wait" data-ap="timing" data-n="' +
+                    i +
+                    '">' +
+                    icon('clock', 13) +
+                    waitText +
+                    ' ' +
+                    icon('pencil', 11) +
+                    '</button>'
+                  : '<span class="ap-wait">' + icon('clock', 13) + waitText + '</span>') +
+                '<section class="ap-card ' +
+                (exp[i] ? 'ap-open' : '') +
+                '" id="ap-step-' +
+                i +
+                '"><div class="ap-stephead"><button class="ap-stepname" data-ap="expand" data-n="' +
+                i +
+                '" aria-expanded="' +
+                exp[i] +
+                '">' +
+                icon('mail', 17) +
+                '步骤 ' +
+                (i + 1) +
+                ' · 自动邮件</button><span class="ap-step-stat">' +
+                s.members.filter((m) => !isFinished(m) && m.step === i).length +
+                ' 进行中</span><button class="ap-chevron" aria-label="' +
+                (exp[i] ? '收起' : '展开') +
+                '步骤 ' +
+                (i + 1) +
+                '" data-ap="expand" data-n="' +
+                i +
+                '">' +
+                (exp[i] ? '▴' : '▾') +
+                '</button></div>' +
+                '<div class="ap-subject"><button class="ap-switch ' +
+                (s.enabled[i] ? 'ap-on' : '') +
+                '" role="switch" aria-checked="' +
+                s.enabled[i] +
+                '" aria-label="启用步骤 ' +
+                (i + 1) +
+                '" data-ap="stepToggle" data-n="' +
+                i +
+                '"></button><span class="ap-variant">A</span><strong>' +
+                esc(fullSubject(s, i)) +
+                '</strong><span class="ap-time">' +
+                (i ? '首封后第 ' + day(s, i) + ' 天' : '首封') +
+                '</span></div>' +
+                (exp[i]
+                  ? '<div class="ap-letter"><div class="ap-letter-meta">' +
+                    icon(i ? 'reply' : 'mail', 13) +
+                    (i ? '回复上一封邮件 · 原线程' : '新建邮件线程') +
+                    '</div><div class="ap-body">' +
+                    highlight(body) +
+                    '</div></div><div class="ap-cardfoot">' +
+                    btn('preview', icon('eye', 14) + '预览', '', i) +
+                    btn('edit', '编辑邮件', 'ap-dark', i) +
+                    '</div>'
+                  : '') +
+                '</section>'
+              );
+            })
+            .join('');
+          return (
+            '<div class="ap-tools">' +
+            btn('outline', icon('list', 15) + '3 个步骤 ' + (outline ? '«' : '»')) +
+            '<div class="ap-tags">' +
+            btn('expandAll', exp.every(Boolean) ? '收起全部步骤' : '展开全部步骤') +
+            '</div></div>' +
+            (outline
+              ? '<div class="ap-outline">' +
+                title
+                  .map(
+                    (t, i) =>
+                      '<button data-ap="jump" data-n="' +
+                      i +
+                      '">步骤 ' +
+                      (i + 1) +
+                      ' · ' +
+                      t +
+                      '</button>',
+                  )
+                  .join('') +
+                '</div>'
+              : '') +
+            '<div class="ap-canvas"><div class="ap-flow">' +
+            cards +
+            '<div class="ap-end">' +
+            icon('check', 13) +
+            '完成序列</div></div></div>'
+          );
+        }
+        function contacts(s) {
+          return (
+            '<div class="ap-gridwrap"><table class="ap-grid"><thead><tr><th>联系人</th><th>邮箱</th><th>当前步骤</th><th>状态</th><th>模拟事件</th></tr></thead><tbody>' +
+            s.members
+              .map(
+                (m, i) =>
+                  '<tr><td>' +
+                  memberName(m.p) +
+                  '</td><td>' +
+                  people[m.p][2] +
+                  '</td><td>' +
+                  title[m.step] +
+                  '</td><td><span class="ap-status ' +
+                  (isFinished(m) || !s.active ? 'ap-paused' : '') +
+                  '">' +
+                  (isFinished(m) ? '已回复 · 已退出' : s.active ? '进行中' : '已暂停') +
+                  '</span></td><td>' +
+                  (isFinished(m) ? '—' : btn('reply', '收到客户回复', '', i)) +
+                  '</td></tr>',
+              )
+              .join('') +
+            '</tbody></table>' +
+            (!s.members.length ? '<p class="ap-out">尚未加入联系人。</p>' : '') +
+            '</div>'
+          );
+        }
+        function settings(s) {
+          return (
+            '<div class="ap-out"><h2 class="ap-h2">发送时间</h2><div class="ap-ss"><div class="ap-ss-row"><b>步骤间隔</b><span>首封发出后第 ' +
+            day(s, 1) +
+            ' 天、第 ' +
+            day(s, 2) +
+            ' 天</span></div><div class="ap-ss-row"><b>跟进方式</b><span>回复原邮件线程</span></div></div><h2 class="ap-h2">序列规则</h2><div class="ap-ss"><div class="ap-ss-row"><b>联系人回复</b><span>结束序列并取消剩余步骤</span></div><div class="ap-ss-row"><b>退订或永久退信</b><span>停止后续发送</span></div><div class="ap-ss-row"><b>发件身份</b><span>沿用加入序列时选择的邮箱</span></div></div></div>'
+          );
+        }
+        function emails(s) {
+          return (
+            '<div class="ap-gridwrap"><table class="ap-grid"><thead><tr><th>邮件主题</th><th>步骤</th><th>线程</th><th>预览</th></tr></thead><tbody>' +
+            s.bodies
+              .map(
+                (b, i) =>
+                  '<tr><td><button class="ap-link ap-name" data-ap="edit" data-n="' +
+                  i +
+                  '">' +
+                  esc(fullSubject(s, i)) +
+                  '</button></td><td>' +
+                  title[i] +
+                  '</td><td>' +
+                  (i ? '回复原邮件' : '新线程') +
+                  '</td><td>' +
+                  btn('preview', '预览', '', i) +
+                  '</td></tr>',
+              )
+              .join('') +
+            '</tbody></table></div>'
+          );
+        }
+        function detail(s) {
+          return (
+            '<div class="ap-header"><div class="ap-crumb"><button data-ap="list">全部序列</button><span>›</span><span>' +
+            esc(s.name) +
+            '</span></div><div class="ap-title-row"><h1>' +
+            esc(s.name) +
+            '</h1><div class="ap-buttons">' +
+            btn('enroll', '＋ 添加联系人', 'ap-yellow') +
+            btn('activate', activeTag(s) + ' ' + (s.active ? '暂停序列' : '启用序列')) +
+            '</div></div><div class="ap-tabs" role="tablist">' +
+            ['编辑器', '联系人', '邮件', '设置']
+              .map(
+                (t) =>
+                  '<button class="ap-tab ' +
+                  (t === tab ? 'ap-selected' : '') +
+                  '" role="tab" aria-selected="' +
+                  (t === tab) +
+                  '" data-ap="tab" data-key="' +
+                  t +
+                  '">' +
+                  t +
+                  (t === '联系人' ? ' · ' + s.members.length : '') +
+                  '</button>',
+              )
+              .join('') +
+            '</div></div>' +
+            (tab === '编辑器'
+              ? editor(s)
+              : tab === '联系人'
+                ? contacts(s)
+                : tab === '邮件'
+                  ? emails(s)
+                  : settings(s))
+          );
+        }
+        function draw() {
+          stage().innerHTML =
+            '<div class="ap-root">' + (list ? listPage() : detail(seq())) + '</div>';
+          if (list) $('filter').value = filter;
+        }
+        function preserveScroll() {
+          const top = stage().querySelector('.ap-root')?.scrollTop || 0;
+          draw();
+          stage().querySelector('.ap-root').scrollTop = top;
+        }
+        function preview(s, i, p) {
+          openModal(
+            '邮件预览',
+            '<div class="ap-form"><label class="ap-field">预览联系人<select id="ap-person" data-i="' +
+              i +
+              '">' +
+              people
+                .map(
+                  (c, n) =>
+                    '<option value="' +
+                    n +
+                    '" ' +
+                    (n === p ? 'selected' : '') +
+                    '>' +
+                    c[0] +
+                    ' · ' +
+                    c[1] +
+                    '</option>',
+                )
+                .join('') +
+              '</select></label><div class="ap-previewhead"><span>发件人　' +
+              esc(s.from) +
+              '</span><span>收件人　' +
+              people[p][2] +
+              '</span><b>' +
+              esc(interpolate(fullSubject(s, i), p)) +
+              '</b></div><div class="ap-body">' +
+              esc(interpolate(s.bodies[i], p)) +
+              '\n\nBest regards,\n' +
+              esc(s.brand) +
+              '</div></div>',
+          );
+        }
+        function selectSeq(n) {
+          current = n;
+          list = false;
+          tab = '编辑器';
+          exp = [false, true, false];
+          outline = false;
+          draw();
+        }
+        document.addEventListener('change', (e) => {
+          if (!stage()?.querySelector('.ap-root')) return;
+          if (e.target.id === 'ap-filter') {
+            filter = e.target.value;
+            draw();
+          }
+          if (e.target.id === 'ap-person')
+            preview(seq(), Number(e.target.dataset.i), Number(e.target.value));
+        });
+        document.addEventListener('click', (e) => {
+          const target = e.target.closest('[data-ap]');
+          if (!target || !stage()?.querySelector('.ap-root')) return;
+          const cmd = target.dataset.ap,
+            n = Number(target.dataset.n),
+            s = seq();
+          if (cmd === 'list') {
+            list = true;
+            draw();
+            return;
+          }
+          if (cmd === 'open') {
+            selectSeq(n);
+            return;
+          }
+          if (cmd === 'tab') {
+            tab = target.dataset.key;
+            draw();
+            return;
+          }
+          if (cmd === 'activate') {
+            s.active = !s.active;
+            draw();
+            toast(s.active ? '模拟序列已启用' : '模拟序列已暂停');
+            return;
+          }
+          if (cmd === 'outline') {
+            outline = !outline;
+            preserveScroll();
+            return;
+          }
+          if (cmd === 'expandAll') {
+            exp = exp.map(() => !exp.every(Boolean));
+            preserveScroll();
+            return;
+          }
+          if (cmd === 'expand' || cmd === 'jump') {
+            exp[n] = cmd === 'jump' || !exp[n];
+            preserveScroll();
+            if (cmd === 'jump') $('step-' + n).scrollIntoView({ block: 'nearest' });
+            return;
+          }
+          if (cmd === 'stepToggle') {
+            s.enabled[n] = !s.enabled[n];
+            preserveScroll();
+            return;
+          }
+          if (cmd === 'preview') {
+            preview(s, n, s.members[0]?.p || 0);
+            return;
+          }
+          if (cmd === 'edit') {
+            openModal(
+              '编辑邮件 · ' + title[n],
+              '<div class="ap-form"><label class="ap-field">线程<input type="text" disabled value="' +
+                (n ? '回复上一封邮件' : '新建邮件线程') +
+                '"></label><label class="ap-field">主题<input type="text" id="ap-subj" maxlength="180" ' +
+                (n ? 'disabled' : '') +
+                '></label><label class="ap-field">正文<textarea id="ap-msg" rows="9" maxlength="6000"></textarea></label><div class="ap-drawer-actions">' +
+                btn('cancel', '取消') +
+                btn('save', '保存邮件', 'ap-dark', n) +
+                '</div></div>',
+            );
+            $('subj').value = fullSubject(s, n);
+            $('msg').value = s.bodies[n];
+            return;
+          }
+          if (cmd === 'save') {
+            const sub = $('subj').value.trim(),
+              body = $('msg').value.trim();
+            if (!sub || !body) {
+              toast('请填写邮件主题和正文');
+              return;
+            }
+            if (!n) s.subject = sub;
+            s.bodies[n] = body;
+            closeModal();
+            preserveScroll();
+            toast('邮件已保存');
+            return;
+          }
+          if (cmd === 'timing') {
+            openModal(
+              '开始此步骤的时间',
+              '<div class="ap-form"><label class="ap-field">距上一步的天数<input id="ap-days" type="number" step="1" min="1" max="60" value="' +
+                s.delays[n] +
+                '"></label><div class="ap-drawer-actions">' +
+                btn('cancel', '取消') +
+                btn('saveTime', '保存间隔', 'ap-dark', n) +
+                '</div></div>',
+            );
+            return;
+          }
+          if (cmd === 'saveTime') {
+            const days = Number($('days').value);
+            if (!Number.isInteger(days) || days < 1 || days > 60) {
+              toast('请输入 1 到 60 之间的整数');
+              return;
+            }
+            s.delays[n] = days;
+            closeModal();
+            preserveScroll();
+            return;
+          }
+          if (cmd === 'create') {
+            openModal(
+              '新建跟进序列',
+              '<div class="ap-form"><label class="ap-field">序列名称<input id="ap-newname" type="text" maxlength="65" placeholder="输入序列名称"></label><label class="ap-field">邮件模板<select id="ap-template">' +
+                templates
+                  .map((t, i) => '<option value="' + i + '">' + esc(t[0]) + '</option>')
+                  .join('') +
+                '</select></label><div class="ap-drawer-actions">' +
+                btn('cancel', '取消') +
+                btn('new', '创建序列', 'ap-yellow') +
+                '</div></div>',
+            );
+            return;
+          }
+          if (cmd === 'new') {
+            const name = $('newname').value.trim();
+            if (!name) {
+              toast('请输入序列名称');
+              return;
+            }
+            const ns = sequence(templates[Number($('template').value)], 0);
+            ns.name = name;
+            ns.active = false;
+            ns.members = [];
+            seqs.push(ns);
+            closeModal();
+            selectSeq(seqs.length - 1);
+            return;
+          }
+          if (cmd === 'enroll') {
+            const available = people
+              .map((p, n) => [p, n])
+              .filter(([, n]) => !s.members.some((m) => m.p === n));
+            openModal(
+              '添加联系人',
+              '<div class="ap-form"><label class="ap-field">发件邮箱<input type="text" disabled value="' +
+                esc(s.from) +
+                '"></label><div>' +
+                available
+                  .map(
+                    ([p, n]) =>
+                      '<label class="ap-check"><input type="checkbox" value="' +
+                      n +
+                      '" class="ap-enroll-check">' +
+                      memberName(n) +
+                      '</label>',
+                  )
+                  .join('') +
+                (!available.length ? '所有模拟联系人均已加入此序列。' : '') +
+                '</div><div class="ap-drawer-actions">' +
+                btn('cancel', '关闭') +
+                (available.length ? btn('add', '加入序列', 'ap-yellow') : '') +
+                '</div></div>',
+            );
+            return;
+          }
+          if (cmd === 'add') {
+            const ids = [...document.querySelectorAll('.ap-enroll-check:checked')].map((el) =>
+              Number(el.value),
+            );
+            if (!ids.length) {
+              toast('请选择联系人');
+              return;
+            }
+            ids.forEach((p) => s.members.push({ p, step: 0 }));
+            closeModal();
+            tab = '联系人';
+            draw();
+            toast('已添加 ' + ids.length + ' 位模拟联系人');
+            return;
+          }
+          if (cmd === 'reply') {
+            s.members[n].replied = true;
+            draw();
+            toast('已模拟收到回复，后续步骤已取消');
+            return;
+          }
+          if (cmd === 'cancel') closeModal();
+        });
+        window.renderSequences = draw;
+        window.frOpenSequence = (brandIndex) => {
+          current = brandIndex;
+          list = false;
+          tab = '编辑器';
+          exp = [false, true, false];
+          go('sequences');
+        };
+      })();
+    </script>
+    <script>
+      (() => {
+        const brands = ['Honeybadger Blinds', 'Shuangsheng Shutter', 'Shutter Blinds Solutions'];
+        const owners = ['林安', '陈思思', '许棠'];
+        const types = ['工作簿', '内部文章', '网页', '简短回答'];
+        const symbols = {
+          folder:
+            '<path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/>',
+          all: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+          workbook:
+            '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11M9 14h12"/>',
+          article: '<path d="M6 3h8l4 4v14H6zM14 3v5h4M9 12h6m-6 4h5"/>',
+          website:
+            '<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/>',
+          snippet: '<path d="M3 5h18v11H9l-5 4v-4H3zM7 10h10"/>',
+          search: '<circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/>',
+          plus: '<path d="M12 5v14M5 12h14"/>',
+          back: '<path d="m13 5-7 7 7 7M6 12h15"/>',
+          chevron: '<path d="m9 5 7 7-7 7"/>',
+          filter:
+            '<path d="M3 8h10m4 0h4M3 16h3m4 0h11"/><circle cx="15" cy="8" r="2"/><circle cx="8" cy="16" r="2"/>',
+          fin: '<path d="m12 2 2.6 7.4L22 12l-7.4 2.6L12 22l-2.6-7.4L2 12l7.4-2.6z"/>',
+          book: '<path d="M3 4h5a5 5 0 0 1 4 2 5 5 0 0 1 4-2h5v15h-5a5 5 0 0 0-4 2 5 5 0 0 0-4-2H3zM12 6v15"/>',
+        };
+        const i = (n, s = 16) =>
+          `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${symbols[n] || symbols.article}</svg>`;
+        const kind = (t) =>
+          ['workbook', 'article', 'website', 'snippet'][types.indexOf(t)] || 'article';
+        const demoSheets = {
+          轨道规格: [
+            ['型号', '材质', '轨道宽度', '安装方式'],
+            ['HB-T27', '阳极氧化铝', '27 mm', '顶装 / 侧装'],
+            ['HB-T35', '铝合金', '35 mm', '顶装'],
+            ['HB-T42', '铝合金', '42 mm', '侧装'],
+            ['HB-T50', '铝合金', '50 mm', '顶装 / 侧装'],
+          ],
+          配套配件: [
+            ['型号', '配件', '单位'],
+            ['HB-T27', '滑轮组', '套'],
+            ['HB-T35', '安装支架', '个'],
+            ['HB-T42', '连接件', '个'],
+          ],
+        };
+        const rows = [
+          [
+            '布艺帘轨道 · 技术规格表',
+            '轨道规格与配件.xlsx',
+            0,
+            0,
+            0,
+            true,
+            true,
+            '11月21日',
+            demoSheets,
+          ],
+          [
+            '成品窗帘 · 面料色卡指南',
+            '面料色卡与保养须知',
+            1,
+            0,
+            1,
+            true,
+            true,
+            '11月20日',
+            '色号 Linen 03 为浅亚麻色。样卡确认时应同时记录灯光条件与面料批次。批量订单以双方签认的实物样卡为准。',
+          ],
+          [
+            '透气窗 · 窗型与安装',
+            'shuangsheng.example / shutters',
+            2,
+            1,
+            1,
+            true,
+            true,
+            '11月19日',
+            '透气窗有内装与外装两种方式。确认开口宽度、高度、窗框深度与把手位置后，再选择框型。',
+          ],
+          [
+            '轨道弯曲半径常见问题',
+            '轨道安装问答',
+            3,
+            0,
+            0,
+            false,
+            true,
+            '11月18日',
+            '客户问题\n轨道可以现场折弯吗？\n\n建议答复\n请先提供轨道型号及所需弧度。可弯轨与直轨的安装要求不同，应按对应型号确认最小弯曲半径。',
+          ],
+          [
+            '室内卷帘 · 遮光面料清单',
+            '室内遮阳规格.xlsx',
+            0,
+            2,
+            2,
+            true,
+            true,
+            '11月17日',
+            {
+              面料规格: [
+                ['型号', '颜色', '门幅'],
+                ['SB-17', '雾白', '2.8 m'],
+                ['SB-32', '暖灰', '2.5 m'],
+              ],
+            },
+          ],
+          [
+            '透气窗叶片尺寸指南',
+            '透气窗产品手册',
+            1,
+            1,
+            1,
+            false,
+            true,
+            '11月16日',
+            '标准样品包含 63 mm 与 89 mm 两种叶片宽度。请根据窗洞尺寸和采光需求确认适用的叶片组合。',
+          ],
+          [
+            '室内遮阳系统 · 测量指南',
+            'solutions.example / measure',
+            2,
+            2,
+            2,
+            true,
+            false,
+            '11月15日',
+            '测量窗洞的上、中、下三处宽度，并分别记录左右两侧高度。记录单位后再提交给业务员复核。',
+          ],
+          [
+            '样品申请与包装说明',
+            '样品申请答复',
+            3,
+            0,
+            0,
+            false,
+            true,
+            '11月14日',
+            '请提供所需的产品型号、样品数量和配送国家。业务员核对库存后确认样品和运输安排。',
+          ],
+        ];
+        let next = rows.length + 1;
+        const items = rows.map(([title, source, t, b, o, fin, cop, updated, body], j) => ({
+          id: j + 1,
+          title,
+          source,
+          type: types[t],
+          brand: b,
+          owner: o,
+          folder: brands[b],
+          fin,
+          cop,
+          updated,
+          body,
+        }));
+        let folders = [...brands],
+          folder = '',
+          query = '',
+          filter = 'all',
+          typeFilter = '',
+          tab = 'content',
+          current = 0,
+          sheet = '',
+          selection = new Set();
+        const css = `
+  .kn{--kn-line:var(--line,#e1e6e4);color:var(--ink,#25332f);background:#fff;min-height:100%;font-size:13px}
+  .kn button,.kn input,.kn select,.kn-form input,.kn-form select,.kn-form textarea{font:inherit}
+  .kn button,.kn-form button{cursor:pointer}.kn button:focus-visible,.kn select:focus-visible,.kn input:focus-visible,.kn-form :focus-visible{outline:2px solid #218568;outline-offset:2px}
+  .kn-head{padding:27px 32px 0;border-bottom:1px solid var(--kn-line)}.kn-headline,.kn-list-heading,.kn-detail-heading{display:flex;align-items:center;justify-content:space-between;gap:14px}
+  .kn-head h1{font-size:28px;letter-spacing:-1px;margin:0}.kn-tabs{display:flex;gap:26px;margin-top:20px}.kn-tabs button{background:none;border:none;border-bottom:2px solid transparent;border-radius:0;padding:0 1px 12px;color:var(--muted);font-weight:550;display:inline-flex;align-items:center;gap:7px}.kn-tabs .kn-on{color:#19694f;border-color:#21755d}
+  .kn-layout{display:grid;grid-template-columns:202px minmax(0,1fr);min-height:calc(100vh - 165px)}.kn-tree{border-right:1px solid var(--kn-line);padding:23px 12px;background:#fafbf9}.kn-tree h3{font-size:11px;letter-spacing:.07em;color:#75827b;margin:18px 10px 9px;font-weight:650}.kn-tree button{display:flex;align-items:center;gap:9px;padding:9px 10px;border:0;background:none;width:100%;text-align:left;color:#4b5c54;border-radius:7px;line-height:1.35;font-size:12px}.kn-tree button small{margin-left:auto;color:#8a948e;font-size:10px}.kn-tree button:hover,.kn-row:hover{background:#f5f8f5}.kn-tree button.kn-on{background:#e4efe8;color:#1c6249;font-weight:650}.kn-tree .kn-folder-add{color:#65786b}.kn-list{min-width:0;padding:25px 24px}.kn-list-heading h2,.kn-detail-heading h2,.kn-sources h2{font-size:21px;margin:0;letter-spacing:-.6px}.kn-count{display:inline-block;font-size:12px;background:#f1f3ef;color:#5c6861;margin-left:8px;border-radius:6px;padding:3px 7px;vertical-align:middle;letter-spacing:0}
+  .kn-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:19px 0 16px}.kn-search{display:flex;align-items:center;gap:8px;border:1px solid var(--kn-line);border-radius:7px;padding:0 11px;height:34px;max-width:270px;color:#748279}.kn-search input{border:0;background:transparent;width:100%;outline:0!important;color:inherit;font-size:12px;min-width:0}
+  .kn-select,.kn-form select,.kn-details select,.kn-form input,.kn-form textarea{background:#fff;border:1px solid #dce2dc;padding:7px 9px;border-radius:6px;color:#35443b;max-width:100%}.kn-select{height:34px;font-size:12px}.kn-table-wrap{overflow:auto}.kn-table{border-collapse:collapse;width:100%;font-size:12px;text-align:left}.kn-table th{color:#758079;font-size:11px;font-weight:550;background:#f7f9f6;padding:10px 8px;border-block:1px solid var(--kn-line);white-space:nowrap}.kn-table td{padding:12px 8px;border-bottom:1px solid #e9ede8}.kn-table td:first-child,.kn-table th:first-child{width:30px}
+  .kn input[type=checkbox]{accent-color:#287257;vertical-align:middle;width:14px;height:14px;cursor:pointer}.kn-title{border:0;background:none;display:flex;text-align:left;align-items:center;gap:11px;padding:0;color:inherit;min-height:39px}.kn-title strong{display:block;font-weight:620;font-size:13px}.kn-title small,.kn-byline{color:#78857b;font-size:11px}.kn-icon{width:35px;height:38px;flex-shrink:0;border-radius:8px;display:grid;place-items:center}.kn-workbook{color:#3e7d5a;background:#eaf3e8}.kn-article{color:#6f67ad;background:#efecfa}.kn-website{color:#407d97;background:#eaf3f8}.kn-snippet{color:#b47739;background:#faf0dd}
+  .kn-tag{display:inline-flex;align-items:center;gap:5px;border:1px solid #cfdfd4;background:#eff7f0;color:#347052;border-radius:5px;font-size:11px;white-space:nowrap;padding:2px 6px}.kn-tag:before{content:'';background:currentColor;width:5px;height:5px;border-radius:100%}.kn-off{background:#f6f7f5;border-color:#e2e5e1;color:#7f8780}.kn-person{white-space:nowrap}.kn-person b{display:inline-grid;place-items:center;border-radius:50%;width:23px;height:23px;background:#eee5d4;color:#7e613b;font-weight:550;font-size:10px;margin-right:5px}.kn-date{color:#7c877e;white-space:nowrap}
+  .kn-bulk{display:flex;gap:9px;align-items:center;padding:8px 11px;background:#edf5ed;border-radius:6px;margin-bottom:10px}.kn-text-btn{background:none;border:0;color:#206c52;padding:3px;font-size:12px}.kn-empty{text-align:center;padding:50px 0;color:#78837c}.kn-back{border:none;background:none;display:inline-flex;gap:7px;align-items:center;padding:0;color:#69796d;font-size:12px}.kn-detail{padding:22px 32px}.kn-detail-heading{margin:23px 0 21px;justify-content:flex-start}.kn-detail-heading h2{margin-bottom:4px}.kn-detail-grid{display:grid;grid-template-columns:minmax(0,1fr) 265px;gap:20px}.kn-preview,.kn-details,.kn-source-card{border:1px solid var(--kn-line);border-radius:10px;overflow:hidden}.kn-preview{align-self:start}.kn-preview-head,.kn-details>h3{margin:0;padding:15px 17px;font-size:13px;font-weight:650;border-bottom:1px solid var(--kn-line)}.kn-preview-head{display:flex;align-items:center;justify-content:space-between}.kn-preview-head small{font-size:11px;font-weight:450;color:#78857b}.kn-sheet-nav{padding:13px 15px 4px;display:flex;gap:6px}.kn-sheet-nav button{font-size:12px;background:none;border:1px solid transparent;border-radius:5px;padding:5px 8px;color:#758279}.kn-sheet-nav .kn-on{background:#eef4ed;color:#376c4c;border-color:#d8e8d8}
+  .kn-sheet-wrap{overflow:auto;padding:12px 16px 19px}.kn-sheet{width:100%;border-collapse:collapse;font-size:12px}.kn-sheet td,.kn-sheet th{padding:9px 10px;border:1px solid #e0e7df;text-align:left;white-space:nowrap}.kn-sheet th{background:#f2f6f0;color:#647167;font-weight:500}.kn-sheet td:first-child{color:#899688;background:#fafbf9;width:34px}.kn-cell-head{font-weight:650;background:#f7f9f6}.kn-body{padding:17px 21px;white-space:pre-line;line-height:1.85;font-size:14px;color:#405145}
+  .kn-details{align-self:start}.kn-detail-section{padding:15px 16px;border-bottom:1px solid var(--kn-line)}.kn-detail-section:last-child{border:0}.kn-details h4{margin:0 0 11px;display:flex;align-items:center;gap:6px;font-size:12px}.kn-setting{display:flex;align-items:center;justify-content:space-between;gap:14px;font-size:12px;margin:9px 0}.kn-setting:last-child{margin-bottom:0}.kn-switch{height:20px;width:34px;background:#ced7cd;padding:2px;border:none;border-radius:12px;flex:none}.kn-switch:before{content:'';display:block;width:16px;height:16px;border-radius:100%;background:white;box-shadow:0 1px 3px #0002}.kn-switch[aria-checked=true]{background:#357a5b}.kn-switch[aria-checked=true]:before{transform:translateX(14px)}.kn-details select{width:100%;margin-top:5px}.kn-details label,.kn-form label{display:block;color:#56665a;font-size:12px}.kn-details label+label,.kn-form label+label{margin-top:11px}
+  .kn-sources{padding:25px 32px}.kn-source-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(205px,1fr));gap:13px;margin-top:19px}.kn-source-card{background:white;text-align:left;padding:17px;color:inherit}.kn-source-card:hover{border-color:#9eb7a6}.kn-source-card h3{font-size:15px;margin:14px 0 5px}.kn-source-card small{color:#758278}.kn-form input,.kn-form select,.kn-form textarea{display:block;width:100%;margin-top:4px;font-size:13px}.kn-form textarea{min-height:70px;resize:vertical}.kn-form-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:19px}.kn-row:focus-within{background:#f1f6f0}
+  @media(max-width:1150px){.kn-layout{grid-template-columns:164px minmax(0,1fr)}.kn-date-col{display:none}.kn-list{padding:20px 15px}.kn-detail-grid{grid-template-columns:minmax(0,1fr) 215px}}
+  @media(max-width:850px){.kn-layout{display:block}.kn-tree{display:flex;flex-wrap:wrap;gap:4px;padding:9px;border-bottom:1px solid var(--kn-line);border-right:0}.kn-tree button{width:auto;font-size:11px;padding:5px}.kn-tree button small,.kn-tree h3{display:none}.kn-head,.kn-sources,.kn-detail{padding-inline:15px}.kn-detail-grid{grid-template-columns:1fr}.kn-table th,.kn-table td{padding-inline:5px}.kn-person-col{display:none}.kn-title strong{font-size:12px}.kn-search{max-width:180px}}
+  `;
+        const style = document.createElement('style');
+        style.textContent = css;
+        document.head.append(style);
+        const stage = () => document.querySelector('#stage');
+        const option = (value, label, selected) =>
+          `<option value="${esc(String(value))}" ${selected ? 'selected' : ''}>${esc(label)}</option>`;
+        const iconBox = (t) => `<span class="kn-icon kn-${kind(t)}">${i(kind(t), 19)}</span>`;
+        const btn = (label, fn, active = false, count) =>
+          `<button class="${active ? 'kn-on' : ''}" onclick="${fn}">${label}${count !== undefined ? `<small>${count}</small>` : ''}</button>`;
+        const filtered = () =>
+          items.filter(
+            (d) =>
+              (!folder || d.folder === folder) &&
+              (!query ||
+                [d.title, d.source, brands[d.brand]]
+                  .join(' ')
+                  .toLowerCase()
+                  .includes(query.toLowerCase())) &&
+              (!typeFilter || d.type === typeFilter) &&
+              (filter === 'all' || (filter === 'on' ? d.fin : !d.fin)),
+          );
+        const controls = () =>
+          `<div class="kn-tools"><label class="kn-search">${i('search')}<input id="kn-search" aria-label="搜索资料" placeholder="搜索标题、来源或品牌" value="${esc(query)}" oninput="knActions.search(this.value)"></label><select class="kn-select" aria-label="筛选内容类型" onchange="knActions.type(this.value)">${option('', '所有类型', !typeFilter)}${types.map((t) => option(t, t, t === typeFilter)).join('')}</select><select class="kn-select" aria-label="筛选 AI 状态" onchange="knActions.filter(this.value)">${[
+            ['all', '所有 AI 状态'],
+            ['on', 'AI 已启用'],
+            ['off', 'AI 未启用'],
+          ]
+            .map(([v, t]) => option(v, t, filter === v))
+            .join('')}</select></div>`;
+        function listRows() {
+          const vis = filtered();
+          const target = document.querySelector('#kn-body');
+          if (!target) return;
+          const count = document.querySelector('#kn-count');
+          if (count) count.textContent = vis.length;
+          target.innerHTML = `${selection.size ? `<div class="kn-bulk"><b>已选 ${selection.size} 项</b><button class="kn-text-btn" onclick="knActions.bulk(true)">启用 AI</button><button class="kn-text-btn" onclick="knActions.bulk(false)">关闭 AI</button></div>` : ''}<div class="kn-table-wrap"><table class="kn-table"><thead><tr><th><input type="checkbox" aria-label="选择可见资料" ${vis.length && vis.every((d) => selection.has(d.id)) ? 'checked' : ''} onchange="knActions.all(this.checked)"></th><th>标题</th><th>AI 接待</th><th class="kn-person-col">负责人</th><th class="kn-date-col">更新日期</th></tr></thead><tbody>${vis.map((d) => `<tr class="kn-row"><td><input type="checkbox" aria-label="选择 ${esc(d.title)}" ${selection.has(d.id) ? 'checked' : ''} onchange="knActions.pick(${d.id},this.checked)"></td><td><button class="kn-title" onclick="knActions.open(${d.id})">${iconBox(d.type)}<span><strong>${esc(d.title)}</strong><small>${esc(d.type)} · ${esc(brands[d.brand])}</small></span></button></td><td><span class="kn-tag ${d.fin ? '' : 'kn-off'}">${d.fin ? '已启用' : '未启用'}</span></td><td class="kn-person kn-person-col"><b>${owners[d.owner][0]}</b>${owners[d.owner]}</td><td class="kn-date kn-date-col">${esc(d.updated)}</td></tr>`).join('')}</tbody></table></div>${!vis.length ? '<p class="kn-empty">当前条件下没有资料。</p>' : ''}`;
+        }
+        function content() {
+          return `<div class="kn-layout"><aside class="kn-tree" aria-label="资料文件夹">${btn(i('all') + '全部内容', 'knActions.folder(-1)', !folder, items.length)}<h3>文件夹</h3>${folders.map((f, n) => btn(i('folder') + esc(f), 'knActions.folder(' + n + ')', folder === f, items.filter((d) => d.folder === f).length)).join('')}<button class="kn-folder-add" onclick="knActions.newFolder()">${i('plus', 14)}新建文件夹</button></aside><div class="kn-list"><div class="kn-list-heading"><h2>${esc(folder || '全部内容')}<span id="kn-count" class="kn-count"></span></h2></div>${controls()}<div id="kn-body"></div></div></div>`;
+        }
+        function sources() {
+          return `<div class="kn-sources"><h2>内容来源</h2><div class="kn-source-grid">${types.map((t, n) => `<button class="kn-source-card" onclick="knActions.source(${n})">${iconBox(t)}<h3>${t}</h3><small>${items.filter((d) => d.type === t).length} 项内容</small></button>`).join('')}</div></div>`;
+        }
+        function detail(d) {
+          const workbook = typeof d.body === 'object';
+          if (workbook && !Object.hasOwn(d.body, sheet)) sheet = Object.keys(d.body)[0];
+          const grid = workbook ? d.body[sheet] : [];
+          const toggle = (key, label) =>
+            `<div class="kn-setting">${label}<button class="kn-switch" role="switch" aria-label="${label}" aria-checked="${d[key]}" onclick="knActions.toggle('${key}')"></button></div>`;
+          return `<div class="kn-detail"><button class="kn-back" onclick="knActions.back()">${i('back', 14)} 返回内容列表</button><div class="kn-detail-heading">${iconBox(d.type)}<div><h2>${esc(d.title)}</h2><span class="kn-byline">${esc(d.type)} · ${esc(d.source)}</span></div></div><div class="kn-detail-grid"><section class="kn-preview"><h3 class="kn-preview-head">内容预览 <small>${workbook ? Object.keys(d.body).length + ' 张工作表' : esc(d.type)}</small></h3>${
+            workbook
+              ? `<div class="kn-sheet-nav">${Object.keys(d.body)
+                  .map((s, n) => btn(esc(s), 'knActions.sheet(' + n + ')', s === sheet))
+                  .join(
+                    '',
+                  )}</div><div class="kn-sheet-wrap"><table class="kn-sheet"><thead><tr><th></th>${grid[0].map((_, c) => `<th>${String.fromCharCode(65 + c)}</th>`).join('')}</tr></thead><tbody>${grid.map((r, n) => `<tr><td>${n + 1}</td>${r.map((v) => `<td class="${n === 0 ? 'kn-cell-head' : ''}">${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`
+              : `<div class="kn-body">${esc(d.body)}</div>`
+          }</section><aside class="kn-details"><h3>资料详情</h3><section class="kn-detail-section"><h4>${i('fin', 14)} AI 使用权限</h4>${toggle('fin', '客户自动接待')}${toggle('cop', '业务员辅助答复')}</section><section class="kn-detail-section"><label>适用品牌<select onchange="knActions.change('brand',this.value)">${brands.map((b, n) => option(n, b, n === d.brand)).join('')}</select></label><label>负责人<select onchange="knActions.change('owner',this.value)">${owners.map((o, n) => option(n, o, n === d.owner)).join('')}</select></label></section><section class="kn-detail-section"><label>文件夹<select onchange="knActions.change('folder',this.value)">${folders.map((f) => option(f, f, f === d.folder)).join('')}</select></label></section><section class="kn-detail-section"><div class="kn-byline">最近更新 · ${esc(d.updated)}</div></section></aside></div></div>`;
+        }
+        function render() {
+          const s = stage();
+          if (!s) return;
+          const d = items.find((x) => x.id === current);
+          s.innerHTML = `<div class="kn"><header class="kn-head"><div class="kn-headline"><h1>产品资料库</h1><button class="action primary" onclick="knActions.add()">${i('plus', 15)} 添加内容</button></div><div class="kn-tabs">${btn(i('book') + '内容', "knActions.tab('content')", tab === 'content')}${btn(i('all') + '来源', "knActions.tab('sources')", tab === 'sources')}</div></header>${d ? detail(d) : tab === 'sources' ? sources() : content()}</div>`;
+          if (!d && tab === 'content') listRows();
+        }
+        const active = () => items.find((d) => d.id === current);
+        function add() {
+          openModal(
+            '添加内容',
+            `<form id="kn-add" class="kn-form"><label>内容标题<input required maxlength="80" name="title" placeholder="例如：轨道配件打样说明"></label><label>内容类型<select name="type">${types.map((t) => option(t, t, t === '内部文章')).join('')}</select></label><label>适用品牌<select name="brand">${brands.map((b, n) => option(n, b, n === 0)).join('')}</select></label><label id="kn-field-label">内容预览<textarea name="body" placeholder="输入一段模拟资料内容"></textarea></label><div class="kn-form-actions"><button type="button" class="action" onclick="closeModal()">取消</button><button type="submit" class="action primary">添加到资料库</button></div></form>`,
+          );
+          const form = document.querySelector('#kn-add');
+          form.elements.type.onchange = () => {
+            form.elements.body.placeholder =
+              form.elements.type.value === '工作簿'
+                ? '每行输入一行，用逗号分隔列，例如 型号,材质'
+                : '输入一段模拟资料内容';
+          };
+          form.onsubmit = (e) => {
+            e.preventDefault();
+            const f = new FormData(form),
+              title = String(f.get('title')).trim();
+            if (!title) {
+              form.elements.title.focus();
+              return;
+            }
+            const brand = Number(f.get('brand')),
+              type = f.get('type'),
+              input = String(f.get('body')).trim();
+            const body =
+              type === '工作簿'
+                ? {
+                    Sheet1: input
+                      ? input.split(/\r?\n/).map((line) => line.split(/[,，]/))
+                      : [
+                          ['型号', '材质'],
+                          ['DEMO-01', '铝合金'],
+                        ],
+                  }
+                : input || '待补充内容';
+            const id = next++;
+            items.unshift({
+              id,
+              title,
+              source: type === '工作簿' ? title + '.xlsx' : title,
+              type,
+              brand,
+              folder: folder || brands[brand],
+              owner: 0,
+              fin: false,
+              cop: false,
+              updated: '刚刚',
+              body,
+            });
+            tab = 'content';
+            current = id;
+            sheet = '';
+            closeModal();
+            render();
+            toast('已添加模拟资料');
+          };
+        }
+        window.knActions = {
+          folder(n) {
+            folder = n === -1 ? '' : folders[n];
+            selection.clear();
+            render();
+          },
+          search(v) {
+            query = v;
+            selection.clear();
+            listRows();
+          },
+          filter(v) {
+            filter = v;
+            selection.clear();
+            render();
+          },
+          type(v) {
+            typeFilter = v;
+            selection.clear();
+            render();
+          },
+          tab(t) {
+            current = 0;
+            tab = t;
+            selection.clear();
+            render();
+          },
+          source(n) {
+            tab = 'content';
+            folder = '';
+            query = '';
+            filter = 'all';
+            typeFilter = types[n];
+            selection.clear();
+            render();
+          },
+          open(id) {
+            current = id;
+            sheet = '';
+            render();
+          },
+          back() {
+            current = 0;
+            render();
+          },
+          sheet(n) {
+            sheet = Object.keys(active().body)[n];
+            render();
+          },
+          toggle(k) {
+            const d = active();
+            d[k] = !d[k];
+            d.updated = '刚刚';
+            render();
+            toast('已更新 AI 使用权限');
+          },
+          change(k, v) {
+            const d = active();
+            d[k] = k === 'folder' ? v : Number(v);
+            d.updated = '刚刚';
+            render();
+            toast('已保存资料设置');
+          },
+          pick(id, on) {
+            on ? selection.add(id) : selection.delete(id);
+            listRows();
+          },
+          all(on) {
+            filtered().forEach((d) => (on ? selection.add(d.id) : selection.delete(d.id)));
+            listRows();
+          },
+          bulk(on) {
+            items
+              .filter((d) => selection.has(d.id))
+              .forEach((d) => {
+                d.fin = on;
+                d.updated = '刚刚';
+              });
+            toast('已更新 ' + selection.size + ' 项资料的 AI 权限');
+            selection.clear();
+            listRows();
+          },
+          add,
+          newFolder() {
+            openModal(
+              '新建文件夹',
+              '<form class="kn-form" id="kn-folder-form"><label>文件夹名称<input name="name" required maxlength="45" autocomplete="off"></label><div class="kn-form-actions"><button type="button" class="action" onclick="closeModal()">取消</button><button class="action primary" type="submit">创建</button></div></form>',
+            );
+            const f = document.querySelector('#kn-folder-form');
+            f.onsubmit = (e) => {
+              e.preventDefault();
+              const n = f.elements.name.value.trim();
+              if (!n || folders.includes(n)) {
+                f.elements.name.setCustomValidity('请输入新的文件夹名称');
+                f.reportValidity();
+                return;
+              }
+              folders.push(n);
+              folder = n;
+              selection.clear();
+              query = '';
+              typeFilter = '';
+              filter = 'all';
+              closeModal();
+              render();
+              toast('文件夹已创建');
+            };
+            f.elements.name.oninput = () => f.elements.name.setCustomValidity('');
+          },
+        };
+        window.mailDesignSources = (email) => {
+          if (typeof email !== 'string') return [];
+          const address = /^[^\s@<>]+@([^\s@<>]+)$/u.exec(email.trim().toLowerCase());
+          if (!address) return [];
+          const brand = [
+            'honeybadgerblinds.com',
+            'shuangshengshutter.com',
+            'shutterblindssolutions.com',
+          ].indexOf(address[1]);
+          if (brand < 0) return [];
+          return items
+            .filter((d) => d.brand === brand && (d.fin || d.cop))
+            .map(({ id, title }) => ({ id, title }));
+        };
+        window.renderKnowledge = render;
+      })();
+    </script>
+    <script>
+      (() => {
+        const initial = [
+          {
+            brand: 'Honeybadger',
+            initials: 'HB',
+            mail: 'SL01@honeybadgerblinds.com',
+            category: '布艺帘轨道',
+            tone: 'forest',
+            sender: 'Mia Chen',
+            sent: 32,
+            limit: 50,
+            score: 98,
+            active: true,
+            warm: true,
+            series: [9, 13, 12, 16, 14, 17, 16],
+          },
+          {
+            brand: 'Shuangsheng',
+            initials: 'SS',
+            mail: 'sl01@shuangshengshutter.com',
+            category: '透气窗',
+            tone: 'clay',
+            sender: 'Leo Zhang',
+            sent: 24,
+            limit: 40,
+            score: 96,
+            active: true,
+            warm: true,
+            series: [7, 8, 11, 9, 13, 12, 14],
+          },
+          {
+            brand: 'Shutter Blinds Solutions',
+            initials: 'SB',
+            mail: 'SL01@shutterblindssolutions.com',
+            category: '室内遮阳帘',
+            tone: 'blue',
+            sender: 'Ava Wu',
+            sent: 8,
+            limit: 30,
+            score: 92,
+            active: false,
+            warm: false,
+            series: [10, 8, 11, 10, 7, 4, 0],
+          },
+        ];
+        const catalog = {
+          'honeybadgerblinds.com': ['布艺帘轨道', '轨道配件', '布艺成品帘'],
+          'shuangshengshutter.com': ['透气窗', '透气窗叶片'],
+          'shutterblindssolutions.com': ['室内遮阳帘', '室内卷帘'],
+        };
+        const initialSources = [[1, 2], [3], [5]];
+        const accounts = initial.map((a, id) => ({
+          ...a,
+          id,
+          products: [a.category],
+          sourceIds: initialSources[id],
+          website: 'https://' + a.mail.split('@')[1],
+          gap: 120,
+          mode: '审核草稿',
+          signature: a.sender + '\n' + a.brand,
+        }));
+        const selected = new Set();
+        let query = '',
+          status = 'all',
+          tag = 'all',
+          nextId = accounts.length;
+        const byId = (id) => accounts.find((a) => a.id === Number(id));
+        const h = (value) =>
+          String(value ?? '').replace(
+            /[&<>"']/g,
+            (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch],
+          );
+        const labelStatus = (a) => (a.active ? '运行中' : '已暂停');
+        const visible = () =>
+          accounts.filter(
+            (a) =>
+              (status === 'all' || (status === 'active') === a.active) &&
+              (tag === 'all' || a.category === tag) &&
+              [a.mail, a.brand, a.category, a.sender].some((v) =>
+                v.toLowerCase().includes(query.trim().toLowerCase()),
+              ),
+          );
+        const svgs = {
+          search: '<circle cx="10.6" cy="10.6" r="6.9"/><path d="m16 16 4.3 4.3"/>',
+          plus: '<path d="M12 5v14M5 12h14"/>',
+          mail: '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="m3 7 9 6 9-6"/>',
+          health: '<path d="M2 12h4l3-8 5 16 3-8h5"/>',
+          send: '<path d="m3 10 18-7-5 18-4.8-6.9L3 10Z"/><path d="m11.2 14.1 5-6"/>',
+          check: '<circle cx="12" cy="12" r="8.5"/><path d="m8.5 12 2.5 2.5 4.7-5"/>',
+          flame:
+            '<path d="M12.6 2.8c.5 5.8-4.9 6.2-3.5 10.9 1.8-.7 3-2.2 3.9-4.3 3.9 3.2 5.4 5.3 5 8.1-.4 2.9-2.9 4.3-5.9 4.3-4.2 0-7-2.6-7-6.4 0-5 4.9-6.3 7.5-12.6Z"/>',
+          chevron: '<path d="m9 5 7 7-7 7"/>',
+          close: '<path d="m6 6 12 12M18 6 6 18"/>',
+          filter: '<path d="M3 6h18M6 12h12M9 18h6"/>',
+        };
+        function glyph(k, size = 17) {
+          return (
+            '<svg aria-hidden="true" width="' +
+            size +
+            '" height="' +
+            size +
+            '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+            svgs[k] +
+            '</svg>'
+          );
+        }
+        const css = document.createElement('style');
+        css.textContent = `
+    .ac-module{max-width:1550px;margin:auto}.ac-module h1{margin:0}.ac-overview{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));background:white;border:1px solid var(--line);border-radius:11px;margin-bottom:26px;overflow:hidden}.ac-stat{padding:18px 20px;position:relative}.ac-stat+.ac-stat{border-left:1px solid var(--line)}.ac-stat-label{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px}.ac-stat-label svg{color:#789085}.ac-number{margin-top:12px;font-size:29px;font-weight:600;line-height:1;letter-spacing:-1.5px;font-variant-numeric:tabular-nums}.ac-number small{font-size:13px;color:var(--muted);font-weight:450;letter-spacing:0;padding-left:5px}.ac-list{overflow:hidden}.ac-listhead{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:19px 20px 16px}.ac-listhead h2{font-size:17px;margin:0;display:flex;align-items:center;gap:8px}.ac-count{font-size:11px;line-height:1.5;padding:1px 6px;color:#56665d;background:#edf1ee;border-radius:5px;font-weight:600}.ac-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:0 20px 16px}.ac-search{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);border-radius:7px;padding:0 10px;max-width:100%;color:var(--muted)}.ac-search:focus-within{outline:2px solid var(--teal)}.ac-search input{min-width:0;width:196px;border:0;outline:0!important;padding:8px 0;background:transparent;color:var(--ink);font-size:13px}.ac-tools select{max-width:170px;border:1px solid var(--line);background:white;border-radius:7px;font-size:13px;padding:8px 24px 8px 10px}.ac-bulk{display:flex;align-items:center;gap:7px;margin-left:auto}.ac-bulk .action{font-size:12px;padding:6px 9px}.ac-bulk small{color:var(--muted);white-space:nowrap}.ac-scroll{overflow:auto}.ac-table{min-width:795px}.ac-table th{background:#f7f9f8;border-top:1px solid var(--line);white-space:nowrap}.ac-table.data-table :is(td,th){padding:13px 10px}.ac-table.data-table :first-child:is(td,th){padding-left:18px;width:36px}.ac-table.data-table td:last-child{padding-right:16px}.ac-table input[type=checkbox]{width:15px;height:15px;accent-color:var(--teal);cursor:pointer}.ac-table tbody tr:hover,.ac-table tr.selected{background:#f5faf7}.ac-table tbody tr{cursor:pointer}.ac-identity{display:flex;align-items:center;gap:10px;text-align:left;padding:0}.ac-mark{width:33px;height:33px;flex:0 0 auto;border-radius:9px;display:grid;place-items:center;font-size:11px;font-weight:700;letter-spacing:.1px}.ac-forest{background:#e4efe5;color:#426c4d}.ac-clay{background:#f5eade;color:#935c35}.ac-blue{background:#e5edf5;color:#496981}.ac-mail{display:block;font-size:12.8px;font-weight:540;color:var(--ink);overflow-wrap:anywhere}.ac-provider{display:block;margin-top:4px;font-size:11px;color:var(--muted)}.ac-pill{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;border-radius:5px;padding:4px 8px;background:#eaf4ed;color:#3c7452;font-size:11.5px}.ac-pill.paused{color:#877047;background:#f5eee2}.ac-pill i{width:6px;height:6px;border-radius:50%;background:currentColor}.ac-tag{border:1px solid var(--line);border-radius:4px;padding:3px 7px;font-size:11.5px;white-space:nowrap;color:#58645e}.ac-quota{display:block;min-width:58px;font-variant-numeric:tabular-nums;font-weight:550;font-size:12px}.ac-quota small{color:var(--muted);font-weight:400}.ac-meter{display:block;width:66px;height:4px;background:#e5eae7;border-radius:3px;overflow:hidden;margin-top:5px}.ac-meter>i{display:block;background:#5c9476;height:100%;border-radius:3px}.ac-health{font-size:12px;display:inline-flex;align-items:center;gap:5px;font-weight:600;color:#3a7153}.ac-warm,.ac-open{display:inline-flex;align-items:center;justify-content:center;border-radius:6px;padding:6px;color:#88968d}.ac-warm.on{background:#edf6ee;color:#45845c}.ac-warm:hover,.ac-open:hover{background:#e6eee8}.ac-listfooter{padding:13px 18px;font-size:12px;color:var(--muted)}.ac-empty{text-align:center!important;padding:40px!important;color:var(--muted)}.ac-drawer{position:fixed;inset:0 0 0 auto;margin:0;height:100dvh;max-height:100dvh;width:min(450px,100%);max-width:100%;border:0;border-left:1px solid var(--line);border-radius:0;background:white;padding:0}.ac-dhead{padding:22px 22px 18px;display:flex;align-items:center;justify-content:space-between;gap:14px;border-bottom:1px solid var(--line)}.ac-dhead strong{font-size:16px}.ac-didentity{display:flex;align-items:center;gap:12px;padding:24px 22px 20px}.ac-didentity .ac-mark{width:43px;height:43px;font-size:14px}.ac-drawer .tabs{padding:0 22px}.ac-dbody{padding:23px 22px}.ac-dbody h3{font-size:15px;margin:0 0 14px}.ac-info{display:grid;grid-template-columns:auto minmax(0,1fr);gap:14px 15px;font-size:13px;margin:0 0 22px}.ac-info dt{color:var(--muted)}.ac-info dd{margin:0;text-align:right;overflow-wrap:anywhere}.ac-form{display:grid;gap:15px}.ac-form label{display:grid;gap:6px;font-size:12.5px;color:#4d5f55}.ac-form input,.ac-form select,.ac-form textarea{border:1px solid var(--line);border-radius:6px;padding:9px 10px;background:white;color:var(--ink);width:100%;font:inherit}.ac-form textarea{resize:vertical;min-height:68px}.ac-two{display:grid;grid-template-columns:1fr 1fr;gap:12px}.ac-formfoot{display:flex;justify-content:flex-end;gap:8px;margin-top:5px}.ac-chart{display:flex;align-items:flex-end;gap:12px;height:140px;padding:14px 6px 0;border-bottom:1px solid var(--line)}.ac-chartcol{display:flex;flex:1;height:100%;align-items:center;justify-content:flex-end;flex-direction:column;font-size:11px;color:var(--muted);gap:4px}.ac-chartcol i{display:block;width:min(100%,23px);border-radius:4px 4px 0 0;background:#8db89f}.ac-chartkey{display:flex;gap:12px;justify-content:space-around;color:var(--muted);font-size:11px;margin-top:6px}.ac-warmstate{display:flex;justify-content:space-between;align-items:center;margin:26px 0 16px;font-size:13px}.ac-form-error{color:#a13e34;font-size:12px;margin:0}.ac-modal-note{color:var(--muted);font-size:12px;margin:0}.ac-empty button{margin-left:9px;text-decoration:underline;color:var(--teal)}
+    .ac-grants{border:1px solid var(--line);border-radius:7px;padding:7px 10px 10px;margin:0;min-width:0}.ac-grants+.ac-grants{margin-top:11px}.ac-grants legend{color:var(--ink);font-size:12px;padding:0 4px}.ac-form .ac-grants label{display:flex;align-items:center;gap:8px;padding:4px 0}.ac-form .ac-grants input{width:14px;height:14px;margin:0;accent-color:var(--teal);flex-shrink:0}.ac-grants small,.ac-granted small{color:var(--muted);font-size:12px}.ac-granted{display:flex;align-items:flex-end;flex-direction:column;gap:4px}.ac-granted span{font-size:12px}
+    @media(max-width:800px){.ac-stat{padding:15px 12px}.ac-bulk{margin-left:0}.ac-module{min-width:0}.ac-number{font-size:24px}}
+    @media(max-width:600px){.ac-overview{grid-template-columns:1fr 1fr}.ac-stat:nth-child(3){border-left:0}.ac-stat:nth-child(n+3){border-top:1px solid var(--line)}.ac-tools,.ac-listhead{padding-left:12px;padding-right:12px}.ac-module .module-head{align-items:center}.ac-search{width:100%}.ac-search input{width:100%}}
+  `;
+        document.head.appendChild(css);
+        function metric(title, num, key, extra = '') {
+          return `<div class="ac-stat"><div class="ac-stat-label">${glyph(key, 15)} ${title}</div><div class="ac-number">${num}<small>${extra}</small></div></div>`;
+        }
+        function stats() {
+          const scored = accounts.filter((a) => a.score !== null);
+          return [
+            metric('已连接邮箱', accounts.length, 'mail'),
+            metric('运行中', accounts.filter((a) => a.active).length, 'check'),
+            metric(
+              '今日发送',
+              accounts.reduce((n, a) => n + a.sent, 0),
+              'send',
+              '/ ' + accounts.reduce((n, a) => n + a.limit, 0),
+            ),
+            metric(
+              '平均健康度',
+              scored.length
+                ? Math.round(scored.reduce((n, a) => n + a.score, 0) / scored.length)
+                : '—',
+              'health',
+              scored.length ? '%' : '',
+            ),
+          ].join('');
+        }
+        function pill(a) {
+          return `<span class="ac-pill ${a.active ? '' : 'paused'}"><i></i>${labelStatus(a)}</span>`;
+        }
+        function badge(a) {
+          return `<span class="ac-mark ac-${a.tone}">${h(a.initials)}</span>`;
+        }
+        function row(a) {
+          const name = h(a.mail);
+          return `<tr class="${selected.has(a.id) ? 'selected' : ''}" onclick="acDemo.detail(${a.id})">
+    <td onclick="event.stopPropagation()"><input type="checkbox" aria-label="选择 ${name}" ${selected.has(a.id) ? 'checked' : ''} onchange="acDemo.pick(${a.id},this.checked)"></td>
+    <td><button class="ac-identity" type="button" onclick="event.stopPropagation();acDemo.detail(${a.id})">${badge(a)}<span><span class="ac-mail">${name}</span><small class="ac-provider">阿里邮箱 · SMTP / IMAP</small></span></button></td>
+    <td>${pill(a)}</td><td><span class="ac-tag">${h(a.category)}</span></td>
+    <td><span class="ac-quota">${a.sent} <small>/ ${a.limit}</small></span><span class="ac-meter"><i style="width:${Math.min(100, Math.round((a.sent / a.limit) * 100))}%"></i></span></td>
+    <td><span class="ac-health">${glyph('health', 16)} ${a.score === null ? '—' : a.score + '%'}</span></td>
+    <td><button type="button" class="ac-warm ${a.warm ? 'on' : ''}" aria-pressed="${a.warm}" title="${a.warm ? '暂停' : '开启'}预热" aria-label="${a.warm ? '暂停' : '开启'} ${name} 预热" onclick="event.stopPropagation();acDemo.warm(${a.id})">${glyph('flame', 18)}</button></td>
+    <td><button type="button" class="ac-open" aria-label="配置 ${name}" onclick="event.stopPropagation();acDemo.detail(${a.id},'settings')">${glyph('chevron', 15)}</button></td>
+  </tr>`;
+        }
+        function update() {
+          if (!document.getElementById('ac-rows')) return;
+          const rows = visible();
+          document.getElementById('ac-metrics').innerHTML = stats();
+          document.getElementById('ac-rows').innerHTML =
+            rows.map(row).join('') ||
+            '<tr><td colspan="8" class="ac-empty">没有匹配的邮箱<button type="button" onclick="acDemo.reset()">清除筛选</button></td></tr>';
+          const check = document.getElementById('ac-all');
+          check.checked = !!rows.length && rows.every((a) => selected.has(a.id));
+          check.indeterminate = !check.checked && rows.some((a) => selected.has(a.id));
+          check.disabled = !rows.length;
+          document.getElementById('ac-total').textContent = accounts.length;
+          document.getElementById('ac-count').textContent =
+            rows.length === accounts.length
+              ? '共 ' + rows.length + ' 个邮箱'
+              : '显示 ' + rows.length + ' / ' + accounts.length + ' 个邮箱';
+          document.getElementById('ac-bulk').innerHTML = selected.size
+            ? `<small>已选 ${selected.size} 项</small><button class="action" onclick="acDemo.bulk(false)">暂停发送</button><button class="action" onclick="acDemo.bulk(true)">恢复发送</button>`
+            : '';
+        }
+        function render() {
+          document.getElementById('stage').innerHTML =
+            `<section class="module ac-module"><div class="module-head"><h1>邮箱管理</h1><button type="button" class="action primary" onclick="acDemo.connect()">${glyph('plus', 16)} 连接邮箱</button></div>
+    <div class="ac-overview" id="ac-metrics"></div><div class="panel ac-list"><div class="ac-listhead"><h2>邮箱账号 <span class="ac-count" id="ac-total"></span></h2></div>
+    <div class="ac-tools"><label class="ac-search">${glyph('search', 15)}<input id="ac-query" type="search" aria-label="搜索邮箱" placeholder="搜索邮箱或品牌…" value="${h(query)}" oninput="acDemo.filter('query',this.value)"></label>
+    <select id="ac-status" aria-label="筛选账号状态" onchange="acDemo.filter('status',this.value)"><option value="all">所有状态</option><option value="active">运行中</option><option value="paused">已暂停</option></select>
+    <select id="ac-tags" aria-label="筛选邮箱标签" onchange="acDemo.filter('tag',this.value)"><option value="all">所有标签</option>${[...new Set(accounts.map((a) => a.category))].map((t) => '<option value="' + h(t) + '">' + h(t) + '</option>').join('')}</select><div class="ac-bulk" id="ac-bulk"></div></div>
+    <div class="ac-scroll"><table class="data-table ac-table" aria-label="邮箱账号列表"><thead><tr><th><input type="checkbox" id="ac-all" aria-label="全选当前邮箱" onchange="acDemo.pickAll(this.checked)"></th><th>邮箱账号</th><th>状态</th><th>标签</th><th>今日发送</th><th>健康度</th><th>预热</th><th></th></tr></thead><tbody id="ac-rows"></tbody></table></div><div class="ac-listfooter" id="ac-count" aria-live="polite"></div></div></section>`;
+          document.getElementById('ac-status').value = status;
+          document.getElementById('ac-tags').value = tag;
+          update();
+        }
+        function closeDrawer() {
+          const d = document.getElementById('ac-drawer');
+          if (d) d.close();
+        }
+        function detail(id, tab = 'overview') {
+          const a = byId(id);
+          if (!a) return;
+          let d = document.getElementById('ac-drawer');
+          if (!d) {
+            d = document.createElement('dialog');
+            d.className = 'ac-drawer';
+            d.id = 'ac-drawer';
+            d.setAttribute('aria-labelledby', 'ac-drawer-title');
+            document.getElementById('stage').appendChild(d);
+            d.addEventListener('close', () => d.remove());
+            d.addEventListener('click', (event) => {
+              if (event.target === d && event.clientX < d.getBoundingClientRect().left) d.close();
+            });
+          }
+          const tabs = [
+            ['overview', '概览'],
+            ['warmup', '预热'],
+            ['settings', '设置'],
+          ];
+          d.innerHTML = `<div class="ac-dhead"><strong id="ac-drawer-title">账号详情</strong><button aria-label="关闭账号详情" class="ac-open" onclick="acDemo.close()">${glyph('close')}</button></div><div class="ac-didentity">${badge(a)}<div><strong class="ac-mail">${h(a.mail)}</strong><small class="ac-provider">${h(a.brand)} · SMTP / IMAP</small></div></div><div class="tabs" role="tablist" aria-label="账号详情分类">${tabs.map(([key, label]) => `<button role="tab" aria-selected="${key === tab}" class="${key === tab ? 'active' : ''}" onclick="acDemo.detail(${a.id},'${key}')">${label}</button>`).join('')}</div><div class="ac-dbody" role="tabpanel">${tab === 'settings' ? settings(a) : tab === 'warmup' ? warmTab(a) : overview(a)}</div>`;
+          if (!d.open) d.showModal();
+        }
+        function choices(a, website = a.website) {
+          const domain = a.mail.split('@').pop().toLowerCase();
+          let host;
+          try {
+            host = new URL(website).hostname.toLowerCase().replace(/^www\./, '');
+          } catch {}
+          if (host !== domain) return { products: [], sources: [] };
+          return {
+            products: catalog[domain] || [],
+            sources: window.mailDesignSources?.(a.mail) || [],
+          };
+        }
+        function grants(a, website = a.website, products = a.products, sourceIds = a.sourceIds) {
+          const opts = choices(a, website);
+          function list(key, title, options, selected, empty) {
+            return `<fieldset class="ac-grants"><legend>${title}</legend>${options.length ? options.map(([v, label]) => `<label><input type="checkbox" name="${key}" value="${h(v)}" ${selected.includes(v) ? 'checked' : ''}><span>${h(label)}</span></label>`).join('') : '<small>' + empty + '</small>'}</fieldset>`;
+          }
+          return (
+            list(
+              'products',
+              '可推产品',
+              opts.products.map((p) => [p, p]),
+              products,
+              '此官网暂无可选产品。',
+            ) +
+            list(
+              'sources',
+              '可用于回复的资料',
+              opts.sources.map((x) => [x.id, x.title]),
+              sourceIds,
+              '此官网暂无已授权给邮件助手的资料。',
+            )
+          );
+        }
+        function overview(a) {
+          const opts = choices(a);
+          const approved = opts.sources
+            .filter((x) => a.sourceIds.includes(x.id))
+            .map((x) => x.title);
+          const allowed = opts.products.filter((x) => a.products.includes(x));
+          const tags = (items) =>
+            items.length
+              ? items.map((x) => '<span>' + h(x) + '</span>').join('')
+              : '<small>未选择</small>';
+          return `<dl class="ac-info"><dt>账号状态</dt><dd>${pill(a)}</dd><dt>所属官网</dt><dd>${h(a.website)}</dd><dt>标签</dt><dd><span class="ac-tag">${h(a.category)}</span></dd><dt>可推产品</dt><dd class="ac-granted">${tags(allowed)}</dd><dt>回复资料</dt><dd class="ac-granted">${tags(approved)}</dd><dt>负责人</dt><dd>${h(a.sender)}</dd><dt>接待策略</dt><dd>${h(a.mode)}</dd><dt>今日发送</dt><dd>${a.sent} / ${a.limit}</dd><dt>健康度</dt><dd>${a.score === null ? '待统计' : a.score + '%'}</dd></dl><button type="button" class="action" onclick="acDemo.flip(${a.id})">${a.active ? '暂停发送' : '恢复发送'}</button>`;
+        }
+        function warmTab(a) {
+          const max = Math.max(1, ...a.series);
+          return `<h3>近 7 天预热发件</h3><div class="ac-chart" aria-label="近七天预热发送量">${a.series.map((n) => `<div class="ac-chartcol"><span>${n}</span><i style="height:${Math.max(2, (n / max) * 70)}%"></i></div>`).join('')}</div><div class="ac-chartkey">${['11/16', '11/17', '11/18', '11/19', '11/20', '11/21', '11/22'].map((n) => '<span>' + n + '</span>').join('')}</div><div class="ac-warmstate"><span>邮箱预热</span><button class="action" onclick="acDemo.warm(${a.id},true)">${a.warm ? '暂停预热' : '开启预热'}</button></div>`;
+        }
+        function settings(a) {
+          return `<form class="ac-form" onsubmit="return acDemo.save(event,${a.id})"><label>发件人 / 负责人<input name="sender" value="${h(a.sender)}" required maxlength="60"></label>
+    <label>产品官网<input name="website" onchange="acDemo.scopeChanged(this.form,${a.id})" type="url" pattern="https?://.+" value="${h(a.website)}" required></label><div class="ac-two"><label>每日发送上限<input name="limit" type="number" min="1" max="500" value="${a.limit}" required></label><label>发送间隔（秒）<input name="gap" type="number" min="5" max="86400" value="${a.gap}" required></label></div>
+    <div data-ac-grants>${grants(a)}</div><label>客户回信策略<select name="mode">${['审核草稿', '自动答复', '人工接待'].map((m) => `<option ${a.mode === m ? 'selected' : ''}>${m}</option>`).join('')}</select></label><label>邮件签名<textarea name="signature" maxlength="1000">${h(a.signature)}</textarea></label>
+    <div class="ac-formfoot"><button type="button" class="action" onclick="acDemo.close()">取消</button><button type="submit" class="action primary">保存设置</button></div></form>`;
+        }
+        function connect() {
+          openModal(
+            '连接邮箱',
+            `<form class="ac-form" onsubmit="return acDemo.add(event)"><label>邮箱地址<input type="email" name="email" placeholder="sales@company.example" required maxlength="180"></label><div class="ac-two"><label>品牌名称<input name="brand" placeholder="示例品牌" required maxlength="48"></label><label>产品标签<input name="category" placeholder="示例产品" required maxlength="32"></label></div><label>负责人<input name="sender" placeholder="姓名" required maxlength="60"></label><p class="ac-modal-note">模拟阿里邮箱连接，无需提供密码。</p><p class="ac-form-error" role="alert"></p><div class="ac-formfoot"><button type="button" class="action" onclick="closeModal()">取消</button><button type="submit" class="action primary">模拟连接</button></div></form>`,
+          );
+        }
+        window.acDemo = {
+          detail,
+          connect,
+          close: closeDrawer,
+          filter(k, v) {
+            if (k === 'status') status = v;
+            else if (k === 'tag') tag = v;
+            else query = v;
+            selected.clear();
+            update();
+          },
+          reset() {
+            query = '';
+            status = 'all';
+            tag = 'all';
+            selected.clear();
+            render();
+          },
+          pick(id, on) {
+            if (on) selected.add(id);
+            else selected.delete(id);
+            update();
+          },
+          pickAll(on) {
+            visible().forEach((a) => (on ? selected.add(a.id) : selected.delete(a.id)));
+            update();
+          },
+          bulk(active) {
+            const count = selected.size;
+            accounts.filter((a) => selected.has(a.id)).forEach((a) => (a.active = active));
+            selected.clear();
+            update();
+            toast(`${count} 个邮箱已${active ? '恢复' : '暂停'}发送`);
+          },
+          flip(id) {
+            const a = byId(id);
+            a.active = !a.active;
+            update();
+            detail(id);
+            toast(a.active ? '已恢复发送' : '已暂停发送');
+          },
+          warm(id, drawer) {
+            const a = byId(id);
+            a.warm = !a.warm;
+            update();
+            if (drawer) detail(id, 'warmup');
+            toast(a.warm ? '已开启预热' : '已暂停预热');
+          },
+          scopeChanged(form, id) {
+            const a = byId(id),
+              fields = new FormData(form);
+            form.querySelector('[data-ac-grants]').innerHTML = grants(
+              a,
+              fields.get('website'),
+              fields.getAll('products'),
+              fields.getAll('sources').map(Number),
+            );
+          },
+          save(event, id) {
+            event.preventDefault();
+            const f = event.target;
+            const a = byId(id);
+            a.sender = f.elements.sender.value.trim();
+            a.website = f.elements.website.value.trim();
+            a.limit = Number(f.elements.limit.value);
+            a.gap = Number(f.elements.gap.value);
+            const fields = new FormData(f),
+              opts = choices(a),
+              ids = fields.getAll('sources').map(Number);
+            a.products = opts.products.filter((v) => fields.getAll('products').includes(v));
+            a.sourceIds = opts.sources.filter((x) => ids.includes(x.id)).map((x) => x.id);
+            a.mode = f.elements.mode.value;
+            a.signature = f.elements.signature.value.trim();
+            update();
+            detail(id);
+            toast('邮箱设置已保存');
+            return false;
+          },
+          add(event) {
+            event.preventDefault();
+            const f = event.target;
+            const mail = f.elements.email.value.trim();
+            if (accounts.some((a) => a.mail.toLowerCase() === mail.toLowerCase())) {
+              f.querySelector('[role="alert"]').textContent = '此邮箱已经连接。';
+              return false;
+            }
+            const brand = f.elements.brand.value.trim(),
+              category = f.elements.category.value.trim(),
+              sender = f.elements.sender.value.trim();
+            if (!brand || !category || !sender) {
+              f.querySelector('[role="alert"]').textContent = '请填写品牌、产品标签和负责人。';
+              return false;
+            }
+            accounts.push({
+              id: nextId++,
+              brand,
+              category,
+              sender,
+              mail,
+              products: [],
+              sourceIds: [],
+              initials: brand.slice(0, 2).toUpperCase(),
+              tone: 'blue',
+              active: false,
+              warm: false,
+              sent: 0,
+              limit: 30,
+              gap: 120,
+              score: null,
+              series: [0, 0, 0, 0, 0, 0, 0],
+              website: 'https://' + mail.split('@')[1],
+              mode: '审核草稿',
+              signature: sender + '\n' + brand,
+            });
+            query = '';
+            status = 'all';
+            tag = 'all';
+            selected.clear();
+            closeModal();
+            render();
+            toast('新邮箱已模拟连接');
+            return false;
+          },
+        };
+        window.renderAccounts = render;
+      })();
+    </script>
+    <script>
+      displayPage();
+    </script>
+  </body>
+</html>
