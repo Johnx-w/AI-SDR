@@ -233,7 +233,10 @@ export function buildBusinessTableFields(
       scalar('发生时间', 5),
       scalar('发送内容摘要'),
       scalar('收到回复内容'),
-      select('回复类型', REPLY_TYPES),
+      select(
+        '回复类型',
+        REPLY_TYPES.filter((type) => type !== '待核实回执'),
+      ),
       scalar('提取客户信息'),
       scalar('客户需求摘要'),
       scalar('业务员纪要'),
@@ -817,11 +820,14 @@ export class CustomerBusinessFeishu {
               对外账号: nullable(entry.account || entry.outboundAccount),
               发生时间: date(entry.occurredAt),
               发送结果: choice(messageStatuses, entry.deliveryStatus, '发送结果'),
-              消息分类: choice(
-                messageKinds,
-                entry.classification || entry.kind || 'normal',
-                '消息分类',
-              ),
+              消息分类:
+                entry.classification === 'unverified'
+                  ? null
+                  : choice(
+                      messageKinds,
+                      entry.classification || entry.kind || 'normal',
+                      '消息分类',
+                    ),
               渠道消息编号: nullable(entry.externalId || entry.channelMessageId),
               附件链接:
                 (entry.attachments || [])
@@ -835,13 +841,17 @@ export class CustomerBusinessFeishu {
                     ? '邮箱同步'
                     : '人工补录',
             };
-          if (key === 'messages' && originalMessages)
+          if (key === 'messages' && originalMessages) {
+            const roundFields = communicationRoundFields(roundById.get(entry.id));
             fields = {
               客户: customer(entry),
               渠道: choice(channels, entry.channel, '沟通渠道'),
               发生时间: date(entry.occurredAt),
-              ...communicationRoundFields(roundById.get(entry.id)),
+              ...roundFields,
+              // The original T3 enum has four fixed options. The body retains the pending label.
+              回复类型: roundFields.回复类型 === '待核实回执' ? null : roundFields.回复类型,
             };
+          }
           if (key === 'tasks')
             fields = {
               ...common,

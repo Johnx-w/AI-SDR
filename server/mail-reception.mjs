@@ -102,7 +102,11 @@ export class MailReception {
         email: peer,
         customerId,
         at: new Date(at).toISOString(),
-        reason: inbound ? '收到客户来信，结束本轮追信' : '业务员已回复，结束本轮追信',
+        reason: !inbound
+          ? '业务员已回复，结束本轮追信'
+          : kind === 'unverified'
+            ? '收到待核实回执，停止本轮自动追信'
+            : '收到客户来信，结束本轮追信',
       });
     if (kind === 'hard_bounce' || kind === 'auto_reply') return;
     this.db

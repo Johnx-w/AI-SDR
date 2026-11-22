@@ -99,6 +99,18 @@ test('策略拒收不当成地址失效，历史 normal 自动回执可被识别
     '系统自动回复',
   );
   assert.equal(knownReplyType({ body: 'We are not looking for suppliers.' }), null);
+  assert.equal(
+    knownReplyType({ body: 'Ticket opened.\nThis is an automated email.' }),
+    '系统自动回复',
+  );
+  assert.equal(
+    knownReplyType({ body: 'Could you confirm whether this is an automated email?' }),
+    null,
+  );
+  assert.equal(
+    knownReplyType({ body: 'Here are our specifications.\n> This is an automated email.' }),
+    null,
+  );
 });
 
 test('客户原文证据排除引用历史，完整收信正文仍不截断', () => {

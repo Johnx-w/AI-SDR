@@ -207,6 +207,8 @@ test('automatic replies retain reliable headers as a classification without gues
     row(6, { subject: 'Automatic reply: Thank you for contacting us' }),
     row(7, { headers: ['X-Autoreply: no', 'X-Autorespond: false'] }),
     row(8, { headers: ['Auto-Submitted: no', 'Auto-Submitted: auto-replied'] }),
+    row(9, { headers: ['Precedence: bulk'] }),
+    row(10, { headers: ['Precedence: normal'] }),
   ];
   const { reader, calls } = fixture({ inbox, sentFolder: false });
   const result = await reader.read({ since });
@@ -221,10 +223,12 @@ test('automatic replies retain reliable headers as a classification without gues
       'normal',
       'normal',
       'auto_reply',
+      'auto_reply',
+      'normal',
     ],
   );
   for (const call of calls.filter((call) => call[0] === 'fetch' && call[3].headers)) {
-    for (const name of ['auto-submitted', 'x-autoreply', 'x-autorespond'])
+    for (const name of ['auto-submitted', 'x-autoreply', 'x-autorespond', 'precedence'])
       assert.ok(call[3].headers.includes(name), `IMAP must request ${name}`);
   }
 });

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { syncReadonlyMail } from '../scripts/sync-mail-readonly.mjs';
 import { MailConversations } from '../server/mail-conversations.mjs';
+import { initializeReplyHistory } from '../server/mail-reply-history.mjs';
 import { handleOutreach } from '../server/outreach-api.mjs';
 
 const at = '2026-03-01T09:00:00.000Z';
@@ -61,6 +62,41 @@ function historyApi(store, query = '') {
     service: { conversations: store },
   });
 }
+
+test('历史回填失败时原子回滚，修复原件后可补全旧索引与同步触发器', (t) => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  const store = new MailConversations({ db, mailboxes: endpoints() });
+  store.putMessage(box, incoming(1));
+  db.exec(`DROP TRIGGER mailbox_reply_insert;
+    DROP INDEX mailbox_reply_scope;
+    UPDATE mailbox_reply_headers SET subject='stale';
+    INSERT INTO mailbox_thread_messages VALUES('extra','account','thread','{}');
+    CREATE TEMP TRIGGER fail_test_backfill BEFORE INSERT ON mailbox_reply_headers WHEN new.id='extra'
+    BEGIN SELECT RAISE(ABORT,'simulated backfill failure'); END;`);
+  const indexExists = () =>
+    db.prepare("SELECT 1 FROM sqlite_schema WHERE name='mailbox_reply_scope'").get();
+  const subjects = () =>
+    db
+      .prepare('SELECT subject FROM mailbox_reply_headers ORDER BY id')
+      .all()
+      .map((row) => row.subject);
+  assert.throws(() => initializeReplyHistory(db), /simulated backfill failure/u);
+  assert.equal(db.isTransaction, false);
+  assert.equal(indexExists(), undefined);
+  assert.deepEqual(subjects(), ['stale']);
+  db.exec('DROP TRIGGER fail_test_backfill');
+  db.prepare('UPDATE mailbox_thread_messages SET data=? WHERE id=?').run(
+    JSON.stringify(incoming(2)),
+    'extra',
+  );
+  initializeReplyHistory(db);
+  initializeReplyHistory(db);
+  assert.ok(indexExists());
+  assert.deepEqual(subjects(), ['Re: Product', 'Re: Product']);
+  store.putMessage(box, incoming(3, { subject: 'After retry' }));
+  assert.ok(subjects().includes('After retry'));
+});
 
 test('历史回信没有本地首封也可筛选；不以主题补造父件或 CRM，分页不返回原文', async (t) => {
   const db = new DatabaseSync(':memory:');
@@ -149,9 +185,13 @@ test('后续回信须同一个发件邮箱、收件对方及最近父件，并�
   let row = (await historyApi(store)).items[0];
   assert.equal(row.hasLocalParent, true);
   assert.equal(row.handling, 'unanswered');
+  assert.equal((await historyApi(store, 'handling=unanswered')).total, 1);
+  assert.equal((await historyApi(store, 'handling=answered')).total, 0);
   store.putMessage(box, outgoing(6, { inReplyTo: msg.messageId }));
   row = (await historyApi(store)).items[0];
   assert.equal(row.handling, 'manual');
+  assert.equal((await historyApi(store, 'handling=answered')).total, 1);
+  assert.equal((await historyApi(store, 'handling=unanswered')).total, 0);
   store.putMessage(
     box,
     outgoing(6, { inReplyTo: msg.messageId, source: 'imap', deliveryStatus: 'sent' }),

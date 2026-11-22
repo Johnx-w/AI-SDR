@@ -42,7 +42,7 @@ const evidenceText = (value) =>
 export async function analyzeCommunication(message, model) {
   const body = customerReplyText(message),
     known = knownReplyType(message);
-  if (isNotice(message) || !body || body === '（邮件正文为空）') {
+  if (isNotice(message) || known === '待核实回执' || !body || body === '（邮件正文为空）') {
     assert(known, '空正文来信无法确定回复类型');
     return { replyType: known, customerInfo: '', demandSummary: '' };
   }

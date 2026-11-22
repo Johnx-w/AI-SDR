@@ -6,6 +6,7 @@ const kinds = {
   reply: '客户回信',
   inquiry: '无回复头来信',
   notification: '自动通知',
+  unverified: '待核实回执',
   bounce: '退信',
   unsubscribe: '退订',
   complaint: '投诉',
@@ -42,6 +43,7 @@ interface Result {
 export function MailReplyHistory({ revision }: { revision: number }) {
   const [mailbox, setMailbox] = useState('all'),
     [kind, setKind] = useState<keyof typeof kinds>('reply'),
+    [replyState, setReplyState] = useState('all'),
     [page, setPage] = useState(1);
   const [result, setResult] = useState<Result | null>(null),
     [error, setError] = useState('');
@@ -50,7 +52,12 @@ export function MailReplyHistory({ revision }: { revision: number }) {
     const abort = new AbortController();
     setResult(null);
     setError('');
-    const params = new URLSearchParams({ mailboxId: mailbox, kind, page: String(page) });
+    const params = new URLSearchParams({
+      mailboxId: mailbox,
+      kind,
+      handling: replyState,
+      page: String(page),
+    });
     async function load() {
       try {
         const response = await fetch('/api/v1/outreach/reply-history?' + params, {
@@ -68,7 +75,7 @@ export function MailReplyHistory({ revision }: { revision: number }) {
     }
     void load();
     return () => abort.abort();
-  }, [mailbox, kind, page, revision]);
+  }, [mailbox, kind, replyState, page, revision]);
   return (
     <section className="business-replies" aria-label="邮箱来信跟进">
       <div className="business-filters">
@@ -95,6 +102,7 @@ export function MailReplyHistory({ revision }: { revision: number }) {
             value={kind}
             onChange={(e) => {
               setKind(e.target.value as keyof typeof kinds);
+              setReplyState('all');
               setPage(1);
             }}
           >
@@ -105,6 +113,22 @@ export function MailReplyHistory({ revision }: { revision: number }) {
             ))}
           </select>
         </label>
+        {kind === 'reply' && (
+          <label>
+            处理情况
+            <select
+              value={replyState}
+              onChange={(e) => {
+                setReplyState(e.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="all">全部处理情况</option>
+              <option value="unanswered">待跟进</option>
+              <option value="answered">已有回复</option>
+            </select>
+          </label>
+        )}
       </div>
       {error ? (
         <p role="alert">{error}</p>
@@ -112,7 +136,7 @@ export function MailReplyHistory({ revision }: { revision: number }) {
         <p role="status">正在读取来信…</p>
       ) : (
         <>
-          <div className="table-wrap">
+          <div className="table-wrap reply-table">
             <table>
               <thead>
                 <tr>
@@ -150,18 +174,29 @@ export function MailReplyHistory({ revision }: { revision: number }) {
                       </Link>
                     </td>
                     <td>{r.account}</td>
-                    <td>{formatBeijingTime(r.receivedAt)}</td>
+                    <td>
+                      <time dateTime={r.receivedAt}>
+                        {formatBeijingTime(r.receivedAt).replace('（北京时间）', '')}
+                      </time>
+                    </td>
                     <td>
                       {r.kind === 'reply'
                         ? r.hasLocalParent
-                          ? '回复头关联到本邮箱发件'
-                          : '存在回复头 · 未找到本地原发件'
+                          ? '已关联原发信'
+                          : '有回复头，未找到原发信'
                         : kinds[r.kind]}
                     </td>
                     <td>
-                      {r.handling === 'unanswered' && r.kind === 'reply'
-                        ? '待跟进'
-                        : handling[r.handling]}
+                      <span
+                        className={
+                          'reply-status ' +
+                          (r.handling === 'unanswered' && r.kind === 'reply' ? 'needs-reply' : '')
+                        }
+                      >
+                        {r.handling === 'unanswered' && r.kind === 'reply'
+                          ? '待跟进'
+                          : handling[r.handling]}
+                      </span>
                     </td>
                   </tr>
                 ))}

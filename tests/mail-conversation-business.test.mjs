@@ -78,6 +78,7 @@ test('mailbox classifications are preserved as original business facts, includin
   for (const classification of [
     'normal',
     'auto_reply',
+    'unverified',
     'unsubscribe',
     'hard_bounce',
     'complaint',

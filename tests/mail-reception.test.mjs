@@ -257,10 +257,13 @@ test('历史导入、系统回执、退信及退订不生成回信，接管恢�
   const h = harness(t, 'review');
   h.incoming({ occurredAt: '2026-10-01T00:00:00Z' });
   h.incoming({ subject: 'Out of office' });
+  h.incoming({ bodyText: "Thanks for getting in touch. We'll be back with you within 48 hours." });
+  h.incoming({ bodyText: '', bodyUnavailable: 'too_large' });
   h.incoming({ from: 'postmaster@dealer.test', subject: 'Undeliverable' });
   await h.sync();
   await h.s.reception.tick();
   assert.equal(h.s.reception.list().total, 0);
+  assert.equal(h.sends.length, 0);
   h.now += 60000;
   const original = h.incoming();
   await h.sync();

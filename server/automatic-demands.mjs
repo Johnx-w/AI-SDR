@@ -55,8 +55,8 @@ export async function extractAutomaticDemands(store, { env = {}, fetchImpl = fet
       let analysis = { demands: [], reviewReason: '' };
       if (
         body &&
-        !['系统自动回复', '联系方式失效'].includes(known) &&
-        !['auto_reply', 'unsubscribe', 'hard_bounce'].includes(source.classification)
+        !['系统自动回复', '联系方式失效', '待核实回执'].includes(known) &&
+        !['auto_reply', 'unverified', 'unsubscribe', 'hard_bounce'].includes(source.classification)
       ) {
         const existing = store
           .all('demands')

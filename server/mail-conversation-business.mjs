@@ -142,6 +142,7 @@ export async function recordMailConversation({ store, conversation, messages }) 
         classification: [
           'normal',
           'auto_reply',
+          'unverified',
           'unsubscribe',
           'hard_bounce',
           'complaint',

@@ -265,7 +265,10 @@ export class OutreachFollowUps {
     )
       return { status: 'cancelled', reason: '已由人工联系，结束本轮追信' };
     const incoming = later.filter((m) => m.direction === 'inbound');
-    if (incoming.some((m) => knownReplyType({ ...m, body: m.bodyText }) !== '系统自动回复'))
+    const replyTypes = incoming.map((m) => knownReplyType(m));
+    if (replyTypes.includes('待核实回执'))
+      return { status: 'cancelled', reason: '收到待核实回执，停止本轮自动追信' };
+    if (replyTypes.some((type) => type !== '系统自动回复'))
       return { status: 'cancelled', reason: '已收到客户回复或地址失效，结束本轮追信' };
     if (
       (graph.customerContexts || []).some(
