@@ -16,7 +16,7 @@
 | 客户档案及评估  | lead-library 保存 SQLite 客户主档案；customer-archive 管理后台飞书同步与编号关联；AssessmentStore 保留最新快照                           |
 | 客户业务与产品  | CustomerBusiness 维护会话、需求、消息、任务和人工归属；产品资料管理审核版本                                                              |
 | 首封开发        | outreach-service 管理计划、邮箱匹配、企业占用和发送队列；outreach-content 生成与检查                                                     |
-| 自动需求与追信  | automatic-demands 从已匹配来信提取 T1；outreach-follow-ups 持久化两次追信、核验发送条件并投影只读任务                                    |
+| 自动需求与追信  | automatic-demands 从已匹配来信提取 T1；outreach-follow-ups 按首封锁定的策略排程、核验发送条件并投影只读任务                              |
 | 邮件收发        | mail-conversations 保存原文和同步游标；mailbox-reader 只读 IMAP；mail-replies 管理草稿与幂等回信；outreach-mailboxes 管理加密账号和 SMTP |
 | 邮件业务桥接    | outreach-business、mail-conversation-business 只登记实际往来，不以记录失败触发再次发送                                                   |
 | 网页状态        | WorkspaceProvider 只负责界面通知，真实业务读取后端；已退役演示仓储不再加载                                                               |
@@ -46,7 +46,7 @@
 
 新增业务操作使用持久幂等编号；编辑核对当前版本。旧评估历史重试返回 410；旧固定邮箱试点 /api/v1/mail/\*、已移除搜索词生成接口返回 404。查看收件箱只读取缓存。正常业务服务同步新来信后按邮箱策略登记接待、生成草稿或自动回复，人工发送走 reply 入口。实数查看实例使用独立的只读 IMAP 同步路径，停用发信及自动接待。
 
-`POST /api/v1/outreach/campaigns/:id/follow-ups` 接受 enable、disable、pause、resume，在所属计划控制追信。独立 `outreach_followups` 表与首封共用 SQLite 和邮箱限额；首封成功入账与创建两次安排在同一事务完成，已完成首封计划仍可继续追信。每分钟后台收信，发送前再次完整核对，记录失败只补记录；旧人工任务不进入执行器。
+`POST /api/v1/outreach/campaigns/:id/follow-ups` 接受 enable、disable、pause、resume，在所属计划控制追信。`GET /api/v1/outreach/sequence-policy` 读取工作区默认策略，`PUT` 携带当前版本、规则名和各步的天数及写作要求保存修订。`outreach_sequence_policies` 保留各版配置，首封提交 SMTP 时记录版本。首封成功入账时，同一事务按实际发送时间在 `outreach_followups` 生成该版本的步骤，默认在第 3、7 天各发一次。首封目标已完成的计划仍可继续追信，后续发送与首封共用邮箱限额。每分钟后台收信，发送前再次完整核对，记录失败只补记录；旧人工任务不进入执行器。
 
 T1/T3 与独立 T4 目标分别同步，共享同一份去重日志，避免多个实例覆盖映射；单独配置或同步 T4 失败不跳过 T1/T3。自动需求提取先本地保存，不以飞书可用为前提。
 
