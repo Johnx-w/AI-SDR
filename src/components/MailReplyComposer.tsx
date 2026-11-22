@@ -342,7 +342,21 @@ export function MailReplyComposer({
   const pendingReply = detail.replies?.find((item) => ['unknown', 'sending'].includes(item.status));
   const latestReply = detail.replies?.[0];
   return (
-    <section ref={panel} className="mail-reply-panel" aria-label="回复邮件">
+    <section
+      ref={panel}
+      className="mail-reply-panel"
+      aria-label="回复邮件"
+      data-empty={
+        canReply &&
+        !content.bodyText.trim() &&
+        !content.attachments.length &&
+        !formatting &&
+        !loading &&
+        !error
+          ? true
+          : undefined
+      }
+    >
       {result && <MailReplyResult reply={result} />}
       {!result && latestReply && <MailReplyResult reply={latestReply} />}
       {loading ? (
@@ -447,12 +461,12 @@ export function MailReplyComposer({
               )}
             </div>
           )}
-          {!canSend && (
-            <small className="inbox-send-status">
-              {replyContext?.reason || '当前会话暂不可回复。'}
-            </small>
-          )}
           <footer className="mail-reply-actions">
+            {!canSend && (
+              <small className="inbox-send-status">
+                {replyContext?.reason || '当前会话暂不可回复。'}
+              </small>
+            )}
             <button
               type="button"
               className="inbox-icon"
