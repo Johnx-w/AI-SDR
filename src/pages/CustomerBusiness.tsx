@@ -82,7 +82,11 @@ export function CustomerBusiness() {
       <PageHeading
         eyebrow="AUTOMATIC FOLLOW-UP"
         title="跟进任务"
-        description="查看系统安排的后续追信和真实结果。暂停、恢复或关闭请进入所属发送计划。"
+        description={
+          showReplies
+            ? '根据实际往来核对客户回信，点击邮件主题可在原线程跟进。'
+            : '查看系统安排的后续追信和真实结果。暂停、恢复或关闭请进入所属发送计划。'
+        }
       >
         <button
           className="btn secondary"
