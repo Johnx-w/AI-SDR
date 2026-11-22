@@ -1,19 +1,33 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, ChevronDown, Inbox, ListFilter, LoaderCircle, Search } from 'lucide-react';
+import {
+  Archive,
+  ArrowLeft,
+  ChevronDown,
+  Inbox,
+  LoaderCircle,
+  RefreshCw,
+  Search,
+} from 'lucide-react';
 import type { OutreachMailbox } from '../outreachApi';
 import { mailConversationsApi } from '../services/mailConversations';
 import type {
   MailConversationDetail,
   MailConversationList,
   MailboxSyncStatus,
-  InboxFolder,
   MailThread,
 } from '../services/mailConversations';
 import { Empty } from './ui';
 import { InboxAvatar, InboxThread } from './InboxThread';
 import { outreachApi } from '../outreachApi';
 import '../mail-conversations.css';
+
+export type InboxView = 'all' | 'unread' | 'hasReply' | 'later' | 'done';
+const primaryViews = [
+  ['all', '全部'],
+  ['unread', '未读'],
+  ['hasReply', '有回复'],
+] as const;
 
 const formatTime = (value?: string | null) => {
   if (!value) return '尚未同步';
@@ -44,12 +58,10 @@ export function MailSyncSummary({ statuses: syncStatuses }: { statuses: MailboxS
           <span className={`mail-sync-dot ${failures.length ? 'error' : ''}`} />
           {failures.length ? `${failures.length} 个邮箱同步异常` : '邮箱同步状态'}
         </span>
-        <span>
-          最近成功同步 {lastSync ? formatTime(lastSync) : '尚未同步'}
-          <ChevronDown size={14} />
-        </span>
+        <ChevronDown size={14} aria-hidden="true" />
       </summary>
       <div className="mail-sync-accounts">
+        {lastSync && <small>最近成功同步 {formatTime(lastSync)}</small>}
         {syncStatuses.length ? (
           syncStatuses.map((item) => (
             <div key={item.mailboxId} className="mail-sync-account">
@@ -104,26 +116,34 @@ export function SalesInbox({
   customerId = '',
   inboundOnly = false,
   initialThread = '',
+  view = 'all',
+  initialQuery = '',
+  onViewChange,
   onMailboxChange,
   review = false,
   reviewCount,
   refreshToken = 0,
-  onReviewChange,
+  onExitReview,
 }: {
   mailboxes: OutreachMailbox[];
   mailboxId?: string;
   customerId?: string;
   inboundOnly?: boolean;
   initialThread?: string;
-  onMailboxChange: (mailboxId: string) => void;
+  view?: InboxView;
+  initialQuery?: string;
+  onViewChange: (view: InboxView, query: string) => void;
+  onMailboxChange: (mailboxId: string, query: string) => void;
   review?: boolean;
   reviewCount?: number;
   refreshToken?: number;
-  onReviewChange?: (review: boolean) => void;
+  onExitReview: () => void;
 }) {
   const queueCount = review ? reviewCount : undefined;
-  const [query, setQuery] = useState('');
-  const [unread, setUnread] = useState(false);
+  const [query, setQuery] = useState(initialQuery);
+  const unread = view === 'unread';
+  const hasReply = view === 'hasReply';
+  const folder = view === 'later' || view === 'done' ? view : undefined;
   const [list, setList] = useState<MailConversationList | null>(null);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState('');
@@ -131,15 +151,15 @@ export function SalesInbox({
   const [detail, setDetail] = useState<MailConversationDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
-  const [folder, setFolder] = useState<InboxFolder | undefined>('open');
-  const [filtersOpen, setFiltersOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [marking, setMarking] = useState(false);
   const [notice, setNotice] = useState('');
   const [revision, setRevision] = useState(0);
   const [detailRevision, setDetailRevision] = useState(0);
-  const [page, setPage] = useState(1);
-  const filterKey = JSON.stringify([mailboxId, customerId, query, unread, inboundOnly, folder]);
+  const [pagination, setPagination] = useState({ view, page: 1 });
+  const page = pagination.view === view ? pagination.page : 1;
+  const setPage = useCallback((page: number) => setPagination({ view, page }), [view]);
+  const filterKey = JSON.stringify([mailboxId, customerId, query, view, inboundOnly]);
   const loadedFilter = useRef(filterKey);
   const mounted = useRef(true);
   const workspace = useRef<HTMLDivElement>(null);
@@ -201,7 +221,17 @@ export function SalesInbox({
               };
             })
           : mailConversationsApi.list(
-              { mailboxId, customerId, q: query, unread, inboundOnly, page, pageSize: 25, folder },
+              {
+                mailboxId,
+                customerId,
+                q: query,
+                unread,
+                hasReply,
+                inboundOnly,
+                page,
+                pageSize: 25,
+                folder,
+              },
               controller.signal,
             );
         void result
@@ -248,6 +278,7 @@ export function SalesInbox({
     customerId,
     query,
     unread,
+    hasReply,
     inboundOnly,
     review,
     page,
@@ -257,6 +288,7 @@ export function SalesInbox({
     refreshToken,
     revision,
     selectConversation,
+    setPage,
   ]);
 
   useEffect(() => {
@@ -360,7 +392,10 @@ export function SalesInbox({
             }
           : value,
       );
-      if (unread) setRevision((value) => value + 1);
+      if (unread) {
+        if (selected.current === thread.id) selectConversation(null);
+        setRevision((value) => value + 1);
+      }
     } catch (reason) {
       if (mounted.current && selected.current === thread.id) setDetailError(errorText(reason));
     } finally {
@@ -380,7 +415,13 @@ export function SalesInbox({
         error: null,
       },
   );
-  const visibleThreads = list?.items.filter((item) => review || !unread || item.unread) || [];
+  const visibleThreads = list?.items || [];
+  const filtered = Boolean(query || view !== 'all');
+  function switchView(next: InboxView) {
+    if (view === next) return;
+    setPage(1);
+    onViewChange(next, query);
+  }
 
   const identity = shownDetail
     ? mailboxes.find((box) => box.id === shownDetail.conversation.mailboxId)
@@ -420,9 +461,9 @@ export function SalesInbox({
               <select
                 aria-label="筛选会话邮箱"
                 value={mailboxId}
-                onChange={(e) => onMailboxChange(e.target.value)}
+                onChange={(e) => onMailboxChange(e.target.value, query)}
               >
-                <option value="all">全部会话</option>
+                <option value="all">全部邮箱</option>
                 {mailboxes.map((box) => (
                   <option value={box.id} key={box.id}>
                     {box.email}
@@ -436,18 +477,15 @@ export function SalesInbox({
             <span className="inbox-list-count">{list?.total ?? '…'}</span>
           </div>
           {!review && (
-            <div className="inbox-scopes" aria-label="会话状态">
-              {(['open', 'later', 'done'] as const).map((state) => (
+            <div className="inbox-scopes" role="group" aria-label="会话筛选">
+              {primaryViews.map(([key, label]) => (
                 <button
                   type="button"
-                  key={state}
-                  aria-pressed={folder === state}
-                  onClick={() => {
-                    setFolder(state);
-                    setPage(1);
-                  }}
+                  key={key}
+                  aria-pressed={view === key}
+                  onClick={() => switchView(key)}
                 >
-                  {{ open: '进行中', later: '稍后', done: '已完成' }[state]}
+                  {label}
                 </button>
               ))}
             </div>
@@ -468,80 +506,26 @@ export function SalesInbox({
               </label>
             )}
             {review && (
-              <button className="text-link" onClick={() => onReviewChange?.(false)}>
+              <button className="text-link" onClick={onExitReview}>
                 返回全部会话
               </button>
             )}
-            <button
-              className="inbox-icon"
-              aria-label="会话筛选与同步"
-              title="筛选与同步"
-              aria-expanded={filtersOpen}
-              onClick={() => setFiltersOpen(!filtersOpen)}
-            >
-              <ListFilter size={16} />
-            </button>
-            {filtersOpen && (
-              <div className="inbox-popover inbox-filter-menu">
-                <button
-                  type="button"
-                  aria-pressed={!unread && !review}
-                  onClick={() => {
-                    setUnread(false);
-                    setPage(1);
-                    setFolder(undefined);
-                    if (review) onReviewChange?.(false);
-                    setFiltersOpen(false);
+            {!review && (
+              <label className="inbox-folder-select" data-active={!!folder} title="其他处理状态">
+                <Archive size={14} aria-hidden="true" />
+                <select
+                  aria-label="其他处理状态"
+                  value={folder || ''}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    switchView(value === 'later' || value === 'done' ? value : 'all');
                   }}
                 >
-                  全部
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={unread && !review}
-                  onClick={() => {
-                    setUnread(true);
-                    setPage(1);
-                    if (review) onReviewChange?.(false);
-                    setFiltersOpen(false);
-                  }}
-                >
-                  未读
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPage(1);
-                    onReviewChange?.(true);
-                    setFiltersOpen(false);
-                  }}
-                >
-                  待审
-                </button>
-                <button
-                  type="button"
-                  aria-label="刷新本地邮件缓存"
-                  disabled={loading}
-                  onClick={() => {
-                    setRevision((n) => n + 1);
-                    setFiltersOpen(false);
-                  }}
-                >
-                  刷新列表
-                </button>
-                {!review && (
-                  <button
-                    type="button"
-                    disabled={syncing || !scopeMailboxes.some((box) => box.configured)}
-                    onClick={() => {
-                      setFiltersOpen(false);
-                      void sync();
-                    }}
-                  >
-                    {syncing ? '正在同步…' : '同步邮件'}
-                  </button>
-                )}
-              </div>
+                  <option value="">其他状态</option>
+                  <option value="later">稍后</option>
+                  <option value="done">已完成</option>
+                </select>
+              </label>
             )}
           </div>
           {loading ? (
@@ -592,7 +576,7 @@ export function SalesInbox({
               title={
                 review
                   ? '当前没有待审回信'
-                  : query || unread
+                  : filtered
                     ? '没有符合筛选的会话'
                     : customerId && inboundOnly
                       ? '暂无该客户的来信'
@@ -601,8 +585,8 @@ export function SalesInbox({
               detail={
                 review
                   ? '需要审核的客户回信将在这里显示。'
-                  : query || unread
-                    ? '试试调整搜索词或取消未读筛选。'
+                  : filtered
+                    ? '可调整搜索词、选择其他邮箱或返回全部会话。'
                     : customerId && inboundOnly
                       ? '当前已同步的邮箱记录中没有该客户的来信，可同步邮件后重新查看。'
                       : '可手动同步邮箱；系统发送的邮件也会在这里保存。'
@@ -633,7 +617,26 @@ export function SalesInbox({
               </div>
             </nav>
           )}
-          {!review && <MailSyncSummary statuses={syncStatuses} />}
+          {!review && (
+            <div className="inbox-sync-footer">
+              <MailSyncSummary statuses={syncStatuses} />
+              <button
+                type="button"
+                className="inbox-sync-action"
+                aria-label="同步邮件"
+                title={mailboxId === 'all' ? '同步全部邮箱' : '同步所选邮箱'}
+                disabled={syncing || !scopeMailboxes.some((box) => box.configured)}
+                onClick={() => void sync()}
+              >
+                <RefreshCw
+                  size={13}
+                  aria-hidden="true"
+                  className={syncing ? 'outreach-spin' : undefined}
+                />
+                {syncing ? '同步中…' : '同步'}
+              </button>
+            </div>
+          )}
         </aside>
         {shownDetail ? (
           <InboxThread

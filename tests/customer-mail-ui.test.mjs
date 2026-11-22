@@ -22,7 +22,7 @@ test('客户邮件按钮进入实际沟通中心并保留客户编号及来信�
 
 function inbox(list, { error = '', loading = false } = {}) {
   const entry = new URL('../src/components/SalesInbox.tsx', import.meta.url);
-  const states = ['', false, list, loading, error];
+  const states = ['', list, loading, error];
   const effects = [];
   const requests = [];
   let index = 0;
@@ -107,10 +107,11 @@ test('点击客户邮件后的列表请求带来信筛选，并默认选中最�
         inboundOnly: true,
         page: 1,
         pageSize: 25,
-        folder: 'open',
+        hasReply: false,
+        folder: undefined,
       },
     ]);
-    assert.equal(view.states[5], 'latest-incoming');
+    assert.equal(view.states[4], 'latest-incoming');
   } finally {
     cleanup?.();
     globalThis.window = previousWindow;

@@ -164,6 +164,7 @@ export const mailConversationsApi = {
       pageSize: number;
       folder?: InboxFolder;
       unread: boolean;
+      hasReply?: boolean;
       inboundOnly?: boolean;
     },
     signal?: AbortSignal,
@@ -177,6 +178,7 @@ export const mailConversationsApi = {
     if (filters.customerId) params.set('customerId', filters.customerId);
     if (filters.q.trim()) params.set('q', filters.q.trim());
     if (filters.unread) params.set('unread', '1');
+    if (filters.hasReply) params.set('hasReply', '1');
     if (filters.inboundOnly) params.set('inboundOnly', '1');
     return outreachApi<MailConversationList>(`/conversations?${params}`, { signal });
   },

@@ -104,7 +104,6 @@ export function MailConversationTimeline({
   return (
     <>
       <header className="inbox-subject">
-        <h2>{conversation.subject || '（无主题）'}</h2>
         <span className="inbox-account-chip">
           <Inbox size={12} />
           {conversation.account}
@@ -277,8 +276,9 @@ export function InboxThread({
   const [note, setNote] = useState(''),
     [replyTarget, setReplyTarget] = useState<{ id: string; request: number } | null>(null);
   const noteAttempt = useRef<{ body: string; id: string } | null>(null);
-  const tools = useRef<HTMLDivElement>(null);
-  const who = detail.reception?.owner || identity?.owner || identity?.displayName;
+  const contactPanel = useRef<HTMLElement>(null);
+  const owner = detail.reception?.owner || identity?.owner;
+  const subject = t.subject || '（无主题）';
   async function move(state: InboxFolder, hours?: number) {
     if (busy) return;
     setBusy(true);
@@ -312,9 +312,7 @@ export function InboxThread({
     }
   }
   function toggleContact() {
-    const visible =
-      contact ?? (tools.current?.closest('.mail-conversations-workspace')?.clientWidth || 0) >= 920;
-    setContact(!visible);
+    if (contactPanel.current) setContact(getComputedStyle(contactPanel.current).display === 'none');
   }
   const title =
     [...detail.messages]
@@ -344,7 +342,7 @@ export function InboxThread({
         aria-label="邮件会话详情"
         data-contact={contact === null ? 'auto' : contact ? 'show' : 'hide'}
       >
-        <div ref={tools} className="inbox-thread-tools">
+        <div className="inbox-thread-tools">
           <button
             className="inbox-icon mail-conversation-back"
             type="button"
@@ -353,10 +351,9 @@ export function InboxThread({
           >
             <ArrowLeft size={17} />
           </button>
-          <span className="inbox-owner" title={who ? '负责人' : '负责邮箱'}>
-            <InboxAvatar name={who || t.account} />
-            {who || identity?.brandName || t.account}
-          </span>
+          <h2 className="inbox-thread-title" title={subject} tabIndex={0}>
+            {subject}
+          </h2>
           <div className="inbox-tool-end">
             {t.unread && (
               <button
@@ -511,6 +508,7 @@ export function InboxThread({
         </div>
       </section>
       <aside
+        ref={contactPanel}
         className="inbox-contact"
         aria-label="联系人及接待设置"
         data-contact={contact === null ? 'auto' : contact ? 'show' : 'hide'}
@@ -555,6 +553,7 @@ export function InboxThread({
           </h4>
           <strong>{identity?.brandName || t.account}</strong>
           <p>{t.account}</p>
+          {owner && <p className="inbox-contact-owner">负责人 · {owner}</p>}
           {identity && (
             <Link to={'/inbox?tab=mailboxes&mailboxId=' + encodeURIComponent(identity.id)}>
               邮箱设置 <ArrowUpRight size={13} />

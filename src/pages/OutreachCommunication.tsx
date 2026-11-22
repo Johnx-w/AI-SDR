@@ -24,7 +24,7 @@ import {
   X,
 } from 'lucide-react';
 import { PageHeading } from '../components/PageHeading';
-import { SalesInbox } from '../components/SalesInbox';
+import { SalesInbox, type InboxView } from '../components/SalesInbox';
 import { FollowUpSequences } from '../components/FollowUpSequences';
 import { MailboxLabels } from '../components/MailboxLabels';
 import { ReplyPreview } from '../components/ReplyPreview';
@@ -1075,8 +1075,34 @@ export function OutreachCommunication({
   function setTab(nextTab: Tab) {
     setSearchParams({ tab: nextTab });
   }
-  function openMailboxConversations(mailboxId: string) {
-    setSearchParams({ tab: 'inbox', mailboxId });
+  const requestedFolder = searchParams.get('folder');
+  const inboxView: InboxView =
+    requestedFolder === 'later' || requestedFolder === 'done'
+      ? requestedFolder
+      : searchParams.get('hasReply') === '1'
+        ? 'hasReply'
+        : searchParams.get('unread') === '1'
+          ? 'unread'
+          : 'all';
+  function inboxListParams(query: string) {
+    const next = new URLSearchParams(searchParams);
+    next.set('tab', 'inbox');
+    next.delete('thread');
+    if (query.trim()) next.set('q', query.trim());
+    else next.delete('q');
+    return next;
+  }
+  function openMailboxConversations(mailboxId: string, query = '') {
+    const next = tab === 'inbox' ? inboxListParams(query) : new URLSearchParams({ tab: 'inbox' });
+    next.set('mailboxId', mailboxId);
+    setSearchParams(next);
+  }
+  function changeInboxView(view: InboxView, query: string) {
+    const next = inboxListParams(query);
+    for (const filter of ['folder', 'unread', 'hasReply']) next.delete(filter);
+    if (view === 'later' || view === 'done') next.set('folder', view);
+    else if (view !== 'all') next.set(view, '1');
+    setSearchParams(next);
   }
   const [received, setState] = useState<(OutreachState & { viewKey: string }) | null>(
     initial?.outreach ?? null,
@@ -1565,7 +1591,16 @@ export function OutreachCommunication({
           <div role="tabpanel" id={`outreach-panel-${tab}`} aria-labelledby={`outreach-tab-${tab}`}>
             {tab === 'inbox' && (
               <SalesInbox
-                key={searchParams.toString()}
+                key={JSON.stringify([
+                  conversationMailboxId,
+                  searchParams.get('thread'),
+                  searchParams.get('customerId'),
+                  searchParams.get('inboundOnly'),
+                  requestedFolder === 'review',
+                ])}
+                view={inboxView}
+                initialQuery={searchParams.get('q') || ''}
+                onViewChange={changeInboxView}
                 initialThread={searchParams.get('thread') || ''}
                 customerId={searchParams.get('customerId') || ''}
                 inboundOnly={searchParams.get('inboundOnly') === '1'}
@@ -1575,9 +1610,7 @@ export function OutreachCommunication({
                 review={searchParams.get('folder') === 'review'}
                 reviewCount={state.reviewCount}
                 refreshToken={inboxRefresh}
-                onReviewChange={(on) =>
-                  setSearchParams(on ? { tab: 'inbox', folder: 'review' } : { tab: 'inbox' })
-                }
+                onExitReview={() => setSearchParams({ tab: 'inbox' })}
               />
             )}
             {tab === 'sequences' && (

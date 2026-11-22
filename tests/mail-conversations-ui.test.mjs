@@ -65,6 +65,7 @@ test('mail lookup encodes account and search filters while writes are limited to
       customerId: 'customer/a b',
       q: '  samples & quotes  ',
       unread: true,
+      hasReply: true,
       inboundOnly: true,
       page: 3,
       pageSize: 25,
@@ -77,6 +78,7 @@ test('mail lookup encodes account and search filters while writes are limited to
   assert.equal(url.searchParams.get('customerId'), 'customer/a b');
   assert.equal(url.searchParams.get('q'), 'samples & quotes');
   assert.equal(url.searchParams.get('unread'), '1');
+  assert.equal(url.searchParams.get('hasReply'), '1');
   assert.equal(url.searchParams.get('inboundOnly'), '1');
   assert.equal(url.searchParams.get('page'), '3');
   assert.equal(url.searchParams.get('pageSize'), '25');
@@ -211,8 +213,13 @@ test('mail conversation entry shows the requested account, local-cache scope and
     onMailboxChange() {},
   });
   assert.match(html, /<option value="mailbox-2" selected="">support@our\.example<\/option>/);
-  assert.match(html, /会话筛选与同步/);
-  assert.match(html, /进行中/);
+  assert.match(html, /aria-label="会话筛选"/);
+  assert.match(html, />全部<\/button>/);
+  assert.match(html, />未读<\/button>/);
+  assert.match(html, />有回复<\/button>/);
+  assert.match(html, /aria-label="其他处理状态"/);
+  assert.match(html, /aria-label="同步邮件"/);
+  assert.doesNotMatch(html, /会话筛选与同步|刷新本地邮件缓存|>刷新列表<|>待审<\/button>/);
   assert.match(html, /稍后/);
   assert.match(html, /已完成/);
   assert.match(html, /正在读取邮件会话/);
