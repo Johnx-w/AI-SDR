@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync, statSync 
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { OutreachMailboxes } from '../server/outreach-mailboxes.mjs';
+import { createApp } from '../server/app.mjs';
 import { simpleParser } from 'mailparser';
 import { renderMailboxSignature } from '../src/domain/mail-signature.mjs';
 
@@ -38,6 +39,107 @@ const signatureDesign = {
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=',
   },
 };
+
+test('业务备注与发件配置分开存储，单改、清空、重启及并发编辑保留原配置', async (t) => {
+  const { registry, config, path } = fixture(t);
+  const box = await registry.save({
+    ...settings,
+    signatureDesign,
+    owner: 'Jo',
+    clientPassword: secret,
+    productIds: ['legacy'],
+    knowledgeProductIds: ['workbook'],
+    replyMode: 'review',
+  });
+  const original = JSON.parse(readFileSync(path, 'utf8'));
+  assert.equal(registry.get(box.id, { withBusinessNote: true }).businessNote, '');
+  await registry.saveNote(box.id, { businessNote: '  周五交接\n仅团队可见  ' });
+  const reopened = new OutreachMailboxes(config);
+  assert.deepEqual(reopened.get(box.id), box);
+  assert.deepEqual(reopened.list(), [box]);
+  assert.equal(reopened.list({ withBusinessNote: true })[0].businessNote, '周五交接\n仅团队可见');
+  const saved = JSON.parse(readFileSync(path, 'utf8'));
+  assert.deepEqual(saved.mailboxes, original.mailboxes);
+  assert.deepEqual(saved.receptionSettings, original.receptionSettings);
+  await Promise.all([
+    reopened.saveNote(box.id, { businessNote: '更改交接日' }),
+    reopened.save({ id: box.id, owner: 'Alice' }),
+  ]);
+  assert.equal(reopened.get(box.id).owner, 'Alice');
+  assert.equal(reopened.get(box.id, { withBusinessNote: true }).businessNote, '更改交接日');
+  for (const input of [
+    null,
+    {},
+    { businessNote: 4 },
+    { businessNote: 'x', owner: 'bad' },
+    { businessNote: 'x'.repeat(2001) },
+  ]) {
+    await assert.rejects(reopened.saveNote(box.id, input), { status: 400 });
+  }
+  await assert.rejects(reopened.saveNote('missing', { businessNote: '' }), { status: 404 });
+  await reopened.saveNote(box.id, { businessNote: '' });
+  assert.equal(
+    new OutreachMailboxes(config).get(box.id, { withBusinessNote: true }).businessNote,
+    '',
+  );
+});
+
+test('本地查看模式的邮箱编辑只允许写入业务备注', async (t) => {
+  const { registry } = fixture(t);
+  const box = await registry.save({ ...settings, productIds: ['legacy'] });
+  const server = createApp({
+    env: {},
+    localMailInspection: {},
+    outreachServiceFactory: () => ({ mailboxes: registry, close() {} }),
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const url = `http://127.0.0.1:${server.address().port}/api/v1/outreach/mailboxes/${box.id}`;
+  const edit = async (path, method, body) =>
+    fetch(url + path, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  assert.equal((await edit('/note', 'PATCH', { businessNote: '接手工程客户' })).status, 200);
+  assert.equal((await (await fetch(url)).json()).businessNote, '接手工程客户');
+  assert.equal((await edit('/note', 'PATCH', { businessNote: '', paused: true })).status, 400);
+  assert.equal((await edit('', 'PUT', { owner: 'Kate', businessNote: '' })).status, 403);
+  assert.equal((await edit('/note', 'POST', { businessNote: '' })).status, 403);
+  assert.deepEqual(registry.get(box.id), box);
+  assert.equal((await (await fetch(url)).json()).businessNote, '接手工程客户');
+});
+
+test('新增和批量邮箱按已审核官网产品绑定，编辑保留旧显式范围及邮箱回复选材', async (t) => {
+  const { registry } = fixture(t);
+  const site = 'honeybadgerblinds.com';
+  const salesProducts = () => [
+    { id: 'own', sourceUrl: 'https://' + site, status: 'approved' },
+    { id: 'other', sourceUrl: 'https://shuangshengshutter.com', status: 'approved' },
+    { id: 'material', brands: [site], materialOnly: true, status: 'approved' },
+    { id: 'draft', brands: [site], status: 'draft' },
+    { id: 'unscoped', status: 'approved' },
+  ];
+  const [created, imported] = [
+    await registry.save({ email: 'a@' + site, businessNote: 'other' }, salesProducts),
+    ...(await registry.import([{ email: 'b@' + site }], salesProducts)),
+  ];
+  for (const box of [created, imported]) {
+    assert.deepEqual(box.productIds, ['own']);
+    assert.deepEqual(box.knowledgeProductIds, []);
+  }
+  const previous = await registry.save({
+    email: 'old@' + site,
+    productIds: ['historic'],
+    knowledgeProductIds: ['material'],
+  });
+  const changed = await registry.save(
+    { id: previous.id, owner: 'Kate', businessNote: 'new' },
+    salesProducts,
+  );
+  assert.deepEqual(changed.productIds, ['historic']);
+  assert.deepEqual(changed.knowledgeProductIds, ['material']);
+});
 
 test('接待策略放在旧邮箱记录之外，回退后再升级也不会自动获得回信权限', async (t) => {
   const { registry, config, path } = fixture(t);

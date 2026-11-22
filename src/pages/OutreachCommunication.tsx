@@ -50,7 +50,7 @@ import '../outreach.css';
 type Tab = 'mailboxes' | 'campaigns' | 'inbox' | 'sequences';
 type MailboxInput = Omit<
   OutreachMailbox,
-  'id' | 'configured' | 'smtpStatus' | 'lastCheckedAt' | 'lastError' | 'signature'
+  'id' | 'configured' | 'smtpStatus' | 'lastCheckedAt' | 'lastError' | 'signature' | 'productIds'
 > & { signature?: string; clientPassword?: string };
 type CampaignInput = Pick<
   OutreachCampaign,
@@ -222,9 +222,10 @@ function MailboxEditor({
   mailbox: OutreachMailbox | null;
   products: OutreachProduct[];
   onClose: () => void;
-  onSave: (input: MailboxInput) => Promise<void>;
+  onSave: (input: MailboxInput | null, businessNote?: string) => Promise<void>;
 }) {
-  const [selectedProducts, setSelectedProducts] = useState(mailbox?.productIds || []);
+  const [businessNote, setBusinessNote] = useState(mailbox?.businessNote || '');
+  const initialSettings = useRef<string | null>(null);
   const [knowledge, setKnowledge] = useState(mailbox?.knowledgeProductIds || []);
   const [site, setSite] = useState(mailbox?.website || '');
   const [brand, setBrand] = useState(mailbox?.brandName || '');
@@ -245,34 +246,41 @@ function MailboxEditor({
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  async function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (busy || uploadingLogo) return;
-    const form = new FormData(event.currentTarget);
+  function readSettings(element: HTMLFormElement): MailboxInput {
+    const form = new FormData(element);
     const password = String(form.get('password') || '');
     const address = String(form.get('email')).trim();
     const displayName = String(form.get('displayName')).trim();
+    return {
+      email: address,
+      website,
+      brandName: identity.brandName,
+      owner: String(form.get('owner') || displayName),
+      replyMode,
+      knowledgeProductIds: knowledge.filter((id) => allowedKnowledge.some((p) => p.id === id)),
+      displayName,
+      ...(signatureDesign ? { signatureDesign } : { signature }),
+      priority: mailbox?.priority ?? 100,
+      dailyLimit: Number(form.get('dailyLimit')),
+      intervalSeconds: Number(form.get('intervalSeconds')),
+      paused: mailbox?.paused ?? false,
+      ...(password ? { clientPassword: password } : {}),
+    };
+  }
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy || uploadingLogo) return;
+    const input = readSettings(event.currentTarget);
+    const onlyNote = !!mailbox && JSON.stringify(input) === initialSettings.current;
+    if (!onlyNote && !event.currentTarget.reportValidity()) return;
     setBusy(true);
     setError(null);
     try {
-      await onSave({
-        email: address,
-        website,
-        brandName: identity.brandName,
-        owner: String(form.get('owner') || displayName),
-        replyMode,
-        knowledgeProductIds: knowledge.filter((id) => allowedKnowledge.some((p) => p.id === id)),
-        displayName,
-        ...(signatureDesign ? { signatureDesign } : { signature }),
-        productIds: selectedProducts.filter((id) =>
-          products.some((p) => !p.materialOnly && p.id === id && siteAllowsProduct(p, identity)),
-        ),
-        priority: mailbox?.priority ?? 100,
-        dailyLimit: Number(form.get('dailyLimit')),
-        intervalSeconds: Number(form.get('intervalSeconds')),
-        paused: mailbox?.paused ?? false,
-        ...(password ? { clientPassword: password } : {}),
-      });
+      const note = businessNote.trim();
+      await onSave(
+        onlyNote ? null : input,
+        note === (mailbox?.businessNote || '') ? undefined : note,
+      );
       onClose();
     } catch (reason) {
       setError(message(reason));
@@ -290,29 +298,15 @@ function MailboxEditor({
     >
       <form
         className="modal-body outreach-form"
+        ref={(element) => {
+          if (element && initialSettings.current === null)
+            initialSettings.current = JSON.stringify(readSettings(element));
+        }}
         onSubmit={(event) => void save(event)}
+        noValidate
         autoComplete="off"
       >
         <InlineError value={error} />
-        {selectedProducts.some((id) => !products.some((product) => product.id === id)) && (
-          <div className="outreach-alert">
-            <span>以下已配置产品不在当前资料库中，正式计划不会使用：</span>
-            {selectedProducts
-              .filter((id) => !products.some((product) => product.id === id))
-              .map((id) => (
-                <button
-                  key={id}
-                  className="text-link"
-                  type="button"
-                  onClick={() =>
-                    setSelectedProducts(selectedProducts.filter((item) => item !== id))
-                  }
-                >
-                  移除 {id}
-                </button>
-              ))}
-          </div>
-        )}
         <div className="outreach-form-section">
           <h3>发件账号</h3>
           <p>邮件使用此账号的准确地址、名称和固定签名。</p>
@@ -382,12 +376,17 @@ function MailboxEditor({
           </label>
         </div>
         <div className="outreach-form-section">
-          <h3>此邮箱负责的产品</h3>
-          <ProductOptions
-            products={products.filter((p) => !p.materialOnly && siteAllowsProduct(p, identity))}
-            selected={selectedProducts}
-            onChange={setSelectedProducts}
-          />
+          <label>
+            业务备注
+            <textarea
+              aria-label="业务备注"
+              value={businessNote}
+              onChange={(event) => setBusinessNote(event.target.value)}
+              rows={3}
+              maxLength={2000}
+              placeholder="记录此邮箱的客户分工或团队交接事项"
+            />
+          </label>
           <h3>客户回信</h3>
           <label>
             接待方式
@@ -413,9 +412,7 @@ function MailboxEditor({
               <Link to="/materials">管理产品资料</Link>
             </>
           )}
-          <small>
-            开启未回复跟进的计划会在首封发出后第 3、7 天沿原线程追信，收到客户回复即结束。
-          </small>
+          <small>已开启的未回复跟进会沿用首封邮件线程，客户回信后停止。</small>
         </div>
         <div className="outreach-form-section">
           <h3>邮件签名</h3>
@@ -519,7 +516,6 @@ function MailboxImport({
             website: `https://${domain}`,
             brandName: domain,
             priority: 100,
-            productIds: [],
           };
         }),
       );
@@ -544,7 +540,7 @@ function MailboxImport({
         onSubmit={(event) => void save(event)}
       >
         <p className="outreach-hint">
-          导入后为每个邮箱配置负责产品、邮件签名并验证连接，再加入对应产品的触达计划。
+          导入后按邮箱官网匹配已审核产品。完善邮件签名并验证连接后，即可加入触达计划。
         </p>
         <InlineError value={error} />
         <div className="outreach-import-rows">
@@ -788,9 +784,7 @@ function CampaignEditor({
                   {mailbox.displayName || '待设置发件人名称'}
                   {!mailbox.configured ? ' · 待配置' : mailbox.paused ? ' · 已暂停' : ''}
                 </small>
-                <small>
-                  {mailboxProductNames(mailbox, products).join('、') || '尚未配置负责产品'}
-                </small>
+                <small>{mailboxProductNames(mailbox, products).join('、') || '暂无匹配产品'}</small>
               </span>
             </label>
           ))}
@@ -834,7 +828,7 @@ function CampaignEditor({
           selected={selectedProducts}
           onChange={setSelectedProducts}
           approvedOnly
-          emptyText="所选邮箱与品类范围内暂无可选产品，请调整选择或先配置邮箱负责产品。"
+          emptyText="所选邮箱与品类范围内暂无匹配的已审核产品，请核对产品官网或调整选择。"
         />
         {unavailableSelections.length > 0 && (
           <div className="outreach-alert">
@@ -1346,14 +1340,23 @@ export function OutreachCommunication({
       setBusy(null);
     }
   }
-  async function saveMailbox(input: MailboxInput) {
-    await outreachApi(
-      mailboxEditor?.value ? pathFor('mailboxes', mailboxEditor.value.id) : '/mailboxes',
-      { method: mailboxEditor?.value ? 'PUT' : 'POST', body: JSON.stringify(input) },
-    );
+  async function saveMailbox(input: MailboxInput | null, businessNote?: string) {
+    const mailbox = mailboxEditor?.value;
+    const path = mailbox ? pathFor('mailboxes', mailbox.id) : '/mailboxes';
+    if (input) {
+      await outreachApi(path, {
+        method: mailbox ? 'PUT' : 'POST',
+        body: JSON.stringify({ ...input, businessNote }),
+      });
+      setSignatureRefresh((current) => current + 1);
+    } else if (mailbox && businessNote !== undefined) {
+      await outreachApi(path + '/note', {
+        method: 'PATCH',
+        body: JSON.stringify({ businessNote }),
+      });
+    } else return;
     await refresh();
-    setSignatureRefresh((current) => current + 1);
-    setNotice('邮箱设置已保存，请验证连接。');
+    setNotice(input ? '邮箱设置已保存。' : '业务备注已保存。');
   }
   async function editMailbox(id: string) {
     setBusy(`mailbox-${id}`);
@@ -1922,8 +1925,7 @@ export function OutreachCommunication({
               <>
                 <div className="outreach-section-heading">
                   <div>
-                    <h2>发件邮箱与负责产品</h2>
-                    <p>客户产品决定发件身份；仅在负责同一产品的邮箱之间按可用额度安排发送。</p>
+                    <h2>发件邮箱</h2>
                   </div>
                   <button
                     className="btn secondary"
@@ -1999,24 +2001,12 @@ export function OutreachCommunication({
                           </div>
                         )}
                         <div className="outreach-mailbox-coverage">
-                          <span>负责产品</span>
-                          <div className="outreach-product-tags">
-                            {mailbox.productIds?.length ? (
-                              mailbox.productIds.map((id) => {
-                                const product = products.find((item) => item.id === id);
-                                return (
-                                  <span key={id}>
-                                    {product ? productName(product) : `未找到产品（${id}）`}
-                                    {product && !productApproved(product) ? ' · 待审核' : ''}
-                                  </span>
-                                );
-                              })
-                            ) : (
-                              <span className="outreach-tag-empty">
-                                尚未配置，请在邮箱设置中选择
-                              </span>
-                            )}
-                          </div>
+                          {mailbox.businessNote && (
+                            <>
+                              <span>业务备注</span>
+                              <p className="outreach-business-note">{mailbox.businessNote}</p>
+                            </>
+                          )}
                           {mailbox.replyMode && mailbox.replyMode !== 'manual' && (
                             <Link to="/materials">
                               回复资料 · 已选 {mailbox.knowledgeProductIds?.length || 0} 项
@@ -2171,7 +2161,7 @@ export function OutreachCommunication({
               body: JSON.stringify({ items }),
             });
             await refresh();
-            setNotice('邮箱已导入，请配置负责产品、完善签名并验证连接。');
+            setNotice('邮箱已导入，请完善签名并验证连接。');
           }}
         />
       )}

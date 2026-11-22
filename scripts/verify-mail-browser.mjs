@@ -116,9 +116,36 @@ try {
   await label('业务员姓名 / 发件人名称').fill('Jo');
   await label('负责人').fill('Jo');
   await page.locator('input[name=password]').fill('browser-test-only');
-  await page.getByRole('checkbox', { name: /QA 布艺帘轨道/ }).check();
+  assert.equal(await page.getByRole('checkbox', { name: /QA 布艺帘轨道/ }).count(), 0);
+  await label('业务备注').fill('周五交接客户');
   await button('保存邮箱').click();
   await page.getByRole('dialog').waitFor({ state: 'hidden' });
+  const card = page.locator('.outreach-mailbox-card').filter({ hasText: me });
+  await card.getByText('周五交接客户', { exact: true }).waitFor();
+  const configuration = boxes.list()[0];
+  assert.deepEqual(configuration.productIds, [saleProduct.id]);
+  for (const businessNote of ['周三交接客户', '']) {
+    await card.getByRole('button', { name: '配置', exact: true }).click();
+    await label('业务备注').fill(businessNote);
+    const submitted = page.waitForRequest(
+      (req) => req.method() !== 'GET' && req.url().includes('/outreach/mailboxes'),
+    );
+    await button('保存邮箱').click();
+    const request = await submitted;
+    assert.equal(request.method(), 'PATCH');
+    assert.ok(request.url().endsWith('/' + configuration.id + '/note'));
+    assert.deepEqual(request.postDataJSON(), { businessNote });
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
+    assert.equal(
+      await card
+        .locator('.outreach-business-note')
+        .allTextContents()
+        .then((notes) => notes.join('')),
+      businessNote,
+    );
+    assert.deepEqual(boxes.list()[0], configuration);
+  }
+  console.log('PASS 官网匹配可推产品，备注编辑与清空仅提交备注，不改发件配置');
   await button('验证连接').click();
   await page.getByText('SMTP 发件与 IMAP 收件、已发送文件夹均已验证。', { exact: true }).waitFor();
   await page.goto(base + '/materials');

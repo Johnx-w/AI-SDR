@@ -411,7 +411,9 @@ export class OutreachService {
     return this.generator || createOutreachGenerator({ env: this.getEnv() });
   }
   async state(params) {
-    const mailboxes = this.mailboxes.list().map(({ signatureDesign, ...mailbox }) => mailbox);
+    const mailboxes = this.mailboxes
+      .list({ withBusinessNote: true })
+      .map(({ signatureDesign, ...mailbox }) => mailbox);
     const { stats, total, cancelled, deliveryGroups } = this.deliveryCounts();
     const deliveryStats = { ...stats, total, cancelled };
     let generatorConfigured = false;

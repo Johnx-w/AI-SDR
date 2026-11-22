@@ -33,6 +33,7 @@ export interface OutreachMailbox {
   signature: string;
   signatureDesign?: MailSignatureDesign | null;
   productIds: string[];
+  businessNote?: string;
   knowledgeProductIds?: string[];
   owner?: string;
   replyMode?: 'manual' | 'review' | 'auto';

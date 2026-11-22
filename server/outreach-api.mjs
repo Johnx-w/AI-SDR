@@ -127,15 +127,17 @@ export async function handleOutreach({ request, url, service, readJson, idempote
     throw fail(405, '不支持的邮件会话操作');
   }
   if (path === '/mailboxes' && method === 'POST')
-    return service.mailboxes.save(await readJson(request));
+    return service.mailboxes.save(await readJson(request), () => service.salesProducts());
   if (path === '/mailboxes/import' && method === 'POST') {
     const body = await readJson(request);
-    return { mailboxes: await service.mailboxes.import(body.items) };
+    return { mailboxes: await service.mailboxes.import(body.items, () => service.salesProducts()) };
   }
-  const mailbox = path.match(/^\/mailboxes\/([\w-]+)(?:\/(verify|preview))?$/);
+  const mailbox = path.match(/^\/mailboxes\/([\w-]+)(?:\/(verify|preview|note))?$/);
   if (mailbox) {
     const [, id, action] = mailbox;
-    if (!action && method === 'GET') return service.mailboxes.get(id);
+    if (!action && method === 'GET') return service.mailboxes.get(id, { withBusinessNote: true });
+    if (action === 'note' && method === 'PATCH')
+      return service.mailboxes.saveNote(id, await readJson(request));
     if (action === 'verify' && method === 'POST') {
       const mailbox = await service.mailboxes.verify(id);
       if (url.searchParams.get('check') === 'both') {
@@ -153,7 +155,7 @@ export async function handleOutreach({ request, url, service, readJson, idempote
     }
     if (!action && method === 'PUT') {
       const body = await readJson(request);
-      return service.mailboxes.save({ ...body, id });
+      return service.mailboxes.save({ ...body, id }, () => service.salesProducts());
     }
   }
   if (path === '/campaigns' && method === 'POST')

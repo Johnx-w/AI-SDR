@@ -270,6 +270,13 @@
 .outreach-mailbox-coverage {
   margin-top: 14px;
 }
+.outreach-business-note {
+  margin: 4px 0 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 7rem;
+  overflow: auto;
+}
 .outreach-mailbox-coverage > span {
   display: block;
   margin-bottom: 8px;
