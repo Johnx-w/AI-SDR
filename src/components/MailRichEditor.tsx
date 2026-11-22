@@ -15,6 +15,7 @@ export function MailRichEditor({
 }) {
   const editor = useRef<HTMLDivElement>(null);
   const selection = useRef<Range | null>(null);
+  const inputQueued = useRef(false);
   const [linkOpen, setLinkOpen] = useState(false);
   const [link, setLink] = useState('https://');
   const [linkError, setLinkError] = useState('');
@@ -22,11 +23,17 @@ export function MailRichEditor({
     if (editor.current) editor.current.innerHTML = sanitizeReplyHtml(initialHtml);
   }, [initialHtml]);
   function changed() {
-    if (editor.current)
-      onChange({
-        bodyHtml: sanitizeReplyHtml(editor.current.innerHTML),
-        bodyText: editor.current.innerText.replace(/\u00a0/g, ' '),
-      });
+    // Chromium may fire input for every paragraph during one multiline paste.
+    if (inputQueued.current) return;
+    inputQueued.current = true;
+    queueMicrotask(() => {
+      inputQueued.current = false;
+      if (editor.current)
+        onChange({
+          bodyHtml: sanitizeReplyHtml(editor.current.innerHTML),
+          bodyText: editor.current.innerText.replace(/\u00a0/g, ' '),
+        });
+    });
   }
   function rememberSelection() {
     const current = window.getSelection();

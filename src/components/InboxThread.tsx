@@ -11,6 +11,8 @@ import {
   LockKeyhole,
   Mail,
   MailCheck,
+  Maximize2,
+  Minimize2,
   PanelRight,
   Paperclip,
   Reply,
@@ -33,6 +35,7 @@ import { MailMessageBody } from './MailMessageBody';
 import { ReplySources } from './ReplyPreview';
 import { sanitizeReplyHtml } from '../services/mailHtml';
 import { Empty } from './ui';
+import '../mail-compose-expanded.css';
 
 const day = new Intl.DateTimeFormat('zh-CN', {
   timeZone: 'Asia/Shanghai',
@@ -278,6 +281,31 @@ export function InboxThread({
   const [note, setNote] = useState(''),
     [replyTarget, setReplyTarget] = useState<{ id: string; request: number } | null>(null);
   const [draftActionHost, setDraftActionHost] = useState<HTMLSpanElement | null>(null);
+  const [writing, setWriting] = useState(false);
+  const compose = useRef<HTMLDialogElement>(null);
+  const sizeToggle = useRef<HTMLButtonElement>(null);
+  function resizeComposer(expand: boolean) {
+    const dialog = compose.current;
+    if (!dialog) return;
+    const editor = dialog.querySelector<HTMLElement>('[contenteditable="true"]');
+    const selection = window.getSelection();
+    const range =
+      selection?.rangeCount && editor?.contains(selection.getRangeAt(0).commonAncestorContainer)
+        ? selection.getRangeAt(0).cloneRange()
+        : null;
+    // The same open dialog is inline when compact and in the browser's top layer when expanded.
+    dialog.close();
+    if (expand) dialog.showModal();
+    else dialog.show();
+    setWriting(expand);
+    if (editor && (expand || range)) {
+      editor.focus({ preventScroll: true });
+      if (selection && range) {
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+    } else sizeToggle.current?.focus({ preventScroll: true });
+  }
   const noteAttempt = useRef<{ body: string; id: string } | null>(null);
   const contactPanel = useRef<HTMLElement>(null);
   const owner = detail.reception?.owner || identity?.owner;
@@ -476,13 +504,23 @@ export function InboxThread({
             }}
           />
         </div>
-        <div className={'inbox-compose' + (noteMode ? ' note' : '')}>
+        <dialog
+          open
+          ref={compose}
+          className={'inbox-compose' + (noteMode ? ' note' : '')}
+          aria-label={writing ? '展开写信' : '会话编辑区'}
+          onCancel={(event) => {
+            event.preventDefault();
+            if (writing) resizeComposer(false);
+          }}
+        >
+          {writing && <h3 className="mail-compose-subject">{subject}</h3>}
           <div className="inbox-compose-tabs">
             <button type="button" aria-pressed={!noteMode} onClick={() => setNoteMode(false)}>
               <Reply size={14} />
               回复客户
             </button>
-            {wf && (
+            {wf && !writing && (
               <button type="button" aria-pressed={noteMode} onClick={() => setNoteMode(true)}>
                 <StickyNote size={14} />
                 内部备注
@@ -503,10 +541,26 @@ export function InboxThread({
                 {!detail.replyContext.signatureHtml && <p>{detail.replyContext.signature}</p>}
               </details>
             )}
+            {!noteMode && (writing || detail.replyContext?.canReply) && (
+              <button
+                ref={sizeToggle}
+                type="button"
+                className="mail-compose-resize"
+                title={writing ? '收起写信' : '展开写信'}
+                aria-label={writing ? '收起写信' : '展开写信'}
+                aria-expanded={writing}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => resizeComposer(!writing)}
+              >
+                {writing ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                {writing ? '收起' : '展开'}
+              </button>
+            )}
           </div>
-          <div hidden={noteMode}>
+          <div className="mail-compose-body" hidden={noteMode}>
             <MailReplyComposer
               key={editorVersion}
+              expanded={writing}
               actionHost={draftActionHost}
               detail={detail}
               targetMessageId={replyTarget?.id}
@@ -534,7 +588,7 @@ export function InboxThread({
               </button>
             </div>
           )}
-        </div>
+        </dialog>
       </section>
       <aside
         ref={contactPanel}

@@ -76,12 +76,14 @@ export function MailReplyResult({ reply }: { reply: MailReplyRecord }) {
 
 export function MailReplyComposer({
   detail,
+  expanded = false,
   actionHost,
   targetMessageId,
   replyRequest,
   onCompleted,
 }: {
   detail: MailConversationDetail;
+  expanded?: boolean;
   actionHost?: HTMLElement | null;
   targetMessageId?: string | null;
   replyRequest?: number;
@@ -217,7 +219,6 @@ export function MailReplyComposer({
     if (loading || readFailed || !canReply || sending || discarding || uncertain || generating)
       return;
     if (contentKey(content) === savedKey.current) return;
-    setSaveState('changed');
     const timeout = window.setTimeout(() => {
       void persist(content).catch((reason: unknown) => {
         if (mounted.current) {
@@ -373,6 +374,8 @@ export function MailReplyComposer({
         message.source === 'imap' &&
         message.classification === 'normal',
     );
+  const draftState =
+    saveState === 'saved' && contentKey(content) !== savedKey.current ? 'changed' : saveState;
   const sourceEligible =
     !!targetMessage &&
     targetMessage.id === latestCustomerMail?.id &&
@@ -418,9 +421,14 @@ export function MailReplyComposer({
       className="mail-reply-panel"
       aria-label="回复邮件"
       data-empty={
+        !expanded &&
         canReply &&
-        !content.bodyText.trim() &&
-        !content.attachments.length &&
+        !hasDraft &&
+        revision.current === undefined &&
+        !provenance &&
+        draftState === 'saved' &&
+        !generating &&
+        !sending &&
         !formatting &&
         !loading &&
         !error
@@ -477,12 +485,12 @@ export function MailReplyComposer({
                 {provenance.generator === 'model' ? 'AI草稿 · 待审核' : '待审核回复'}
               </b>
             )}
-            <span className={'mail-draft-state ' + saveState}>
+            <span className={'mail-draft-state ' + draftState}>
               {sending
                 ? '正在发送…'
-                : saveState === 'saving'
+                : draftState === 'saving'
                   ? '正在保存草稿…'
-                  : saveState === 'changed'
+                  : draftState === 'changed'
                     ? '草稿待保存'
                     : saveState === 'error'
                       ? '草稿尚未保存'

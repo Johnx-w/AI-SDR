@@ -283,6 +283,135 @@ try {
     await assist.waitFor();
     assert.equal(await assist.innerText(), 'AI起草');
   }
+  const draftMeta = page.locator('.inbox-draft-meta');
+  assert.equal(await draftMeta.isVisible(), false);
+  await editor.focus();
+  assert.ok(await draftMeta.isVisible());
+  const sentBeforeWriting = sent.length;
+  const paragraphs = [
+    '',
+    'Thank you for sharing the preliminary drawings. I have listed the details we still need so we can prepare a room-by-room specification for your team.',
+    '',
+    'Sample review',
+    'Please let us know which track finish and fabric samples you would like to see together. A photograph in daylight will also help us understand the existing interior.',
+    '',
+    'Drawings and installation',
+    'Could you mark the mounting surface, the opening direction and the available clearance on each elevation? We will use those measurements when reviewing the layout with you.',
+    '',
+    'Schedule',
+    'Please confirm the first room you would like us to review and the date your installer needs the drawings. We can then agree the order of the remaining rooms.',
+    '',
+    'Room checklist',
+    ...[
+      'Reception',
+      'Meeting room',
+      'Lounge',
+      'Dining room',
+      'Library',
+      'Studio',
+      'Guest room',
+      'Conference suite',
+      'East office',
+      'West office',
+      'Showroom',
+      'Training room',
+    ].flatMap((room) => [
+      '',
+      room,
+      `Please mark the fixing points and finished height on the ${room.toLowerCase()} drawing.`,
+      'Please note any access restrictions and the side from which the track will be serviced.',
+    ]),
+    '',
+    'Kind regards,',
+    'Jordan',
+  ];
+  for (const width of [1397, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 667 : 773 });
+    const heading = width === 390 ? 'Hello Jordan,' : 'Hello Morgan,';
+    await editor.fill([heading, ...paragraphs].join('\n'));
+    const inline = await editor.evaluate((node) => {
+      const shell = node.closest('.inbox-compose');
+      const panel = node.closest('.mail-reply-panel');
+      const actions = panel.querySelector('.mail-reply-actions').getBoundingClientRect();
+      return {
+        height: node.clientHeight,
+        line: parseFloat(getComputedStyle(node).lineHeight),
+        panelScroll: panel.scrollHeight - panel.clientHeight,
+        shellScroll: shell.scrollHeight - shell.clientHeight,
+        actionsVisible:
+          actions.bottom <= window.innerHeight &&
+          actions.bottom <= shell.getBoundingClientRect().bottom + 1,
+      };
+    });
+    if (width > 390) assert.ok(inline.height >= inline.line * 9, JSON.stringify(inline));
+    assert.ok(
+      inline.actionsVisible && inline.shellScroll <= 2 && inline.panelScroll <= 2,
+      '普通长草稿只需滚动正文，操作栏应一直可见：' + JSON.stringify(inline),
+    );
+    await editor.press('Control+End');
+    await editor.press('ArrowLeft');
+    const keepCaret = async () =>
+      editor.evaluateHandle((node) => {
+        const selection = window.getSelection();
+        return { node, anchor: selection.anchorNode, offset: selection.anchorOffset };
+      });
+    const assertCaret = async (handle) => {
+      assert.ok(
+        await handle.evaluate(({ node, anchor, offset }) => {
+          const selection = window.getSelection();
+          return (
+            document.activeElement === node &&
+            node === document.querySelector('.mail-editor-content') &&
+            selection.anchorNode === anchor &&
+            selection.anchorOffset === offset
+          );
+        }),
+        '展开或收起应保留同一编辑器及光标位置',
+      );
+      await handle.dispose();
+    };
+    const compactCaret = await keepCaret();
+    await button('展开写信').click();
+    await page.getByRole('dialog', { name: '展开写信', exact: true }).waitFor();
+    await assertCaret(compactCaret);
+    const geometry = await editor.evaluate((node) => ({
+      height: node.clientHeight,
+      content: node.scrollHeight,
+      left: node.getBoundingClientRect().left,
+      right: node.getBoundingClientRect().right,
+    }));
+    assert.ok(geometry.height >= 340 && geometry.content > geometry.height);
+    assert.ok(geometry.left >= 0 && geometry.right <= width);
+    await editor.press('Control+Home');
+    assert.ok(await editor.evaluate((node) => node.scrollTop < node.clientHeight / 4));
+    if (width === 1397) {
+      await page
+        .getByRole('dialog', { name: '展开写信' })
+        .screenshot({ path: join(root, 'expanded-reply-preview.png') });
+    }
+    await page.keyboard.insertText('Revised: ');
+    assert.ok((await editor.innerText()).startsWith('Revised: ' + heading));
+    const expandedCaret = await keepCaret();
+    if (width === 390) await editor.press('Escape');
+    else await button('收起写信').click();
+    await button('展开写信').waitFor();
+    await assertCaret(expandedCaret);
+    await page.getByText('草稿已保存', { exact: true }).waitFor();
+    const saved = service.replies.draft(thread.id).bodyText;
+    assert.ok(saved.startsWith('Revised: ' + heading));
+    for (const line of paragraphs) assert.ok(saved.includes(line));
+  }
+  await button('内部备注').click();
+  await label('内部备注正文').waitFor();
+  assert.ok(await editor.isHidden());
+  await button('回复客户').click();
+  assert.match(await editor.innerText(), /^Revised: Hello Jordan,/);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.reload();
+  await editor.waitFor();
+  assert.match(await editor.innerText(), /^Revised: Hello Jordan,/);
+  assert.equal(sent.length, sentBeforeWriting);
+  console.log('PASS 长回复展开编辑、回首行修改、收起和 Esc 保留光标，桌面与手机全文保存且未发信');
   const manual = 'We are reviewing your request.';
   await editor.fill(manual);
   assert.ok(await assist.isDisabled());
