@@ -6,7 +6,7 @@ import { OutreachMailboxes } from '../server/outreach-mailboxes.mjs';
 import { syncReadonlyMail } from './sync-mail-readonly.mjs';
 
 const { values } = parseArgs({
-  options: { 'data-dir': { type: 'string' }, port: { type: 'string', default: '14322' } },
+  options: { 'data-dir': { type: 'string' }, port: { type: 'string', default: '14324' } },
 });
 if (!values['data-dir']) throw new Error('请指定用于本地查看的数据库快照目录');
 const dir = resolve(values['data-dir']),
