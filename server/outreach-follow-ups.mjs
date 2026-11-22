@@ -326,7 +326,6 @@ export class OutreachFollowUps {
     const s = this.service,
       c = s.campaign(item.campaignId),
       first = s.delivery(item.firstId);
-    const graph = s.businessState();
     if (!c.followUpEnabled || c.status === 'cancelled')
       return { status: 'cancelled', reason: '发送计划或自动跟进已关闭' };
     if (c.scope !== s.getScope()) return { reason: '客户数据来源已改变' };
@@ -348,13 +347,13 @@ export class OutreachFollowUps {
         .get(detail.conversation.id, first.submittedAt || first.sentAt)
     )
       return { status: 'cancelled', reason: '本会话已有回信提交，结束本轮追信' };
+    const siblings = s.db
+      .prepare(
+        "SELECT id,state,json_extract(data,'$.messageId') AS messageId FROM outreach_followups WHERE json_extract(data,'$.firstId')=?",
+      )
+      .all(first.id);
     const ownMessages = new Set(
-      [
-        first.messageId,
-        ...this.all()
-          .filter((r) => r.firstId === first.id)
-          .map((r) => r.messageId),
-      ].filter(Boolean),
+      [first.messageId, ...siblings.map((r) => r.messageId)].filter(Boolean),
     );
     const later = detail.messages.filter(
       (m) =>
@@ -375,20 +374,13 @@ export class OutreachFollowUps {
       return { status: 'cancelled', reason: '收到待核实回执，停止本轮自动追信' };
     if (replyTypes.some((type) => type !== '系统自动回复'))
       return { status: 'cancelled', reason: '已收到客户回复或地址失效，结束本轮追信' };
+    const customer = s.customerMailState(item.customerId);
     if (
-      (graph.customerContexts || []).some(
-        (r) =>
-          r.customerId === item.customerId &&
-          (r.doNotContact ||
-            (r.fixedEmail && r.fixedEmail.toLowerCase() !== item.from.toLowerCase())),
-      ) ||
-      (graph.conversations || []).some(
-        (r) =>
-          r.customerId === item.customerId && (r.ownership === 'human' || r.status === 'closed'),
-      ) ||
-      (graph.demands || []).some(
-        (r) => r.customerId === item.customerId && r.ownership === 'human',
-      ) ||
+      customer.context?.doNotContact ||
+      (customer.context?.fixedEmail &&
+        customer.context.fixedEmail.toLowerCase() !== item.from.toLowerCase()) ||
+      customer.conversations.some((r) => r.ownership === 'human' || r.status === 'closed') ||
+      customer.demands.some((r) => r.ownership === 'human') ||
       s
         .identities(first.candidate)
         .some((key) => s.db.prepare('SELECT 1 FROM outreach_suppression WHERE identity=?').get(key))
@@ -399,12 +391,7 @@ export class OutreachFollowUps {
       incoming.some((m) => !item.reviewedAutoReplies?.includes(m.id))
     )
       return { reason: '收到系统自动回复，核对后在所属计划恢复追信' };
-    if (
-      this.all().some(
-        (r) =>
-          r.firstId === first.id && ['unknown', 'sending'].includes(r.status) && r.id !== item.id,
-      )
-    )
+    if (siblings.some((r) => ['unknown', 'sending'].includes(r.state) && r.id !== item.id))
       return { reason: '前次发送结果待核实，不继续追信' };
     if (
       c.followUpPaused ||

@@ -163,21 +163,13 @@ export class OutreachService {
           .prepare(
             `SELECT data FROM outreach_deliveries WHERE state='accepted'
             AND NOT EXISTS (SELECT 1 FROM mailbox_imported_deliveries
-              WHERE delivery_id=outreach_deliveries.id)`,
+              WHERE delivery_id=outreach_deliveries.id)
+            UNION ALL SELECT data FROM outreach_followups WHERE state='accepted'
+            AND NOT EXISTS (SELECT 1 FROM mailbox_imported_deliveries
+              WHERE delivery_id=outreach_followups.id)`,
           )
           .all()
-          .map((row) => JSON.parse(row.data))
-          .concat(
-            this.followUps
-              .all()
-              .filter(
-                (row) =>
-                  row.status === 'accepted' &&
-                  !this.db
-                    .prepare('SELECT 1 FROM mailbox_imported_deliveries WHERE delivery_id=?')
-                    .get(row.id),
-              ),
-          ),
+          .map((row) => JSON.parse(row.data)),
       customers,
       recordCommunication,
       onMessage: (box, thread, message, lookup) =>
