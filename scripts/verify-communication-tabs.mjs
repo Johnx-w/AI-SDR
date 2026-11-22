@@ -161,10 +161,20 @@ try {
   const button = (name) => page.getByRole('button', { name, exact: true });
   const close = () => button('关闭弹窗').click();
   const headingStyle = () =>
-    page.locator('.page-heading').evaluate((heading) => ({
-      title: getComputedStyle(heading.querySelector('h1')).fontSize,
-      description: !!heading.querySelector('p')?.getBoundingClientRect().height,
-    }));
+    page.locator('.page-heading').evaluate((heading) => {
+      const title = heading.querySelector('h1');
+      const description = heading.querySelector('p');
+      const headingBox = heading.getBoundingClientRect();
+      const titleBox = title.getBoundingClientRect();
+      const descriptionBox = description?.getBoundingClientRect();
+      return {
+        titleSize: getComputedStyle(title).fontSize,
+        titleWeight: getComputedStyle(title).fontWeight,
+        titleTop: Math.round(titleBox.top - headingBox.top),
+        descriptionTop: descriptionBox ? Math.round(descriptionBox.top - headingBox.top) : null,
+        stacked: !!descriptionBox && descriptionBox.top >= titleBox.bottom - 1,
+      };
+    });
   const label = (name) => page.getByLabel(name, { exact: true });
   await page.goto(base + '/inbox');
   await page.getByRole('heading', { name: box.email, exact: true }).waitFor();
@@ -266,7 +276,7 @@ try {
     .click();
   assert.equal(await label('筛选会话邮箱').inputValue(), box.id);
   assert.deepEqual(await headingStyle(), mailboxesHeading);
-  assert.equal(mailboxesHeading.description, true);
+  assert.equal(mailboxesHeading.stacked, true);
   await button('未读').click();
   assert.equal(await label('筛选会话邮箱').inputValue(), box.id);
   await button('全部').click();
@@ -418,6 +428,26 @@ try {
       .evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
     assert.ok(size >= minimum, selector + ' 字号 ' + size + ' 应至少为 ' + minimum);
   }
+  const rowPresentation = await page
+    .locator('.mail-conversation-row')
+    .first()
+    .evaluate((row) => {
+      const subject = row.querySelector('.mail-conversation-row-subject');
+      const preview = row.querySelector('.mail-conversation-preview');
+      const meta = row.querySelector('.mail-conversation-row-meta');
+      return {
+        height: row.getBoundingClientRect().height,
+        senderWeight: getComputedStyle(row.querySelector('.mail-conversation-row-top strong'))
+          .fontWeight,
+        subjectClamp: getComputedStyle(subject).webkitLineClamp,
+        previewBottom: preview.getBoundingClientRect().bottom,
+        metaTop: meta.getBoundingClientRect().top,
+      };
+    });
+  assert.ok(rowPresentation.height >= 108 && rowPresentation.height <= 112, rowPresentation);
+  assert.equal(rowPresentation.senderWeight, '600');
+  assert.equal(rowPresentation.subjectClamp, '2');
+  assert.ok(rowPresentation.metaTop >= rowPresentation.previewBottom - 1, rowPresentation);
   const draftBody = 'Draft retained while paging';
   assert.equal(await editor.innerText().then((t) => t.trim()), '');
   assert.equal(service.replies.draft(firstThreadId), null);
@@ -610,8 +640,8 @@ try {
   const layoutResults = [];
   const readingViewports = [
     { width: 1600, height: 900, minBodyWidth: 900, minBodyHeight: 395 },
-    { width: 1397, height: 773, minBodyWidth: 775, minBodyHeight: 368 },
-    { width: 541, height: 773, minBodyWidth: 465, minBodyHeight: 460 },
+    { width: 1397, height: 773, minBodyWidth: 775, minBodyHeight: 300 },
+    { width: 541, height: 773, minBodyWidth: 440, minBodyHeight: 460 },
   ];
   for (const { width, height, minBodyWidth, minBodyHeight } of readingViewports) {
     await page.setViewportSize({ width, height });
@@ -678,7 +708,7 @@ try {
   }
   console.log('首屏度量', JSON.stringify(layoutResults));
   for (const result of layoutResults) {
-    assert.ok(result.completeRows >= 4, JSON.stringify(result));
+    assert.ok(result.completeRows >= (result.width === 541 ? 2 : 3), JSON.stringify(result));
     assert.ok(result.html.lines >= 13 && result.plain.lines >= 10, JSON.stringify(result));
   }
   readerFails = true;

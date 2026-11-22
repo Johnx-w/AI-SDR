@@ -584,16 +584,18 @@ export function SalesInbox({
                       <span className="mail-conversation-preview">
                         {thread.preview || '暂无正文摘要'}
                       </span>
-                      {(mailboxId === 'all' || review) && brand && (
-                        <span className="inbox-brand-label" title={thread.account}>
-                          {brand}
-                        </span>
-                      )}
-                      {!review && thread.messageCount > 1 && (
-                        <span className="mail-conversation-row-count">
-                          {thread.messageCount} 封
-                        </span>
-                      )}
+                      <span className="mail-conversation-row-meta">
+                        {(mailboxId === 'all' || review) && brand && (
+                          <span className="inbox-brand-label" title={thread.account}>
+                            {brand}
+                          </span>
+                        )}
+                        {!review && thread.messageCount > 1 && (
+                          <span className="mail-conversation-row-count">
+                            {thread.messageCount} 封
+                          </span>
+                        )}
+                      </span>
                     </span>
                   </button>
                 );
