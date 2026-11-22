@@ -1,3 +1,5 @@
+import { effectiveFolder } from './mail-thread-workflow.mjs';
+
 const json = (field) => "json_extract(t.data,'$." + field + "')";
 const searchable = (alias, fields) =>
   fields
@@ -39,13 +41,19 @@ export function listThreadPage(
   store,
   keys,
   lookup,
-  { customerId, query, unread, inboundOnly, page, pageSize },
+  { customerId, query, unread, inboundOnly, folder, page, pageSize },
 ) {
   const size = [10, 20, 25, 50, 100, 200].includes(Number(pageSize)) ? Number(pageSize) : 25;
   if (!keys.length) return { items: [], total: 0, page: 1, pageSize: size, hasMore: false };
   const scope = 't.account_key IN (' + keys.map(() => '?').join(',') + ')';
   const where = [scope],
     args = [...keys];
+  if (folder) {
+    if (!['open', 'later', 'done'].includes(folder))
+      throw Object.assign(new Error('无效的会话分组'), { status: 400 });
+    where.push('(' + effectiveFolder + ')=?');
+    args.push(new Date(store.now()).toISOString(), folder);
+  }
   if (unread) where.push(json('unread') + '=1');
   if (inboundOnly)
     where.push(
@@ -75,7 +83,11 @@ export function listThreadPage(
       args.push(JSON.stringify(nameMatches), query, query);
     }
   }
-  const source = 'FROM mailbox_threads t WHERE ' + where.join(' AND ');
+  const source =
+    'FROM mailbox_threads t ' +
+    (folder ? 'LEFT JOIN mail_thread_workflow w ON w.thread_id=t.id ' : '') +
+    'WHERE ' +
+    where.join(' AND ');
   const total = store.db.prepare('SELECT count(*) AS n ' + source).get(...args).n;
   const number = Math.max(
     1,

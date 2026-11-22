@@ -1,4 +1,5 @@
 import { initializeThreadSearch, listThreadPage } from './mail-thread-page.mjs';
+import { initializeThreadWorkflow, mergeThreadWorkflow } from './mail-thread-workflow.mjs';
 import { createHash } from 'node:crypto';
 import { setImmediate as yieldToRequests } from 'node:timers/promises';
 import { mailSyncFailure } from './mail-sync-errors.mjs';
@@ -75,6 +76,7 @@ export class MailConversations {
     `);
     initializeReplyHistory(db);
     initializeThreadSearch(db);
+    initializeThreadWorkflow(db);
     this.db.function('mail_text_fold', { deterministic: true }, (value) =>
       String(value ?? '').toLowerCase(),
     );
@@ -255,6 +257,7 @@ export class MailConversations {
       this.db
         .prepare('UPDATE mailbox_thread_links SET thread_id=? WHERE thread_id=?')
         .run(threadId, other);
+      mergeThreadWorkflow(this.db, other, threadId);
       this.db.prepare('DELETE FROM mailbox_threads WHERE id=?').run(other);
     }
     for (const reference of references)
@@ -368,6 +371,20 @@ export class MailConversations {
       .prepare('INSERT INTO mailbox_thread_messages VALUES(?,?,?,?)')
       .run(id, accountKey, threadId, JSON.stringify(data));
     const thread = this.rebuild(threadId, mailbox, { ...inherited, ...extra });
+    if (
+      data.direction === 'inbound' &&
+      ['normal', 'unverified', 'unsubscribe', 'complaint'].includes(data.classification)
+    ) {
+      const arrival = Number.isFinite(Date.parse(data.receivedAt))
+        ? iso(data.receivedAt)
+        : occurredAt;
+      this.db
+        .prepare(
+          `UPDATE mail_thread_workflow SET state='open',snooze_until=NULL,updated_at=?
+        WHERE thread_id=? AND state!='open' AND updated_at<=?`,
+        )
+        .run(arrival, threadId, arrival);
+    }
     this.onMessage?.(mailbox, thread, data, lookup);
     return 1;
   }
@@ -460,6 +477,7 @@ export class MailConversations {
       q = '',
       unread = false,
       inboundOnly = false,
+      folder = '',
       page = 1,
       pageSize = 25,
     } = {},
@@ -472,6 +490,7 @@ export class MailConversations {
       query: text(q, 500).toLowerCase().trim(),
       unread,
       inboundOnly,
+      folder,
       page,
       pageSize,
     });

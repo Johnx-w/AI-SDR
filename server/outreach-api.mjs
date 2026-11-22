@@ -1,9 +1,17 @@
 import { listSequences, sequenceDetail } from './outreach-sequences.mjs';
+import { addInternalNote, threadWorkflow, updateThreadWorkflow } from './mail-thread-workflow.mjs';
 import { sequencePolicy, saveSequencePolicy } from './outreach-sequence-policy.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
-export async function handleOutreach({ request, url, service, readJson, idempotencyKey }) {
+export async function handleOutreach({
+  request,
+  url,
+  service,
+  readJson,
+  idempotencyKey,
+  localMailInspection,
+}) {
   const path = url.pathname.slice('/api/v1/outreach'.length),
     method = request.method;
   if (path === '/sequence-policy' && method === 'GET') return sequencePolicy(service.db);
@@ -51,6 +59,7 @@ export async function handleOutreach({ request, url, service, readJson, idempote
       q: url.searchParams.get('q') || '',
       unread: url.searchParams.get('unread') === '1',
       inboundOnly: url.searchParams.get('inboundOnly') === '1',
+      folder: url.searchParams.get('folder') || '',
       page: url.searchParams.get('page'),
       pageSize: url.searchParams.get('pageSize'),
     });
@@ -63,7 +72,7 @@ export async function handleOutreach({ request, url, service, readJson, idempote
   if (path === '/reception' && method === 'GET')
     return service.reception.list(Object.fromEntries(url.searchParams));
   const conversation = path.match(
-    /^\/conversations\/([\w-]+)(?:\/(read|draft|reply|ownership|regenerate))?$/,
+    /^\/conversations\/([\w-]+)(?:\/(read|draft|reply|ownership|regenerate|workflow|notes))?$/,
   );
   if (conversation) {
     const [, id, action] = conversation;
@@ -79,9 +88,17 @@ export async function handleOutreach({ request, url, service, readJson, idempote
           (mailIds.has(m.mailboxMessageId) || externalIds.has(m.externalId)),
       );
       const recordIds = new Set(records.map((m) => m.id));
+      const extras = service.replies.detailExtras(id);
+      if (localMailInspection && extras.replyContext.canReply)
+        extras.replyContext = {
+          ...extras.replyContext,
+          canSend: false,
+          reason: '本地验收可保存草稿，发送已关闭。',
+        };
       return {
         ...detail,
-        ...service.replies.detailExtras(id),
+        ...extras,
+        workflow: threadWorkflow(service.db, id, service.now()),
         reception: service.reception.detail(detail.conversation),
         demands: (graph.demands || []).filter(
           (d) =>
@@ -92,6 +109,18 @@ export async function handleOutreach({ request, url, service, readJson, idempote
           [m.demandReviewReason, m.demandAnalysisError].filter(Boolean),
         ),
       };
+    }
+    if (
+      (action === 'workflow' && method === 'PATCH') ||
+      (action === 'notes' && method === 'POST')
+    ) {
+      const input = await readJson(request);
+      return service.transaction(() => {
+        service.conversations.detail(id);
+        return action === 'workflow'
+          ? updateThreadWorkflow(service.db, id, input, service.now())
+          : addInternalNote(service.db, id, input, service.now());
+      });
     }
     if (action === 'read' && method === 'POST')
       return service.conversations.markRead(id, (await readJson(request)).unread);

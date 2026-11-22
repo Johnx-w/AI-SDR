@@ -475,10 +475,19 @@ export function createApp({
             });
           }
           const localEdit =
+            (request.method === 'PUT' && url.pathname === '/api/v1/outreach/sequence-policy') ||
+            (request.method === 'PATCH' &&
+              /^\/api\/v1\/outreach\/mailboxes\/[\w-]+\/note$/.test(url.pathname)) ||
+            (request.method === 'PATCH' &&
+              /^\/api\/v1\/outreach\/conversations\/[\w-]+\/workflow$/.test(url.pathname)) ||
+            (request.method === 'POST' &&
+              /^\/api\/v1\/outreach\/conversations\/[\w-]+\/notes$/.test(url.pathname)) ||
+            (['PUT', 'DELETE'].includes(request.method) &&
+              /^\/api\/v1\/outreach\/conversations\/[\w-]+\/draft$/.test(url.pathname)) ||
             /^\/api\/v1\/(?:materials(?:\/|$)|outreach\/(?:mailbox-tags(?:\/|$)|conversations\/[\w-]+\/read$|mailboxes\/[\w-]+\/preview$))/.test(
               url.pathname,
             );
-          if (!localEdit) throw new ApiError(403, '本次本地实数查看支持资料管理和只读收信。');
+          if (!localEdit) throw new ApiError(403, '本地验收工作区已关闭此业务操作。');
         }
         if (url.pathname === '/api/v1/overview') {
           if (request.method !== 'GET') throw new ApiError(405, '总览仅支持读取');
@@ -520,6 +529,7 @@ export function createApp({
               request,
               url,
               service: outreach(),
+              localMailInspection: !!localMailInspection,
               readJson: (input) =>
                 readJson(
                   input,
