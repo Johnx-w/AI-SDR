@@ -1633,13 +1633,16 @@ export class OutreachService {
     }
     const pending = {
       ...d,
-      followUpAtSubmission: c.mode === 'production' && c.followUpEnabled === true,
+      followUpAtSubmission:
+        latestCampaign.mode === 'production' && latestCampaign.followUpEnabled === true,
       status: 'sending',
       attemptedAt: iso(this.now),
       messageId: `<${d.id}@${m.email.split('@')[1]}>`,
     };
     const claimed = this.transaction(() => {
       if (this.delivery(d.id).status !== 'queued') return false;
+      if (pending.followUpAtSubmission)
+        pending.sequencePolicyRevision = this.followUps.policy().revision;
       this.putDelivery(pending);
       return true;
     });

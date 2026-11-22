@@ -1,3 +1,5 @@
+import { sequencePolicy, legacyFollowUpStep } from './outreach-sequence-policy.mjs';
+
 const production = "json_extract(c.data,'$.mode')='production'";
 const fields = `c.id,json_extract(c.data,'$.name') AS name,json_extract(c.data,'$.status') AS status,
   json_extract(c.data,'$.mailboxIds') AS mailboxIds,json_extract(c.data,'$.followUpEnabled') AS enabled,
@@ -56,18 +58,41 @@ export function sequenceDetail(db, id, params) {
     const rows = db
       .prepare(
         `SELECT json_extract(data,'$.firstId') AS firstId,json_extract(data,'$.step') AS step,
+      json_extract(data,'$.day') AS day,json_extract(data,'$.instruction') AS instruction,
+      json_extract(data,'$.policyRevision') AS policyRevision,json_extract(data,'$.policyName') AS policyName,
       state AS status,json_extract(data,'$.reason') AS reason,json_extract(data,'$.sentAt') AS sentAt,
       json_extract(data,'$.dueAt') AS dueAt FROM outreach_followups
       WHERE json_extract(data,'$.firstId') IN (${items.map(() => '?').join(',')})
       ORDER BY json_extract(data,'$.firstId'),json_extract(data,'$.step')`,
       )
       .all(...lookup.keys());
-    for (const { firstId, ...step } of rows) lookup.get(firstId).followUps.push(step);
+    const legacyName = rows.some((row) => row.day == null) && sequencePolicy(db, 1).name;
+    for (const { firstId, ...step } of rows) {
+      if (step.day == null)
+        Object.assign(step, legacyFollowUpStep(step.step), {
+          policyRevision: 1,
+          policyName: legacyName,
+        });
+      lookup.get(firstId).followUps.push(step);
+    }
   }
+  const steps = sequence.firstCount
+    ? db
+        .prepare(
+          `SELECT DISTINCT coalesce(json_extract(data,'$.day'),
+      CASE json_extract(data,'$.step') WHEN 1 THEN ? WHEN 2 THEN ? END) AS day
+      FROM outreach_followups WHERE json_extract(data,'$.campaignId')=? ORDER BY day`,
+        )
+        .all(legacyFollowUpStep(1).day, legacyFollowUpStep(2).day, id)
+    : sequencePolicy(db).steps;
   return {
     ...result,
     sequence,
-    steps: [0, 72, 168].map((offsetHours, step) => ({ step, offsetHours })),
+    steps: [0, ...steps.map((s) => s.day).filter(Number.isInteger)].map((day, step) => ({
+      step,
+      day,
+      offsetHours: day * 24,
+    })),
     items,
   };
 }

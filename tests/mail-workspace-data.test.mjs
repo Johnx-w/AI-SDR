@@ -89,6 +89,104 @@ test('跟进序列分页读取正式首封与该客户的两次跟进，不取�
   assert.ok(!JSON.stringify(page).includes('private long body'));
   await assert.rejects(call('/sequences/internal'), { status: 404 });
 });
+
+test('工作区无计划时可发布跟进策略，重复保存幂等，并发过期写入不会覆盖', async (t) => {
+  const { call } = api(t),
+    initial = await call('/sequence-policy');
+  assert.deepEqual(
+    initial.steps.map((s) => s.day),
+    [3, 7],
+  );
+  assert.equal((await call('/sequences')).total, 0);
+  const input = {
+    revision: initial.revision,
+    name: '展会跟进',
+    steps: [
+      { day: 6, instruction: '询问测试进展' },
+      { day: 1, instruction: '确认选型' },
+    ],
+  };
+  const changed = await call('/sequence-policy', 'PUT', input);
+  assert.deepEqual(
+    changed.steps.map((s) => s.day),
+    [1, 6],
+  );
+  assert.deepEqual(await call('/sequence-policy', 'PUT', input), changed);
+  for (const steps of [
+    [{ day: 0, instruction: 'x' }],
+    [{ day: 366, instruction: 'x' }],
+    [{ day: 1, instruction: ' ' }],
+    [changed.steps[0], changed.steps[0]],
+  ])
+    await assert.rejects(call('/sequence-policy', 'PUT', { ...changed, steps }), { status: 400 });
+  const writes = await Promise.allSettled(
+    ['A', 'B'].map((name) => call('/sequence-policy', 'PUT', { ...changed, name })),
+  );
+  assert.equal(writes.filter((w) => w.status === 'fulfilled').length, 1);
+  assert.equal(writes.find((w) => w.status === 'rejected').reason.status, 409);
+});
+
+test('同一计划的不同首封沿用各自版本，零步和旧格式记录均不会因重新排程而变化', async (t) => {
+  const { service, call } = api(t);
+  const plan = {
+    id: 'plan',
+    name: '采购团队',
+    mode: 'production',
+    status: 'active',
+    followUpEnabled: true,
+  };
+  service.putCampaign(plan);
+  const enroll = (id) => {
+    const d = {
+      id,
+      campaignId: plan.id,
+      mode: 'production',
+      status: 'accepted',
+      sentAt: '2026-01-01T00:00:00Z',
+    };
+    service.putDelivery(d);
+    service.followUps.schedule(d, plan);
+    return d;
+  };
+  const prior = enroll('old');
+  service.db.exec(
+    "UPDATE outreach_followups SET data=json_remove(data,'$.day','$.instruction','$.policyRevision','$.policyName'); UPDATE outreach_deliveries SET data=json_remove(data,'$.sequencePolicyRevision')",
+  );
+  const initial = await call('/sequence-policy');
+  const update = async (steps) =>
+    call('/sequence-policy', 'PUT', { ...(await call('/sequence-policy')), name: '新版', steps });
+  const custom = await update([
+    { day: 2, instruction: '核对用途' },
+    { day: 8, instruction: '询问联系人' },
+    { day: 12, instruction: '请求确认' },
+  ]);
+  enroll('custom');
+  await update([]);
+  const empty = enroll('empty');
+  await update(custom.steps);
+  service.followUps.schedule(empty, plan);
+  service.followUps.schedule(prior, plan);
+  const detail = await call('/sequences/plan');
+  assert.deepEqual(
+    detail.steps.map((s) => s.day),
+    [0, 2, 3, 7, 8, 12],
+  );
+  assert.deepEqual(detail.items.find((s) => s.firstId === 'empty').followUps, []);
+  const old = detail.items.find((s) => s.firstId === 'old').followUps;
+  assert.deepEqual(
+    old.map((s) => s.day),
+    [3, 7],
+  );
+  assert.ok(
+    old.every((s) => s.policyRevision === initial.revision && s.policyName === initial.name),
+  );
+  assert.deepEqual(
+    detail.items
+      .find((s) => s.firstId === 'custom')
+      .followUps.map((s) => [s.day, s.instruction, s.policyRevision]),
+    custom.steps.map((s) => [s.day, s.instruction, custom.revision]),
+  );
+});
 test('独立素材可以作为本站回复资料，不进入可推产品', (t) => {
   const { mailbox } = api(t),
     file = { sourceUrl: 'https://dealer.test', brands: ['Dealer'], materialOnly: true };

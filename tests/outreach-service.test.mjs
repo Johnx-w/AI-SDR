@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OutreachService } from '../server/outreach-service.mjs';
 import { eligibleOutreachFacts } from '../server/outreach-content.mjs';
+import { saveSequencePolicy } from '../server/outreach-sequence-policy.mjs';
 
 function buyer(id = 'buyer-one', product = 'PVC shutters') {
   const domain = `${id}.example.org`;
@@ -1427,6 +1428,7 @@ test('首次生成失败时发生资料变化，仍保留待重做状态与原�
 
 async function followUpHarness(options) {
   const h = harness(options);
+  if (options?.policy) saveSequencePolicy(h.service, { revision: 1, ...options.policy });
   h.service.mailboxes.readMailbox = async () => ({ folders: [], hasMore: false });
   h.service.generator.generateFollowUp = async ({ step }) =>
     step === 1
@@ -1494,6 +1496,76 @@ test('自动追信按首封72/168小时各一次，首封完成不终止追信�
     assert.equal(h.service.conversations.list().items.length, 1);
   } finally {
     await h.service.close();
+  }
+});
+
+test('自定义三步在首封提交时冻结规则，重启后将各步要求、原信和历史交给模型并在原线程发送一次', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'sequence-model-'));
+  const steps = [
+    { day: 1, instruction: '询问规格' },
+    { day: 4, instruction: '核对应用' },
+    { day: 6, instruction: '请求负责人转交' },
+  ];
+  const h = await followUpHarness({
+    path: join(directory, 'outreach.sqlite'),
+    policy: { name: '采购沟通', steps },
+  });
+  try {
+    assert.equal(h.first.sequencePolicyRevision, 2);
+    saveSequencePolicy(h.service, { name: '仅首封', revision: 2, steps: [] });
+    await h.service.close();
+    h.service = new OutreachService(h.serviceOptions);
+    delete h.service.generator.generateFollowUp;
+    h.service.getEnv = () => ({
+      RESEARCH_MODEL_PROVIDER: 'openai_compatible',
+      RESEARCH_MODEL_BASE_URL: 'https://test.invalid/v1',
+      RESEARCH_MODEL_API_KEY: 'synthetic',
+      RESEARCH_MODEL_MODEL: 'qa',
+    });
+    const prompts = [];
+    t.mock.method(globalThis, 'fetch', async (url, req) => {
+      assert.equal(url, 'https://test.invalid/v1/chat/completions');
+      const payload = JSON.parse(req.body),
+        prompt = JSON.parse(payload.messages[1].content);
+      prompts.push(prompt);
+      const body = 'Can we discuss the application for step ' + prompt.step + '?';
+      return Response.json({
+        choices: [{ message: { content: JSON.stringify({ body_text: body }) } }],
+      });
+    });
+    for (const [index, step] of steps.entries()) {
+      h.state.clock = Date.parse(h.first.sentAt) + step.day * 86400000 - 1000;
+      await h.service.tick();
+      assert.equal(h.deliveries.length, index + 1);
+      h.state.clock += 1000;
+      if (index === 0) {
+        const item = h.service.followUps.pending()[0];
+        await Promise.all([
+          h.service.followUps.dispatch(item, h.boxes[0]),
+          h.service.followUps.dispatch(item, h.boxes[0]),
+        ]);
+      } else await h.service.tick();
+      await h.service.tick();
+      assert.equal(h.deliveries.length, index + 2, JSON.stringify(h.service.followUps.all()));
+      const submitted = h.deliveries.at(-1),
+        prompt = prompts.at(-1);
+      assert.equal(submitted.inReplyTo, h.first.messageId);
+      assert.ok(submitted.text.includes('application for step ' + (index + 1) + '?'));
+      assert.equal(prompt.day, step.day);
+      assert.equal(prompt.writingInstruction, step.instruction);
+      assert.deepEqual(prompt.firstEmail, { subject: h.first.subject, body: h.first.bodyText });
+      if (index)
+        assert.ok(
+          prompt.history.some((m) => m.body.includes('application for step ' + index + '?')),
+        );
+    }
+    assert.ok(
+      h.service.followUps.all().every((s) => s.status === 'accepted' && s.policyRevision === 2),
+    );
+    assert.equal(h.service.followUps.policy().steps.length, 0);
+  } finally {
+    await h.service.close();
+    await rm(directory, { recursive: true, force: true });
   }
 });
 

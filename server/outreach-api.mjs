@@ -1,10 +1,14 @@
 import { listSequences, sequenceDetail } from './outreach-sequences.mjs';
+import { sequencePolicy, saveSequencePolicy } from './outreach-sequence-policy.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
 export async function handleOutreach({ request, url, service, readJson, idempotencyKey }) {
   const path = url.pathname.slice('/api/v1/outreach'.length),
     method = request.method;
+  if (path === '/sequence-policy' && method === 'GET') return sequencePolicy(service.db);
+  if (path === '/sequence-policy' && method === 'PUT')
+    return saveSequencePolicy(service, await readJson(request));
   if (path === '/sequences' && method === 'GET') return listSequences(service.db, url.searchParams);
   const sequence = path.match(/^\/sequences\/([\w-]+)$/);
   if (sequence && method === 'GET')
