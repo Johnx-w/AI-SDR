@@ -78,7 +78,7 @@ export function listThreadPage(
       args.push(customerId, JSON.stringify(customerEmails));
     }
     if (query) {
-      where.push(`(${byEmail} OR instr(mail_text_fold(${searchable('t', ['account', 'participant', 'subject', 'preview', 'companyName'])}),?)>0 OR EXISTS(
+      where.push(`(${byEmail} OR instr(mail_text_fold(${searchable('t', ['account', 'participant', 'participantName', 'subject', 'preview', 'companyName'])}),?)>0 OR EXISTS(
         SELECT 1 FROM mailbox_search_text m WHERE m.thread_id=t.id AND instr(mail_text_fold(m.content),?)>0))`);
       args.push(JSON.stringify(nameMatches), query, query);
     }

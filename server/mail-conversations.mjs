@@ -83,6 +83,27 @@ export class MailConversations {
     this.db
       .exec(`CREATE INDEX IF NOT EXISTS mailbox_thread_order ON mailbox_threads(account_key,json_extract(data,'$.updatedAt') DESC,id);
       CREATE INDEX IF NOT EXISTS mailbox_inbound_thread ON mailbox_reply_headers(thread_id) WHERE direction='inbound';`);
+    this.db.exec(
+      'CREATE TABLE IF NOT EXISTS mailbox_summary_migrations (version INTEGER PRIMARY KEY)',
+    );
+    if (!this.db.prepare('SELECT 1 FROM mailbox_summary_migrations WHERE version=1').get())
+      this.transaction(() => {
+        if (
+          !this.db.prepare('INSERT OR IGNORE INTO mailbox_summary_migrations VALUES(1)').run()
+            .changes
+        )
+          return;
+        this.db.exec(`WITH names AS (
+          SELECT h.thread_id, json_extract(m.data,'$.fromName') AS name,
+            row_number() OVER (PARTITION BY h.thread_id ORDER BY json_extract(m.data,'$.occurredAt') DESC,m.id DESC) AS ordinal
+          FROM mailbox_reply_headers h JOIN mailbox_threads t ON t.id=h.thread_id
+          JOIN mailbox_thread_messages m ON m.id=h.id
+          WHERE h.direction='inbound' AND h.sender=json_extract(t.data,'$.participant')
+            AND trim(coalesce(json_extract(m.data,'$.fromName'),''))!=''
+        )
+        UPDATE mailbox_threads AS t SET data=json_set(t.data,'$.participantName',trim(names.name))
+          FROM names WHERE names.ordinal=1 AND names.thread_id=t.id`);
+      });
   }
 
   replyHistory(filters) {
@@ -196,6 +217,14 @@ export class MailConversations {
       mailboxId: mailbox.id,
       account: mailbox.email,
       participant,
+      participantName: messages
+        .findLast(
+          (message) =>
+            message.direction === 'inbound' &&
+            message.from === participant &&
+            message.fromName?.trim(),
+        )
+        ?.fromName.trim(),
       subject: first.subject || latest.subject,
       updatedAt: latest.occurredAt,
       unread: messages.some((item) => item.unread),

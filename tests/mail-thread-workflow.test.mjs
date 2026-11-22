@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../server/app.mjs';
 import { OutreachService } from '../server/outreach-service.mjs';
+import { MailConversations } from '../server/mail-conversations.mjs';
 
 test('本地收件箱分组、稍后回到进行中、线程合并与工作备注独立于邮件和发送', async (t) => {
   let now = Date.parse('2026-01-02T00:00:00Z');
@@ -48,10 +49,17 @@ test('本地收件箱分组、稍后回到进行中、线程合并与工作备�
       ...extra,
     });
   }
-  incoming('question');
+  incoming('question', { fromName: 'Jamie Lawson' });
   incoming('second');
   const thread = service.conversations.list({ q: 'question' }).items[0].id;
   const path = '/conversations/' + thread;
+  assert.equal((await read('/conversations?q=lawson')).items[0].participantName, 'Jamie Lawson');
+  service.db
+    .prepare("UPDATE mailbox_threads SET data=json_remove(data,'$.participantName') WHERE id=?")
+    .run(thread);
+  service.db.exec('DELETE FROM mailbox_summary_migrations WHERE version=1');
+  new MailConversations({ db: service.db, mailboxes: service.mailboxes });
+  assert.equal((await read('/conversations?q=lawson')).items[0].id, thread);
   const count = async (folder) => (await read('/conversations?folder=' + folder)).total;
   assert.equal(await count('open'), 2);
   const note = { body: '业务员内部单独核实样品', clientId: 'client-note-123' };
