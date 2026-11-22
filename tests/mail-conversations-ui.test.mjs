@@ -19,8 +19,8 @@ const loadModule = createModuleLoader((specifier) =>
 const { mailConversationsApi } = loadModule(
   new URL('../src/services/mailConversations.ts', import.meta.url),
 );
-const { MailConversations, MailConversationTimeline, MailSyncSummary } = loadModule(
-  new URL('../src/components/MailConversations.tsx', import.meta.url),
+const { SalesInbox, MailConversationTimeline, MailSyncSummary } = loadModule(
+  new URL('../src/components/SalesInbox.tsx', import.meta.url),
 );
 const {
   mailFramePolicy,
@@ -193,7 +193,7 @@ test('mail sync failures remain visible per account and describe incomplete fold
 
 test('mail conversation entry shows the requested account, local-cache scope and read-only empty loading layout', () => {
   requests.length = 0;
-  const html = render(MailConversations, {
+  const html = render(SalesInbox, {
     mailboxes: [
       { id: 'mailbox-1', email: 'sales@our.example', configured: true },
       { id: 'mailbox-2', email: 'support@our.example', configured: true },
@@ -202,10 +202,10 @@ test('mail conversation entry shows the requested account, local-cache scope and
     onMailboxChange() {},
   });
   assert.match(html, /<option value="mailbox-2" selected="">support@our\.example<\/option>/);
-  assert.match(html, /首次同步读取最近 30 天的收件箱与可识别的已发件箱，之后继续增量读取/);
+  assert.match(html, /待审/);
   assert.match(html, /aria-label="刷新本地邮件缓存"/);
   assert.match(html, /<button[^>]*>[\s\S]*?同步邮件<\/button>/);
-  assert.match(html, /仅看未读/);
+  assert.match(html, /未读/);
   assert.match(html, /正在读取邮件会话/);
   assert.match(html, /选择一段邮件会话/);
   assert.doesNotMatch(html, /<textarea|审核并发送|回复邮件/);

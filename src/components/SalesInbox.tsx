@@ -23,7 +23,8 @@ import type {
   MailThread,
 } from '../services/mailConversations';
 import { Badge, Empty } from './ui';
-import { ReceptionControls } from './MailReviewQueue';
+import { ReceptionControls } from './InboxReception';
+import { outreachApi } from '../outreachApi';
 import { ReplySources } from './ReplyPreview';
 import { MailMessageBody } from './MailMessageBody';
 import { MailReplyComposer } from './MailReplyComposer';
@@ -266,13 +267,17 @@ export function MailSyncSummary({ statuses: syncStatuses }: { statuses: MailboxS
   );
 }
 
-export function MailConversations({
+export function SalesInbox({
   mailboxes,
   mailboxId = 'all',
   customerId = '',
   inboundOnly = false,
   initialThread = '',
   onMailboxChange,
+  review = false,
+  reviewCount,
+  refreshToken = 0,
+  onReviewChange,
 }: {
   mailboxes: OutreachMailbox[];
   mailboxId?: string;
@@ -280,13 +285,18 @@ export function MailConversations({
   inboundOnly?: boolean;
   initialThread?: string;
   onMailboxChange: (mailboxId: string) => void;
+  review?: boolean;
+  reviewCount?: number;
+  refreshToken?: number;
+  onReviewChange?: (review: boolean) => void;
 }) {
+  const queueCount = review ? reviewCount : undefined;
   const [query, setQuery] = useState('');
   const [unread, setUnread] = useState(false);
   const [list, setList] = useState<MailConversationList | null>(null);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState('');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialThread || null);
   const [detail, setDetail] = useState<MailConversationDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
@@ -296,9 +306,13 @@ export function MailConversations({
   const [notice, setNotice] = useState('');
   const [revision, setRevision] = useState(0);
   const [detailRevision, setDetailRevision] = useState(0);
+  const [reviewPage, setReviewPage] = useState(1);
+  const [reviewTotal, setReviewTotal] = useState(0);
   const mounted = useRef(true);
-  const selected = useRef<string | null>(null);
+  const selected = useRef<string | null>(initialThread || null);
+  const linkedThread = useRef(initialThread);
   const selectConversation = useCallback((id: string | null) => {
+    if (selected.current === id) return;
     selected.current = id;
     setSelectedId(id);
     setDetail(null);
@@ -317,16 +331,61 @@ export function MailConversations({
     setLoading(true);
     setListError('');
     setList(null);
-    selectConversation(initialThread || null);
+
     const timeout = window.setTimeout(
       () => {
-        void mailConversationsApi
-          .list({ mailboxId, customerId, q: query, unread, inboundOnly }, controller.signal)
+        const result: Promise<MailConversationList> = review
+          ? outreachApi<{
+              total: number;
+              items: {
+                threadId: string;
+                sourceId: string;
+                subject: string;
+                account: string;
+                from: string;
+                receivedAt: string;
+                reason: string;
+              }[];
+            }>('/reception?page=' + reviewPage, { signal: controller.signal }).then((result) => {
+              if (!controller.signal.aborted) {
+                setReviewTotal(result.total);
+                const lastPage = Math.max(1, Math.ceil(result.total / 20));
+                if (reviewPage > lastPage) setReviewPage(lastPage);
+              }
+              return {
+                mailboxes: [],
+                items: result.items.map((ticket) => ({
+                  id: ticket.threadId,
+                  mailboxId: '',
+                  subject: ticket.subject,
+                  participant: ticket.from,
+                  updatedAt: ticket.receivedAt,
+                  account: ticket.account,
+                  preview: ticket.reason,
+                  unread: false,
+                  messageCount: 0,
+                })),
+              };
+            })
+          : mailConversationsApi.list(
+              { mailboxId, customerId, q: query, unread, inboundOnly },
+              controller.signal,
+            );
+        void result
           .then((value) => {
             if (controller.signal.aborted) return;
             setList(value);
-            if (customerId && inboundOnly && value.items.length)
-              selectConversation(value.items[0].id);
+            const retained = value.items.find((t) => t.id === selected.current)?.id;
+            const first = value.items[0]?.id;
+            const wide =
+              typeof window.matchMedia === 'function' &&
+              window.matchMedia('(min-width:1101px)').matches;
+            const next =
+              linkedThread.current ||
+              retained ||
+              ((customerId && inboundOnly) || wide ? first : null);
+            linkedThread.current = '';
+            selectConversation(next || null);
           })
           .catch((reason: unknown) => {
             if (!controller.signal.aborted) setListError(errorText(reason));
@@ -347,7 +406,10 @@ export function MailConversations({
     query,
     unread,
     inboundOnly,
-    initialThread,
+    review,
+    reviewPage,
+    queueCount,
+    refreshToken,
     revision,
     selectConversation,
   ]);
@@ -369,7 +431,7 @@ export function MailConversations({
         if (!controller.signal.aborted) setDetailLoading(false);
       });
     return () => controller.abort();
-  }, [selectedId, detailRevision]);
+  }, [selectedId, detailRevision, refreshToken]);
 
   async function sync() {
     if (syncing) return;
@@ -430,78 +492,19 @@ export function MailConversations({
         error: null,
       },
   );
-  const visibleThreads = list?.items.filter((item) => !unread || item.unread) || [];
+  const visibleThreads = list?.items.filter((item) => review || !unread || item.unread) || [];
 
+  const identity = shownDetail
+    ? mailboxes.find((box) => box.id === shownDetail.conversation.mailboxId)
+    : null;
   return (
-    <section className="mail-conversations">
-      <div className="outreach-section-heading">
-        <div>
-          <h2>邮件会话</h2>
-        </div>
-        <button
-          className="btn primary"
-          disabled={syncing || !scopeMailboxes.some((item) => item.configured)}
-          onClick={() => void sync()}
-        >
-          <RefreshCw size={15} className={syncing ? 'outreach-spin' : ''} />
-          {syncing ? '正在同步…' : '同步邮件'}
-        </button>
-      </div>
-      <div className="mail-conversations-toolbar panel">
-        <label className="mail-account-filter">
-          <Mail size={16} />
-          <select
-            aria-label="筛选会话邮箱"
-            value={mailboxId}
-            onChange={(event) => onMailboxChange(event.target.value)}
-          >
-            <option value="all">全部邮箱</option>
-            {mailboxes.map((item) => (
-              <option value={item.id} key={item.id}>
-                {item.email}
-              </option>
-            ))}
-            {mailboxId !== 'all' && !mailboxes.some((item) => item.id === mailboxId) && (
-              <option value={mailboxId}>邮箱不存在</option>
-            )}
-          </select>
-        </label>
-        <label className="outreach-search mail-conversation-search">
-          <Search size={17} />
-          <input
-            aria-label="搜索邮件会话"
-            value={query}
-            placeholder="搜索客户、邮箱、主题或正文"
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </label>
-        <label className="mail-unread-filter">
-          <input
-            type="checkbox"
-            checked={unread}
-            onChange={(event) => setUnread(event.target.checked)}
-          />
-          仅看未读
-        </label>
-        <button
-          className="btn subtle"
-          disabled={loading}
-          onClick={() => setRevision((value) => value + 1)}
-          aria-label="刷新本地邮件缓存"
-        >
-          <RefreshCw size={15} />
-          刷新列表
-        </button>
-      </div>
-      <p className="mail-conversations-scope">
-        {customerId && (
-          <span>
-            {inboundOnly ? '仅显示该客户有来信的会话' : '仅显示该客户邮件'} ·{' '}
-            <Link to="/inbox?tab=conversations">查看全部客户</Link> ·{' '}
-          </span>
-        )}
-        首次同步读取最近 30 天的收件箱与可识别的已发件箱，之后继续增量读取。
-      </p>
+    <section className="sales-inbox mail-conversations">
+      {customerId && (
+        <p className="mail-conversations-scope">
+          {inboundOnly ? '仅显示该客户有来信的会话' : '仅显示该客户邮件'} ·{' '}
+          <Link to="/inbox?tab=inbox">查看全部客户</Link>
+        </p>
+      )}
       {notice && (
         <div className="outreach-alert success" role="status">
           {notice}
@@ -515,15 +518,87 @@ export function MailConversations({
           </button>
         </div>
       )}
-      <MailSyncSummary statuses={syncStatuses} />
+
       <div
         className={`mail-conversations-workspace panel ${selectedId ? 'has-selection' : 'no-selection'}`}
       >
         <aside className="mail-conversation-list" aria-label="邮件会话列表" aria-busy={loading}>
-          <div className="mail-conversation-list-heading">
-            <strong>会话列表</strong>
-            <span>{loading ? '读取中' : `${visibleThreads.length} 个会话`}</span>
+          <div className="inbox-list-head">
+            <h2>{review ? '待审草稿' : '收件箱'}</h2>
+            <button
+              className="icon-button"
+              title="刷新列表"
+              aria-label="刷新本地邮件缓存"
+              disabled={loading}
+              onClick={() => setRevision((v) => v + 1)}
+            >
+              <RefreshCw size={15} />
+            </button>
           </div>
+          <div className="inbox-scopes">
+            <button
+              type="button"
+              aria-pressed={!review && !unread}
+              onClick={() => {
+                setUnread(false);
+                if (review) onReviewChange?.(false);
+              }}
+            >
+              全部
+            </button>
+            <button
+              type="button"
+              aria-pressed={!review && unread}
+              onClick={() => {
+                setUnread(true);
+                if (review) onReviewChange?.(false);
+              }}
+            >
+              未读
+            </button>
+            <button
+              type="button"
+              aria-pressed={review}
+              onClick={() => {
+                setUnread(false);
+                setReviewPage(1);
+                onReviewChange?.(true);
+              }}
+            >
+              待审
+            </button>
+          </div>
+          {!review && (
+            <div className="inbox-filters">
+              <label className="mail-account-filter">
+                <Mail size={15} />
+                <select
+                  aria-label="筛选会话邮箱"
+                  value={mailboxId}
+                  onChange={(e) => onMailboxChange(e.target.value)}
+                >
+                  <option value="all">全部邮箱</option>
+                  {mailboxes.map((box) => (
+                    <option key={box.id} value={box.id}>
+                      {box.email}
+                    </option>
+                  ))}
+                  {mailboxId !== 'all' && !mailboxes.some((b) => b.id === mailboxId) && (
+                    <option value={mailboxId}>邮箱不存在</option>
+                  )}
+                </select>
+              </label>
+              <label className="outreach-search mail-conversation-search">
+                <Search size={15} />
+                <input
+                  aria-label="搜索邮件会话"
+                  placeholder="搜索客户、邮件主题或正文"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                />
+              </label>
+            </div>
+          )}
           {loading ? (
             <div className="mail-conversation-placeholder" role="status">
               <LoaderCircle size={22} className="outreach-spin" />
@@ -533,9 +608,9 @@ export function MailConversations({
             <Empty title="会话读取失败" detail="请重新读取列表，或检查服务是否正常。" />
           ) : visibleThreads.length ? (
             <div className="mail-conversation-items">
-              {visibleThreads.map((thread) => (
+              {visibleThreads.map((thread, index) => (
                 <button
-                  key={thread.id}
+                  key={review ? thread.id + '-' + index : thread.id}
                   className={`mail-conversation-row ${selectedId === thread.id ? 'selected' : ''} ${thread.unread ? 'unread' : ''}`}
                   aria-pressed={selectedId === thread.id}
                   onClick={() => selectConversation(thread.id)}
@@ -554,7 +629,7 @@ export function MailConversations({
                   <span className="mail-conversation-row-account">
                     <Mail size={12} />
                     {thread.account}
-                    <span>{thread.messageCount} 封</span>
+                    {!review && <span>{thread.messageCount} 封</span>}
                   </span>
                 </button>
               ))}
@@ -562,18 +637,22 @@ export function MailConversations({
           ) : (
             <Empty
               title={
-                query || unread
-                  ? '没有符合筛选的会话'
-                  : customerId && inboundOnly
-                    ? '暂无该客户的来信'
-                    : '暂无邮件会话'
+                review
+                  ? '当前没有待审回信'
+                  : query || unread
+                    ? '没有符合筛选的会话'
+                    : customerId && inboundOnly
+                      ? '暂无该客户的来信'
+                      : '暂无邮件会话'
               }
               detail={
-                query || unread
-                  ? '试试调整搜索词或取消未读筛选。'
-                  : customerId && inboundOnly
-                    ? '当前已同步的邮箱记录中没有该客户的来信，可同步邮件后重新查看。'
-                    : '可手动同步邮箱；系统发送的邮件也会在这里保存。'
+                review
+                  ? '需要审核的客户回信将在这里显示。'
+                  : query || unread
+                    ? '试试调整搜索词或取消未读筛选。'
+                    : customerId && inboundOnly
+                      ? '当前已同步的邮箱记录中没有该客户的来信，可同步邮件后重新查看。'
+                      : '可手动同步邮箱；系统发送的邮件也会在这里保存。'
               }
             />
           )}
@@ -581,6 +660,41 @@ export function MailConversations({
             <p className="mail-conversation-list-note">
               当前显示最近 {list.items.length} 个会话，请按邮箱或关键词缩小范围。
             </p>
+          )}
+          {review && (reviewPage > 1 || reviewTotal > 20) && (
+            <div className="inbox-pager">
+              <button
+                type="button"
+                disabled={reviewPage === 1}
+                onClick={() => setReviewPage((p) => p - 1)}
+              >
+                上一页
+              </button>
+              <span>
+                {reviewPage} / {Math.max(1, Math.ceil(reviewTotal / 20))}
+              </span>
+              <button
+                type="button"
+                disabled={reviewPage * 20 >= reviewTotal}
+                onClick={() => setReviewPage((p) => p + 1)}
+              >
+                下一页
+              </button>
+            </div>
+          )}
+          {!review && (
+            <div className="inbox-sync">
+              <button
+                type="button"
+                className="btn secondary"
+                disabled={syncing || !scopeMailboxes.some((box) => box.configured)}
+                onClick={() => void sync()}
+              >
+                <RefreshCw size={14} className={syncing ? 'outreach-spin' : ''} />
+                {syncing ? '正在同步…' : '同步邮件'}
+              </button>
+              <MailSyncSummary statuses={syncStatuses} />
+            </div>
           )}
         </aside>
         <section
@@ -609,7 +723,7 @@ export function MailConversations({
                   </button>
                 </div>
               )}
-              {detailLoading ? (
+              {detailLoading && !shownDetail ? (
                 <div className="mail-conversation-placeholder" role="status">
                   <LoaderCircle size={22} className="outreach-spin" />
                   正在读取邮件正文…
@@ -628,10 +742,6 @@ export function MailConversations({
                       </button>
                     </div>
                   )}
-                  <ReceptionControls
-                    detail={shownDetail}
-                    onChange={() => setDetailRevision((v) => v + 1)}
-                  />
                   <MailConversationTimeline
                     {...shownDetail}
                     onReply={(id) =>
@@ -645,6 +755,7 @@ export function MailConversations({
                     replyRequest={replyTarget?.request}
                     onCompleted={(value) => {
                       setDetail(value);
+                      if (review) setRevision((v) => v + 1);
                       setList((current) =>
                         current
                           ? {
@@ -670,6 +781,32 @@ export function MailConversations({
             </div>
           )}
         </section>
+        {shownDetail && (
+          <aside className="inbox-contact" aria-label="联系人及接待设置">
+            <h3>联系人</h3>
+            <strong>
+              {shownDetail.conversation.companyName || shownDetail.conversation.participant}
+            </strong>
+            <p>{shownDetail.conversation.participant}</p>
+            {shownDetail.conversation.customerId && (
+              <Link to={'/leads?lead=' + encodeURIComponent(shownDetail.conversation.customerId)}>
+                客户档案
+              </Link>
+            )}
+            <h3>负责邮箱</h3>
+            <strong>{identity?.brandName || shownDetail.conversation.account}</strong>
+            <p>{shownDetail.conversation.account}</p>
+            {identity && (
+              <Link to={'/inbox?tab=mailboxes&mailboxId=' + encodeURIComponent(identity.id)}>
+                邮箱设置
+              </Link>
+            )}
+            <ReceptionControls
+              detail={shownDetail}
+              onChange={() => setDetailRevision((v) => v + 1)}
+            />
+          </aside>
+        )}
       </div>
     </section>
   );

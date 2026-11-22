@@ -6,7 +6,6 @@ import {
   ArrowRight,
   Check,
   CheckCircle2,
-  ChevronRight,
   Clock3,
   Eye,
   FileText,
@@ -14,7 +13,6 @@ import {
   Inbox,
   LoaderCircle,
   Mail,
-  MessageSquare,
   Pause,
   Play,
   Plus,
@@ -26,8 +24,9 @@ import {
   X,
 } from 'lucide-react';
 import { PageHeading } from '../components/PageHeading';
-import { MailConversations } from '../components/MailConversations';
-import { MailReviewQueue } from '../components/MailReviewQueue';
+import { SalesInbox } from '../components/SalesInbox';
+import { FollowUpSequences } from '../components/FollowUpSequences';
+import { MailboxLabels } from '../components/MailboxLabels';
 import { ReplyPreview } from '../components/ReplyPreview';
 import { MailMessageBody } from '../components/MailMessageBody';
 import { MailSignatureFields, defaultSignatureDesign } from '../components/MailSignatureFields';
@@ -41,14 +40,14 @@ import type {
   OutreachCampaign,
   OutreachCampaignDetail,
   OutreachDelivery,
-  OutreachDeliveryPage,
   OutreachMailbox,
   OutreachProduct,
+  MailboxTagState,
   OutreachState,
 } from '../outreachApi';
 import '../outreach.css';
 
-type Tab = 'mailboxes' | 'campaigns' | 'deliveries' | 'conversations' | 'review';
+type Tab = 'mailboxes' | 'campaigns' | 'inbox' | 'sequences';
 type MailboxInput = Omit<
   OutreachMailbox,
   'id' | 'configured' | 'smtpStatus' | 'lastCheckedAt' | 'lastError' | 'signature'
@@ -266,7 +265,7 @@ function MailboxEditor({
         displayName,
         ...(signatureDesign ? { signatureDesign } : { signature }),
         productIds: selectedProducts.filter((id) =>
-          products.some((p) => p.id === id && siteAllowsProduct(p, identity)),
+          products.some((p) => !p.materialOnly && p.id === id && siteAllowsProduct(p, identity)),
         ),
         priority: mailbox?.priority ?? 100,
         dailyLimit: Number(form.get('dailyLimit')),
@@ -385,7 +384,7 @@ function MailboxEditor({
         <div className="outreach-form-section">
           <h3>此邮箱负责的产品</h3>
           <ProductOptions
-            products={products.filter((p) => siteAllowsProduct(p, identity))}
+            products={products.filter((p) => !p.materialOnly && siteAllowsProduct(p, identity))}
             selected={selectedProducts}
             onChange={setSelectedProducts}
           />
@@ -1072,29 +1071,18 @@ function MessagePreview({
 export function OutreachCommunication({
   initial,
   pages,
-}: { initial?: InitialPage; pages?: Pick<InitialPage, 'outreach' | 'records'> } = {}) {
+}: { initial?: InitialPage; pages?: Pick<InitialPage, 'outreach'> } = {}) {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = searchParams.get('tab');
-  const tab: Tab = ['mailboxes', 'campaigns', 'deliveries', 'conversations', 'review'].includes(
-    requestedTab || '',
-  )
+  const tab: Tab = ['mailboxes', 'campaigns', 'inbox', 'sequences'].includes(requestedTab || '')
     ? (requestedTab as Tab)
-    : 'campaigns';
+    : 'mailboxes';
   const conversationMailboxId = searchParams.get('mailboxId') || 'all';
   function setTab(nextTab: Tab) {
-    setSearchParams((current) => {
-      const next = new URLSearchParams(current);
-      next.set('tab', nextTab);
-      return next;
-    });
+    setSearchParams({ tab: nextTab });
   }
   function openMailboxConversations(mailboxId: string) {
-    setSearchParams((current) => {
-      const next = new URLSearchParams(current);
-      next.set('tab', 'conversations');
-      next.set('mailboxId', mailboxId);
-      return next;
-    });
+    setSearchParams({ tab: 'inbox', mailboxId });
   }
   const [received, setState] = useState<(OutreachState & { viewKey: string }) | null>(
     initial?.outreach ?? null,
@@ -1110,10 +1098,62 @@ export function OutreachCommunication({
     null,
   );
   const [cancelTarget, setCancelTarget] = useState<OutreachCampaign | null>(null);
+  const [showLabels, setShowLabels] = useState(false);
+  const [tagState, setTagState] = useState<MailboxTagState | null>(null);
+  const [tagError, setTagError] = useState('');
+  const [tagRefresh, setTagRefresh] = useState(0);
+  const tagGeneration = useRef(0);
+  useEffect(() => {
+    if (tab !== 'mailboxes') return;
+    const controller = new AbortController();
+    const generation = ++tagGeneration.current;
+    setTagError('');
+    outreachApi<MailboxTagState>('/mailbox-tags', { signal: controller.signal })
+      .then((value) => {
+        if (!controller.signal.aborted && tagGeneration.current === generation) setTagState(value);
+      })
+      .catch((e) => {
+        if (!controller.signal.aborted) setTagError(message(e));
+      });
+    return () => controller.abort();
+  }, [tab, tagRefresh]);
+  const openedBox = useRef('');
+  const requestedBox = tab === 'mailboxes' ? searchParams.get('mailboxId') || '' : '';
+  useEffect(() => {
+    if (!requestedBox) {
+      openedBox.current = '';
+      return;
+    }
+    if (openedBox.current === requestedBox) return;
+    openedBox.current = requestedBox;
+    const controller = new AbortController();
+    outreachApi<OutreachMailbox>(pathFor('mailboxes', requestedBox), { signal: controller.signal })
+      .then((value) => {
+        if (!controller.signal.aborted) setMailboxEditor({ value });
+      })
+      .catch((e) => {
+        if (!controller.signal.aborted) setError(message(e));
+      });
+    return () => {
+      controller.abort();
+      openedBox.current = '';
+      setMailboxEditor((current) => (current?.value?.id === requestedBox ? null : current));
+    };
+  }, [requestedBox]);
+  const [mailFilter, setMailFilter] = useState('');
+  const [inboxRefresh, setInboxRefresh] = useState(0);
   const [importOpen, setImportOpen] = useState(false);
   const [testOpen, setTestOpen] = useState(false);
   const [testMailboxes, setTestMailboxes] = useState<OutreachMailbox[]>([]);
-  const [detailId, setDetailId] = useState<string | null>(searchParams.get('campaignId'));
+  const detailId = tab === 'campaigns' ? searchParams.get('campaignId') : null;
+  function setDetailId(id: string | null) {
+    setSearchParams((current) => {
+      const params = new URLSearchParams(current);
+      if (id) params.set('campaignId', id);
+      else params.delete('campaignId');
+      return params;
+    });
+  }
   const [detail, setDetail] = useState<OutreachCampaignDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [sampleId, setSampleId] = useState<string | null>(null);
@@ -1123,8 +1163,6 @@ export function OutreachCommunication({
     error?: string;
   } | null>(null);
   const [sampleRetry, setSampleRetry] = useState(0);
-  const [deliveryPreview, setDeliveryPreview] = useState<OutreachDelivery | null>(null);
-  const [deliveryFull, setDeliveryFull] = useState<OutreachDelivery | null>(null);
   const [resolutionTarget, setResolutionTarget] = useState<OutreachDelivery | null>(null);
   const [resolutionOutcome, setResolutionOutcome] = useState<'accepted' | 'failed'>('accepted');
   const [resolutionEvidence, setResolutionEvidence] = useState('');
@@ -1132,17 +1170,6 @@ export function OutreachCommunication({
   const [verificationError, setVerificationError] = useState<string | null>(null);
   const [suppressionTarget, setSuppressionTarget] = useState<OutreachDelivery | null>(null);
   const [suppressionReason, setSuppressionReason] = useState('人工标记不再联系');
-  const [query, setQuery] = useState('');
-  const [recordStatus, setRecordStatus] = useState('all');
-  const [recordRefresh, setRecordRefresh] = useState(0);
-  const [recordPage, setRecordPage] = useState(1);
-  const [recordPageSize, setRecordPageSize] = useState(20);
-  const [recordResult, setRecordResult] = useState<{
-    key: string;
-    data: OutreachDeliveryPage;
-  } | null>(initial?.records ?? pages?.records ?? null);
-  const [recordError, setRecordError] = useState<string | null>(null);
-  const [recordsLoading, setRecordsLoading] = useState(false);
   const [signatureMailboxes, setSignatureMailboxes] = useState<Record<string, OutreachMailbox>>({});
   const [signatureRefresh, setSignatureRefresh] = useState(0);
   const [signatureError, setSignatureError] = useState<string | null>(null);
@@ -1172,18 +1199,8 @@ export function OutreachCommunication({
   useEffect(() => {
     if (pages && received?.viewKey.startsWith('view=current&')) pages.outreach = received;
   }, [pages, received]);
-  useEffect(() => {
-    if (pages && recordResult) pages.records = recordResult;
-  }, [pages, recordResult]);
-  const recordKey = new URLSearchParams({
-    page: String(recordPage),
-    pageSize: String(recordPageSize),
-    group: recordStatus,
-    q: query.trim(),
-  }).toString();
   const request = useRef(0);
   const seededState = useRef(initial?.outreach?.viewKey);
-  const seededRecords = useRef(initial?.records?.key);
   const pendingState = useRef<{ key: string; promise: Promise<void> } | null>(null);
   const detailController = useRef<AbortController | null>(null);
   const detailStatus = useRef<string | null>(null);
@@ -1210,39 +1227,6 @@ export function OutreachCommunication({
       controller.abort();
     };
   }, [tab, signatureKey, signatureRefresh]);
-
-  useEffect(() => {
-    if (tab !== 'deliveries') return;
-    const controller = new AbortController();
-    let pending = false;
-    const loadRecords = async () => {
-      if (pending) return;
-      pending = true;
-      setRecordsLoading(true);
-      setRecordError(null);
-      try {
-        const data = await outreachApi<OutreachDeliveryPage>(`/deliveries?${recordKey}`, {
-          signal: controller.signal,
-        });
-        if (!controller.signal.aborted) setRecordResult({ key: recordKey, data });
-      } catch (reason: unknown) {
-        if (!controller.signal.aborted) setRecordError(message(reason));
-      } finally {
-        pending = false;
-        if (!controller.signal.aborted) setRecordsLoading(false);
-      }
-    };
-    if (seededRecords.current !== recordKey) void loadRecords();
-    seededRecords.current = undefined;
-    const timer = window.setInterval(() => {
-      if (!document.hidden) void loadRecords();
-    }, 10000);
-    return () => {
-      window.clearInterval(timer);
-      controller.abort();
-    };
-  }, [tab, recordKey, recordRefresh]);
-
   const refresh = useCallback(
     async (poll = false) => {
       const pending = pendingState.current;
@@ -1402,6 +1386,11 @@ export function OutreachCommunication({
     setCancelTarget(campaign);
   }
   const mailboxes = state?.mailboxes || [];
+  const filteredMailboxes = mailFilter
+    ? mailboxes.filter((m) =>
+        tagState?.assignments.some((a) => a.mailboxId === m.id && a.tagId === mailFilter),
+      )
+    : mailboxes;
   const campaigns = state?.campaigns || [];
   const visibleCampaigns = state?.viewKey === viewKey ? campaigns : [];
   const filteredCount = state?.viewKey === viewKey ? state.filtered : 0;
@@ -1415,14 +1404,6 @@ export function OutreachCommunication({
   const testRingChanged =
     JSON.stringify(testMailboxes.map((mailbox) => [mailbox.id, mailbox.email])) !==
     JSON.stringify(connected.map((mailbox) => [mailbox.id, mailbox.email]));
-  const recordData =
-    recordResult?.key === recordKey
-      ? recordResult.data
-      : pages?.records?.key === recordKey
-        ? pages.records.data
-        : null;
-  const paginationData = recordData || recordResult?.data;
-  const visibleRecords = recordData?.items || [];
   const shownDetail = detail?.campaign.id === detailId ? detail : null;
   const sample =
     shownDetail?.deliveries.find((delivery) => delivery.id === sampleId) ||
@@ -1447,27 +1428,6 @@ export function OutreachCommunication({
     return () => controller.abort();
   }, [sampleKey, sampleRetry]);
   const samplePreview = sampleBody?.key === sampleKey ? sampleBody : null;
-  useEffect(() => {
-    setDeliveryFull(null);
-    if (!deliveryPreview) return;
-    const controller = new AbortController();
-    void outreachApi<OutreachDelivery>(pathFor('deliveries', deliveryPreview.id), {
-      signal: controller.signal,
-    })
-      .then((delivery) => {
-        if (!controller.signal.aborted) setDeliveryFull(delivery);
-      })
-      .catch((reason: unknown) => {
-        if (!controller.signal.aborted) setVerificationError(message(reason));
-      });
-    return () => controller.abort();
-  }, [deliveryPreview?.id]);
-  const currentDeliveryPreview = deliveryPreview
-    ? deliveryFull?.id === deliveryPreview.id
-      ? deliveryFull
-      : recordData?.items.find((delivery) => delivery.id === deliveryPreview.id) || deliveryPreview
-    : null;
-
   async function verifyDelivery(
     delivery: OutreachDelivery,
     outcome?: 'accepted' | 'failed',
@@ -1485,10 +1445,10 @@ export function OutreachCommunication({
           body: JSON.stringify(outcome ? { outcome, evidence, operator } : {}),
         },
       );
-      setDeliveryFull(result);
+
       if (sampleBody?.delivery?.id === result.id)
         setSampleBody({ key: sampleBody.key, delivery: result });
-      setRecordRefresh((current) => current + 1);
+
       if (detailId) await refreshDetail(detailId);
       await refresh();
       setNotice(
@@ -1518,7 +1478,8 @@ export function OutreachCommunication({
             setError(null);
             setLoading(true);
             setSignatureRefresh((current) => current + 1);
-            setRecordRefresh((current) => current + 1);
+            setInboxRefresh((value) => value + 1);
+            setTagRefresh((v) => v + 1);
             void refresh()
               .catch((reason: unknown) => setError(message(reason)))
               .finally(() => setLoading(false));
@@ -1527,6 +1488,21 @@ export function OutreachCommunication({
           <RefreshCw size={15} className={loading ? 'outreach-spin' : ''} />
           刷新
         </button>
+        {tab === 'mailboxes' && (
+          <button type="button" className="btn secondary" onClick={() => setShowLabels(true)}>
+            邮箱标签
+          </button>
+        )}
+        {tab === 'inbox' && (
+          <button
+            type="button"
+            className="btn secondary"
+            onClick={() => setSearchParams({ tab: 'inbox', folder: 'review' })}
+          >
+            <FileText size={15} />
+            待审草稿 {state?.reviewCount ?? 0}
+          </button>
+        )}
         {['mailboxes', 'campaigns'].includes(tab) && (
           <button
             className="btn primary"
@@ -1556,10 +1532,9 @@ export function OutreachCommunication({
         {(
           [
             { id: 'mailboxes', label: '邮箱管理', icon: Mail, count: mailboxes.length },
-            { id: 'review', label: '待审回信', icon: FileText, count: state?.reviewCount ?? null },
             { id: 'campaigns', label: '触达计划', icon: Send, count: state?.counts?.total ?? null },
-            { id: 'deliveries', label: '发送记录', icon: Inbox, count: deliveryStats?.total || 0 },
-            { id: 'conversations', label: '邮件会话', icon: MessageSquare, count: null },
+            { id: 'inbox', label: '收件箱', icon: Inbox, count: null },
+            { id: 'sequences', label: '跟进序列', icon: Clock3, count: null },
           ] as const
         ).map((item) => (
           <button
@@ -1577,23 +1552,39 @@ export function OutreachCommunication({
           </button>
         ))}
       </div>
-      {!state && loading && tab !== 'deliveries' ? (
+      {!state && loading ? (
         <div className="outreach-loading">
           <LoaderCircle size={22} className="outreach-spin" />
           正在读取邮箱和计划…
         </div>
       ) : (
-        (state || tab === 'deliveries') && (
+        state && (
           <div role="tabpanel" id={`outreach-panel-${tab}`} aria-labelledby={`outreach-tab-${tab}`}>
-            {tab === 'review' && <MailReviewQueue count={state?.reviewCount} />}
-            {tab === 'conversations' && (
-              <MailConversations
+            {tab === 'inbox' && (
+              <SalesInbox
+                key={searchParams.toString()}
                 initialThread={searchParams.get('thread') || ''}
-                mailboxes={mailboxes}
-                mailboxId={conversationMailboxId}
                 customerId={searchParams.get('customerId') || ''}
                 inboundOnly={searchParams.get('inboundOnly') === '1'}
+                mailboxId={conversationMailboxId}
+                mailboxes={mailboxes}
                 onMailboxChange={openMailboxConversations}
+                review={searchParams.get('folder') === 'review'}
+                reviewCount={state.reviewCount}
+                refreshToken={inboxRefresh}
+                onReviewChange={(on) =>
+                  setSearchParams(on ? { tab: 'inbox', folder: 'review' } : { tab: 'inbox' })
+                }
+              />
+            )}
+            {tab === 'sequences' && (
+              <FollowUpSequences
+                mailboxes={mailboxes}
+                sequenceId={searchParams.get('sequenceId') || ''}
+                refreshToken={inboxRefresh}
+                onSelect={(id) =>
+                  setSearchParams(id ? { tab: 'sequences', sequenceId: id } : { tab: 'sequences' })
+                }
               />
             )}
             {tab === 'campaigns' && state && (
@@ -1943,10 +1934,33 @@ export function OutreachCommunication({
                     批量导入
                   </button>
                 </div>
-                <InlineError value={signatureError} />
+                {!!tagState?.tags.length && (
+                  <label className="mail-tag-filter">
+                    邮箱标签{' '}
+                    <select
+                      aria-label="邮箱标签"
+                      value={mailFilter}
+                      onChange={(e) => setMailFilter(e.target.value)}
+                    >
+                      <option value="">全部标签</option>
+                      {tagState.tags.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <InlineError value={tagError || signatureError} />
                 {mailboxes.length ? (
                   <div className="outreach-mailbox-grid">
-                    {mailboxes.map((mailbox, index) => (
+                    {!filteredMailboxes.length && (
+                      <Empty
+                        title="没有使用此标签的邮箱"
+                        detail="选择其他标签，或在邮箱标签中分配邮箱。"
+                      />
+                    )}
+                    {filteredMailboxes.map((mailbox, index) => (
                       <section className="panel outreach-mailbox-card" key={mailbox.id}>
                         <div className="outreach-card-heading">
                           <span className={`outreach-brand-mark mark-${index % 3}`}>
@@ -1971,6 +1985,19 @@ export function OutreachCommunication({
                                 : '待配置密码'}
                           </Badge>
                         </div>
+                        {tagState && (
+                          <div className="outreach-product-tags">
+                            {tagState.tags
+                              .filter((t) =>
+                                tagState.assignments.some(
+                                  (a) => a.mailboxId === mailbox.id && a.tagId === t.id,
+                                ),
+                              )
+                              .map((t) => (
+                                <span key={t.id}>{t.name}</span>
+                              ))}
+                          </div>
+                        )}
                         <div className="outreach-mailbox-coverage">
                           <span>负责产品</span>
                           <div className="outreach-product-tags">
@@ -2107,196 +2134,31 @@ export function OutreachCommunication({
                 )}
               </>
             )}
-            {tab === 'deliveries' && (
-              <>
-                <section className="panel outreach-records">
-                  <div className="outreach-record-toolbar">
-                    <label className="outreach-search">
-                      <Search size={17} />
-                      <input
-                        aria-label="搜索发送记录"
-                        placeholder="搜索公司、邮箱或主题"
-                        value={query}
-                        onChange={(event) => {
-                          setQuery(event.target.value);
-                          setRecordPage(1);
-                        }}
-                      />
-                    </label>
-                    <select
-                      aria-label="按发送状态筛选"
-                      value={recordStatus}
-                      onChange={(event) => {
-                        setRecordStatus(event.target.value);
-                        setRecordPage(1);
-                      }}
-                    >
-                      <option value="all">全部</option>
-                      <option value="sent">已发送</option>
-                      <option value="failed">发送失败</option>
-                      <option value="skipped">已跳过</option>
-                    </select>
-                  </div>
-                  <InlineError value={recordError} />
-                  {!recordData ? (
-                    <div className="outreach-loading" role="status">
-                      {recordError ? '发送记录读取失败，请点击刷新重试。' : '正在读取发送记录…'}
-                    </div>
-                  ) : visibleRecords.length ? (
-                    <div className="outreach-table-wrap">
-                      <table className="outreach-table">
-                        <thead>
-                          <tr>
-                            <th>客户与收件邮箱</th>
-                            <th>发件邮箱</th>
-                            <th>邮件主题 / 处理原因</th>
-                            <th>状态</th>
-                            <th>记录时间</th>
-                            <th>
-                              <span className="outreach-sr-only">详情</span>
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {visibleRecords.map((delivery) => (
-                            <tr key={delivery.id}>
-                              <td>
-                                <strong>{delivery.companyName || '公司自有测试邮箱'}</strong>
-                                <small>{delivery.to}</small>
-                              </td>
-                              <td>
-                                {delivery.status === 'skipped' ? '—' : delivery.from || '待分配'}
-                              </td>
-                              <td className="outreach-subject-cell">
-                                {delivery.status === 'skipped'
-                                  ? delivery.reason
-                                  : delivery.subject || '尚未生成'}
-                                {delivery.status !== 'skipped' && delivery.reason && (
-                                  <small>{delivery.reason}</small>
-                                )}
-                              </td>
-                              <td>
-                                <DeliveryBadge delivery={delivery} />
-                                {delivery.mode === 'internal_test' &&
-                                  delivery.receivedVerifiedAt && (
-                                    <small className="outreach-receipt-verified">
-                                      已核对测试收件
-                                    </small>
-                                  )}
-                                {delivery.recordError && <small>{delivery.recordError}</small>}
-                              </td>
-                              <td className="outreach-time-cell">
-                                {formatTime(
-                                  delivery.resolution?.at ||
-                                    delivery.bouncedAt ||
-                                    delivery.sentAt ||
-                                    delivery.attemptedAt ||
-                                    delivery.skippedAt ||
-                                    delivery.createdAt,
-                                )}
-                              </td>
-                              <td>
-                                <button
-                                  className="icon-button"
-                                  aria-label={`查看 ${delivery.companyName || delivery.to} 的首发记录`}
-                                  onClick={() => {
-                                    setVerificationError(null);
-                                    setDeliveryPreview(delivery);
-                                  }}
-                                >
-                                  <ChevronRight size={17} />
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <Empty
-                      title={
-                        query.trim() || recordStatus !== 'all'
-                          ? '没有符合筛选条件的记录'
-                          : '暂无发送记录'
-                      }
-                      detail={
-                        query.trim() || recordStatus !== 'all'
-                          ? '请调整搜索词或发送状态。'
-                          : '准备计划样稿或进行公司邮箱试发后，邮件会显示在这里。'
-                      }
-                    />
-                  )}
-                  {paginationData && (
-                    <nav
-                      className="outreach-record-pagination outreach-record-pagination-bottom"
-                      aria-label="发送记录分页"
-                      aria-busy={recordsLoading || !recordData}
-                    >
-                      <span aria-live="polite">
-                        共 {paginationData.total} 条 · 第{' '}
-                        {paginationData.total
-                          ? (paginationData.page - 1) * paginationData.pageSize + 1
-                          : 0}
-                        –
-                        {Math.min(
-                          paginationData.page * paginationData.pageSize,
-                          paginationData.total,
-                        )}{' '}
-                        条
-                      </span>
-                      <label>
-                        每页
-                        <select
-                          aria-label="每页发送记录条数"
-                          value={recordPageSize}
-                          onChange={(event) => {
-                            setRecordPageSize(Number(event.target.value));
-                            setRecordPage(1);
-                          }}
-                        >
-                          {[10, 20, 50, 100].map((size) => (
-                            <option key={size} value={size}>
-                              {size} 条
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <div className="outreach-record-page-actions">
-                        <button
-                          className="btn secondary"
-                          disabled={recordsLoading || !recordData || paginationData.page <= 1}
-                          onClick={() => setRecordPage(paginationData.page - 1)}
-                        >
-                          上一页
-                        </button>
-                        <span>
-                          第 {paginationData.page} / {paginationData.totalPages} 页
-                        </span>
-                        <button
-                          className="btn secondary"
-                          disabled={
-                            recordsLoading ||
-                            !recordData ||
-                            paginationData.page >= paginationData.totalPages
-                          }
-                          onClick={() => setRecordPage(paginationData.page + 1)}
-                        >
-                          下一页
-                        </button>
-                      </div>
-                    </nav>
-                  )}
-                </section>
-              </>
-            )}
           </div>
         )
+      )}
+      {showLabels && (
+        <MailboxLabels
+          mailboxes={mailboxes}
+          state={tagState}
+          loadError={tagError}
+          onRetry={() => setTagRefresh((v) => v + 1)}
+          onClose={() => setShowLabels(false)}
+          onChange={(value) => {
+            ++tagGeneration.current;
+            setTagState(value);
+            setMailFilter('');
+          }}
+        />
       )}
       {mailboxEditor && (
         <MailboxEditor
           mailbox={mailboxEditor.value}
           products={products}
-          onClose={() => setMailboxEditor(null)}
+          onClose={() => {
+            setMailboxEditor(null);
+            if (requestedBox) setTab('mailboxes');
+          }}
           onSave={saveMailbox}
         />
       )}
@@ -2428,7 +2290,7 @@ export function OutreachCommunication({
                     {shownDetail.campaign.cancelledAt
                       ? `（${formatTime(shownDetail.campaign.cancelledAt)}）`
                       : ''}
-                    ，不会继续准备邮件或安排发送。已提交的邮件及其实际结果保留，可在发送记录中查看。
+                    ，不会继续准备邮件或安排发送。已提交的邮件及其实际结果保留在计划详情。
                   </p>
                 )}
                 {shownDetail.campaign.mode === 'production' && (
@@ -2697,48 +2559,6 @@ export function OutreachCommunication({
           </div>
         </Modal>
       )}
-      {currentDeliveryPreview && (
-        <Modal
-          wide
-          title={
-            currentDeliveryPreview.subject ||
-            currentDeliveryPreview.bodyText ||
-            currentDeliveryPreview.bodyHtml
-              ? '邮件详情'
-              : '首发记录详情'
-          }
-          onClose={() => {
-            setDeliveryPreview(null);
-            setVerificationError(null);
-          }}
-        >
-          <div className="modal-body">
-            <InlineError value={verificationError} />
-            <MessagePreview
-              delivery={currentDeliveryPreview}
-              loadingBody={deliveryFull?.id !== currentDeliveryPreview.id && !verificationError}
-              campaignName={
-                currentDeliveryPreview.campaignName ||
-                campaigns.find((campaign) => campaign.id === currentDeliveryPreview.campaignId)
-                  ?.name
-              }
-              onSuppress={(delivery) => {
-                setSuppressionReason('人工标记不再联系');
-                setSuppressionTarget(delivery);
-              }}
-              onReconcile={(delivery) => void verifyDelivery(delivery)}
-              onResolve={(delivery) => {
-                setResolutionTarget(delivery);
-                setResolutionOutcome('accepted');
-                setResolutionEvidence('');
-                setResolutionOperator('');
-                setVerificationError(null);
-              }}
-              verifying={busy === `verify-${currentDeliveryPreview.id}`}
-            />
-          </div>
-        </Modal>
-      )}
       {resolutionTarget && (
         <Modal
           title="记录发送核实结论"
@@ -2905,7 +2725,7 @@ export function OutreachCommunication({
                       expectedMailboxIds: testMailboxes.map((mailbox) => mailbox.id),
                       expectedMailboxEmails: testMailboxes.map((mailbox) => mailbox.email),
                     },
-                    '公司试发已创建，请查看发送记录和实际测试邮件。',
+                    '公司试发已创建，请在公司试发计划中查看结果。',
                     'POST',
                     {
                       'Idempotency-Key':

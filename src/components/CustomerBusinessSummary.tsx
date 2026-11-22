@@ -33,9 +33,7 @@ export function CustomerBusinessSummary({ customerId }: { customerId: string }) 
       <div className="business-summary-links">
         <Link
           className="btn secondary"
-          to={
-            '/inbox?' + new URLSearchParams({ tab: 'conversations', customerId, inboundOnly: '1' })
-          }
+          to={'/inbox?' + new URLSearchParams({ tab: 'inbox', customerId, inboundOnly: '1' })}
         >
           客户邮件
         </Link>

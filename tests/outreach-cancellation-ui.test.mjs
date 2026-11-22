@@ -30,7 +30,6 @@ function setup(
     tab = 'campaigns',
     detailResponse,
     deliveryResponse,
-    recordsResponse,
     stateGate,
     extraDeliveries = [],
   } = {},
@@ -131,7 +130,9 @@ function setup(
         useSearchParams: () => [
           searchParams,
           (next) => {
-            searchParams = next(searchParams);
+            searchParams = new URLSearchParams(
+              typeof next === 'function' ? next(searchParams) : next,
+            );
           },
         ],
       };
@@ -173,20 +174,11 @@ function setup(
                 .map((item) => ({ ...item, customerCount: item.customerIds?.length })),
             });
           }
+          if (path === '/mailbox-tags') return { tags: [], assignments: [] };
           if (path.startsWith('/mailboxes/')) {
             const mailbox = mailboxDetails[path.slice('/mailboxes/'.length)];
             if (mailbox instanceof Error) throw mailbox;
             return structuredClone(mailbox);
-          }
-          if (path.startsWith('/deliveries?')) {
-            const data = {
-              items: structuredClone(deliveries),
-              total: 1,
-              page: 1,
-              pageSize: 20,
-              totalPages: 1,
-            };
-            return recordsResponse ? recordsResponse(path, data) : data;
           }
           if (path === '/campaigns/campaign-one' || path === '/campaigns/campaign-one?summary=1') {
             const result = structuredClone({ campaign, deliveries });
@@ -617,126 +609,6 @@ test('计划表格默认只列当前正式计划，搜索筛选先于分页且�
   await h.ready();
   assert.equal(rows().length, 1);
   assert.match(h.html(), /Company test/);
-  assert.deepEqual(h.writes(), []);
-});
-
-test('发送记录不等待状态轮询，也不并发重复读取相同状态', async () => {
-  let finish;
-  const h = setup('active', {
-    tab: 'deliveries',
-    stateGate: new Promise((resolve) => {
-      finish = resolve;
-    }),
-  });
-  await h.ready();
-  try {
-    assert.match(h.html(), /Buyer company/);
-    h.tick(10000);
-    h.tick(10000);
-    assert.equal(h.requests.filter(({ path }) => path.startsWith('/state?')).length, 1);
-  } finally {
-    finish();
-    await flush();
-  }
-});
-
-test('发送记录只按状态筛选且分页置底，未知结果详情保留核对说明', async () => {
-  const h = setup('active', { tab: 'deliveries', deliveryStatus: 'unknown' });
-  await h.ready();
-  h.render();
-  await flush();
-  const filter = h.elements().find((node) => node.props['aria-label'] === '按发送状态筛选');
-  assert.deepEqual(
-    allElements(filter)
-      .filter((node) => node.type === 'option')
-      .map(textContent),
-    ['全部', '已发送', '发送失败', '已跳过'],
-  );
-  const elements = h.elements();
-  assert.ok(!elements.some((node) => node.props['aria-label'] === '按计划筛选'));
-  assert.ok(
-    elements.findIndex((node) => node.type === 'table') <
-      elements.findIndex((node) => node.props['aria-label'] === '发送记录分页'),
-  );
-  h.change('按发送状态筛选', 'failed');
-  h.render();
-  await flush();
-  assert.ok(h.requests.some(({ path }) => path.includes('group=failed')));
-  assert.ok(h.requests.every(({ path }) => !path.includes('campaignId=')));
-  h.elements()
-    .find((node) => node.props['aria-label'] === '查看 Buyer company 的首发记录')
-    .props.onClick();
-  assert.match(h.html(), /结果待核实；请先核对原邮箱，系统不会自动重发/);
-  assert.deepEqual(h.writes(), []);
-});
-
-test('发送失败筛选把已收到退信的首发显示为投递失败', async () => {
-  const h = setup('active', {
-    tab: 'deliveries',
-    extraDeliveries: [
-      {
-        id: 'bounce',
-        companyName: 'Bounced buyer',
-        subject: 'Products',
-        status: 'accepted',
-        bouncedAt: '2026-11-18T02:00:00.000Z',
-      },
-    ],
-  });
-  await h.ready();
-  h.change('按发送状态筛选', 'failed');
-  h.render();
-  await flush();
-  assert.match(h.html(), /投递失败/);
-  h.elements()
-    .find((node) => node.props['aria-label'] === '查看 Bounced buyer 的首发记录')
-    .props.onClick();
-  assert.match(h.html(), /原发件邮箱收到退信/);
-});
-
-test('后台状态刷新不会取消发送记录筛选的慢请求', async () => {
-  let finish;
-  const h = setup('active', {
-    tab: 'deliveries',
-    recordsResponse: (path, data) =>
-      path.includes('group=sent')
-        ? new Promise((resolve) => {
-            finish = () => resolve(data);
-          })
-        : data,
-  });
-  await h.ready();
-  h.change('按发送状态筛选', 'sent');
-  h.render();
-  const request = h.requests.find(({ path }) => path.includes('group=sent'));
-  h.tick(10000);
-  await flush();
-  h.render();
-  assert.equal(request.init.signal.aborted, false);
-  assert.equal(h.requests.filter(({ path }) => path.includes('group=sent')).length, 1);
-  finish();
-  await flush();
-  assert.match(h.html(), /Buyer company/);
-});
-
-test('已跳过详情只显示客户、计划、原因与时间，不显示空邮件或人工处理按钮', async () => {
-  const h = setup('active', { tab: 'deliveries', deliveryStatus: 'skipped' });
-  await h.ready();
-  h.change('按发送状态筛选', 'skipped');
-  h.render();
-  await flush();
-  assert.ok(h.requests.some(({ path }) => path.includes('group=skipped')));
-  h.elements()
-    .find((node) => node.props['aria-label'] === '查看 Buyer company 的首发记录')
-    .props.onClick();
-  const html = h.html();
-  assert.match(html, /所属计划：Australia first outreach/);
-  assert.match(html, /跳过原因：首发条件未满足/);
-  assert.match(html, /本次首发已结束/);
-  assert.doesNotMatch(
-    html,
-    /邮件内容尚未生成|尚未生成主题|标记不再联系|Original submitted message/,
-  );
   assert.deepEqual(h.writes(), []);
 });
 

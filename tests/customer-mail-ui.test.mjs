@@ -15,13 +15,13 @@ test('客户邮件按钮进入实际沟通中心并保留客户编号及来信�
   const href = html.match(/<a\b[^>]*href="([^"]+)"[^>]*>客户邮件/)[1].replaceAll('&amp;', '&');
   const url = new URL(href, 'http://example.test');
   assert.equal(url.pathname, '/inbox');
-  assert.equal(url.searchParams.get('tab'), 'conversations');
+  assert.equal(url.searchParams.get('tab'), 'inbox');
   assert.equal(url.searchParams.get('customerId'), 'buyer/a b');
   assert.equal(url.searchParams.get('inboundOnly'), '1');
 });
 
 function inbox(list, { error = '', loading = false } = {}) {
-  const entry = new URL('../src/components/MailConversations.tsx', import.meta.url);
+  const entry = new URL('../src/components/SalesInbox.tsx', import.meta.url);
   const states = ['', false, list, loading, error];
   const effects = [];
   const requests = [];
@@ -52,10 +52,10 @@ function inbox(list, { error = '', loading = false } = {}) {
         },
       };
   });
-  const { MailConversations } = load(entry);
+  const { SalesInbox } = load(entry);
   return {
     html: render(
-      MailConversations({
+      SalesInbox({
         mailboxes: [],
         customerId: 'buyer',
         inboundOnly: true,
@@ -72,7 +72,7 @@ test('客户没有来信时明确提示空状态，读取失败和加载中不�
   const empty = { items: [], mailboxes: [] };
   assert.match(inbox(empty).html, /暂无该客户的来信/);
   assert.match(inbox(empty).html, /当前已同步的邮箱记录中没有该客户的来信/);
-  assert.match(inbox(empty).html, /href="\/inbox\?tab=conversations"/);
+  assert.match(inbox(empty).html, /href="\/inbox\?tab=inbox"/);
   const failed = inbox(null, { error: '服务暂时不可用' }).html;
   assert.match(failed, /会话读取失败|服务暂时不可用/);
   assert.doesNotMatch(failed, /暂无该客户的来信/);

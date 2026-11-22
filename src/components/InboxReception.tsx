@@ -1,87 +1,8 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useState } from 'react';
 import { outreachApi } from '../outreachApi';
 import { ReplySources } from './ReplyPreview';
 import { mailConversationsApi, type MailConversationDetail } from '../services/mailConversations';
 
-interface Queue {
-  total: number;
-  items: {
-    threadId: string;
-    sourceId: string;
-    subject: string;
-    from: string;
-    account: string;
-    reason: string;
-    owner: string;
-  }[];
-}
-export function MailReviewQueue({ count }: { count?: number }) {
-  const [page, setPage] = useState(1),
-    [data, setData] = useState<Queue | null>(null),
-    [error, setError] = useState(''),
-    [revision, setRevision] = useState(0);
-  useEffect(() => {
-    const controller = new AbortController();
-    setError('');
-    setData(null);
-    outreachApi<Queue>('/reception?page=' + page, { signal: controller.signal })
-      .then((r) => {
-        if (!controller.signal.aborted) setData(r);
-      })
-      .catch((e) => {
-        if (!controller.signal.aborted) setError(e.message);
-      });
-    return () => controller.abort();
-  }, [page, revision, count]);
-  return (
-    <section className="panel mail-review-list">
-      <div className="outreach-section-heading">
-        <h2>待审回信{data ? ' · ' + data.total : ''}</h2>
-        <button type="button" className="btn secondary" onClick={() => setRevision((r) => r + 1)}>
-          刷新待审
-        </button>
-      </div>
-      {error && <p role="alert">{error}</p>}
-      {!data && !error && <p role="status">正在读取待审回信…</p>}
-      {data?.total === 0 && <p>当前没有待审回信。</p>}
-      {data?.items.map((item) => (
-        <article key={item.sourceId}>
-          <div>
-            <strong>{item.subject || '（无主题）'}</strong>
-            <p>
-              {item.from} → {item.account}
-            </p>
-            <small>
-              {item.owner} · {item.reason}
-            </small>
-          </div>
-          <Link
-            className="btn secondary"
-            to={'/inbox?tab=conversations&thread=' + encodeURIComponent(item.threadId)}
-          >
-            查看并审核
-          </Link>
-        </article>
-      ))}
-      {data && (page > 1 || data.total > 20) && (
-        <div className="workbook-controls">
-          <button className="btn secondary" disabled={page <= 1} onClick={() => setPage(page - 1)}>
-            上一页
-          </button>
-          {page} / {Math.ceil(data.total / 20)}
-          <button
-            className="btn secondary"
-            disabled={page * 20 >= data.total}
-            onClick={() => setPage(page + 1)}
-          >
-            下一页
-          </button>
-        </div>
-      )}
-    </section>
-  );
-}
 export function ReceptionControls({
   detail,
   onChange,
