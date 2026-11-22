@@ -14,6 +14,7 @@ const env = {
   LEAD_LIBRARY_DB_PATH: join(folder, 'leads.sqlite'),
   CUSTOMER_BUSINESS_DB_PATH: join(folder, 'business.sqlite'),
   BRANDING_CACHE_PATH: join(folder, 'branding'),
+  CONNECTIONS_PATH: join(folder, 'connections.json'),
 };
 const scope = createHash('sha256')
   .update(JSON.stringify(['native', '', '', '', '']))
@@ -22,9 +23,33 @@ const offline = () => {
   throw new Error('Unexpected external service call');
 };
 const leads = new LeadLibrary({ path: env.LEAD_LIBRARY_DB_PATH, scope, readLeads: offline });
+const mailbox = {
+  id: 'bench-sales',
+  email: 'sales@bench.example',
+  brandName: 'Benchmark',
+  website: 'https://bench.example',
+  displayName: 'Sales',
+  owner: 'Sales',
+  priority: 100,
+  paused: true,
+  configured: false,
+  smtpStatus: 'not_checked',
+  productIds: [],
+  knowledgeProductIds: [],
+  replyMode: 'manual',
+  signature: '',
+  dailyLimit: 50,
+  intervalSeconds: 60,
+};
 const service = new OutreachService({
-  mailboxes: { list: () => [] },
-  customers: offline,
+  mailboxes: {
+    list: () => [mailbox],
+    get: (id) => {
+      assert.equal(id, mailbox.id);
+      return mailbox;
+    },
+  },
+  customers: () => [],
   acquisitionSources: offline,
 });
 let app, browser;
@@ -88,6 +113,24 @@ try {
       candidate: { evidence: 'x'.repeat(10000) },
       bodyHtml: 'x'.repeat(index % 20 ? 5000 : 200000),
     });
+  service.transaction(() => {
+    for (let i = 0; i < 1203; i++) {
+      service.conversations.putMessage(mailbox, {
+        identity: 'benchmark-' + i,
+        messageId: '<benchmark-' + i + '@buyer.example>',
+        inReplyTo: '<sent-' + i + '@bench.example>',
+        source: 'imap',
+        direction: 'inbound',
+        from: 'buyer' + i + '@example.test',
+        to: mailbox.email,
+        subject: 'Benchmark reply ' + i,
+        deliveryStatus: 'received',
+        classification: i % 9 === 0 ? 'auto_reply' : 'normal',
+        bodyText: 'x'.repeat(16384),
+        occurredAt: new Date(Date.UTC(2026, 0, 1) + i * 60_000).toISOString(),
+      });
+    }
+  });
   app = createApp({ env, fetchImpl: offline, outreachServiceFactory: () => service });
   await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${app.address().port}`;
@@ -115,14 +158,38 @@ try {
       (data) => legacy || (data.page === 2 && data.filtered === 14),
     ],
     [
-      '发送记录',
-      '/outreach/deliveries?page=1',
-      (data) => data.total === 1203 && data.items.length === 20,
+      '邮箱管理',
+      '/outreach/state?view=mailboxes',
+      (data) =>
+        data.mailboxes.length === 1 &&
+        data.mailboxes[0].email === mailbox.email &&
+        data.campaigns.length === 0,
     ],
     [
-      '发送记录筛选翻页',
-      '/outreach/deliveries?page=2&q=buyer&group=failed',
-      (data) => data.page === 2 && data.items.length === 20,
+      '序列分页',
+      '/outreach/sequences?page=2',
+      (data) => data.page === 2 && data.items.length === 20 && data.total === 41,
+    ],
+    [
+      '序列收件人分页',
+      '/outreach/sequences/plan-1?page=2&pageSize=10',
+      (data) =>
+        data.page === 2 && data.items.length === 10 && data.items.every((row) => row.firstId),
+    ],
+    [
+      '来信首屏',
+      '/outreach/reply-history?kind=all',
+      (data) => data.total === 1203 && data.items.length === 25,
+    ],
+    [
+      '来信邮箱及类型筛选',
+      '/outreach/reply-history?mailboxId=bench-sales&kind=notification',
+      (data) => data.total === 134 && data.items.length === 25,
+    ],
+    [
+      '来信深页',
+      '/outreach/reply-history?kind=reply&page=30',
+      (data) => data.page === 30 && data.total === 1069 && data.items.length === 25,
     ],
   ]) {
     const times = [];
@@ -144,7 +211,10 @@ try {
   }
   if (process.env.PLAYWRIGHT_MODULE) {
     const { chromium } = await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE).href);
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({
+      headless: true,
+      executablePath: process.env.MAIL_BROWSER_PATH,
+    });
     const context = await browser.newContext();
     const page = await context.newPage();
     const session = await context.newCDPSession(page);
@@ -155,16 +225,16 @@ try {
       downloadThroughput: 1250000,
       uploadThroughput: 1250000,
     });
-    const cases = [
+    const serverRendered = [
       ['客户库', '/leads', '.reference-lead-table tbody tr'],
       ['客户详情', '/leads?lead=buyer-111', '.prospect-title h2'],
       ['触达计划', '/inbox?tab=campaigns', '.outreach-campaign-table tbody tr'],
-      ['发送记录', '/inbox?tab=deliveries', '#outreach-panel-deliveries tbody tr'],
+      ['邮箱管理', '/inbox', '.outreach-mailbox-card h3'],
     ];
     if (!legacy) {
       const plain = await browser.newContext({ javaScriptEnabled: false });
       const view = await plain.newPage();
-      for (const [, path, selector] of cases) {
+      for (const [, path, selector] of serverRendered) {
         const response = await view.goto(base + path);
         assert.match(response.headers()['cache-control'], /no-store/);
         assert.ok(
@@ -174,6 +244,11 @@ try {
       }
       await plain.close();
     }
+    const cases = [
+      ...serverRendered,
+      ['收件箱', '/inbox?tab=inbox', '.mail-conversation-row'],
+      ['跟进序列', '/inbox?tab=sequences', '.sequence-page tbody tr'],
+    ];
     let worst = 0;
     for (const [label, path, selector] of cases) {
       const times = [];
@@ -211,14 +286,16 @@ try {
     const clicks = [
       ['客户库', 'a[href="/leads"]', '.reference-lead-table tbody tr'],
       ['客户详情', '.reference-lead-table tbody tr', '.prospect-title h2'],
-      ['触达计划', 'a[href="/inbox"]', '.outreach-campaign-table tbody tr'],
-      ['发送记录', '#outreach-tab-deliveries', '#outreach-panel-deliveries tbody tr'],
+      ['邮箱管理', 'a[href="/inbox"]', '.outreach-mailbox-card h3'],
+      ['触达计划', '#outreach-tab-campaigns', '.outreach-campaign-table tbody tr'],
+      ['收件箱', '#outreach-tab-inbox', '.mail-conversation-row'],
+      ['跟进序列', '#outreach-tab-sequences', '.sequence-page tbody tr'],
     ];
     const timings = clicks.map(() => []);
     if (!legacy) await page.locator('#root[data-interactive]').waitFor({ state: 'attached' });
     for (let iteration = 0; iteration < 6; iteration++) {
       if (!legacy && iteration === 1) {
-        await page.route('**/api/v1/outreach/{state,deliveries}?*', async (route) => {
+        await page.route('**/api/v1/outreach/state?view=current*', async (route) => {
           await new Promise((resolve) => setTimeout(resolve, 900));
           await route.continue();
         });
@@ -255,10 +332,7 @@ try {
       const reads = ['/leads/real/list?', '/outreach/state?view=current'].map((path) =>
         first.waitForResponse((res) => res.url().includes(path) && res.ok(), { timeout: 5000 }),
       );
-      const [, listResponse] = await Promise.all([
-        first.goto(base + '/inbox?tab=deliveries'),
-        ...reads,
-      ]);
+      const [, listResponse] = await Promise.all([first.goto(base + '/inbox'), ...reads]);
       const prepared = await listResponse.json();
       assert.deepEqual(
         prepared.dossiers?.map((item) => item.lead.id),
