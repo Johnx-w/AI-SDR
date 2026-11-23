@@ -243,6 +243,8 @@ export class ProductKnowledge {
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
       CREATE TABLE IF NOT EXISTS product_knowledge(id TEXT PRIMARY KEY, data TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS material_updated ON product_knowledge(json_extract(data,'$.updatedAt') DESC,id);
+      CREATE INDEX IF NOT EXISTS material_category_page ON product_knowledge(
+        COALESCE(json_extract(data,'$.materialCategory'),'未分类'),json_extract(data,'$.updatedAt') DESC,id,json_extract(data,'$.documentIds[0]'));
       CREATE TABLE IF NOT EXISTS product_knowledge_requests(
         request_key TEXT PRIMARY KEY, body_hash TEXT NOT NULL, product_id TEXT NOT NULL
       );
