@@ -199,6 +199,7 @@ export class MaterialLibrary {
     key,
     env = {},
     fetchImpl,
+    onPage,
   }) {
     if (typeof key !== 'string' || !/^[\w-]{8,128}$/.test(key))
       throw fail(400, '缺少有效的上传操作编号');
@@ -222,7 +223,7 @@ export class MaterialLibrary {
     let prepared;
     if (id && parsesLocally(contentType) && !findRequest.get(key)) {
       currentVersion();
-      prepared = await this.k.documents.prepareReplacement(file);
+      prepared = await this.k.documents.prepareReplacement(file, onPage);
     }
     const record = transaction(this.db, () => {
       const prior = findRequest.get(key);
@@ -262,7 +263,11 @@ export class MaterialLibrary {
             ...this.scope(site),
           });
       const document = this.k.documents.store(product.id, file);
-      if (prepared && !document.extraction)
+      if (
+        prepared &&
+        (!document.extraction ||
+          (contentType === 'application/pdf' && !document.extraction.facts.length))
+      )
         this.k.documents.saveLocalExtraction(document.id, prepared);
       const ids = product.documentIds || [];
       // Historical products may link several independent files. Replace only the primary file.
@@ -289,7 +294,12 @@ export class MaterialLibrary {
     let warning = '';
     try {
       if (!prepared && parsesLocally(contentType))
-        await this.k.documents.extract(record.id, record.documentId, { env, fetchImpl });
+        await this.k.documents.extract(record.id, record.documentId, {
+          env,
+          fetchImpl,
+          pdfText: true,
+          onPage,
+        });
     } catch (e) {
       warning = e.message;
     }

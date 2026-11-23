@@ -86,6 +86,114 @@ test('素材直接上传、重试幂等、站点隔离、换版撤回及跨重�
   assert.equal(lib.list({ status: 'archived' }).total, 1);
   assert.equal(lib.detail(id).documents[0].id, replacement.documentId);
 });
+test('素材自动识别 PDF 文字、图内中英参数和扫描页，回读后可按页引用', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'material-pdf-'));
+  const path = join(dir, 'knowledge.sqlite');
+  let k = new ProductKnowledge(path);
+  t.after(() => {
+    k.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+  let lib = new MaterialLibrary(k, boxes);
+  const bytes = readFileSync(new URL('./fixtures/material-mixed-catalog.pdf', import.meta.url));
+  const input = data('选型资料.pdf', bytes, honey);
+  const { id, documentId, warning } = await lib.upload(input);
+  assert.equal(warning, '');
+  k.close();
+  k = new ProductKnowledge(path);
+  lib = new MaterialLibrary(k, boxes);
+  const doc = lib.detail(id).documents[0];
+  assert.equal(doc.extraction?.pageCount, 3);
+  const facts = doc.extraction.facts;
+  assert.ok(facts.some((f) => f.page === 1 && f.text.includes('R-80')));
+  const spec = facts.find((f) => f.page === 2 && /73\s*mm/iu.test(f.text));
+  assert.match(spec?.text || '', /MX42/);
+  assert.match(spec.text, /行程\s*125\s*毫米/u);
+  assert.ok(facts.some((f) => f.page === 3 && f.text.includes('ZX905')));
+  const box = { ...boxes[0], knowledgeProductIds: [id] };
+  const ask = () =>
+    answerMailQuestion(k, box, 'How wide is the MX42 track?', Date.now(), { forDraft: true });
+  assert.equal(ask().sources.length, 0);
+  const ref = '第 2 页 · ' + spec.location;
+  const approved = lib.edit(id, {
+    version: 1,
+    status: 'approved',
+    approvedBy: '测试审核',
+    sourceFacts: [{ documentId, location: ref, text: spec.text }],
+  });
+  assert.ok(ask().draftSources.some((s) => s.ref === ref && s.value.includes('73')));
+  await assert.rejects(
+    lib.upload({ ...data('损坏新版.pdf', '%PDF-1.7\ninvalid'), id, version: approved.version }),
+    /PDF/,
+  );
+  assert.equal(lib.detail(id).product.version, approved.version);
+  assert.equal(lib.detail(id).documents[0].id, documentId);
+  assert.deepEqual(k.documents.get(id, documentId).bytes, bytes);
+});
+
+test('旧 PDF 空提取从素材接口后台补齐，同一原件重试保留审核片段', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'material-existing-pdf-'));
+  const path = join(dir, 'knowledge.sqlite'),
+    k = new ProductKnowledge(path);
+  let product = k.save({ name: '已有图册', direction: 'materials', sourceUrl: 'https://' + honey });
+  const doc = k.documents.store(product.id, {
+    name: '旧图册.pdf',
+    contentType: 'application/pdf',
+    bytes: readFileSync(new URL('./fixtures/material-mixed-catalog.pdf', import.meta.url)),
+  });
+  const sourceFacts = [
+    { documentId: doc.id, location: '原人工核对', text: 'Keep this reference.' },
+  ];
+  product = k.save({
+    ...product,
+    status: 'approved',
+    approvedBy: '测试审核',
+    documentIds: [doc.id],
+    sourceFacts,
+  });
+  k.db
+    .prepare('UPDATE product_documents SET extraction=? WHERE id=?')
+    .run(JSON.stringify({ facts: [], warnings: ['未提取'], model: 'previous' }), doc.id);
+  k.close();
+  const app = createApp({
+    env: { PRODUCT_KNOWLEDGE_DB_PATH: path },
+    outreachServiceFactory: () => ({ mailboxes: { list: () => boxes }, close() {} }),
+    fetchImpl: () => {
+      throw Error('禁止外部请求');
+    },
+  });
+  await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    await new Promise((resolve) => app.close(resolve));
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const base = 'http://127.0.0.1:' + app.address().port + '/api/v1/materials';
+  const extract = base + '/' + product.id + '/extract/' + doc.id;
+  const begin = await fetch(extract, { method: 'POST', headers: { Prefer: 'respond-async' } });
+  assert.equal(begin.status, 202);
+  const { processingId } = await begin.json();
+  let status;
+  for (let attempt = 0; attempt < 400; attempt++) {
+    const poll = await fetch(base + '/processing/' + processingId);
+    status = poll.status;
+    await poll.json();
+    if (status !== 202) break;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.equal(status, 200);
+  const detail = () => fetch(base + '/' + product.id).then((r) => r.json());
+  const after = await detail();
+  assert.equal(after.documents[0].extraction.pageCount, 3);
+  assert.ok(
+    after.documents[0].extraction.facts.some((f) => f.page === 2 && f.text.includes('73 mm')),
+  );
+  assert.deepEqual(after.product.sourceFacts, sourceFacts);
+  assert.equal(after.product.version, product.version);
+  assert.equal(after.product.status, 'approved');
+  assert.equal((await fetch(extract, { method: 'POST' })).status, 200);
+  assert.deepEqual(await detail(), after);
+});
+
 test('升级已有工作簿不重复保存文件或变为推品；纯产品不混入素材列表与品类', async (t) => {
   const k = new ProductKnowledge();
   t.after(() => k.close());

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { MaterialLibrary } from './materials.mjs';
 import { materialType } from './material-formats.mjs';
 import {
@@ -7,6 +8,27 @@ import {
 } from '../src/domain/material-upload.mjs';
 import { workbookPage } from './product-workbooks.mjs';
 const fail = (n, msg) => Object.assign(new Error(msg), { status: n });
+
+// Return promptly through the public proxy while a catalogue is being recognised.
+// Only progress and the small final receipt live here. Originals and passages are stored in SQLite.
+function processPdf(jobs, action) {
+  const processingId = randomUUID();
+  const job = { status: 202, result: { processingId } };
+  jobs.set(processingId, job);
+  void action((page, total) => {
+    job.result = { processingId, page, total };
+  })
+    .then((result) => {
+      job.status = 200;
+      job.result = result;
+    })
+    .catch((error) => {
+      job.status = error.status || 500;
+      job.result = { error: error.status ? error.message : 'PDF 提取失败，请重新打开资料重试。' };
+    })
+    .finally(() => setTimeout(() => jobs.delete(processingId), 5 * 60 * 1000).unref());
+  return { processingId };
+}
 async function contents(request, name, expected) {
   const declared = Number(request.headers['content-length']);
   checkMaterialSize(name, declared);
@@ -88,10 +110,18 @@ export async function handleMaterials({
   onChange,
   sites,
   uploads,
+  pdfJobs,
 }) {
   const library = new MaterialLibrary(knowledge, sites?.() || []);
   const method = request.method,
     endpoint = url.pathname.slice('/api/v1/materials'.length);
+  const progress = /^\/processing\/([\da-f-]{36})$/u.exec(endpoint);
+  if (progress && method === 'GET') {
+    const job = pdfJobs.get(progress[1]);
+    if (!job) throw fail(410, '提取进度已过期，请重新打开资料查看结果。');
+    return json(response, job.status, job.result);
+  }
+  const asyncPdf = request.headers.prefer === 'respond-async';
   const parts = method === 'POST' && /^\/(?:pk_[a-f0-9]{32}\/versions\/)?parts$/u.test(endpoint);
   const path = parts ? endpoint.slice(0, -'/parts'.length) : endpoint,
     q = Object.fromEntries(url.searchParams);
@@ -122,19 +152,25 @@ export async function handleMaterials({
       throw fail(400, '素材分段请求无效');
     const upload = await readUpload(request, name, key, url.pathname + url.search, uploads);
     if (!upload.bytes) return json(response, 202, upload);
-    const data = await library.upload({
-      name,
-      site: q.site || '',
-      category: q.category || '',
-      version: q.version === undefined ? undefined : Number(q.version),
-      id,
-      bytes: upload.bytes,
-      key,
-      env,
-      fetchImpl,
-    });
-    onChange?.();
-    return json(response, 201, data);
+    const save = async (onPage) => {
+      const data = await library.upload({
+        name,
+        site: q.site || '',
+        category: q.category || '',
+        version: q.version === undefined ? undefined : Number(q.version),
+        id,
+        bytes: upload.bytes,
+        key,
+        env,
+        fetchImpl,
+        onPage,
+      });
+      onChange?.();
+      return data;
+    };
+    if (type === 'application/pdf' && asyncPdf)
+      return json(response, 202, processPdf(pdfJobs, save));
+    return json(response, 201, await save());
   }
   if (id && !op) {
     if (method === 'GET') return json(response, 200, library.detail(id, q.revision));
@@ -156,8 +192,12 @@ export async function handleMaterials({
     return json(response, 200, { id, version: product.version });
   }
   if (id && op === 'extract' && docId && method === 'POST') {
-    await knowledge.documents.extract(id, docId, { env, fetchImpl });
-    return json(response, 200, { ok: true });
+    const extract = async (onPage) => {
+      await knowledge.documents.extract(id, docId, { env, fetchImpl, pdfText: true, onPage });
+      return { ok: true };
+    };
+    if (asyncPdf) return json(response, 202, processPdf(pdfJobs, extract));
+    return json(response, 200, await extract());
   }
   if (id && op === 'document' && docId && method === 'GET') {
     if (rows) return json(response, 200, workbookPage(knowledge.db, id, docId, q));

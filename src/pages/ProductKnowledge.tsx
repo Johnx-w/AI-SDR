@@ -144,6 +144,7 @@ export function ProductKnowledgePage() {
             category: categories.length === 1 ? categories[0] : undefined,
           },
           key,
+          (page, total) => setReport(file.name + ' · 正在提取第 ' + page + ' / ' + total + ' 页'),
         );
         done++;
         if (result.reused) reused++;

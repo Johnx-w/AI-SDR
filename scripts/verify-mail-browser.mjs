@@ -149,6 +149,18 @@ const app = createApp({
       });
       return Response.json({ choices: [{ finish_reason: 'stop', message: { content } }] });
     }
+    if (data.incoming.subject === 'MX42 dimensions') {
+      const index = data.evidence.findIndex((source) =>
+        /MX42 track width is 73 mm/u.test(source.value),
+      );
+      assert.ok(index >= 0, '模型应收到扫描规格表的实际识别值');
+      const content = JSON.stringify({
+        coverage: 'partial',
+        body: 'The MX42 track is 73 mm wide.',
+        sourceIndexes: [index],
+      });
+      return Response.json({ choices: [{ finish_reason: 'stop', message: { content } }] });
+    }
     const material = data.evidence.findIndex((source) => source.value === 'Aluminium alloy');
     assert.ok(material >= 0, '应使用已校对的已选资料');
     await modelGate;
@@ -251,6 +263,18 @@ try {
   await material.getByText('审核人 QA', { exact: true }).waitFor();
   assert.equal(knowledge.list().find((p) => p.name === 'care-note').sourceFacts[0].text, careText);
   await button('关闭素材详情').click();
+  await label('品牌邮箱筛选').selectOption('honeybadgerblinds.com');
+  const choosePdf = page.waitForEvent('filechooser');
+  await button('选择文件上传').click();
+  await (await choosePdf).setFiles(resolve('tests/fixtures/material-mixed-catalog.pdf'));
+  await button('预览 material-mixed-catalog').click();
+  await material.getByText(/原件共 3 页/u).waitFor();
+  const spec = material.locator('.mat-evidence').filter({ hasText: 'MX42 track width is 73 mm.' });
+  await spec.getByRole('button', { name: '采用片段' }).click();
+  await label('审核人').fill('QA');
+  await button('审核通过').click();
+  await material.getByText('审核人 QA', { exact: true }).waitFor();
+  await button('关闭素材详情').click();
 
   await page.goto(base + '/inbox');
   await button('配置').click();
@@ -270,6 +294,7 @@ try {
   await mode.selectOption('review');
   await page.getByRole('checkbox', { name: /mail-specimen/ }).check();
   await page.getByRole('checkbox', { name: /care-note/ }).check();
+  await page.getByRole('checkbox', { name: /material-mixed-catalog/ }).check();
   await button('保存邮箱').click();
   await page.getByRole('dialog').waitFor({ state: 'hidden' });
   const mailbox = boxes.list()[0];
@@ -277,6 +302,7 @@ try {
   assert.deepEqual(mailbox.knowledgeProductIds.map((id) => knowledge.get(id).name).sort(), [
     'care-note',
     'mail-specimen',
+    'material-mixed-catalog',
   ]);
   await page.getByText('按此邮箱资料试问', { exact: true }).click();
   await label('客户问题').fill('What material is ZX-01 made of?');
@@ -570,6 +596,7 @@ try {
   for (const [key, subject, bodyText] of [
     ['care', 'Care and rating', 'How should I clean the slats? What is their fire rating?'],
     ['rating', 'Rating only', 'What is their fire rating?'],
+    ['pdf', 'MX42 dimensions', 'How wide is the MX42 track? What is its fire rating?'],
   ]) {
     service.conversations.putMessage(mailbox, {
       identity: key,
@@ -605,6 +632,11 @@ try {
         sources.map((s) => s.value),
         [careText],
       );
+    } else if (key === 'pdf') {
+      assert.match(body, /73 mm/);
+      await page.getByText('查看回复依据 · 1', { exact: true }).click();
+      await page.getByText(/material-mixed-catalog.pdf.*第 2 页/u).waitFor();
+      assert.match(sources[0].value, /MX42 track width is 73 mm/u);
     } else assert.deepEqual(sources, []);
     assert.equal(sent.length, sentBefore);
   }
