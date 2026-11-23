@@ -2,6 +2,7 @@ import { copyFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parentPort, workerData } from 'node:worker_threads';
+import { splitMaterialText } from './material-chunks.mjs';
 import { PDFiumLibrary } from '@hyzyla/pdfium';
 import { createWorker, OEM, PSM } from 'tesseract.js';
 
@@ -104,15 +105,9 @@ function printedSections(tsv, width, height, native) {
 }
 
 function passages(text, title, page, location) {
-  const chunks = [];
-  let rest = text.trim();
-  while (rest) {
-    const space = 3999 - title.length;
-    const newline = rest.lastIndexOf('\n', space);
-    const end = rest.length <= space ? rest.length : newline > 0 ? newline : space;
-    chunks.push((title + '\n' + rest.slice(0, end)).trim());
-    rest = rest.slice(end).trim();
-  }
+  const chunks = Array.from(splitMaterialText(text.trim(), 1600 - title.length), (part) =>
+    (title + '\n' + part).trim(),
+  );
   return chunks.map((value, index) => ({
     page,
     location: location + (chunks.length > 1 ? ' · 第 ' + (index + 1) + ' 段' : ''),
@@ -192,14 +187,55 @@ async function readPdf(bytes) {
   }
 }
 
+async function readImage(bytes) {
+  const { default: sharp } = await import('sharp');
+  const source = sharp(bytes, { limitInputPixels: 64 * 1024 * 1024 });
+  const { pages = 1 } = await source.metadata();
+  const { data, info } = await source
+    .autoOrient()
+    .flatten({ background: '#fff' })
+    .resize({
+      width: 3200,
+      height: 3200,
+      fit: 'inside',
+      withoutEnlargement: true,
+    })
+    .grayscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const worker = await openOcr();
+  try {
+    const bitmap = Buffer.concat([
+      Buffer.from('P5\n' + info.width + ' ' + info.height + '\n255\n'),
+      data,
+    ]);
+    const { data: result } = await worker.recognize(bitmap, {}, { text: false, tsv: true });
+    const facts = printedSections(result.tsv, info.width, info.height, '').flatMap((section) =>
+      passages(section.text, '', 1, section.location),
+    );
+    if (!facts.length) throw new Error('empty');
+    const warnings = ['图片中的型号、数字及单位请与原图核对后采用。'];
+    if (pages > 1) warnings.push('动画图片仅提取第一帧。');
+    return { model: 'local-image', facts, warnings, extractedAt: new Date().toISOString() };
+  } finally {
+    await worker.terminate();
+  }
+}
+
+const isImage = workerData.contentType.startsWith('image/');
 try {
-  parentPort.postMessage({ extraction: await readPdf(workerData) });
+  const bytes = Buffer.from(workerData.bytes);
+  parentPort.postMessage({ extraction: isImage ? await readImage(bytes) : await readPdf(bytes) });
 } catch (error) {
   const messages = {
-    empty: 'PDF 未识别到可读文字，请核对原件。',
+    empty: isImage ? '图片未识别到可读文字，请对照原图。' : 'PDF 未识别到可读文字，请核对原件。',
     large: 'PDF 识别正文过长，请分册提取。',
   };
   parentPort.postMessage({
-    error: messages[error.message] || '无法读取 PDF 正文，请检查原件是否损坏、加密或能正常打开。',
+    error:
+      messages[error.message] ||
+      (isImage
+        ? '无法读取图片，请检查原图尺寸及完整性。'
+        : '无法读取 PDF 正文，请检查原件是否损坏、加密或能正常打开。'),
   });
 }

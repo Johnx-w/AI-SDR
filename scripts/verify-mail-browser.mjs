@@ -234,12 +234,15 @@ try {
   await button('验证连接').click();
   await page.getByText('SMTP 发件与 IMAP 收件、已发送文件夹均已验证。', { exact: true }).waitFor();
   await page.goto(base + '/materials');
+  await page.getByLabel('筛选文件').click();
   await label('品牌邮箱筛选').selectOption('honeybadgerblinds.com');
+  await page.getByLabel('筛选文件').click();
   const choosing = page.waitForEvent('filechooser');
-  await button('选择文件上传').click();
+  await button('新建 / 导入').click();
+  await page.getByRole('button', { name: /选择文件上传/u }).click();
   await (await choosing).setFiles(resolve('tests/fixtures/mail-specimen.xlsx'));
   await button('预览 mail-specimen').click();
-  const material = page.getByRole('dialog', { name: '素材详情' });
+  const material = page.getByRole('region', { name: '素材详情' });
   await label('查找型号或主题').fill('ZX-01');
   await material.getByText('2 · ZX-01', { exact: true }).click();
   assert.equal(await label('规格!B2').inputValue(), 'Aluminium');
@@ -247,14 +250,20 @@ try {
   await label('审核人').fill('QA');
   await button('审核通过').click();
   await material.getByText('审核人 QA', { exact: true }).waitFor();
-  await button('关闭素材详情').click();
+  await button('返回素材库').click();
   console.log('PASS 按邮箱官网上传工作簿、定位原单元格、校对与审核');
   const chooseCare = page.waitForEvent('filechooser');
-  await button('选择文件上传').click();
+  await button('新建 / 导入').click();
+  await page.getByRole('button', { name: /选择文件上传/u }).click();
   await (
     await chooseCare
   ).setFiles({ name: 'care-note.txt', mimeType: 'text/plain', buffer: Buffer.from(careText) });
   await button('预览 care-note').click();
+  await button('查看原文').click();
+  const originalText = material.locator('.kb-raw-text');
+  await originalText.filter({ hasText: careText }).waitFor();
+  assert.equal(await originalText.textContent(), careText);
+  await button('关闭原文').click();
   await button('采用片段').click();
   await label('审核人').fill('QA');
   await button('审核通过').click();
@@ -262,19 +271,44 @@ try {
   await page.reload();
   await material.getByText('审核人 QA', { exact: true }).waitFor();
   assert.equal(knowledge.list().find((p) => p.name === 'care-note').sourceFacts[0].text, careText);
-  await button('关闭素材详情').click();
+  await button('返回素材库').click();
+  await page.getByLabel('筛选文件').click();
   await label('品牌邮箱筛选').selectOption('honeybadgerblinds.com');
+  await page.getByLabel('筛选文件').click();
   const choosePdf = page.waitForEvent('filechooser');
-  await button('选择文件上传').click();
+  await button('新建 / 导入').click();
+  await page.getByRole('button', { name: /选择文件上传/u }).click();
   await (await choosePdf).setFiles(resolve('tests/fixtures/material-mixed-catalog.pdf'));
   await button('预览 material-mixed-catalog').click();
   await material.getByText(/原件共 3 页/u).waitFor();
-  const spec = material.locator('.mat-evidence').filter({ hasText: 'MX42 track width is 73 mm.' });
-  await spec.getByRole('button', { name: '采用片段' }).click();
+  const spec = material.locator('.kb-chunk').filter({ hasText: 'MX42 track width is 73 mm.' });
+  const findChunk = material.getByRole('searchbox', { name: '搜索引用片段' });
+  await findChunk.fill('unknown-qa-marker');
+  await material.getByText('没有找到匹配的片段').waitFor();
+  await findChunk.fill('第 2 页');
+  await spec.getByRole('button', { name: /第 2 页/ }).click();
+  await material.locator('iframe[src$="page=2"], a:not(.kb-enlarge)[href$="#page=2"]').waitFor();
+  await spec.getByRole('button', { name: '编辑片段' }).click();
+  const chunkEditor = page.getByRole('dialog', { name: '分块详情' });
+  const edit = chunkEditor.getByRole('textbox', { name: '引用内容' });
+  await edit.fill('Discard this edit');
+  await chunkEditor.getByRole('button', { name: '取消', exact: true }).click();
+  await spec.getByRole('button', { name: '编辑片段' }).click();
+  assert.match(await edit.inputValue(), /MX42 track width is 73 mm/);
+  await edit.fill('MX42 track width is 73 mm.');
+  await chunkEditor.getByRole('button', { name: '保存并采用' }).click();
+  await material.getByText('片段已保存并采用', { exact: true }).waitFor();
+  await page.reload();
+  await material.getByRole('button', { name: '已采用 · 1' }).click();
+  assert.equal(await spec.locator('.kb-chunk-text').innerText(), 'MX42 track width is 73 mm.');
+  await spec.getByRole('button', { name: '编辑片段' }).click();
+  await edit.fill('MX42 track width is 73 mm. Checked against the printed table.');
+  await chunkEditor.getByRole('button', { name: '保存修改' }).click();
+  await material.getByText('片段修改已保存', { exact: true }).waitFor();
   await label('审核人').fill('QA');
   await button('审核通过').click();
   await material.getByText('审核人 QA', { exact: true }).waitFor();
-  await button('关闭素材详情').click();
+  await button('返回素材库').click();
 
   await page.goto(base + '/inbox');
   await button('配置').click();
@@ -636,11 +670,45 @@ try {
       assert.match(body, /73 mm/);
       await page.getByText('查看回复依据 · 1', { exact: true }).click();
       await page.getByText(/material-mixed-catalog.pdf.*第 2 页/u).waitFor();
+      const original = page.getByRole('link', { name: /material-mixed-catalog.pdf.*第 2 页/u });
+      assert.ok((await original.getAttribute('href')).endsWith('#page=2'));
+      const response = await page.request.get(
+        new URL(await original.getAttribute('href'), base).href,
+      );
+      assert.equal(response.headers()['content-type'], 'application/pdf');
       assert.match(sources[0].value, /MX42 track width is 73 mm/u);
     } else assert.deepEqual(sources, []);
     assert.equal(sent.length, sentBefore);
   }
   console.log('PASS 直接审核采用的片段，刷新后混合问题引用原段并请示，未命中问题仅请示。');
+  await page.goto(base + '/materials?tab=test');
+  await page.getByLabel('检索范围').selectOption(configuration.id);
+  await page.getByLabel('测试问题').fill('What material is ZX-01 made of?');
+  await button('开始测试').click();
+  await page.locator('.kb-hit').filter({ hasText: 'Aluminium alloy' }).first().waitFor();
+  await page.getByLabel('测试问题').fill('What material is Shuangsheng ZX-01 made of?');
+  await button('开始测试').click();
+  await page.getByText('匹配片段 · 0').waitFor();
+  await button('数据集').click();
+  const nameColumn = page.getByRole('columnheader', { name: '集合名称' });
+  await nameColumn.getByRole('button').click();
+  await nameColumn.and(page.locator('[aria-sort="ascending"]')).waitFor();
+  await page.getByRole('checkbox', { name: '选择 care-note', exact: true }).check();
+  await page.getByText('已选择 1 项').waitFor();
+  await button('取消选择').click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await button('素材库信息').click();
+  await button('关闭素材库信息').click();
+  await button('预览 material-mixed-catalog').click();
+  await button('文件信息').click();
+  await button('关闭文件信息').click();
+  await page.getByRole('searchbox', { name: '搜索引用片段' }).fill('第 2 页');
+  await spec.getByRole('button', { name: '编辑片段' }).click();
+  await chunkEditor.getByRole('button', { name: '对照原文' }).click();
+  await chunkEditor.locator('iframe[src$="page=2"],a[href$="#page=2"]').first().waitFor();
+  assert.ok(await chunkEditor.evaluate((e) => e.scrollWidth <= e.clientWidth + 1));
+  await chunkEditor.getByRole('button', { name: '取消', exact: true }).click();
+  console.log('PASS 素材库文件排序与选择、实际邮箱检索命中与隔离、手机分块编辑对照原页。');
 } catch (e) {
   console.error(
     '测试收件处理',

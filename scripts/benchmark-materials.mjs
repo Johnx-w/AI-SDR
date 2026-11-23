@@ -58,6 +58,7 @@ try {
   const base = 'http://127.0.0.1:' + app.address().port + '/api/v1/materials?';
   for (const [label, params, total, first] of [
     ['首页', {}, count, 2499],
+    ['名称升序第2页', { sort: 'name-asc', page: '2' }, count, 1015],
     ['第100页', { page: '100' }, count, 519],
     [
       '组合筛选',

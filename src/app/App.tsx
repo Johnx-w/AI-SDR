@@ -52,7 +52,7 @@ const nav = [
   { path: '/leads', name: '客户库', icon: UsersRound },
   { path: '/business', name: '跟进任务', icon: ClipboardList },
   { path: '/inbox', name: '沟通中心', icon: MessageSquare },
-  { path: '/materials', name: '产品与资料', icon: FolderOpen },
+  { path: '/materials', name: '素材库', icon: FolderOpen },
   { path: '/settings', name: 'API 连接', icon: Settings2 },
 ];
 export function App({

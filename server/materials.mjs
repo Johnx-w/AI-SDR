@@ -1,9 +1,14 @@
 import { createHash } from 'node:crypto';
 import { mailSite, siteAllowsProduct } from '../src/domain/mail-site.mjs';
 import { materialType, validateFile } from './material-formats.mjs';
-import { parsesLocally } from './product-documents.mjs';
 
 const fail = (status, msg) => Object.assign(new Error(msg), { status });
+const collectionOrders = new Map([
+  ['updated-desc', 'updatedAt DESC'],
+  ['updated-asc', 'updatedAt ASC'],
+  ['name-asc', 'name COLLATE NOCASE ASC'],
+  ['name-desc', 'name COLLATE NOCASE DESC'],
+]);
 const formats = {
   'application/pdf': 'PDF',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'Word',
@@ -68,6 +73,7 @@ export class MaterialLibrary {
     status = 'active',
     page = 1,
     pageSize = 20,
+    sort = 'updated-desc',
   } = {}) {
     page = Number(page);
     pageSize = Number(pageSize);
@@ -77,6 +83,7 @@ export class MaterialLibrary {
       page > 100000 ||
       ![10, 20, 50].includes(pageSize) ||
       String(q).length > 200 ||
+      !collectionOrders.has(sort) ||
       !['active', 'draft', 'approved', 'archived', 'all'].includes(status)
     )
       throw fail(400, '素材筛选条件无效');
@@ -84,7 +91,13 @@ export class MaterialLibrary {
     const fields = `p.id,json_extract(p.data,'$.name') AS name,json_extract(p.data,'$.version') AS version,json_extract(p.data,'$.status') AS status,
       json_extract(p.data,'$.updatedAt') AS updatedAt,COALESCE(json_extract(p.data,'$.materialCategory'),'未分类') AS category,
       COALESCE(json_extract(p.data,'$.keywords'),'[]') AS keywords, json_extract(p.data,'$.sourceUrl') AS sourceUrl, json_extract(p.data,'$.brands') AS brands,
-      d.id AS documentId,json_extract(d.metadata,'$.contentType') AS contentType,COALESCE(json_extract(d.metadata,'$.size'),0) AS size,asset_format(json_extract(d.metadata,'$.contentType')) AS format`;
+      d.id AS documentId,json_extract(d.metadata,'$.contentType') AS contentType,COALESCE(json_extract(d.metadata,'$.size'),0) AS size,asset_format(json_extract(d.metadata,'$.contentType')) AS format,
+      CASE WHEN d.extraction IS NULL THEN 'pending'
+           WHEN json_extract(d.extraction,'$.model')='failed' THEN 'failed'
+           WHEN json_extract(d.extraction,'$.model')='manual' THEN 'manual'
+           WHEN json_array_length(d.extraction,'$.facts')=0 AND json_type(d.extraction,'$.sheets') IS NULL THEN 'pending'
+           ELSE 'ready' END AS extractionStatus,
+      COALESCE(json_array_length(d.extraction,'$.facts'),0) AS extractionCount`;
     const cond = ['documentId IS NOT NULL'],
       args = [];
     if (q) {
@@ -126,21 +139,16 @@ export class MaterialLibrary {
     page = Math.min(page, Math.max(1, Math.ceil(total / pageSize)));
     const rows = this.db
       .prepare(
-        `SELECT visible.*, (SELECT json_array(w.sheet,
-        substr(json_extract(w.data,'$[0].field'),1,48),substr(json_extract(w.data,'$[0].value'),1,64),
-        substr(json_extract(w.data,'$[1].field'),1,48),substr(json_extract(w.data,'$[1].value'),1,64),
-        substr(json_extract(w.data,'$[2].field'),1,48),substr(json_extract(w.data,'$[2].value'),1,64))
-        FROM product_workbook_rows w WHERE w.document_id=visible.documentId
-        ORDER BY w.sheet,w.row_number LIMIT 1) preview FROM (SELECT *` +
-          select +
-          ' ORDER BY updatedAt DESC,id LIMIT ? OFFSET ?) visible',
+        'SELECT *' + select + ' ORDER BY ' + collectionOrders.get(sort) + ',id LIMIT ? OFFSET ?',
       )
       .all(...args, pageSize, (page - 1) * pageSize);
     const items = rows.map(({ brands, sourceUrl, ...x }) => ({
       ...x,
+      extractionStatus: this.k.documents.running.has(x.documentId)
+        ? 'processing'
+        : x.extractionStatus,
       sites: scoped({ sourceUrl, brands: JSON.parse(brands || '[]') }, this.sites),
       keywords: JSON.parse(x.keywords),
-      preview: x.preview ? JSON.parse(x.preview) : null,
     }));
     const categories = this.db
       .prepare(
@@ -221,7 +229,7 @@ export class MaterialLibrary {
     };
     // Parse outside the write transaction. A bad replacement must leave the active version usable.
     let prepared;
-    if (id && parsesLocally(contentType) && !findRequest.get(key)) {
+    if (id && !findRequest.get(key)) {
       currentVersion();
       prepared = await this.k.documents.prepareReplacement(file, onPage);
     }
@@ -266,7 +274,9 @@ export class MaterialLibrary {
       if (
         prepared &&
         (!document.extraction ||
-          (contentType === 'application/pdf' && !document.extraction.facts.length))
+          document.extraction.model === 'failed' ||
+          ((contentType === 'application/pdf' || contentType.startsWith('image/')) &&
+            !document.extraction.facts.length))
       )
         this.k.documents.saveLocalExtraction(document.id, prepared);
       const ids = product.documentIds || [];
@@ -293,11 +303,11 @@ export class MaterialLibrary {
     });
     let warning = '';
     try {
-      if (!prepared && parsesLocally(contentType))
+      if (!prepared)
         await this.k.documents.extract(record.id, record.documentId, {
           env,
           fetchImpl,
-          pdfText: true,
+          material: true,
           onPage,
         });
     } catch (e) {

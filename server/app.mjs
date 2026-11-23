@@ -226,7 +226,7 @@ export function createApp({
     (products ??= new ProductCatalog(env.PRODUCT_DB_PATH || env.BATCH_DB_PATH || ':memory:'));
   let productKnowledge;
   const materialUploads = new Map();
-  const materialPdfJobs = new Map();
+  const materialJobs = new Map();
   const knowledge = () =>
     (productKnowledge ??= new ProductKnowledge(
       env.PRODUCT_KNOWLEDGE_DB_PATH || env.PRODUCT_DB_PATH || env.BATCH_DB_PATH || ':memory:',
@@ -609,7 +609,7 @@ export function createApp({
         if (url.pathname === '/api/v1/materials' || url.pathname.startsWith('/api/v1/materials/'))
           return await handleMaterials({
             uploads: materialUploads,
-            pdfJobs: materialPdfJobs,
+            jobs: materialJobs,
             request,
             response,
             url,

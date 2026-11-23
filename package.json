@@ -41,6 +41,7 @@
     "read-excel-file": "9.3.20",
     "sanitize-html": "^2.18.1",
     "saxen": "11.2.0",
+    "sharp": "0.35.5",
     "tesseract.js": "7.0.0",
     "unzipper-esm": "0.13.3"
   },
