@@ -167,12 +167,27 @@ export async function handleOutreach({
     const body = await readJson(request);
     return { mailboxes: await service.mailboxes.import(body.items, () => service.salesProducts()) };
   }
-  const mailbox = path.match(/^\/mailboxes\/([\w-]+)(?:\/(verify|preview|note))?$/);
+  const mailbox = path.match(/^\/mailboxes\/([\w-]+)(?:\/(verify|preview|note|writing))?$/);
   if (mailbox) {
     const [, id, action] = mailbox;
     if (!action && method === 'GET') return service.mailboxes.get(id, { withBusinessNote: true });
     if (action === 'note' && method === 'PATCH')
       return service.mailboxes.saveNote(id, await readJson(request));
+    if (action === 'writing' && method === 'PATCH') {
+      const body = await readJson(request);
+      if (
+        !body ||
+        typeof body !== 'object' ||
+        Array.isArray(body) ||
+        !Object.keys(body).length ||
+        Object.keys(body).some(
+          (key) => !['draftPersona', 'knowledgeProductIds', 'businessNote'].includes(key),
+        )
+      )
+        throw fail(400, '请选择此邮箱的起草身份或回复资料');
+      service.mailboxes.get(id);
+      return service.mailboxes.save({ ...body, id });
+    }
     if (action === 'verify' && method === 'POST') {
       const mailbox = await service.mailboxes.verify(id);
       if (url.searchParams.get('check') === 'both') {

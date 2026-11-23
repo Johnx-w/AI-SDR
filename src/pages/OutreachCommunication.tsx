@@ -222,14 +222,16 @@ function MailboxEditor({
   mailbox: OutreachMailbox | null;
   products: OutreachProduct[];
   onClose: () => void;
-  onSave: (input: MailboxInput | null, businessNote?: string) => Promise<void>;
+  onSave: (input: Partial<MailboxInput> | null, businessNote?: string) => Promise<void>;
 }) {
   const [businessNote, setBusinessNote] = useState(mailbox?.businessNote || '');
-  const initialSettings = useRef<string | null>(null);
+  const initialSettings = useRef<MailboxInput | null>(null);
   const [knowledge, setKnowledge] = useState(mailbox?.knowledgeProductIds || []);
   const [site, setSite] = useState(mailbox?.website || '');
   const [brand, setBrand] = useState(mailbox?.brandName || '');
-  const [replyMode, setReplyMode] = useState(mailbox?.replyMode || 'manual');
+  const [replyMode, setReplyMode] = useState<
+    NonNullable<OutreachMailbox['replyMode']> | 'business'
+  >(mailbox?.autoBusinessReplies ? 'business' : mailbox?.replyMode || 'manual');
   const [email, setEmail] = useState(mailbox?.email || '');
   const domain = email.split('@')[1] || '';
   const website = site || (domain ? 'https://' + domain : '');
@@ -256,7 +258,9 @@ function MailboxEditor({
       website,
       brandName: identity.brandName,
       owner: String(form.get('owner') || displayName),
-      replyMode,
+      replyMode: replyMode === 'business' ? 'auto' : replyMode,
+      autoBusinessReplies: replyMode === 'business',
+      draftPersona: String(form.get('draftPersona') || '').trim(),
       knowledgeProductIds: knowledge.filter((id) => allowedKnowledge.some((p) => p.id === id)),
       displayName,
       ...(signatureDesign ? { signatureDesign } : { signature }),
@@ -271,14 +275,28 @@ function MailboxEditor({
     event.preventDefault();
     if (busy || uploadingLogo) return;
     const input = readSettings(event.currentTarget);
-    const onlyNote = !!mailbox && JSON.stringify(input) === initialSettings.current;
-    if (!onlyNote && !event.currentTarget.reportValidity()) return;
+    const changed =
+      mailbox && initialSettings.current
+        ? Object.fromEntries(
+            Object.entries(input).filter(
+              ([key, value]) =>
+                JSON.stringify(value) !==
+                JSON.stringify(initialSettings.current?.[key as keyof MailboxInput]),
+            ),
+          )
+        : input;
+    const edits = Object.keys(changed);
+    if (
+      edits.some((key) => !['draftPersona', 'knowledgeProductIds'].includes(key)) &&
+      !event.currentTarget.reportValidity()
+    )
+      return;
     setBusy(true);
     setError(null);
     try {
       const note = businessNote.trim();
       await onSave(
-        onlyNote ? null : input,
+        edits.length ? changed : null,
         note === (mailbox?.businessNote || '') ? undefined : note,
       );
       onClose();
@@ -300,7 +318,7 @@ function MailboxEditor({
         className="modal-body outreach-form"
         ref={(element) => {
           if (element && initialSettings.current === null)
-            initialSettings.current = JSON.stringify(readSettings(element));
+            initialSettings.current = readSettings(element);
         }}
         onSubmit={(event) => void save(event)}
         noValidate
@@ -396,22 +414,30 @@ function MailboxEditor({
             >
               <option value="manual">业务员手动回复</option>
               <option value="review">生成草稿，逐封审核</option>
-              <option value="auto">有明确依据时自动回复</option>
+              <option value="business">自动回复常规业务与已核实的产品问题</option>
+              <option value="auto">仅自动回复已核实的产品问题</option>
             </select>
           </label>
-          {replyMode !== 'manual' && (
-            <>
-              <h4>回复可用资料</h4>
-              <ProductOptions
-                products={allowedKnowledge}
-                selected={knowledge}
-                onChange={setKnowledge}
-                approvedOnly
-                emptyText="请先在产品资料中审核并填写此官网或适用品牌。"
-              />
-              <Link to="/materials">管理产品资料</Link>
-            </>
-          )}
+          <label>
+            AI起草身份与语气
+            <textarea
+              name="draftPersona"
+              rows={3}
+              maxLength={2000}
+              defaultValue={mailbox?.draftPersona || ''}
+              placeholder="例如：你是本品牌的工程项目销售。先回应客户当前项目，再提出方便采购团队执行的下一步。"
+            />
+            <small>留空时按本品牌外贸业务员的身份撰写正式邮件。</small>
+          </label>
+          <h4>回复可用资料</h4>
+          <ProductOptions
+            products={allowedKnowledge}
+            selected={knowledge}
+            onChange={setKnowledge}
+            approvedOnly
+            emptyText="请先在产品资料中审核并填写此官网或适用品牌。"
+          />
+          <Link to="/materials">管理产品资料</Link>
           <small>已开启的未回复跟进会沿用首封邮件线程，客户回信后停止。</small>
         </div>
         <div className="outreach-form-section">
@@ -1366,12 +1392,15 @@ export function OutreachCommunication({
       setBusy(null);
     }
   }
-  async function saveMailbox(input: MailboxInput | null, businessNote?: string) {
+  async function saveMailbox(input: Partial<MailboxInput> | null, businessNote?: string) {
     const mailbox = mailboxEditor?.value;
     const path = mailbox ? pathFor('mailboxes', mailbox.id) : '/mailboxes';
     if (input) {
-      await outreachApi(path, {
-        method: mailbox ? 'PUT' : 'POST',
+      const writingOnly =
+        mailbox &&
+        Object.keys(input).every((key) => ['draftPersona', 'knowledgeProductIds'].includes(key));
+      await outreachApi(writingOnly ? path + '/writing' : path, {
+        method: writingOnly ? 'PATCH' : mailbox ? 'PUT' : 'POST',
         body: JSON.stringify({ ...input, businessNote }),
       });
       setSignatureRefresh((current) => current + 1);

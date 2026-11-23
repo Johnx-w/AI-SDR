@@ -10,22 +10,6 @@ const MAX_INLINE_IMAGE_BYTES = 512 * 1024;
 const MAX_INLINE_TOTAL_BYTES = 2 * 1024 * 1024;
 const MAX_INLINE_WIRE_BYTES = MAX_INLINE_IMAGE_BYTES * 3 + 4096;
 const INLINE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
-const HEADERS = [
-  'from',
-  'to',
-  'cc',
-  'reply-to',
-  'subject',
-  'date',
-  'message-id',
-  'in-reply-to',
-  'references',
-  'auto-submitted',
-  'precedence',
-  'list-id',
-  'x-autoreply',
-  'x-autorespond',
-];
 export class MailboxReadError extends Error {
   constructor(code = 'MAILBOX_READ_FAILED') {
     const failure = mailSyncFailure({ code });
@@ -184,12 +168,15 @@ export function createMailboxReader({
     throw invalid();
 
   async function readMessage(client, metadata, folder, since, initial) {
-    if (!Buffer.isBuffer(metadata.headers) || metadata.headers.length > MAX_HEADERS_BYTES)
-      return null;
+    if (!Buffer.isBuffer(metadata.headers)) return null;
     const receivedAt = instant(metadata.internalDate);
     if (!receivedAt) return null;
     if (initial && Date.parse(receivedAt) < Date.parse(since)) return null;
-    const headers = await parseMessage(metadata.headers, parseOptions());
+    const completeHeaders = metadata.headers.length <= MAX_HEADERS_BYTES;
+    const headers = await parseMessage(
+      completeHeaders ? metadata.headers : Buffer.from('\r\n'),
+      parseOptions(),
+    );
     const from = addresses(headers.from ?? metadata.envelope?.from);
     const to = addresses(headers.to ?? metadata.envelope?.to);
     const cc = addresses(headers.cc ?? metadata.envelope?.cc);
@@ -283,7 +270,11 @@ export function createMailboxReader({
       uid: uid(metadata.uid),
       folder: folder.path,
       direction: folder.sent || from[0] === normalizedAccount ? 'outbound' : 'inbound',
-      classification: automaticReply(headers.headers) ? 'auto_reply' : 'normal',
+      classification: !completeHeaders
+        ? 'unverified'
+        : automaticReply(headers.headers)
+          ? 'auto_reply'
+          : 'normal',
       from: from[0],
       fromName: clean(
         headers.from?.value?.[0]?.name || metadata.envelope?.from?.[0]?.name || '',
@@ -355,7 +346,8 @@ export function createMailboxReader({
             envelope: true,
             flags: true,
             internalDate: true,
-            headers: HEADERS,
+            // Alibaba omits Auto-Submitted from HEADER.FIELDS even when present in HEADER.
+            headers: true,
             bodyStructure: true,
           },
           { uid: true },

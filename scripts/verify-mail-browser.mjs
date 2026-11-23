@@ -33,6 +33,9 @@ const me = 'sales@honeybadgerblinds.com',
   peer = 'buyer@dealer.test',
   inbox = [],
   sent = [];
+const persona = '以工程项目销售的身份写正式英文回信，给采购团队一个明确的下一步。';
+const introduction =
+  'Dear Jordan,\n\nI understand that your purchasing team reviews supplier enquiries. Please forward this note to the colleague responsible for your project so they have a direct point of contact.\n\nA short outline of their purchasing priorities would help us prepare a focused discussion. They are welcome to reply in this thread when convenient.';
 const crm = new CustomerBusiness({
   customer: async (id) => (id === 'qa' ? { record_id: id } : null),
 });
@@ -113,7 +116,13 @@ const app = createApp({
     const payload = JSON.parse(init.body);
     assert.match(payload.model, /deepseek/i);
     const data = JSON.parse(payload.messages.find((message) => message.role === 'user').content);
+    assert.ok(payload.messages[0].content.includes(persona));
     assert.equal(data.website, 'honeybadgerblinds.com');
+    if (data.incoming.subject === 'Purchasing introduction') {
+      assert.deepEqual(data.evidence, []);
+      const content = JSON.stringify({ body: introduction, sourceIndexes: [] });
+      return Response.json({ choices: [{ finish_reason: 'stop', message: { content } }] });
+    }
     const material = data.evidence.findIndex((source) => source.value === 'Aluminium alloy');
     assert.ok(material >= 0, '应使用已校对的已选资料');
     await modelGate;
@@ -153,7 +162,7 @@ try {
   await label('业务员姓名 / 发件人名称').fill('Jo');
   await label('负责人').fill('Jo');
   await page.locator('input[name=password]').fill('browser-test-only');
-  assert.equal(await page.getByRole('checkbox', { name: /QA 布艺帘轨道/ }).count(), 0);
+  assert.equal(await page.getByRole('checkbox', { name: /QA 布艺帘轨道/ }).isChecked(), false);
   await label('业务备注').fill('周五交接客户');
   await button('保存邮箱').click();
   await page.getByRole('dialog').waitFor({ state: 'hidden' });
@@ -207,7 +216,18 @@ try {
   await page.goto(base + '/inbox');
   await button('配置').click();
   const mode = page.getByRole('combobox', { name: /接待方式/ });
-  assert.equal(await page.getByRole('checkbox', { name: /mail-specimen/ }).count(), 0);
+  assert.equal(await page.getByRole('checkbox', { name: /mail-specimen/ }).isChecked(), false);
+  await page.getByRole('textbox', { name: /AI起草身份与语气/ }).fill(persona);
+  await button('保存邮箱').click();
+  await page.getByRole('dialog').waitFor({ state: 'hidden' });
+  await button('配置').click();
+  assert.equal(await page.getByRole('textbox', { name: /AI起草身份与语气/ }).inputValue(), persona);
+  await mode.selectOption('business');
+  await button('保存邮箱').click();
+  await page.getByRole('dialog').waitFor({ state: 'hidden' });
+  assert.equal(boxes.get(configuration.id).autoBusinessReplies, true);
+  await button('配置').click();
+  assert.equal(await mode.inputValue(), 'business');
   await mode.selectOption('review');
   await page.getByRole('checkbox', { name: /mail-specimen/ }).check();
   await button('保存邮箱').click();
@@ -476,6 +496,35 @@ try {
   console.log(
     'PASS 桌面及手机端 AI起草仅生成待审核草稿，保护已有/并发草稿，模型替身按已选资料引用，刷新后保留且未新增发信',
   );
+  service.conversations.putMessage(mailbox, {
+    identity: 'intro-request',
+    messageId: '<intro@dealer.test>',
+    direction: 'inbound',
+    from: peer,
+    to: me,
+    toAddresses: [me],
+    subject: 'Purchasing introduction',
+    bodyText: 'Please send an introduction I can forward to purchasing.',
+    source: 'imap',
+    deliveryStatus: 'received',
+    occurredAt: '2025-02-12T09:00:00Z',
+  });
+  const introThread = service.conversations.list({
+    mailboxId: mailbox.id,
+    q: 'Purchasing introduction',
+  }).items[0];
+  await page.goto(
+    base +
+      '/inbox?' +
+      new URLSearchParams({ tab: 'inbox', thread: introThread.id, mailboxId: mailbox.id }),
+  );
+  await assist.click();
+  await page.getByText('AI草稿 · 待审核', { exact: true }).waitFor();
+  assert.match(await editor.innerText(), /colleague responsible/);
+  assert.deepEqual(service.replies.draft(introThread.id).provenance.sources, []);
+  assert.equal(sent.length, sentBefore);
+  assert.deepEqual(pageErrors, []);
+  console.log('PASS 正式邮箱身份保存与重开、常规自动回复模式选择、无匹配资料起草完整采购转介邮件');
 } catch (e) {
   console.error(
     '测试收件处理',
