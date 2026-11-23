@@ -769,6 +769,25 @@ try {
   await page.locator('.workspace-nav-hint').filter({ hasText: 'API 连接' }).waitFor();
   await page.keyboard.press('Escape');
   await page.locator('.workspace-nav-hint').waitFor({ state: 'detached' });
+  await settingsLink.click();
+  const apiNav = page.getByRole('navigation', { name: 'API 连接栏目' });
+  await page.locator('#WEB_SEARCH_BASE_URL').fill('https://search.example.test');
+  await apiNav.getByRole('button', { name: '飞书同步' }).click();
+  await page.locator('#FEISHU_APP_ID').fill('test-navigation-only');
+  await apiNav.getByRole('button', { name: '大语言模型 API' }).click();
+  assert.equal(await page.locator('.connection-group').count(), 3);
+  assert.equal(await page.locator('#FEISHU_APP_ID').count(), 0);
+  await page.goBack();
+  assert.equal(await page.locator('#FEISHU_APP_ID').inputValue(), 'test-navigation-only');
+  await apiNav.getByRole('button', { name: '搜索 API' }).click();
+  assert.equal(
+    await page.locator('#WEB_SEARCH_BASE_URL').inputValue(),
+    'https://search.example.test',
+  );
+  await apiNav.getByRole('button', { name: '大语言模型 API' }).click();
+  await page.reload();
+  await page.getByRole('heading', { name: '大语言模型 API', exact: true }).waitFor();
+  console.log('PASS 一级导航悬停提示、API 连接三栏切换与跨栏编辑保留。');
 } catch (e) {
   console.error(
     '测试收件处理',
