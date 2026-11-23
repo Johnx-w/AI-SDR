@@ -355,10 +355,11 @@ try {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
   await page.setViewportSize({ width: 541, height: 773 });
   await page.waitForFunction(() => {
-    const workspace = document
-      .querySelector('.mail-conversations-workspace')
-      ?.getBoundingClientRect();
-    return workspace && workspace.height >= 515 && workspace.bottom <= innerHeight;
+    const list = document.querySelector('.mail-conversation-list')?.getBoundingClientRect();
+    const detail = document.querySelector('.mail-conversation-detail')?.getBoundingClientRect();
+    return (
+      list && detail && list.height >= 500 && detail.height >= 620 && list.bottom <= detail.top + 1
+    );
   });
   await page.setViewportSize({ width: 390, height: 667 });
   const readingPane = page.locator('.inbox-thread-scroll');
@@ -374,7 +375,9 @@ try {
     sendBounds && sendBounds.y + sendBounds.height <= 667,
     '短屏手机展开编辑后可看到发送按钮',
   );
-  await button('返回会话列表').click();
+  await page
+    .locator('.mail-conversation-list')
+    .evaluate((element) => element.scrollIntoView({ block: 'start', behavior: 'instant' }));
   await page.getByRole('button', { name: /QA accepted first email/ }).waitFor();
   const firstThreadId = linkedThread.get('thread');
   service.transaction(() => {
@@ -676,7 +679,7 @@ try {
   const readingViewports = [
     { width: 1600, height: 900, minBodyHeight: 535 },
     { width: 1397, height: 773, minBodyHeight: 435 },
-    { width: 541, height: 773, minBodyHeight: 460 },
+    { width: 541, height: 773, minBodyHeight: 450 },
   ];
   for (const { width, height, minBodyHeight } of readingViewports) {
     await page.setViewportSize({ width, height });
@@ -686,6 +689,10 @@ try {
     const rows = page.locator('.mail-conversation-items');
     const selectedRow = rows.getByRole('button', { name: /Panel request dealer-25/ });
     await selectedRow.waitFor();
+    await page.getByText('邮件会话', { exact: true }).waitFor();
+    await label('共 26 段会话').waitFor();
+    assert.equal(await label('筛选会话邮箱').inputValue(), box.id);
+    assert.equal(await label('其他处理状态').inputValue(), '');
     assert.equal(await page.locator('.mail-sync-summary').getAttribute('open'), null);
     const narrow = width === 541;
     const pageTitle = page.locator('.page-heading h1');
@@ -697,9 +704,11 @@ try {
     const workspace = page.locator('.mail-conversations-workspace');
     const workspaceHeight = await workspace.evaluate((el) => el.getBoundingClientRect().height);
     const initialRows = await rows.evaluate(completeListRows);
-    assert.ok(initialRows >= (narrow ? 2 : 3), JSON.stringify({ width, initialRows }));
+    assert.ok(initialRows >= 2, JSON.stringify({ width, initialRows }));
     assert.ok(workspaceHeight >= height - 100, JSON.stringify({ height, workspaceHeight }));
-    await workspace.evaluate((el) => el.scrollIntoView({ block: 'end', behavior: 'instant' }));
+    if (narrow)
+      await rows.evaluate((el) => el.scrollIntoView({ block: 'start', behavior: 'instant' }));
+    else await workspace.evaluate((el) => el.scrollIntoView({ block: 'end', behavior: 'instant' }));
     const completeRows = await rows.evaluate(completeListRows);
     const listHeight = await rows.evaluate((list) => list.clientHeight);
     assert.equal(completeRows, Math.floor(listHeight / 147), '可见区域应排满固定高度的会话行');
@@ -738,9 +747,15 @@ try {
     assert.ok(remoteImageRequests.length > 0, '打开原邮件后应自动请求外链图片');
     assert.equal(await button('加载图片').count(), 0);
     if (narrow) {
-      await pageTitle.waitFor({ state: 'hidden' });
-      assert.equal(await tab('收件箱').isVisible(), false);
-      assert.equal(await rows.isVisible(), false);
+      await pageTitle.waitFor();
+      await tab('收件箱').waitFor();
+      await rows.waitFor();
+      const stacked = await page.locator('.mail-conversations-workspace').evaluate((element) => {
+        const list = element.querySelector('.mail-conversation-list').getBoundingClientRect();
+        const detail = element.querySelector('.mail-conversation-detail').getBoundingClientRect();
+        return list.bottom <= detail.top + 1;
+      });
+      assert.equal(stacked, true, '窄屏应按参考页把会话详情排在列表下方');
     }
     const html = await viewer.evaluate(visibleReply);
     assert.equal(await contact.isVisible(), false, '正常进入会话时保留完整阅读宽度');
@@ -756,9 +771,7 @@ try {
     assert.equal((await viewer.evaluate(visibleReply)).paneWidth, plain.paneWidth);
     await viewer.getByRole('button', { name: '原邮件' }).click();
     await viewer.frameLocator('iframe').getByText(longReply[0], { exact: true }).waitFor();
-    const back = button('返回会话列表');
     if (narrow) {
-      await back.click();
       await pageTitle.waitFor();
       await tab('收件箱').waitFor();
       assert.equal(await label('筛选会话邮箱').inputValue(), box.id);
@@ -769,7 +782,6 @@ try {
       .locator('.inbox-message[open] .mail-conversation-body')
       .getByText('Please quote 72 mm panels for dealer-24', { exact: true })
       .waitFor();
-    if (narrow) await back.click();
     await rows.waitFor();
     const result = { width, height, workspaceHeight, initialRows, completeRows, html, plain };
     const workspaceWidth = await page
@@ -786,7 +798,7 @@ try {
   }
   console.log('首屏及完整工作区度量', JSON.stringify(layoutResults));
   for (const result of layoutResults) {
-    assert.ok(result.completeRows >= 3, JSON.stringify(result));
+    assert.ok(result.completeRows >= (result.width === 541 ? 2 : 3), JSON.stringify(result));
     assert.ok(result.html.lines >= 10 && result.plain.lines >= 10, JSON.stringify(result));
   }
   readerFails = true;

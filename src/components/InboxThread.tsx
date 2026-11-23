@@ -432,9 +432,17 @@ export function InboxThread({
           >
             <ArrowLeft size={17} />
           </button>
-          <h2 className="inbox-thread-title" title={subject} tabIndex={0}>
-            {subject}
-          </h2>
+          <div className="inbox-thread-heading">
+            <InboxAvatar name={title} />
+            <div>
+              <h2 className="inbox-thread-title" title={subject} tabIndex={0}>
+                {subject}
+              </h2>
+              <p>
+                {title} · 更新于 {timePart(t.updatedAt, day)} {timePart(t.updatedAt, clock)}
+              </p>
+            </div>
+          </div>
           <div className="inbox-tool-end">
             {t.unread && (
               <button

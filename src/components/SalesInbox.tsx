@@ -173,6 +173,14 @@ export function SalesInbox({
     setDetail(null);
     setDetailError('');
   }, []);
+  function revealDetailOnNarrowScreen() {
+    if (!window.matchMedia('(max-width: 760px)').matches) return;
+    window.requestAnimationFrame(() => {
+      workspace.current
+        ?.querySelector<HTMLElement>('.mail-conversation-detail')
+        ?.scrollIntoView({ block: 'start', behavior: 'instant' });
+    });
+  }
   function backToList() {
     selectConversation(null);
     requestAnimationFrame(() => {
@@ -262,13 +270,7 @@ export function SalesInbox({
                 : value.items.find((t) => t.id === selected.current)?.id;
             loadedFilter.current = filterKey;
             const first = value.items[0]?.id;
-            const wide =
-              typeof window.matchMedia === 'function' &&
-              window.matchMedia('(min-width:1101px)').matches;
-            const next =
-              linkedThread.current ||
-              retained ||
-              ((customerId && inboundOnly) || wide ? first : null);
+            const next = linkedThread.current || retained || first;
             linkedThread.current = '';
             selectConversation(next || null);
           })
@@ -465,6 +467,12 @@ export function SalesInbox({
         className={`mail-conversations-workspace panel ${selectedId ? 'has-selection' : 'no-selection'}`}
       >
         <aside className="mail-conversation-list" aria-label="邮件会话列表" aria-busy={loading}>
+          <div className="inbox-list-title">
+            <strong>{review ? '待审草稿' : '邮件会话'}</strong>
+            <span aria-live="polite" aria-label={`共 ${list?.total ?? '…'} 段会话`}>
+              {list ? `${list.total} 个` : '更新中'}
+            </span>
+          </div>
           <div className="inbox-list-head">
             <Inbox size={16} />
             {review ? (
@@ -487,9 +495,6 @@ export function SalesInbox({
                 )}
               </select>
             )}
-            <span className="inbox-list-count" aria-label={`共 ${list?.total ?? '…'} 段会话`}>
-              {list?.total ?? '…'}
-            </span>
             {!review && (
               <div className="inbox-scopes" role="group" aria-label="会话筛选">
                 {primaryViews.map(([key, label]) => (
@@ -565,6 +570,7 @@ export function SalesInbox({
                     onClick={(event) => {
                       openedRow.current = event.currentTarget;
                       selectConversation(thread.id);
+                      revealDetailOnNarrowScreen();
                     }}
                   >
                     <span className="mail-conversation-row-top">
