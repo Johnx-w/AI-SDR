@@ -83,6 +83,8 @@ T1/T3 与独立 T4 目标分别同步，共享同一份去重日志，避免多�
 
 在 API 连接的「产品资料 · 图纸与规格识别」填写 `DOCUMENT_MODEL_BASE_URL`、`DOCUMENT_MODEL_API_KEY`、`DOCUMENT_MODEL_MODEL`。服务须支持 Responses API、图片/PDF 输入及 JSON Schema 输出；基础地址包括服务商所需的 `/v1`（例如 `https://api.openai.com/v1`）。本功能不自动借用企业研究模型。文件输入协议参见 [OpenAI File inputs](https://developers.openai.com/api/docs/guides/file-inputs) 和 [Images and vision](https://developers.openai.com/api/docs/guides/images-vision)。
 
+仅保存或清除这三项资料识别配置时，应用保留当前获客引擎，并在后续提取请求中使用新配置。当前正在提取资料时须等待提取完成。同时提交其他连接字段时，沿用任务空闲后才能修改的校验。回归入口为 `node --test tests/batch-api.test.mjs tests/product-documents.test.mjs`，覆盖运行中获客、独立保存与清除、混合配置拦截及提取中的配置保护。
+
 上传只写入本地库；用户点击 AI 提取才将原文件发送到已配置的模型服务。AI 结果单独保存为候选，保留页序号、位置、模型和提取时间。模糊标注及不确定归属列为提示；价格、MOQ、交期等需人工另行填写并沿用其适用条件和有效期规则。超过 60 条参数的文件应拆分，不能视为完整提取。网络失败、截断或无效输出不改动产品资料，原文件保留，可重试；成功结果重试直接复用。
 
 在「原件与校对」保存带位置的校对结果，填写审核人并审核通过。资料变更后按新版本审核。邮箱只能选择本站有效资料作为回复依据。原文件保存在资料库，回复按所选来源生成，不自动附加原件。
