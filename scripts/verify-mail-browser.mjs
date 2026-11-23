@@ -762,6 +762,13 @@ try {
     );
   }
   console.log('PASS 共用主栏、模块栏目切换与刷新、资料校对收起和展开导航。');
+  const settingsLink = page
+    .locator('.sidebar')
+    .getByRole('link', { name: 'API 连接', exact: true });
+  await settingsLink.hover();
+  await page.locator('.workspace-nav-hint').filter({ hasText: 'API 连接' }).waitFor();
+  await page.keyboard.press('Escape');
+  await page.locator('.workspace-nav-hint').waitFor({ state: 'detached' });
 } catch (e) {
   console.error(
     '测试收件处理',
