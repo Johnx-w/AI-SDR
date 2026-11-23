@@ -1,4 +1,4 @@
-import { checkMaterialSize } from '../domain/material-upload.mjs';
+import { checkMaterialSize, materialPartBytes } from '../domain/material-upload.mjs';
 
 export const materialFormats = ['PDF', 'Word', 'Markdown', 'TXT', 'Excel', '图片', '视频'];
 export const acceptMaterials =
@@ -97,14 +97,26 @@ export async function uploadMaterial(
   if (options.site) q.set('site', options.site);
   if (options.category) q.set('category', options.category);
   if (options.version) q.set('version', String(options.version));
-  return materialsRequest<{ id: string; documentId: string; warning: string; reused: boolean }>(
-    (options.id ? '/' + options.id + '/versions' : '') + '?' + q,
-    {
+  const path = options.id ? '/' + options.id + '/versions' : '';
+  const headers = { 'Content-Type': 'application/octet-stream', 'Idempotency-Key': key };
+  type Result = { id: string; documentId: string; warning: string; reused: boolean };
+  if (file.size <= materialPartBytes)
+    return materialsRequest<Result>(path + '?' + q, { method: 'POST', headers, body: file });
+  const parts = path + '/parts?' + q;
+  for (let start = 0; ; start += materialPartBytes) {
+    const end = Math.min(file.size, start + materialPartBytes);
+    const init = {
       method: 'POST',
-      headers: { 'Content-Type': 'application/octet-stream', 'Idempotency-Key': key },
-      body: file,
-    },
-  );
+      headers: {
+        ...headers,
+        'Content-Range': 'bytes ' + start + '-' + (end - 1) + '/' + file.size,
+      },
+      body: file.slice(start, end),
+    };
+    if (end === file.size) return materialsRequest<Result>(parts, init);
+    const { received } = await materialsRequest<{ received: number }>(parts, init);
+    if (received !== end) throw new Error('素材分段未完整接收，请重新上传');
+  }
 }
 export const fileSize = (n: number) =>
   n >= 1048576

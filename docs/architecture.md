@@ -138,7 +138,9 @@ Node.js 后端仅监听 127.0.0.1，API 保留本机来源及跨站请求限制�
 
 80 端口只提供 `/.well-known/acme-challenge/` 的证书验证文件，其余请求返回 404；443 保留给自动 CD 的专用 SSH，22 仍只允许管理 IP，14311 不对公网开放。应用环境文件配置精确的 `PUBLIC_ORIGIN=https://47.76.84.114:8443`，只允许这个 HTTPS 来源调用 API，原有跨站阻断仍生效。此入口与本机 SSH 隧道互不依赖，启用状态以服务器实际监听和安全组为准。
 
-本地分支的网关模板对 `/api/v1/materials` 和 `/api/v1/materials/{资料编号}/versions` 放行最多 80 MiB 的原始请求体，应用按文件类型执行上限。其余路由的网关上限为 16 MiB。仅素材原件响应允许同源框架嵌入，以便在详情阅读 PDF。正式发布此项时需同步站点配置、通过 `nginx -t` 并重载，再用 `nginx -T` 核对生效路由，从已认证的公网素材页复测。
+素材页面对超过 8 MiB 的文件按 8 MiB 分段传输，使用同源素材新建或换版路径下的 `/parts`。应用校验各段的实际字节数、顺序和目标，完整收齐后再校验文件格式、总上限并提交版本。每实例最多保留 160 MiB 分段缓冲，未完成传输空闲五分钟后释放。沿用单次请求 16 MiB 的公网网关即可使用素材页面。网关禁止嵌入时，详情提供新窗口 PDF 原件阅读入口。
+
+仓库的网关模板另支持向素材新建和换版接口直接提交最多 80 MiB 的单个原始请求，仅原件响应允许同源嵌入。应用仍按文件类型执行上限。安装模板时通过 `nginx -t` 并重载，用 `nginx -T` 核对生效路由。
 
 公网 IP 证书由 Certbot 5.4+ 通过 HTTP-01 申请，使用约六天有效的 shortlived 证书；自动续期成功后必须重载 Nginx。核对 `certbot renew --dry-run`、证书到期时间、续期定时器及站点证书链。验收时从公网确认未认证的首页和 API 均为 401，正确密码可读取页面与 API，浏览器同源写请求不因 Origin 被拒绝，且公网无法直连 14311。依据：[Let's Encrypt IP 证书说明](https://letsencrypt.org/2026/03/11/shorter-certs-certbot)、[HTTP-01 验证端口](https://letsencrypt.org/docs/challenge-types/)、[Nginx HTTP Basic Auth](https://nginx.org/en/docs/http/ngx_http_auth_basic_module.html)。
 

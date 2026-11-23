@@ -1,5 +1,6 @@
 export const documentLimitMiB = 50;
 export const videoLimitMiB = 80;
+export const materialPartBytes = 8 * 1024 ** 2;
 export const videoTypes = { mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm' };
 
 export function checkMaterialSize(name, bytes) {

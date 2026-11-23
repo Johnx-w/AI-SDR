@@ -136,17 +136,26 @@ try {
   await source.pdf({ path: pdf });
   await source.close();
   await choose('选择文件上传', pdf);
-  const viewer = page.waitForEvent('framenavigated', (frame) =>
-    frame.url().startsWith('chrome-extension://'),
-  );
   await preview('catalog-page');
-  await viewer;
-  const original = await page.request.get(
-    new URL(await dialog.locator('iframe').getAttribute('src'), base).href,
-  );
+  const download = await dialog.getByRole('link', { name: '下载原件' }).getAttribute('href');
+  const original = await page.request.get(new URL(download, base).href);
   assert.ok((await original.body()).equals(readFileSync(pdf)));
-  if (proxy) assert.equal(original.headers()['x-frame-options'], 'SAMEORIGIN');
-  console.log('PASS Chrome 在素材详情中加载同源 PDF 阅读器并回读完整原件。');
+  const waitForReader = async (tab) => {
+    const isReader = (frame) =>
+      frame.url().startsWith('chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/');
+    if (!tab.frames().some(isReader)) await tab.waitForEvent('framenavigated', isReader);
+  };
+  if (original.headers()['x-frame-options'] === 'DENY') {
+    const open = page.waitForEvent('popup');
+    await dialog.getByRole('link', { name: '在新窗口查看 PDF 原件' }).click();
+    const popup = await open;
+    await waitForReader(popup);
+    await popup.close();
+  } else {
+    await dialog.locator('iframe').waitFor();
+    await waitForReader(page);
+  }
+  console.log('PASS Chrome 阅读器打开完整 PDF，回读字节与原件一致。');
 } finally {
   await browser?.close();
   if (app.listening) await new Promise((ok) => app.close(ok));

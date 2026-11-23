@@ -300,6 +300,54 @@ test('素材新建与换版按实际字节接受 50 MiB，超限保留当前版�
   assert.equal((await (await fetch(base)).json()).total, 1);
 });
 
+test('素材分段按实际长度、顺序及目标校验，完整落库前可重试且不影响原件', async (t) => {
+  const app = createApp({
+    env: { BATCH_DB_PATH: ':memory:' },
+    outreachServiceFactory: () => ({ mailboxes: { list: () => [] }, close() {} }),
+  });
+  await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => app.close(resolve)));
+  const base = 'http://127.0.0.1:' + app.address().port + '/api/v1/materials';
+  const part = Buffer.alloc(8 * 1024 ** 2, ' ');
+  const last = Buffer.from('\nDry cloth');
+  const total = part.length + last.length;
+  const headers = { 'Content-Type': 'application/octet-stream', 'Idempotency-Key': randomUUID() };
+  const send = (target, start, end, bytes, size = total, extra = {}) =>
+    fetch(base + target, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Range': 'bytes ' + start + '-' + end + '/' + size, ...extra },
+      body: bytes,
+    });
+  const path = '/parts?name=care.txt';
+  assert.equal((await send(path, 0, part.length - 1, part, 52428801)).status, 413);
+  assert.equal((await send(path, 0, part.length - 1, last)).status, 400);
+  assert.equal((await send(path, part.length, total - 1, last)).status, 409);
+  assert.equal(
+    (await send(path, 0, part.length - 1, part, total, { origin: 'https://foreign.invalid' }))
+      .status,
+    403,
+  );
+  for (let retry = 0; retry < 2; retry++) {
+    const res = await send(path, 0, part.length - 1, part);
+    assert.equal(res.status, 202);
+    assert.equal((await res.json()).received, part.length);
+  }
+  assert.equal((await (await fetch(base)).json()).total, 0);
+  assert.equal((await send('/parts?name=other.txt', part.length, total - 1, last)).status, 409);
+  const saved = await send(path, part.length, total - 1, last);
+  assert.equal(saved.status, 201);
+  const { id, documentId } = await saved.json();
+  const replace = '/' + id + '/versions/parts?name=care.txt&version=1';
+  headers['Idempotency-Key'] = randomUUID();
+  assert.equal((await send(replace, 0, part.length - 1, part)).status, 202);
+  assert.equal((await send(replace, part.length, total - 1, Buffer.from('x'))).status, 400);
+  const detail = await (await fetch(base + '/' + id)).json();
+  assert.equal(detail.currentVersion, 1);
+  assert.equal(detail.documents[0].id, documentId);
+  assert.equal(detail.documents[0].extraction.facts.at(-1).text, 'Dry cloth');
+  assert.equal(detail.documents[0].size, total);
+});
+
 test('视频额度为 80 MiB，邮件附件按 10 个、解码合计 10 MiB 校验', () => {
   for (const name of ['样片.MOV', '样片.mp4', '样片.webm']) {
     checkMaterialSize(name, 80 * 1024 ** 2);

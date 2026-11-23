@@ -1,18 +1,80 @@
 import { MaterialLibrary } from './materials.mjs';
 import { materialType } from './material-formats.mjs';
-import { checkMaterialSize } from '../src/domain/material-upload.mjs';
+import {
+  checkMaterialSize,
+  materialPartBytes,
+  videoLimitMiB,
+} from '../src/domain/material-upload.mjs';
 import { workbookPage } from './product-workbooks.mjs';
 const fail = (n, msg) => Object.assign(new Error(msg), { status: n });
-async function contents(request, name) {
-  checkMaterialSize(name, Number(request.headers['content-length']));
+async function contents(request, name, expected) {
+  const declared = Number(request.headers['content-length']);
+  checkMaterialSize(name, declared);
+  if (expected !== undefined && Number.isFinite(declared) && declared !== expected)
+    throw fail(400, '素材分段长度无效');
   const chunks = [];
   let size = 0;
   for await (const part of request) {
     size += part.length;
     checkMaterialSize(name, size);
+    if (expected !== undefined && size > expected) throw fail(400, '素材分段长度无效');
     chunks.push(part);
   }
-  return Buffer.concat(chunks);
+  if (expected !== undefined && size !== expected) throw fail(400, '素材分段不完整');
+  return Buffer.concat(chunks, size);
+}
+
+// Keep incomplete uploads outside the library. Only the complete file enters its normal
+// validation, parsing, idempotency and version transaction.
+async function readUpload(request, name, key, target, uploads) {
+  const range = request.headers['content-range'];
+  if (range === undefined) return { bytes: await contents(request, name) };
+  const match = /^bytes (\d+)-(\d+)\/(\d+)$/u.exec(range);
+  if (!match || typeof key !== 'string' || !/^[\w-]{8,128}$/u.test(key))
+    throw fail(400, '素材分段或操作编号无效');
+  const [start, end, total] = match.slice(1).map(Number);
+  checkMaterialSize(name, total);
+  if (
+    !Number.isSafeInteger(total) ||
+    total <= materialPartBytes ||
+    start >= total ||
+    start % materialPartBytes !== 0 ||
+    end !== Math.min(start + materialPartBytes, total) - 1
+  )
+    throw fail(400, '素材分段范围无效');
+  const part = await contents(request, name, end - start + 1);
+  let entry = uploads.get(key);
+  if (!entry) {
+    if (start !== 0) throw fail(409, '素材分段已失效，请重新上传');
+    const reserved = [...uploads.values()].reduce((sum, item) => sum + item.buffer.length, 0);
+    if (reserved + total > 2 * videoLimitMiB * 1024 ** 2)
+      throw fail(429, '正在接收其他大文件，请稍后重试');
+    entry = {
+      target,
+      buffer: Buffer.alloc(total),
+      received: 0,
+      timer: setTimeout(() => uploads.delete(key), 5 * 60 * 1000).unref(),
+    };
+    uploads.set(key, entry);
+  }
+  if (
+    entry.target !== target ||
+    entry.buffer.length !== total ||
+    start > entry.received ||
+    (start < entry.received && !entry.buffer.subarray(start, end + 1).equals(part))
+  )
+    throw fail(409, '素材分段冲突，请重新上传');
+  if (start === entry.received) {
+    part.copy(entry.buffer, start);
+    entry.received = end + 1;
+  }
+  if (entry.received < total) {
+    entry.timer.refresh();
+    return { received: end + 1 };
+  }
+  clearTimeout(entry.timer);
+  uploads.delete(key);
+  return { bytes: entry.buffer };
 }
 export async function handleMaterials({
   request,
@@ -25,10 +87,13 @@ export async function handleMaterials({
   json,
   onChange,
   sites,
+  uploads,
 }) {
-  const library = new MaterialLibrary(knowledge, sites?.() || []),
-    path = url.pathname.slice('/api/v1/materials'.length);
+  const library = new MaterialLibrary(knowledge, sites?.() || []);
   const method = request.method,
+    endpoint = url.pathname.slice('/api/v1/materials'.length);
+  const parts = method === 'POST' && /^\/(?:pk_[a-f0-9]{32}\/versions\/)?parts$/u.test(endpoint);
+  const path = parts ? endpoint.slice(0, -'/parts'.length) : endpoint,
     q = Object.fromEntries(url.searchParams);
   if (!path && method === 'GET') {
     const categories = url.searchParams.getAll('category').filter(Boolean);
@@ -53,13 +118,17 @@ export async function handleMaterials({
       type = materialType(name);
     if (!type) throw fail(400, '不支持该文件类型');
     const key = request.headers['idempotency-key'];
+    if (parts !== (request.headers['content-range'] !== undefined))
+      throw fail(400, '素材分段请求无效');
+    const upload = await readUpload(request, name, key, url.pathname + url.search, uploads);
+    if (!upload.bytes) return json(response, 202, upload);
     const data = await library.upload({
       name,
       site: q.site || '',
       category: q.category || '',
       version: q.version === undefined ? undefined : Number(q.version),
       id,
-      bytes: await contents(request, name),
+      bytes: upload.bytes,
       key,
       env,
       fetchImpl,

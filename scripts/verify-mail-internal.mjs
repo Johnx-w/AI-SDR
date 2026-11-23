@@ -150,7 +150,7 @@ export async function runInternal(
       businessState: () => ({
         customerContexts: [{ customerId: 'qa-peer', fixedEmail: internalAccounts[0] }],
       }),
-      answerQuestion: (b, q, now) => answerMailQuestion(knowledge, b, q, now),
+      answerQuestion: (...args) => answerMailQuestion(knowledge, ...args),
     });
     for (let i = 0; i < 3; i++) {
       const to = internalAccounts[(i + 1) % 3],

@@ -34,6 +34,7 @@ const me = 'sales@honeybadgerblinds.com',
   inbox = [],
   sent = [];
 const persona = '以工程项目销售的身份写正式英文回信，给采购团队一个明确的下一步。';
+const careText = 'Clean the slats with a dry microfiber cloth.';
 const introduction =
   'Dear Jordan,\n\nI understand that your purchasing team reviews supplier enquiries. Please forward this note to the colleague responsible for your project so they have a direct point of contact.\n\nA short outline of their purchasing priorities would help us prepare a focused discussion. They are welcome to reply in this thread when convenient.';
 const crm = new CustomerBusiness({
@@ -77,16 +78,17 @@ const service = new OutreachService({
   customers: () => [{ id: 'qa', name: 'Browser QA', email: peer }],
   businessState: () => crm.view(),
   recordCommunication: record,
-  answerQuestion: (b, q) => answerMailQuestion(knowledge, b, q),
+  answerQuestion: (...args) => answerMailQuestion(knowledge, ...args),
   getDraftModel: () => ({
     name: 'browser-reception',
     generate: async (messages) => {
       const { evidence } = JSON.parse(messages[1].content);
       assert.deepEqual(
-        evidence.map((s) => s.value),
+        evidence.slice(0, 2).map((s) => s.value),
         ['ZX-01', 'Aluminium alloy'],
       );
       return JSON.stringify({
+        coverage: 'answered',
         body: 'For ZX-01, the material is Aluminium alloy.',
         sourceIndexes: [0, 1],
       });
@@ -116,17 +118,42 @@ const app = createApp({
     const payload = JSON.parse(init.body);
     assert.match(payload.model, /deepseek/i);
     const data = JSON.parse(payload.messages.find((message) => message.role === 'user').content);
+    if (payload.messages[0].content.startsWith('Find terms')) {
+      return Response.json({
+        choices: [
+          {
+            finish_reason: 'stop',
+            message: { content: JSON.stringify({ words: ['fire rating', '防火等级'] }) },
+          },
+        ],
+      });
+    }
     assert.ok(payload.messages[0].content.includes(persona));
     assert.equal(data.website, 'honeybadgerblinds.com');
     if (data.incoming.subject === 'Purchasing introduction') {
-      assert.deepEqual(data.evidence, []);
-      const content = JSON.stringify({ body: introduction, sourceIndexes: [] });
+      const content = JSON.stringify({
+        coverage: 'correspondence',
+        body: introduction,
+        sourceIndexes: [],
+      });
+      return Response.json({ choices: [{ finish_reason: 'stop', message: { content } }] });
+    }
+    if (['Care and rating', 'Rating only'].includes(data.incoming.subject)) {
+      const index = data.evidence.findIndex((source) => source.value === careText);
+      assert.ok(index >= 0);
+      const mixed = data.incoming.subject === 'Care and rating';
+      const content = JSON.stringify({
+        coverage: mixed ? 'partial' : 'unanswered',
+        body: mixed ? careText : '',
+        sourceIndexes: mixed ? [index] : [],
+      });
       return Response.json({ choices: [{ finish_reason: 'stop', message: { content } }] });
     }
     const material = data.evidence.findIndex((source) => source.value === 'Aluminium alloy');
     assert.ok(material >= 0, '应使用已校对的已选资料');
     await modelGate;
     const content = JSON.stringify({
+      coverage: 'answered',
       body: 'The referenced track uses Aluminium alloy. What length do you need?',
       sourceIndexes: [material],
     });
@@ -205,13 +232,25 @@ try {
   await material.getByText('2 · ZX-01', { exact: true }).click();
   assert.equal(await label('规格!B2').inputValue(), 'Aluminium');
   await label('规格!B2').fill('Aluminium alloy');
-  await button('保存校对').click();
-  await material.getByText('校对已保存', { exact: true }).waitFor();
   await label('审核人').fill('QA');
   await button('审核通过').click();
   await material.getByText('审核人 QA', { exact: true }).waitFor();
   await button('关闭素材详情').click();
   console.log('PASS 按邮箱官网上传工作簿、定位原单元格、校对与审核');
+  const chooseCare = page.waitForEvent('filechooser');
+  await button('选择文件上传').click();
+  await (
+    await chooseCare
+  ).setFiles({ name: 'care-note.txt', mimeType: 'text/plain', buffer: Buffer.from(careText) });
+  await button('预览 care-note').click();
+  await button('采用片段').click();
+  await label('审核人').fill('QA');
+  await button('审核通过').click();
+  await material.getByText('审核人 QA', { exact: true }).waitFor();
+  await page.reload();
+  await material.getByText('审核人 QA', { exact: true }).waitFor();
+  assert.equal(knowledge.list().find((p) => p.name === 'care-note').sourceFacts[0].text, careText);
+  await button('关闭素材详情').click();
 
   await page.goto(base + '/inbox');
   await button('配置').click();
@@ -230,12 +269,15 @@ try {
   assert.equal(await mode.inputValue(), 'business');
   await mode.selectOption('review');
   await page.getByRole('checkbox', { name: /mail-specimen/ }).check();
+  await page.getByRole('checkbox', { name: /care-note/ }).check();
   await button('保存邮箱').click();
   await page.getByRole('dialog').waitFor({ state: 'hidden' });
   const mailbox = boxes.list()[0];
   assert.deepEqual(mailbox.productIds, [saleProduct.id]);
-  assert.equal(mailbox.knowledgeProductIds.length, 1);
-  assert.equal(knowledge.get(mailbox.knowledgeProductIds[0]).name, 'mail-specimen');
+  assert.deepEqual(mailbox.knowledgeProductIds.map((id) => knowledge.get(id).name).sort(), [
+    'care-note',
+    'mail-specimen',
+  ]);
   await page.getByText('按此邮箱资料试问', { exact: true }).click();
   await label('客户问题').fill('What material is ZX-01 made of?');
   await button('预览答复').click();
@@ -525,6 +567,48 @@ try {
   assert.equal(sent.length, sentBefore);
   assert.deepEqual(pageErrors, []);
   console.log('PASS 正式邮箱身份保存与重开、常规自动回复模式选择、无匹配资料起草完整采购转介邮件');
+  for (const [key, subject, bodyText] of [
+    ['care', 'Care and rating', 'How should I clean the slats? What is their fire rating?'],
+    ['rating', 'Rating only', 'What is their fire rating?'],
+  ]) {
+    service.conversations.putMessage(mailbox, {
+      identity: key,
+      messageId: '<' + key + '@dealer.test>',
+      direction: 'inbound',
+      from: peer,
+      to: me,
+      toAddresses: [me],
+      subject,
+      bodyText,
+      source: 'imap',
+      deliveryStatus: 'received',
+      occurredAt: '2025-02-13T09:00:00Z',
+    });
+    const convo = service.conversations.list({ mailboxId: mailbox.id, q: subject }).items[0];
+    await page.goto(
+      base +
+        '/inbox?' +
+        new URLSearchParams({ tab: 'inbox', thread: convo.id, mailboxId: mailbox.id }),
+    );
+    await assist.click();
+    await page.getByText('AI草稿 · 待审核', { exact: true }).waitFor();
+    await page.reload();
+    await page.getByText('AI草稿 · 待审核', { exact: true }).waitFor();
+    const body = await editor.innerText();
+    assert.match(body, /with my manager/);
+    const sources = service.replies.draft(convo.id).provenance.sources;
+    if (key === 'care') {
+      assert.ok(body.includes(careText));
+      await page.getByText('查看回复依据 · 1', { exact: true }).click();
+      await page.getByText(/care-note.txt.*第 1 段/).waitFor();
+      assert.deepEqual(
+        sources.map((s) => s.value),
+        [careText],
+      );
+    } else assert.deepEqual(sources, []);
+    assert.equal(sent.length, sentBefore);
+  }
+  console.log('PASS 直接审核采用的片段，刷新后混合问题引用原段并请示，未命中问题仅请示。');
 } catch (e) {
   console.error(
     '测试收件处理',

@@ -201,7 +201,7 @@ function normalize(value) {
     if (!f || !documentIds.includes(f.documentId)) throw fail(400, '引用原件必须属于当前资料');
     return {
       documentId: f.documentId,
-      location: text(f.location, '原件位置', 160, true),
+      location: text(f.location, '原件位置', 240, true),
       text: text(f.text, '引用片段', 4000, true),
     };
   });
