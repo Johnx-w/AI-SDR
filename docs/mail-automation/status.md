@@ -12,6 +12,8 @@
 
 ## 当前工作项 · 单文件 50 MiB 导入
 
+本机修复及回归测试提交为 `c0e09f5`（`fix: 支持素材库单文件 50 MiB 导入并保护换版原件`）。
+
 **本机已可用，云端待发布。** 2026-11-23 在 `D:\CodeX\AI-SDR-mail` 的 `codex/material-import-50mb` 分支从交接点 `6d7f975` 继续。端口 14325 使用独立 SQLite 快照 `.data/material-import-local`，可继续上传、刷新和换版。已有三份公司 Excel、新增的公司 PDF 和带图工作簿均可在此查看。复测样本的当前版本是 v2，打开「原件与校对」后展开「2 · ZX-01」，或在「历史版本」选择 v1 对照。[本机素材库](http://127.0.0.1:14325/materials) · [直接打开 50 MiB 样本](http://127.0.0.1:14325/materials?id=pk_b62ac6f2b96d4b12b7edfe84b9371f43)
 
 修前，从正式 React 素材库选择 13,521,674 字节的公司 PDF 或 52,428,800 字节的有效 XLSX，页面均显示 1 份失败。直连应用返回 JSON 413，素材新建、换版及文件存储共用的非视频上限为 10 MiB。将同一份工作簿交给旧解析器，又命中 Office 解压总量 32 MiB 的限制。通过原 Nginx 模板上传该工作簿时，16 MiB 网关上限先返回 HTML 413。该模板的全站禁止嵌入响应头还拦住了详情内的 PDF 阅读器。[上传请求](../../src/services/materials.ts) · [资料 API](../../server/materials-api.mjs) · [文件校验](../../src/domain/material-upload.mjs) · [解析](../../server/product-workbooks.mjs) · [网关模板](../../scripts/shadeflow-public.nginx.conf)
