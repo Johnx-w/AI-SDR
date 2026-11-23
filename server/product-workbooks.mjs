@@ -15,6 +15,8 @@ export function checkOfficeArchive(bytes) {
   const end = bytes.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
   if (end < 0 || end + 22 > bytes.length) throw fail(400, '工作簿 ZIP 目录无效');
   const entries = bytes.readUInt16LE(end + 10);
+  // Image-heavy catalogs may already be large on disk. Bound the extra bytes produced by inflation.
+  const expandedLimit = bytes.length + 32 * 1024 ** 2;
   let position = bytes.readUInt32LE(end + 16),
     size = 0;
   if (!entries || entries > 2000) throw fail(400, '工作簿文件数量超限');
@@ -22,7 +24,8 @@ export function checkOfficeArchive(bytes) {
     if (position + 46 > end || bytes.readUInt32LE(position) !== 0x02014b50)
       throw fail(400, '工作簿 ZIP 目录损坏');
     size += bytes.readUInt32LE(position + 24);
-    if (size > 32 * 1024 * 1024) throw fail(413, '工作簿解压后超过 32 MB');
+    if (size > expandedLimit)
+      throw fail(413, 'Office 文件解压后的大小超过可处理范围（原件大小加 32 MiB）');
     position +=
       46 +
       bytes.readUInt16LE(position + 28) +
@@ -31,12 +34,12 @@ export function checkOfficeArchive(bytes) {
   }
 }
 
-export async function extractWorkbook(db, file) {
-  checkOfficeArchive(file.bytes);
+export async function parseWorkbook(bytes) {
+  checkOfficeArchive(bytes);
   let sheets;
   try {
     // Excel displays numeric values to 15 significant digits. Text model codes stay verbatim.
-    sheets = await readWorkbook(file.bytes, {
+    sheets = await readWorkbook(bytes, {
       parseNumber: (value) => String(Number(Number(value).toPrecision(15))),
     });
   } catch {
@@ -63,8 +66,7 @@ export async function extractWorkbook(db, file) {
               },
             ],
       );
-      if (cells.length)
-        rows.push([file.id, sheet, index + 1, cells[0].value, JSON.stringify(cells)]);
+      if (cells.length) rows.push([sheet, index + 1, cells[0].value, JSON.stringify(cells)]);
     }
     summary.push({ name: sheet, rows: rows.length - start });
   }
@@ -77,20 +79,7 @@ export async function extractWorkbook(db, file) {
     model: 'read-excel-file',
     extractedAt: new Date().toISOString(),
   };
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    const insert = db.prepare('INSERT OR REPLACE INTO product_workbook_rows VALUES(?,?,?,?,?)');
-    for (const row of rows) insert.run(...row);
-    db.prepare('UPDATE product_documents SET extraction=? WHERE id=?').run(
-      JSON.stringify(extraction),
-      file.id,
-    );
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
-  return extraction;
+  return { extraction, rows };
 }
 
 export function workbookPage(db, productId, documentId, { sheet, page = 1, q = '' }) {

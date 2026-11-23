@@ -65,22 +65,86 @@ function named(question, label) {
     'iu',
   ).test(question);
 }
+export function managerReply(zh, partial = false) {
+  if (zh)
+    return partial
+      ? '其余问题我需要先和上级讨论，再给您答复。'
+      : '感谢您的来信。这个问题我需要先和上级讨论，再给您答复。';
+  return partial
+    ? 'I’ll need to discuss the remaining details with my manager before I can confirm them.'
+    : 'Thank you for your message. I’ll need to discuss your question with my manager before I can confirm an answer.';
+}
 const fallback = (zh, reason) => ({
   automatic: false,
   reason,
   sources: [],
-  body: zh
-    ? '您好，感谢来信。请问您需要确认哪个型号及哪项规格？'
-    : 'Thank you for your message. Could you confirm the model and the detail you need?',
+  body: managerReply(zh),
 });
 
-export function answerMailQuestion(knowledge, mailbox, input, now = Date.now()) {
+const segmenter = new Intl.Segmenter('zh', { granularity: 'word' });
+const commonWords = new Set(
+  'the to of is it on in at as be an and or for by we us do my me our you your their they them any if so he his she her what when where which who why how should could would does are can with from this that have will please tell about need thank thanks product model details 什么 怎么 如何 请问 可以 是否 产品 型号 我们 你们 需要 这个'.split(
+    ' ',
+  ),
+);
+function searchTerms(text, models) {
+  const words = new Set();
+  for (const { segment, isWordLike } of segmenter.segment(normal(text))) {
+    if (
+      !isWordLike ||
+      segment.length < 2 ||
+      commonWords.has(segment) ||
+      models.some((m) => named(m, segment))
+    )
+      continue;
+    const word = segment.replace(/(?<=[a-z]{3})s$/u, '');
+    words.add(/^[a-z]+$/u.test(word) ? '(?<![a-z])' + escape(word) + 's?(?![a-z])' : escape(word));
+    if (words.size === 80) break;
+  }
+  return words.size ? new RegExp([...words].join('|'), 'giu') : null;
+}
+function draftEvidence(hits, candidates) {
+  const seen = new Set(),
+    selected = [];
+  let length = 0;
+  let truncated = false;
+  for (const { sources } of [...hits, ...candidates].sort((a, b) => b.score - a.score)) {
+    for (const source of sources) {
+      const key = JSON.stringify([
+        source.productId,
+        source.documentId,
+        source.sheet,
+        source.ref,
+        source.value,
+      ]);
+      if (seen.has(key)) continue;
+      if (selected.length >= 32) return { selected, truncated: true };
+      if (length + source.value.length > 24000) {
+        truncated = true;
+        continue;
+      }
+      selected.push(source);
+      seen.add(key);
+      length += source.value.length;
+    }
+  }
+  return { selected, truncated };
+}
+
+export function answerMailQuestion(
+  knowledge,
+  mailbox,
+  input,
+  now = Date.now(),
+  { subject = '', forDraft = false, searchWords = [] } = {},
+) {
   const question = String(input || '')
     .trim()
     .slice(0, 4000)
     .replace(/\s+/gu, ' ');
   const zh = /[\u3400-\u9fff]/u.test(question);
-  if (!question || mentionsOtherSite(question, mailbox))
+  const lookup = [subject.slice(0, 500), question].join(' ').trim();
+  if (!question || mentionsOtherSite(lookup, mailbox))
     return fallback(zh, '问题超出当前官网资料范围');
   const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date(now));
   const products = (mailbox.knowledgeProductIds || [])
@@ -93,7 +157,12 @@ export function answerMailQuestion(knowledge, mailbox, input, now = Date.now()) 
     );
   const asks = attributes.filter((a) => a.query.test(question));
   const hits = [];
+  const candidates = [];
+  let hasWorkbook = false;
+  const models = lookup.match(/\b[a-z]+(?:[-_]?[a-z]+)*[-_]?\d+[a-z0-9_-]*\b/giu) || [];
+  const vocabulary = searchTerms([lookup, ...searchWords].join(' '), models);
   for (const product of products) {
+    const priorHits = hits.length;
     const documents = knowledge.documents.list(product.id);
     // Human-reviewed passages keep their source document and original locator.
     for (const fact of product.sourceFacts || []) {
@@ -101,54 +170,71 @@ export function answerMailQuestion(knowledge, mailbox, input, now = Date.now()) 
         (d) => d.id === fact.documentId && product.documentIds?.includes(d.id),
       );
       if (!doc) continue;
-      const models = question.match(/\b[a-z]+(?:[-_]?[a-z]+)*[-_]?\d+[a-z0-9_-]*\b/giu) || [];
       const attributeMatch = asks.some((a) => a.field?.test(fact.text) || a.query.test(fact.text));
-      const exact = models.length > 0 && models.every((model) => named(fact.text, model));
-      if (models.length && !exact) continue;
-      if (asks.length && !attributeMatch) continue;
-      if (!exact && ![product.name, ...(product.keywords || [])].some((k) => named(question, k)))
+      const exact = models.filter((model) => named(fact.text, model));
+      if (
+        models.length &&
+        !exact.length &&
+        !models.some(
+          (m) => named(product.name, m) && !/\b[a-z]+[-_]?\d+[a-z0-9_-]*\b/iu.test(fact.text),
+        )
+      )
         continue;
+      const namedProduct = [product.name, ...(product.keywords || [])].some((k) =>
+        named(lookup, k),
+      );
+      const overlap = vocabulary ? new Set(normal(fact.text).match(vocabulary)).size : 0;
+      const source = {
+        productId: product.id,
+        version: product.version,
+        documentId: doc.id,
+        file: doc.name,
+        ref: fact.location,
+        value: fact.text,
+      };
+      if (!(attributeMatch && (exact.length || namedProduct || overlap >= 2)) && overlap < 2) {
+        if (forDraft)
+          candidates.push({
+            score: -2 + (namedProduct || exact.length || overlap ? 1 : 0),
+            sources: [source],
+          });
+        continue;
+      }
       hits.push({
-        label: exact ? models.join(' / ') : product.name,
-        score: exact ? Math.max(...models.map((s) => s.length)) : 0,
+        label: exact.length ? exact.join(' / ') : product.name,
+        score: exact.length ? Math.max(...exact.map((s) => s.length)) : Math.min(3, overlap),
         body: fact.text,
         automatic:
-          exact &&
+          models.length === 1 &&
+          exact.length === 1 &&
+          attributeMatch &&
           asks.length === 1 &&
           !commercial.test(question + ' ' + fact.text) &&
           (zh || !/[\u3400-\u9fff]/u.test(fact.text)),
-        sources: [
-          {
-            productId: product.id,
-            version: product.version,
-            documentId: doc.id,
-            file: doc.name,
-            ref: fact.location,
-            value: fact.text,
-          },
-        ],
+        sources: [source],
       });
     }
     for (const doc of documents.filter(
       (d) => product.documentIds?.includes(d.id) && d.extraction?.sheets,
     )) {
-      const topics = asks.filter((a) => a.topic).map((a) => a.topic);
+      hasWorkbook = true;
+      const topics = [...asks.filter((a) => a.topic).map((a) => a.topic), ...searchWords];
       const edits = (product.cellEdits || []).filter((edit) => edit.documentId === doc.id);
       const editedRows = edits.map((edit) => Number(edit.ref.match(/\d+$/u)[0]));
       const rows = knowledge.db
         .prepare(
           `SELECT sheet,row_number,data FROM product_workbook_rows WHERE document_id=?
-        AND (instr(lower(?),lower(label))>0 OR EXISTS (SELECT 1 FROM json_each(?) WHERE instr(label,value)>0)
+        AND (instr(lower(?),lower(label))>0 OR EXISTS (SELECT 1 FROM json_each(?) WHERE instr(lower(label),lower(value))>0)
         OR row_number IN (SELECT value FROM json_each(?)))`,
         )
-        .all(doc.id, question, JSON.stringify(topics), JSON.stringify(editedRows));
+        .all(doc.id, lookup, JSON.stringify(topics), JSON.stringify(editedRows));
       for (const row of rows) {
         const cells = JSON.parse(row.data).map((cell) => {
           const edit = edits.find((e) => e.sheet === row.sheet && e.ref === cell.ref);
           return edit ? { ...cell, original: cell.value, value: edit.value } : cell;
         });
         const label = cells[0].value;
-        const exact = named(question, label);
+        const exact = named(lookup, label);
         const applicable = asks.filter((a) => exact || (a.topic && label.includes(a.topic)));
         const values = applicable.flatMap((a) => {
           const cell = cells.find((c) => a.field.test(c.field) && c.value);
@@ -171,13 +257,7 @@ export function answerMailQuestion(knowledge, mailbox, input, now = Date.now()) 
             if (cell) values.push({ attr: { en: cell.field, commercial: true }, cell });
           }
         }
-        if (!values.length) continue;
-        const rowCommercial = values.some((v) => v.attr.commercial);
-        const extra = rowCommercial
-          ? cells.filter((c) => /^(?:单位|适用条件|unit|conditions?)$/iu.test(c.field))
-          : [];
-        const selected = [...values.map((v) => v.cell), ...extra];
-        const sources = [cells[0], ...selected].map((c) => ({
+        const sourceFor = (c) => ({
           productId: product.id,
           version: product.version,
           documentId: doc.id,
@@ -187,7 +267,24 @@ export function answerMailQuestion(knowledge, mailbox, input, now = Date.now()) 
           field: c.field,
           value: c.value,
           original: c.original,
-        }));
+          item: label,
+        });
+        const topicRow =
+          !models.length && searchWords.some((word) => normal(label).includes(normal(word)));
+        if (forDraft && (exact || topicRow))
+          candidates.push({
+            score: -1,
+            sources: cells
+              .filter((c) => c.value && !/来源|待核|核对|思路|备注|source|warning/iu.test(c.field))
+              .map(sourceFor),
+          });
+        if (!values.length) continue;
+        const rowCommercial = values.some((v) => v.attr.commercial);
+        const extra = rowCommercial
+          ? cells.filter((c) => /^(?:单位|适用条件|unit|conditions?)$/iu.test(c.field))
+          : [];
+        const selected = [...values.map((v) => v.cell), ...extra];
+        const sources = [cells[0], ...selected].map(sourceFor);
         const terms = extra.map((c) => c.value).join(' · ');
         const body =
           values.map(({ attr, cell }) => `${zh ? cell.field : attr.en}: ${cell.value}`).join('\n') +
@@ -207,10 +304,10 @@ export function answerMailQuestion(knowledge, mailbox, input, now = Date.now()) 
       }
     }
     if (
-      !hits.length &&
+      hits.length === priorHits &&
       [product.name, product.englishName, ...(product.aliases || [])]
         .filter(Boolean)
-        .some((name) => named(question, name))
+        .some((name) => named(lookup, name))
     ) {
       const facts = (product.outreachFacts || []).filter(
         (f) => f.kind === 'product' && (!f.validUntil || Date.parse(f.validUntil) > now),
@@ -236,11 +333,28 @@ export function answerMailQuestion(knowledge, mailbox, input, now = Date.now()) 
         });
     }
   }
+  const draft = {};
+  if (forDraft) {
+    const { selected, truncated } = draftEvidence(hits, candidates);
+    draft.draftSources = selected;
+    // Expanded searches must also invalidate a draft if an initially unseen source changes.
+    if (
+      truncated ||
+      (hasWorkbook &&
+        !hits.length &&
+        !models.length &&
+        (asks.length || /[?？]|请问|please (?:advise|confirm|provide)/iu.test(question)))
+    )
+      draft.searchVersions = products.map((p) => [p.id, p.version]);
+  }
   if (!hits.length)
-    return fallback(
-      zh,
-      products.length ? '已选资料中没有与问题对应的已核实字段' : '此邮箱尚无可用的已审核资料',
-    );
+    return {
+      ...fallback(
+        zh,
+        products.length ? '已选资料中没有与问题对应的已核实字段' : '此邮箱尚无可用的已审核资料',
+      ),
+      ...draft,
+    };
   const score = Math.max(...hits.map((h) => h.score)),
     best = hits.filter((h) => h.score === score);
   const automatic =
@@ -252,6 +366,7 @@ export function answerMailQuestion(knowledge, mailbox, input, now = Date.now()) 
     ) &&
     (question.match(/[?？]/gu) || []).length <= 1;
   return {
+    ...draft,
     automatic,
     reason: automatic ? '单一型号、已核实参数' : '请核对适用条件及客户问题后发送',
     body:

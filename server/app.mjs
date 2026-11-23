@@ -225,6 +225,7 @@ export function createApp({
   const catalog = () =>
     (products ??= new ProductCatalog(env.PRODUCT_DB_PATH || env.BATCH_DB_PATH || ':memory:'));
   let productKnowledge;
+  const materialUploads = new Map();
   const knowledge = () =>
     (productKnowledge ??= new ProductKnowledge(
       env.PRODUCT_KNOWLEDGE_DB_PATH || env.PRODUCT_DB_PATH || env.BATCH_DB_PATH || ':memory:',
@@ -259,8 +260,7 @@ export function createApp({
               isDevelopmentCustomer,
             ),
           products: () => knowledge().list(),
-          answerQuestion: (mailbox, question, now) =>
-            answerMailQuestion(knowledge(), mailbox, question, now),
+          answerQuestion: (...args) => answerMailQuestion(knowledge(), ...args),
           getDraftModel,
           getEnv: () => connections.environment(),
           getScope: acquisitionScope,
@@ -607,6 +607,7 @@ export function createApp({
         }
         if (url.pathname === '/api/v1/materials' || url.pathname.startsWith('/api/v1/materials/'))
           return await handleMaterials({
+            uploads: materialUploads,
             request,
             response,
             url,
@@ -1239,6 +1240,8 @@ export function createApp({
     operationalTimer.unref();
   });
   server.on('close', () => {
+    for (const { timer } of materialUploads.values()) clearTimeout(timer);
+    materialUploads.clear();
     clearInterval(maintenanceTimer);
     clearInterval(operationalTimer);
     void brandingCache.close();

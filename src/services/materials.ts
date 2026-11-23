@@ -1,3 +1,5 @@
+import { checkMaterialSize, materialPartBytes } from '../domain/material-upload.mjs';
+
 export const materialFormats = ['PDF', 'Word', 'Markdown', 'TXT', 'Excel', '图片', '视频'];
 export const acceptMaterials =
   '.pdf,.docx,.xlsx,.md,.markdown,.txt,.jpg,.jpeg,.png,.gif,.webp,.mp4,.webm,.mov';
@@ -70,7 +72,13 @@ export const sourceUrl = (id: string, document: string) =>
 export async function materialsRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(materialApi + path, init);
   const data = await response.json().catch(() => null);
-  if (!response.ok || !data) throw new Error(data?.error || '素材操作失败，请刷新后重试');
+  if (!response.ok || !data)
+    throw new Error(
+      data?.error ||
+        (response.status === 413
+          ? '上传请求超过网关上限，请联系管理员检查素材上传配置'
+          : '素材操作失败，请刷新后重试'),
+    );
   return data as T;
 }
 export const sendJson = <T>(path: string, method: string, body: unknown) =>
@@ -84,18 +92,31 @@ export async function uploadMaterial(
   options: { site?: string; category?: string; id?: string; version?: number },
   key: string,
 ) {
+  checkMaterialSize(file.name, file.size);
   const q = new URLSearchParams({ name: file.name });
   if (options.site) q.set('site', options.site);
   if (options.category) q.set('category', options.category);
   if (options.version) q.set('version', String(options.version));
-  return materialsRequest<{ id: string; documentId: string; warning: string; reused: boolean }>(
-    (options.id ? '/' + options.id + '/versions' : '') + '?' + q,
-    {
+  const path = options.id ? '/' + options.id + '/versions' : '';
+  const headers = { 'Content-Type': 'application/octet-stream', 'Idempotency-Key': key };
+  type Result = { id: string; documentId: string; warning: string; reused: boolean };
+  if (file.size <= materialPartBytes)
+    return materialsRequest<Result>(path + '?' + q, { method: 'POST', headers, body: file });
+  const parts = path + '/parts?' + q;
+  for (let start = 0; ; start += materialPartBytes) {
+    const end = Math.min(file.size, start + materialPartBytes);
+    const init = {
       method: 'POST',
-      headers: { 'Content-Type': 'application/octet-stream', 'Idempotency-Key': key },
-      body: file,
-    },
-  );
+      headers: {
+        ...headers,
+        'Content-Range': 'bytes ' + start + '-' + (end - 1) + '/' + file.size,
+      },
+      body: file.slice(start, end),
+    };
+    if (end === file.size) return materialsRequest<Result>(parts, init);
+    const { received } = await materialsRequest<{ received: number }>(parts, init);
+    if (received !== end) throw new Error('素材分段未完整接收，请重新上传');
+  }
 }
 export const fileSize = (n: number) =>
   n >= 1048576

@@ -37,6 +37,19 @@ test('邮箱试问只引用本站现行的已选审核资料，核对、撤回�
   const box = { website: 'https://honeybadgerblinds.com', knowledgeProductIds: [p.id] };
   const ask = (m = box, q = 'What material is ZX-01 made of?') => answerMailQuestion(k, m, q);
   assert.equal(ask().automatic, true);
+  const subjectOnly = answerMailQuestion(k, box, 'What material is it made of?', Date.now(), {
+    subject: 'ZX-01',
+    forDraft: true,
+  });
+  assert.equal(subjectOnly.sources.at(-1).ref, 'B2');
+  assert.equal(subjectOnly.draftSources.find((s) => s.ref === 'B2').value, 'Aluminium');
+  assert.equal(
+    answerMailQuestion(k, box, 'What material is it made of?', Date.now(), {
+      subject: 'Shuangsheng ZX-01',
+      forDraft: true,
+    }).draftSources,
+    undefined,
+  );
   assert.equal(ask().sources.at(-1).ref, 'B2');
   assert.match(ask().body, /Aluminium/);
   for (const other of ['shuangshengshutter.com', 'shutterblindssolutions.com'])

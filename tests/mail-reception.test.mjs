@@ -6,6 +6,9 @@ import { join } from 'node:path';
 import { generateMailDraft } from '../server/mail-assisted-draft.mjs';
 import { mailDraftModel } from '../server/mail-draft-model.mjs';
 import { OutreachService } from '../server/outreach-service.mjs';
+import { MaterialLibrary } from '../server/materials.mjs';
+import { ProductKnowledge } from '../server/product-knowledge.mjs';
+import { answerMailQuestion } from '../server/mail-knowledge.mjs';
 const peer = 'buyer@dealer.test';
 function harness(t, mode = 'auto') {
   const dir = mkdtempSync(join(tmpdir(), 'sdr-reception-')),
@@ -74,7 +77,7 @@ function harness(t, mode = 'auto') {
       JSON.stringify(
         messages[0].content.includes('Verify')
           ? { supported: true }
-          : { body: 'The material is aluminium.', sourceIndexes: [0] },
+          : { coverage: 'answered', body: 'The material is aluminium.', sourceIndexes: [0] },
       ),
   };
   h.s = new OutreachService(options);
@@ -211,7 +214,7 @@ test('自动接待的模型或引用异常进入待处理，复核不通过保�
             generate: async (messages) => {
               if (scenario === 'offline') throw Error('transport failed');
               if (scenario === 'badSource')
-                return JSON.stringify({ body: 'Hello', sourceIndexes: [5] });
+                return JSON.stringify({ coverage: 'answered', body: 'Hello', sourceIndexes: [5] });
               if (messages[0].content.includes('Verify')) return '{"supported":false}';
               return model.generate(messages);
             },
@@ -275,11 +278,17 @@ test('来信中自行提供的规格数值不能当作已审核产品资料自�
   h.incoming({ bodyText: 'Is the thickness 5 mm?' });
   h.model.generate = async (messages) => {
     assert.ok(!messages[0].content.includes('Verify'));
-    return JSON.stringify({ body: 'The thickness is 5 mm.', sourceIndexes: [0] });
+    return JSON.stringify({
+      coverage: 'answered',
+      body: 'The thickness is 5 mm.',
+      sourceIndexes: [0],
+    });
   };
   await h.sync();
   await h.s.reception.tick();
   assert.equal(h.s.reception.list().items[0].state, 'review');
+  assert.match(h.s.replies.draft(h.thread().id).bodyText, /with my manager/);
+  assert.doesNotMatch(h.s.replies.draft(h.thread().id).bodyText, /5 mm/);
   assert.equal(h.sends.length, 0);
 });
 
@@ -311,7 +320,7 @@ test('后台接待使用当前聊天补全连接完成起草与事实复核', as
                 message: {
                   content:
                     calls.length === 1
-                      ? '{"body":"The material is aluminium.","sourceIndexes":[0]}'
+                      ? '{"coverage":"answered","body":"The material is aluminium.","sourceIndexes":[0]}'
                       : '{"supported":true}',
                 },
               },
@@ -474,7 +483,11 @@ test('手动或历史来信按当前邮箱匹配资料起草，保存来源及�
     generate: async (messages) => {
       const data = JSON.parse(messages[1].content);
       assert.deepEqual(data.evidence, [{ field: 'Material', value: 'aluminium' }]);
-      return JSON.stringify({ body: 'The material is aluminium.', sourceIndexes: [0] });
+      return JSON.stringify({
+        coverage: 'answered',
+        body: 'The material is aluminium.',
+        sourceIndexes: [0],
+      });
     },
   };
   await assert.rejects(
@@ -485,7 +498,11 @@ test('手动或历史来信按当前邮箱匹配资料起草，保存来源及�
       {
         name: model.name,
         generate: async () =>
-          JSON.stringify({ body: 'The material is titanium.', sourceIndexes: [0] }),
+          JSON.stringify({
+            coverage: 'answered',
+            body: 'The material is titanium.',
+            sourceIndexes: [0],
+          }),
       },
     ),
     { status: 502 },
@@ -529,7 +546,7 @@ test('输入原信发生变化或生成期间有人工编辑，保留现稿且�
     expectedRevision: 0,
     bodyText: 'My manual draft',
   });
-  release(JSON.stringify({ body: 'What detail should we confirm?', sourceIndexes: [] }));
+  release(JSON.stringify({ coverage: 'unanswered', body: '', sourceIndexes: [] }));
   await assert.rejects(promised, { status: 409 });
   assert.equal(h.s.replies.draft(id).bodyText, 'My manual draft');
   assert.equal(h.sends.length, 0);
@@ -540,7 +557,7 @@ test('输入原信发生变化或生成期间有人工编辑，保留现稿且�
       h.now += 5000;
       h.incoming({ inReplyTo: '<m1@dealer.test>' });
       await h.sync();
-      return JSON.stringify({ body: 'Could you confirm the model?', sourceIndexes: [] });
+      return JSON.stringify({ coverage: 'unanswered', body: '', sourceIndexes: [] });
     },
   };
   await assert.rejects(generateMailDraft(h.s, id, { sourceId, expectedRevision: 0 }, changed), {
@@ -566,6 +583,7 @@ test('常规业务自动回复在原线程推进采购转介，重启及重复�
       }
       assert.ok(messages[0].content.includes(box.draftPersona));
       return JSON.stringify({
+        coverage: 'correspondence',
         body: 'Dear Jordan,\n\nI understand that your purchasing team handles supplier enquiries. You are welcome to forward this email to the colleague coordinating the project so they can reply directly in this thread.\n\nFor their reference, I am the sales contact for this enquiry. An outline of their project priorities would give us a starting point for a focused discussion.\n\nKind regards,',
         sourceIndexes: [],
       });
@@ -619,8 +637,10 @@ test('扩大自动接待范围须逐邮箱启用，启用前的来信、商务�
           return '{"routineBusinessEmail":true,"sellerClaims":["We supply blinds to commercial customers."]}';
         return '{"routineBusinessEmail":false}';
       }
-      if (scenario === 'fragment') return '{"body":"Who handles purchasing?","sourceIndexes":[]}';
+      if (scenario === 'fragment')
+        return '{"coverage":"correspondence","body":"Who handles purchasing?","sourceIndexes":[]}';
       return JSON.stringify({
+        coverage: scenario === 'quote' ? 'unanswered' : 'correspondence',
         body: 'Dear colleague,\n\nI understand that you are considering the next step for this project.\n\nWe can continue the discussion in this thread when your team is ready.\n\nKind regards,',
         sourceIndexes: [],
       });
@@ -663,6 +683,7 @@ test('无匹配资料时按邮箱身份为采购转介起草，保存待审且�
         return live.generate(messages);
       }
       return JSON.stringify({
+        coverage: 'correspondence',
         body: 'I understand that your purchasing team handles this. Please forward my contact details to the buyer handling this project.',
         sourceIndexes: [],
       });
@@ -678,7 +699,7 @@ test('无匹配资料时按邮箱身份为采购转介起草，保存待审且�
   assert.equal(h.sends.length, 0);
 });
 
-test('无匹配资料时可以起草澄清问题，拒绝虚假参数、越界品牌、伪造引用及模型缺失', async (t) => {
+test('无匹配资料时说明需与上级讨论，拒绝虚假参数、越界品牌、伪造引用及模型缺失', async (t) => {
   const h = harness(t, 'manual');
   h.s.answerQuestion = () => ({ sources: [] });
   h.incoming();
@@ -696,7 +717,7 @@ test('无匹配资料时可以起草澄清问题，拒绝虚假参数、越界�
     await assert.rejects(
       generateMailDraft(h.s, id, input, {
         name: 'deepseek-flash',
-        generate: async () => JSON.stringify({ body, sourceIndexes }),
+        generate: async () => JSON.stringify({ coverage: 'answered', body, sourceIndexes }),
       }),
       { status: 502 },
     );
@@ -706,12 +727,136 @@ test('无匹配资料时可以起草澄清问题，拒绝虚假参数、越界�
     name: 'deepseek-flash',
     generate: async () =>
       JSON.stringify({
-        body: 'Thank you for your inquiry. Could you clarify the model?',
+        coverage: 'unanswered',
+        body: '',
         sourceIndexes: [],
       }),
   });
   assert.deepEqual(draft.provenance.sources, []);
-  assert.match(draft.provenance.reason, /没有引用产品资料/);
+  assert.match(draft.provenance.reason, /上级/);
+  assert.match(draft.bodyText, /discuss your question with my manager/);
+  assert.equal(h.sends.length, 0);
+});
+
+test('上传并审核的正文能回答保养问题，缺项转上级并保留已知部分及原文位置', async (t) => {
+  const k = new ProductKnowledge();
+  t.after(() => k.close());
+  const website = 'https://honeybadgerblinds.com';
+  const library = new MaterialLibrary(k, [{ website, brandName: 'Honey Badger Blinds' }]);
+  const { id, documentId } = await library.upload({
+    name: 'care-note.txt',
+    bytes: Buffer.from(
+      'Clean the slats with a dry microfiber cloth.\nUse a soft brush on the headrail.',
+    ),
+    site: 'honeybadgerblinds.com',
+    key: 'care-note-test',
+  });
+  const [first] = library.detail(id).documents[0].extraction.facts;
+  library.edit(id, {
+    version: 1,
+    status: 'approved',
+    approvedBy: 'QA',
+    sourceFacts: [{ documentId, location: first.location, text: first.text }],
+  });
+  const live = process.env.MAIL_MODEL_LIVE_SMOKE === '1';
+  for (const [question, coverage] of [
+    ['How should I clean the slats?', 'answered'],
+    ['What is the fire rating?', 'unanswered'],
+    ['How should I clean the slats? What is their fire rating?', 'partial'],
+    ['请问叶片怎么清洁？另外，它达到哪一级防火标准？', 'partial'],
+  ]) {
+    const h = harness(t, 'review');
+    const box = h.s.mailboxes.get('own');
+    Object.assign(box, { website, knowledgeProductIds: [id] });
+    h.s.answerQuestion = (...args) => answerMailQuestion(k, ...args);
+    h.model = live
+      ? mailDraftModel(process.env, fetch)
+      : {
+          name: 'care-test',
+          generate: async (messages) => {
+            const { evidence } = JSON.parse(messages[1].content);
+            assert.deepEqual(
+              evidence.map((s) => s.value),
+              [first.text],
+            );
+            return JSON.stringify({
+              coverage,
+              language: question.startsWith('请') ? 'zh' : 'en',
+              body: coverage === 'unanswered' ? '' : first.text,
+              sourceIndexes: coverage === 'unanswered' ? [] : [0],
+            });
+          },
+        };
+    h.incoming({ subject: 'Care enquiry', bodyText: question });
+    await h.sync();
+    await h.s.reception.tick();
+    const row = h.s.reception.list().items[0];
+    const draft = h.s.replies.draft(h.thread().id);
+    assert.ok(draft, row?.reason);
+    const sources = draft.provenance.sources;
+    if (coverage !== 'unanswered') {
+      assert.match(draft.bodyText, /microfib(?:er|re)|超细纤维|微纤维/iu);
+      assert.deepEqual(
+        sources.map(({ documentId, ref, value }) => [documentId, ref, value]),
+        [[documentId, first.location, first.text]],
+      );
+    } else assert.deepEqual(sources, []);
+    assert.equal(/manager|上级/iu.test(draft.bodyText), coverage !== 'answered');
+    assert.equal(row.state, 'review');
+    assert.equal(h.sends.length, 0);
+  }
+});
+
+test('大资料的跨语言问题能找到候选窗口之外的已审核段落', async (t) => {
+  const k = new ProductKnowledge(),
+    h = harness(t, 'manual');
+  t.after(() => k.close());
+  const box = h.s.mailboxes.get('own');
+  box.website = 'https://honeybadgerblinds.com';
+  const lib = new MaterialLibrary(k, [{ website: box.website, brandName: 'Honey Badger Blinds' }]);
+  const care = '叶片只需使用干燥的超细纤维布清洁。';
+  const lines = Array.from({ length: 199 }, (_, i) => '包装标签条目 ' + i).concat(care);
+  const { id, documentId } = await lib.upload({
+    name: 'manual.txt',
+    bytes: Buffer.from(lines.join('\n')),
+    key: 'many-passages',
+    site: 'honeybadgerblinds.com',
+  });
+  const facts = lib
+    .detail(id)
+    .documents[0].extraction.facts.map(({ text, location }) => ({ documentId, text, location }));
+  lib.edit(id, { version: 1, status: 'approved', approvedBy: 'QA', sourceFacts: facts });
+  box.knowledgeProductIds = [id];
+  h.s.answerQuestion = (...args) => answerMailQuestion(k, ...args);
+  h.incoming({ subject: 'Care', bodyText: 'What should I use to wipe down the slats?' });
+  await h.sync();
+  const thread = h.thread().id;
+  const sourceId = h.s.conversations.detail(thread).messages[0].id;
+  let searched = false;
+  const model = {
+    name: 'care-test',
+    generate: async (messages) => {
+      if (messages[0].content.startsWith('Find terms')) {
+        searched = true;
+        return JSON.stringify({ words: ['清洁', '叶片'] });
+      }
+      const { evidence } = JSON.parse(messages[1].content);
+      assert.ok(evidence.length <= 32);
+      const index = evidence.findIndex((s) => s.value === care);
+      assert.ok(index >= 0);
+      return JSON.stringify({
+        coverage: 'answered',
+        body: 'Use a dry microfiber cloth.',
+        sourceIndexes: [index],
+      });
+    },
+  };
+  const { draft } = await generateMailDraft(h.s, thread, { sourceId, expectedRevision: 0 }, model);
+  assert.ok(searched);
+  assert.deepEqual(
+    draft.provenance.sources.map((s) => s.ref),
+    ['第 200 段'],
+  );
   assert.equal(h.sends.length, 0);
 });
 

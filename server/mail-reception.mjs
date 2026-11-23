@@ -296,7 +296,7 @@ export class MailReception {
     const businessCorrespondence =
       box.autoBusinessReplies === true &&
       timestamp(m) >= Date.parse(box.businessReplySince) &&
-      !basis.sources.length &&
+      !basis.answer.sources?.length &&
       !requiresProductOrCommercialReview(basis.mail.subject + '\n' + basis.question, box);
     return {
       ...basis,
@@ -469,6 +469,8 @@ export class MailReception {
         box.replyMode === 'auto' &&
         !box.paused &&
         basis.eligible &&
+        !result.needsManager &&
+        result.sources.every((source) => basis.answer.sources?.includes(source)) &&
         (await verifyGrounding(model, basis, result));
       if (!stillCurrent()) return;
       draft = this.s.replies.saveDraft(
@@ -487,7 +489,11 @@ export class MailReception {
           stamp: basis.stamp,
           sources: result.sources,
           automatic,
-          reason: automatic || !basis.eligible ? basis.reason : '请业务员审核模型草稿后发送',
+          reason: result.needsManager
+            ? '资料未覆盖全部问题，需与上级确认后跟进'
+            : automatic || !basis.eligible
+              ? basis.reason
+              : '请业务员审核模型草稿后发送',
         },
       );
     }

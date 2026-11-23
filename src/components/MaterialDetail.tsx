@@ -106,15 +106,31 @@ export function MaterialDialog({
   }
   const writable = active && p?.status !== 'archived' && !busy;
   const original = doc ? sourceUrl(id, doc.id) : '';
-  const saveRefs = () =>
-    save(
-      {
-        adoptDocumentId: docId,
-        cellEdits: edits,
-        sourceFacts: facts.filter((f) => f.text.trim() && f.location.trim()),
-      },
-      '校对已保存',
-    );
+  const reviewFields = { adoptDocumentId: docId, cellEdits: edits, sourceFacts: facts };
+  const incompleteFact = facts.some((f) => !f.text.trim() || !f.location.trim());
+  const passages = (doc?.extraction?.facts || []).map((f) => ({
+    documentId: docId,
+    location:
+      doc?.contentType === 'application/pdf' ? '第 ' + f.page + ' 页 · ' + f.location : f.location,
+    text: f.text,
+  }));
+  function adopt(selected: Reference[]) {
+    const next = [...facts];
+    for (const item of selected) {
+      if (
+        !next.some(
+          (f) =>
+            f.documentId === item.documentId &&
+            f.location === item.location &&
+            f.text === item.text,
+        )
+      )
+        next.push(item);
+    }
+    if (next.length > 200) return setError('最多可采用 200 个片段，请逐条选择需要引用的内容');
+    setError('');
+    setFacts(next);
+  }
   const modeLabel: Record<MaterialView, string> = {
     preview: '原件与校对',
     edit: '编辑资料',
@@ -322,6 +338,24 @@ export function MaterialDialog({
                       </div>
                       <div>
                         <h3>引用片段</h3>
+                        {writable && passages.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              adopt(
+                                passages.filter(
+                                  (p) =>
+                                    !facts.some(
+                                      (f) =>
+                                        f.documentId === p.documentId && f.location === p.location,
+                                    ),
+                                ),
+                              )
+                            }
+                          >
+                            采用全部识别片段
+                          </button>
+                        )}
                         {doc.extraction?.facts.map((f, i) => (
                           <div className="mat-evidence" key={i}>
                             <small>
@@ -330,25 +364,7 @@ export function MaterialDialog({
                             </small>
                             <p>{f.text}</p>
                             {writable && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const location =
-                                    doc.contentType === 'application/pdf'
-                                      ? '第 ' + f.page + ' 页 · ' + f.location
-                                      : f.location;
-                                  setFacts((prev) =>
-                                    prev.some(
-                                      (x) =>
-                                        x.documentId === doc.id &&
-                                        x.location === location &&
-                                        x.text === f.text,
-                                    )
-                                      ? prev
-                                      : [...prev, { documentId: doc.id, location, text: f.text }],
-                                  );
-                                }}
-                              >
+                              <button type="button" onClick={() => adopt([passages[i]])}>
                                 采用片段
                               </button>
                             )}
@@ -394,7 +410,7 @@ export function MaterialDialog({
                               原件位置
                               <input
                                 required
-                                maxLength={160}
+                                maxLength={240}
                                 value={f.location}
                                 disabled={!writable}
                                 onChange={(e) =>
@@ -448,8 +464,8 @@ export function MaterialDialog({
                   {writable && (
                     <button
                       className="mat-primary"
-                      onClick={() => void saveRefs()}
-                      disabled={facts.some((f) => !f.location.trim() || !f.text.trim())}
+                      onClick={() => void save(reviewFields, '校对已保存')}
+                      disabled={incompleteFact}
                     >
                       保存校对
                     </button>
@@ -507,7 +523,7 @@ export function MaterialDialog({
                         {
                           status: 'approved',
                           approvedBy: reviewer,
-                          ...(doc ? { adoptDocumentId: doc.id } : {}),
+                          ...(doc ? reviewFields : {}),
                         },
                         '已审核通过',
                       );
@@ -520,7 +536,11 @@ export function MaterialDialog({
                     placeholder="审核人姓名"
                     maxLength={100}
                   />
-                  <button disabled={busy || (!doc && !p.sourceUrl && !p.attachments.length)}>
+                  <button
+                    disabled={
+                      busy || incompleteFact || (!doc && !p.sourceUrl && !p.attachments.length)
+                    }
+                  >
                     审核通过
                   </button>
                 </form>
@@ -547,10 +567,35 @@ export function MaterialDialog({
     </dialog>
   );
 }
+function PdfOriginal({ name, url }: { name: string; url: string }) {
+  const [inlineUrl, setInlineUrl] = useState('');
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch(url, { headers: { Range: 'bytes=0-0' }, signal: controller.signal })
+      .then(async (response) => {
+        await response.body?.cancel();
+        if (
+          !controller.signal.aborted &&
+          response.ok &&
+          !/deny/i.test(response.headers.get('X-Frame-Options') || '')
+        )
+          setInlineUrl(url);
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [url]);
+  return inlineUrl === url ? (
+    <iframe title={name} src={url} />
+  ) : (
+    <a href={url} target="_blank" rel="noopener noreferrer">
+      在新窗口查看 PDF 原件
+    </a>
+  );
+}
 function Original({ doc, url }: { doc: StoredDocument; url: string }) {
   if (doc.contentType.startsWith('image/')) return <img src={url} alt={doc.name} />;
   if (doc.contentType.startsWith('video/')) return <video src={url} controls preload="metadata" />;
-  if (doc.contentType === 'application/pdf') return <iframe title={doc.name} src={url} />;
+  if (doc.contentType === 'application/pdf') return <PdfOriginal name={doc.name} url={url} />;
   if (doc.extraction?.facts.length)
     return (
       <div className="mat-original">
