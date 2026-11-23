@@ -35,7 +35,6 @@
 .business-replies td small {
   display: block;
 }
-.business-view-picker,
 .business-page-controls {
   display: flex;
   align-items: center;

@@ -186,7 +186,7 @@ export function App({
     document.getElementById('root')?.setAttribute('data-interactive', 'true');
   }, []);
   return (
-    <div className="app-shell">
+    <div className="app-shell workspace-shell">
       {mobile && (
         <button className="sidebar-shade" aria-label="关闭导航" onClick={() => setMobile(false)} />
       )}

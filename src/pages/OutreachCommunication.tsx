@@ -1,3 +1,4 @@
+import { SectionWorkspace } from '../components/SectionWorkspace';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -1566,38 +1567,18 @@ export function OutreachCommunication({
     else setTab(id as Tab);
   }
   return (
-    <div className="fin-center">
-      <aside className="fin-nav" aria-label="沟通中心导航">
-        <div className="fin-nav-title">
-          <span>
-            <MessagesSquare size={19} />
-          </span>
-          <strong>沟通中心</strong>
-        </div>
-        <div className="fin-nav-groups" role="tablist" aria-label="沟通中心栏目">
-          {sections.map((group) => (
-            <div key={group.group} className="fin-nav-group">
-              <div className="fin-caption">{group.group}</div>
-              {group.items.map((item) => (
-                <button
-                  role="tab"
-                  type="button"
-                  key={item.id}
-                  id={`outreach-tab-${item.id}`}
-                  aria-selected={selected === item.id}
-                  onClick={() => openSection(item.id)}
-                >
-                  <item.icon size={16} />
-                  <span>{item.label}</span>
-                  {item.count != null && <small>{item.count}</small>}
-                </button>
-              ))}
-            </div>
-          ))}
-        </div>
-        {mailboxes.length > 0 && (
+    <SectionWorkspace
+      title="沟通中心"
+      icon={MessagesSquare}
+      sections={sections}
+      selected={selected}
+      onSelect={openSection}
+      className="fin-center"
+      panelPrefix="outreach-tab-"
+      sidebarExtra={
+        mailboxes.length > 0 && (
           <div className="fin-accounts">
-            <div className="fin-caption">按邮箱查看</div>
+            <div className="section-caption">按邮箱查看</div>
             {mailboxes.map((box, i) => (
               <button
                 key={box.id}
@@ -1610,8 +1591,9 @@ export function OutreachCommunication({
               </button>
             ))}
           </div>
-        )}
-      </aside>
+        )
+      }
+    >
       <div className="outreach-page fin-body">
         <div className="fin-crumb">
           {section.group}
@@ -2928,6 +2910,6 @@ export function OutreachCommunication({
           </>
         )}
       </div>
-    </div>
+    </SectionWorkspace>
   );
 }

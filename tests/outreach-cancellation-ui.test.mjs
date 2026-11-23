@@ -678,16 +678,12 @@ test('一个邮箱签名读取失败不隐藏其他邮箱Logo，离开邮箱页�
   });
   await h.ready();
   assert.equal(h.requests.filter(({ path }) => path.startsWith('/mailboxes/')).length, 0);
-  h.elements()
-    .find((node) => node.props.id === 'outreach-tab-mailboxes')
-    .props.onClick();
+  h.render().props.onSelect('mailboxes');
   h.render();
   await flush();
   assert.match(h.html(), /data:image\/png;base64,b2s=/);
   assert.match(h.html(), /完整签名读取失败/);
-  h.elements()
-    .find((node) => node.props.id === 'outreach-tab-campaigns')
-    .props.onClick();
+  h.render().props.onSelect('campaigns');
   h.render();
   const count = h.requests.length;
   h.render();

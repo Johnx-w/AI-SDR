@@ -740,6 +740,28 @@ try {
   assert.ok(await chunkEditor.evaluate((e) => e.scrollWidth <= e.clientWidth + 1));
   await chunkEditor.getByRole('button', { name: '取消', exact: true }).click();
   console.log('PASS 素材库文件排序与选择、实际邮箱检索命中与隔离、手机分块编辑对照原页。');
+  await button('展开栏目导航').click();
+  await button('收起栏目导航').click();
+  await button('返回素材库').click();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  for (const [module, view] of [
+    ['获客任务', '定时计划'],
+    ['跟进任务', '邮箱来信跟进'],
+    ['素材库', '搜索测试'],
+  ]) {
+    await page.locator('.sidebar').getByRole('link', { name: module, exact: true }).click();
+    const item = page
+      .getByRole('navigation', { name: module + '栏目' })
+      .getByRole('button', { name: view, exact: true });
+    await item.click();
+    await page.reload();
+    await item.and(page.locator('[aria-current="page"]')).waitFor();
+    assert.equal(
+      await page.locator('.sidebar').evaluate((el) => el.getBoundingClientRect().width),
+      58,
+    );
+  }
+  console.log('PASS 共用主栏、模块栏目切换与刷新、资料校对收起和展开导航。');
 } catch (e) {
   console.error(
     '测试收件处理',
