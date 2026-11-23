@@ -1,8 +1,8 @@
 import { Open } from 'unzipper-esm';
 import { Parser } from 'saxen';
+import { checkMaterialSize, videoTypes } from '../src/domain/material-upload.mjs';
 import { workbookType, checkOfficeArchive } from './product-workbooks.mjs';
 
-export const videoLimit = 80 * 1024 * 1024;
 export const types = {
   xlsx: workbookType,
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -15,9 +15,7 @@ export const types = {
   jpeg: 'image/jpeg',
   webp: 'image/webp',
   gif: 'image/gif',
-  mp4: 'video/mp4',
-  mov: 'video/quicktime',
-  webm: 'video/webm',
+  ...videoTypes,
 };
 const fail = (msg) => Object.assign(new Error(msg), { status: 400 });
 export function materialType(name) {
@@ -29,6 +27,7 @@ export function validateFile(name, type, bytes) {
     throw fail('文件名或文件内容无效');
   if (!type || type !== materialType(name))
     throw fail('仅支持 PDF、DOCX、XLSX、Markdown、TXT、图片和视频');
+  checkMaterialSize(name, bytes.length);
   const head = bytes.subarray(0, 16).toString('latin1');
   let valid = false;
   if (type.startsWith('text/')) {
@@ -45,6 +44,12 @@ export function validateFile(name, type, bytes) {
   else valid = head.slice(4, 8) === 'ftyp';
   if (!valid) throw fail('文件内容与格式不符，文本请另存为 UTF-8');
 }
+// Stop scanning a large text file once the existing paragraph preview is full.
+function* textParagraphs(bytes) {
+  const text = bytes.toString('utf8').replace(/^\ufeff/, '');
+  for (const line of text.matchAll(/([^\n]*)\n?/g)) yield line[1].replace(/\r$/, '');
+}
+
 export async function extractText(file) {
   let paragraphs = [];
   if (file.contentType === types.docx) {
@@ -88,21 +93,20 @@ export async function extractText(file) {
     } catch {
       throw fail('无法读取 DOCX 正文，请检查原件');
     }
-  } else
-    paragraphs = file.bytes
-      .toString('utf8')
-      .replace(/^\ufeff/, '')
-      .split(/\r?\n/);
+  } else paragraphs = textParagraphs(file.bytes);
   const facts = [];
-  let truncated = false;
-  for (const [i, p] of paragraphs.entries()) {
-    if (!p.trim()) continue;
+  let truncated = false,
+    number = 0;
+  for (const p of paragraphs) {
+    number++;
+    const text = p.trim();
+    if (!text) continue;
     if (facts.length >= 200) {
       truncated = true;
       break;
     }
     if (p.length > 4000) truncated = true;
-    facts.push({ text: p.trim().slice(0, 4000), page: 1, location: '第 ' + (i + 1) + ' 段' });
+    facts.push({ text: text.slice(0, 4000), page: 1, location: '第 ' + number + ' 段' });
   }
   return {
     facts,

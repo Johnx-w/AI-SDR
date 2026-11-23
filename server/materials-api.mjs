@@ -1,15 +1,15 @@
 import { MaterialLibrary } from './materials.mjs';
-import { materialType, videoLimit } from './material-formats.mjs';
-import { MAX_PRODUCT_DOCUMENT_BYTES } from './product-documents.mjs';
+import { materialType } from './material-formats.mjs';
+import { checkMaterialSize } from '../src/domain/material-upload.mjs';
 import { workbookPage } from './product-workbooks.mjs';
 const fail = (n, msg) => Object.assign(new Error(msg), { status: n });
-async function contents(request, limit) {
-  if (Number(request.headers['content-length']) > limit) throw fail(413, '文件大小超过上限');
+async function contents(request, name) {
+  checkMaterialSize(name, Number(request.headers['content-length']));
   const chunks = [];
   let size = 0;
   for await (const part of request) {
     size += part.length;
-    if (size > limit) throw fail(413, '文件大小超过上限');
+    checkMaterialSize(name, size);
     chunks.push(part);
   }
   return Buffer.concat(chunks);
@@ -59,10 +59,7 @@ export async function handleMaterials({
       category: q.category || '',
       version: q.version === undefined ? undefined : Number(q.version),
       id,
-      bytes: await contents(
-        request,
-        type.startsWith('video/') ? videoLimit : MAX_PRODUCT_DOCUMENT_BYTES,
-      ),
+      bytes: await contents(request, name),
       key,
       env,
       fetchImpl,

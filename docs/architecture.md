@@ -81,6 +81,8 @@ T1/T3 与独立 T4 目标分别同步，共享同一份去重日志，避免多�
 
 从 `/materials` 上传原件，新素材直接进入待审核。XLSX、DOCX、Markdown 和 TXT 由本地解析。PDF 和图片可核对原件，也可显式提取候选。视频可按时间点人工校对。上传新版本、恢复历史版本及撤回均保留原版本轨迹。[素材操作与验收](mail-automation/README.md#素材库与业务员操作)
 
+素材新建与换版以原文件作为 HTTP 请求体。普通文件上限为 50 MiB，视频为 80 MiB，边界值可导入。浏览器、服务端按块计数及原件存储共用同一校验。Office 解析允许在原件大小之上再展开 32 MiB，继续限制包内条目数、Word 正文和工作表数据量。需本地解析的新版先解析，随后在一个事务内核对当前版本、保存原件和解析结果、切换资料版本。产品 JSON 接口的 Base64 原件仍按 10 MiB 校验。当前发布状态见[本机验收与生产基线](mail-automation/status.md)。
+
 在 API 连接的「产品资料 · 图纸与规格识别」填写 `DOCUMENT_MODEL_BASE_URL`、`DOCUMENT_MODEL_API_KEY`、`DOCUMENT_MODEL_MODEL`。服务须支持 Responses API、图片/PDF 输入及 JSON Schema 输出；基础地址包括服务商所需的 `/v1`（例如 `https://api.openai.com/v1`）。本功能不自动借用企业研究模型。文件输入协议参见 [OpenAI File inputs](https://developers.openai.com/api/docs/guides/file-inputs) 和 [Images and vision](https://developers.openai.com/api/docs/guides/images-vision)。
 
 上传只写入本地库；用户点击 AI 提取才将原文件发送到已配置的模型服务。AI 结果单独保存为候选，保留页序号、位置、模型和提取时间。模糊标注及不确定归属列为提示；价格、MOQ、交期等需人工另行填写并沿用其适用条件和有效期规则。超过 60 条参数的文件应拆分，不能视为完整提取。网络失败、截断或无效输出不改动产品资料，原文件保留，可重试；成功结果重试直接复用。
@@ -133,6 +135,8 @@ Node.js 后端仅监听 127.0.0.1，API 保留本机来源及跨站请求限制�
 公网入口使用 `https://47.76.84.114:8443/`。Nginx 配置源为 `scripts/shadeflow-public.nginx.conf`，在 8443 为**所有路径**（包括 `/api/`、首页和静态资源）验证浏览器原生用户名／密码，再代理到回环地址 14311；转发时清除 Basic `Authorization`，不把入口密码交给应用，失败认证响应延迟一秒。密码文件 `/etc/nginx/shadeflow.htpasswd` 只存哈希，不入仓库；入口用户名 `root` 仅是网页认证账号，与系统 root 无关。在已配置 `ai-sdr` SSH 别名的 Windows 本机运行 `scripts/set-public-password.ps1`，交互输入两次 6–72 位密码即可创建或更换哈希，不在命令行或仓库传递明文。单一共享账号不提供逐人权限或审计。
 
 80 端口只提供 `/.well-known/acme-challenge/` 的证书验证文件，其余请求返回 404；443 保留给自动 CD 的专用 SSH，22 仍只允许管理 IP，14311 不对公网开放。应用环境文件配置精确的 `PUBLIC_ORIGIN=https://47.76.84.114:8443`，只允许这个 HTTPS 来源调用 API，原有跨站阻断仍生效。此入口与本机 SSH 隧道互不依赖，启用状态以服务器实际监听和安全组为准。
+
+本地分支的网关模板对 `/api/v1/materials` 和 `/api/v1/materials/{资料编号}/versions` 放行最多 80 MiB 的原始请求体，应用按文件类型执行上限。其余路由的网关上限为 16 MiB。仅素材原件响应允许同源框架嵌入，以便在详情阅读 PDF。正式发布此项时需同步站点配置、通过 `nginx -t` 并重载，再用 `nginx -T` 核对生效路由，从已认证的公网素材页复测。
 
 公网 IP 证书由 Certbot 5.4+ 通过 HTTP-01 申请，使用约六天有效的 shortlived 证书；自动续期成功后必须重载 Nginx。核对 `certbot renew --dry-run`、证书到期时间、续期定时器及站点证书链。验收时从公网确认未认证的首页和 API 均为 401，正确密码可读取页面与 API，浏览器同源写请求不因 Origin 被拒绝，且公网无法直连 14311。依据：[Let's Encrypt IP 证书说明](https://letsencrypt.org/2026/03/11/shorter-certs-certbot)、[HTTP-01 验证端口](https://letsencrypt.org/docs/challenge-types/)、[Nginx HTTP Basic Auth](https://nginx.org/en/docs/http/ngx_http_auth_basic_module.html)。
 

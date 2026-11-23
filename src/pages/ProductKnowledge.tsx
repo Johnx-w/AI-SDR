@@ -15,6 +15,7 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { MaterialDialog, type MaterialView } from '../components/MaterialDetail';
+import { documentLimitMiB, videoLimitMiB } from '../domain/material-upload.mjs';
 import {
   acceptMaterials,
   fileSize,
@@ -250,7 +251,10 @@ export function ProductKnowledgePage() {
           </span>
           <div>
             <h2>素材上传入口</h2>
-            <p>拖入或选择文档、表格、图片和视频。</p>
+            <p>
+              拖入或选择文件。文档、表格和图片每份最多 {documentLimitMiB} MiB，视频最多{' '}
+              {videoLimitMiB} MiB。
+            </p>
           </div>
         </div>
         <div className="mat-actions">

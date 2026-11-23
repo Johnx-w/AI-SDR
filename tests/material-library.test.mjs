@@ -9,6 +9,8 @@ import { MaterialLibrary } from '../server/materials.mjs';
 import { createApp } from '../server/app.mjs';
 import { answerMailQuestion } from '../server/mail-knowledge.mjs';
 import { workbookType } from '../server/product-workbooks.mjs';
+import { normalizeAttachments } from '../server/mail-content.mjs';
+import { checkMaterialSize } from '../src/domain/material-upload.mjs';
 const honey = 'honeybadgerblinds.com',
   other = 'shuangshengshutter.com';
 const boxes = [
@@ -116,6 +118,40 @@ test('升级已有工作簿不重复保存文件或变为推品；纯产品不�
   assert.deepEqual(edit.documentIds, [doc.id]);
   assert.equal(edit.status, 'draft');
 });
+
+test('换版文件可上传但无法解析时，保留已审核版本、原件与校对内容', async (t) => {
+  const k = new ProductKnowledge();
+  t.after(() => k.close());
+  const lib = new MaterialLibrary(k);
+  const { id, documentId } = await lib.upload(data('参数.txt', 'Width 72 mm'));
+  const approved = lib.edit(id, {
+    version: 1,
+    status: 'approved',
+    approvedBy: 'QA',
+    sourceFacts: [{ documentId, location: '第 1 段', text: 'Width 72 mm' }],
+  });
+  const before = lib.detail(id);
+  const file = readFileSync(new URL('./fixtures/material-slats.docx', import.meta.url));
+  const upload = {
+    name: '误选工作簿.xlsx',
+    bytes: file,
+    key: randomUUID(),
+    id,
+    version: approved.version,
+  };
+  await assert.rejects(lib.upload(upload), /XLSX|工作簿/);
+  assert.deepEqual(lib.detail(id), before);
+  assert.equal(k.documents.list(id).length, 1);
+  const replacements = await Promise.allSettled(
+    ['Width 73 mm', 'Width 74 mm'].map((body) =>
+      lib.upload({ ...data('新参数.txt', body), id, version: approved.version }),
+    ),
+  );
+  assert.equal(replacements.filter((r) => r.status === 'fulfilled').length, 1);
+  assert.equal(replacements.find((r) => r.status === 'rejected').reason.status, 409);
+  assert.equal(lib.detail(id).currentVersion, approved.version + 1);
+  assert.equal(k.documents.list(id).length, 2);
+});
 test('素材解析 DOCX 和多格式预览，批量编辑原子性，筛选总数与翻页一致', async (t) => {
   const k = new ProductKnowledge();
   t.after(() => k.close());
@@ -202,4 +238,79 @@ test('正式素材 API 读取和原件分段下载不依赖云端，跨站上传
     true,
   );
   assert.deepEqual(outside, []);
+});
+
+test('素材新建与换版按实际字节接受 50 MiB，超限保留当前版本及原件', async (t) => {
+  const app = createApp({
+    env: {},
+    outreachServiceFactory: () => ({ mailboxes: { list: () => [] }, close() {} }),
+  });
+  await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => app.close(resolve)));
+  const base = 'http://127.0.0.1:' + app.address().port + '/api/v1/materials';
+  const post = (path, body) =>
+    fetch(base + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream', 'Idempotency-Key': randomUUID() },
+      body,
+      duplex: 'half',
+    });
+  const bytes = Buffer.alloc(50 * 1024 ** 2, ' ');
+  const tail = '\nWidth 72 mm';
+  bytes.write(tail, bytes.length - tail.length);
+  const first = await post('?name=spec.txt', bytes);
+  assert.equal(first.status, 201);
+  const { id, documentId } = await first.json();
+  const versions = '/' + id + '/versions?name=spec.txt&version=';
+  bytes.write('73', bytes.length - 5);
+  const revised = await post(versions + '1', bytes);
+  assert.equal(revised.status, 201);
+  const current = await revised.json();
+  assert.notEqual(current.documentId, documentId);
+  assert.equal(current.warning, '');
+
+  const over = Buffer.concat([bytes, Buffer.from('\n')]);
+  async function* chunks() {
+    for (let i = 0; i < over.length; i += 65536) yield over.subarray(i, i + 65536);
+  }
+  for (const [url, body] of [
+    ['?name=over.txt', over],
+    [versions + '2', chunks()],
+  ]) {
+    const refused = await post(url, body);
+    assert.equal(refused.status, 413);
+    assert.match((await refused.json()).error, /50 MiB/);
+  }
+  const detail = await (await fetch(base + '/' + id)).json();
+  assert.equal(detail.currentVersion, 2);
+  assert.deepEqual(detail.history, [2, 1]);
+  assert.equal(detail.documents[0].id, current.documentId);
+  assert.equal(detail.documents[0].size, bytes.length);
+  assert.equal(detail.documents[0].extraction.facts.at(-1).text, 'Width 73 mm');
+  for (const [doc, expected] of [
+    [documentId, '72 mm'],
+    [current.documentId, '73 mm'],
+  ]) {
+    const raw = await fetch(base + '/' + id + '/document/' + doc, {
+      headers: { Range: 'bytes=-5' },
+    });
+    assert.equal(raw.status, 206);
+    assert.equal(await raw.text(), expected);
+  }
+  assert.equal((await (await fetch(base)).json()).total, 1);
+});
+
+test('视频额度为 80 MiB，邮件附件按 10 个、解码合计 10 MiB 校验', () => {
+  for (const name of ['样片.MOV', '样片.mp4', '样片.webm']) {
+    checkMaterialSize(name, 80 * 1024 ** 2);
+    assert.throws(() => checkMaterialSize(name, 80 * 1024 ** 2 + 1), /80 MiB/);
+  }
+  const small = { name: 'extra.txt', contentBase64: 'YQ==' };
+  const full = {
+    name: 'mail.txt',
+    contentBase64: Buffer.alloc(10 * 1024 ** 2, 'a').toString('base64'),
+  };
+  assert.equal(normalizeAttachments([full])[0].size, 10485760);
+  assert.throws(() => normalizeAttachments([full, small]), /10 MB/);
+  assert.throws(() => normalizeAttachments(Array(11).fill(small)), /10 个/);
 });

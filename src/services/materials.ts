@@ -1,3 +1,5 @@
+import { checkMaterialSize } from '../domain/material-upload.mjs';
+
 export const materialFormats = ['PDF', 'Word', 'Markdown', 'TXT', 'Excel', '图片', '视频'];
 export const acceptMaterials =
   '.pdf,.docx,.xlsx,.md,.markdown,.txt,.jpg,.jpeg,.png,.gif,.webp,.mp4,.webm,.mov';
@@ -70,7 +72,13 @@ export const sourceUrl = (id: string, document: string) =>
 export async function materialsRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(materialApi + path, init);
   const data = await response.json().catch(() => null);
-  if (!response.ok || !data) throw new Error(data?.error || '素材操作失败，请刷新后重试');
+  if (!response.ok || !data)
+    throw new Error(
+      data?.error ||
+        (response.status === 413
+          ? '上传请求超过网关上限，请联系管理员检查素材上传配置'
+          : '素材操作失败，请刷新后重试'),
+    );
   return data as T;
 }
 export const sendJson = <T>(path: string, method: string, body: unknown) =>
@@ -84,6 +92,7 @@ export async function uploadMaterial(
   options: { site?: string; category?: string; id?: string; version?: number },
   key: string,
 ) {
+  checkMaterialSize(file.name, file.size);
   const q = new URLSearchParams({ name: file.name });
   if (options.site) q.set('site', options.site);
   if (options.category) q.set('category', options.category);

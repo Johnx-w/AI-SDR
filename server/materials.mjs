@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mailSite, siteAllowsProduct } from '../src/domain/mail-site.mjs';
 import { materialType, validateFile } from './material-formats.mjs';
+import { parsesLocally } from './product-documents.mjs';
 
 const fail = (status, msg) => Object.assign(new Error(msg), { status });
 const formats = {
@@ -207,10 +208,24 @@ export class MaterialLibrary {
       .update(JSON.stringify([id, version, name, site, category]))
       .update(bytes)
       .digest('hex');
+    const file = { name, contentType, bytes };
+    const findRequest = this.db.prepare(
+      'SELECT * FROM material_upload_requests WHERE request_key=?',
+    );
+    const currentVersion = () => {
+      const p = this.get(id);
+      if (p.version !== Number(version) || p.status === 'archived')
+        throw fail(409, '资料状态已变化，请刷新');
+      return p;
+    };
+    // Parse outside the write transaction. A bad replacement must leave the active version usable.
+    let prepared;
+    if (id && parsesLocally(contentType) && !findRequest.get(key)) {
+      currentVersion();
+      prepared = await this.k.documents.prepareReplacement(file);
+    }
     const record = transaction(this.db, () => {
-      const prior = this.db
-        .prepare('SELECT * FROM material_upload_requests WHERE request_key=?')
-        .get(key);
+      const prior = findRequest.get(key);
       if (prior) {
         if (prior.fingerprint !== fingerprint) throw fail(409, '此操作编号已用于其他文件');
         return { id: prior.product_id, documentId: prior.document_id, reused: true };
@@ -238,7 +253,7 @@ export class MaterialLibrary {
         }
       }
       const product = id
-        ? this.get(id)
+        ? currentVersion()
         : this.k.save({
             name: name.replace(/\.[^.]+$/, '').slice(0, 160) || name,
             direction: 'materials',
@@ -246,9 +261,9 @@ export class MaterialLibrary {
             materialCategory: category || '未分类',
             ...this.scope(site),
           });
-      if (id && (product.version !== Number(version) || product.status === 'archived'))
-        throw fail(409, '资料状态已变化，请刷新');
-      const document = this.k.documents.store(product.id, { name, contentType, bytes });
+      const document = this.k.documents.store(product.id, file);
+      if (prepared && !document.extraction)
+        this.k.documents.saveLocalExtraction(document.id, prepared);
       const ids = product.documentIds || [];
       // Historical products may link several independent files. Replace only the primary file.
       const documentIds = [...new Set([document.id, ...ids.slice(1)])];
@@ -273,7 +288,7 @@ export class MaterialLibrary {
     });
     let warning = '';
     try {
-      if (contentType !== 'application/pdf' && !contentType.startsWith('image/'))
+      if (!prepared && parsesLocally(contentType))
         await this.k.documents.extract(record.id, record.documentId, { env, fetchImpl });
     } catch (e) {
       warning = e.message;

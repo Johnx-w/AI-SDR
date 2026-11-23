@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
-import { materialType, types, validateFile, extractText, videoLimit } from './material-formats.mjs';
+import { materialType, types, validateFile, extractText } from './material-formats.mjs';
 import { platformJson, providerBaseUrl } from './acquisition-config.mjs';
-import { extractWorkbook, workbookType } from './product-workbooks.mjs';
+import { parseWorkbook, workbookType } from './product-workbooks.mjs';
 
+// The product JSON endpoint accepts Base64; the material library uploads original bytes.
 export const MAX_PRODUCT_DOCUMENT_BYTES = 10 * 1024 * 1024;
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const string = (value, max, required = false) =>
@@ -100,6 +101,21 @@ function extracted(data, contentType) {
   }
 }
 
+export const parsesLocally = (type) => type !== types.pdf && !type.startsWith('image/');
+
+async function localExtraction(file) {
+  if (file.contentType === workbookType) return parseWorkbook(file.bytes);
+  const extraction = file.contentType.startsWith('video/')
+    ? {
+        facts: [],
+        warnings: ['预览视频后按时间点填写核对片段。'],
+        model: 'manual',
+        extractedAt: new Date().toISOString(),
+      }
+    : await extractText(file);
+  return { extraction };
+}
+
 export class ProductDocuments {
   constructor(db) {
     this.db = db;
@@ -144,11 +160,6 @@ export class ProductDocuments {
   }
   store(productId, file) {
     validateFile(file.name, file.contentType, file.bytes);
-    if (
-      file.bytes.length >
-      (file.contentType.startsWith('video/') ? videoLimit : MAX_PRODUCT_DOCUMENT_BYTES)
-    )
-      throw fail(413, '文件超过大小上限');
     if (!this.db.prepare('SELECT 1 FROM product_knowledge WHERE id=?').get(productId))
       throw fail(404, '资料不存在');
     const sha256 = createHash('sha256').update(file.bytes).digest('hex');
@@ -174,52 +185,50 @@ export class ProductDocuments {
       .run(id, productId, JSON.stringify(metadata), file.bytes);
     return { ...metadata, extraction: null };
   }
+  async runExtraction(key, action) {
+    if (this.running.has(key)) return this.running.get(key);
+    if (this.running.size >= 2) throw fail(429, '正在提取其他文件，请稍后重试');
+    const task = action();
+    this.running.set(key, task);
+    try {
+      return await task;
+    } finally {
+      this.running.delete(key);
+    }
+  }
+  prepareReplacement(file) {
+    return this.runExtraction(file, () => localExtraction(file));
+  }
+  saveLocalExtraction(id, { extraction, rows }) {
+    // Also used inside the transaction that switches the active version.
+    this.db.exec('SAVEPOINT material_extraction');
+    try {
+      if (rows) {
+        const insert = this.db.prepare(
+          'INSERT OR REPLACE INTO product_workbook_rows VALUES(?,?,?,?,?)',
+        );
+        for (const row of rows) insert.run(id, ...row);
+      }
+      this.db
+        .prepare('UPDATE product_documents SET extraction=? WHERE id=? AND extraction IS NULL')
+        .run(JSON.stringify(extraction), id);
+      this.db.exec('RELEASE material_extraction');
+    } catch (error) {
+      this.db.exec('ROLLBACK TO material_extraction; RELEASE material_extraction');
+      throw error;
+    }
+  }
   async extract(productId, id, { env, fetchImpl = fetch }) {
     const file = this.get(productId, id);
     if (file.extraction) return this.list(productId).find((item) => item.id === id);
-    if (this.running.has(id)) return this.running.get(id);
-    if (this.running.size >= 2) throw fail(429, '正在提取其他文件，请稍后重试');
-    if (file.contentType === workbookType) {
-      const work = extractWorkbook(this.db, file).then(() =>
-        this.list(productId).find((item) => item.id === id),
-      );
-      this.running.set(id, work);
-      try {
-        return await work;
-      } finally {
-        this.running.delete(id);
+    return this.runExtraction(id, async () => {
+      if (parsesLocally(file.contentType)) {
+        this.saveLocalExtraction(id, await localExtraction(file));
+        return this.list(productId).find((item) => item.id === id);
       }
-    }
-    if (
-      file.contentType.startsWith('text/') ||
-      file.contentType === types.docx ||
-      file.contentType.startsWith('video/')
-    ) {
-      const task = (async () => {
-        const extraction = file.contentType.startsWith('video/')
-          ? {
-              facts: [],
-              warnings: ['预览视频后按时间点填写核对片段。'],
-              model: 'manual',
-              extractedAt: new Date().toISOString(),
-            }
-          : await extractText(file);
-        this.db
-          .prepare('UPDATE product_documents SET extraction=? WHERE id=? AND extraction IS NULL')
-          .run(JSON.stringify(extraction), id);
-        return this.list(productId).find((d) => d.id === id);
-      })();
-      this.running.set(id, task);
-      try {
-        return await task;
-      } finally {
-        this.running.delete(id);
-      }
-    }
-    const config = documentModelConfig(env);
-    if (!config.baseUrl || !config.model || !config.apiKey)
-      throw fail(503, '请在 API 连接中配置支持图片、PDF 和 Responses API 的资料识别模型');
-    const task = (async () => {
+      const config = documentModelConfig(env);
+      if (!config.baseUrl || !config.model || !config.apiKey)
+        throw fail(503, '请在 API 连接中配置支持图片、PDF 和 Responses API 的资料识别模型');
       const dataUrl = `data:${file.contentType};base64,${file.bytes.toString('base64')}`;
       const data = await platformJson(
         fetchImpl,
@@ -264,12 +273,6 @@ export class ProductDocuments {
         .prepare('UPDATE product_documents SET extraction=? WHERE id=? AND extraction IS NULL')
         .run(JSON.stringify(extraction), id);
       return this.list(productId).find((item) => item.id === id);
-    })();
-    this.running.set(id, task);
-    try {
-      return await task;
-    } finally {
-      this.running.delete(id);
-    }
+    });
   }
 }
