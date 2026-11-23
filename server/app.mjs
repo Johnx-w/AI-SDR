@@ -243,6 +243,10 @@ export function createApp({
     saveCustomerFields: (id, fields) => provider.saveCustomerFields(id, fields),
   });
   let outbound;
+  const getDraftModel = () =>
+    localMailInspection
+      ? localMailInspection.draftModel
+      : mailDraftModel(connections.environment(), fetchImpl);
   const outreach = () =>
     (outbound ??= outreachServiceFactory
       ? outreachServiceFactory({ env })
@@ -257,6 +261,7 @@ export function createApp({
           products: () => knowledge().list(),
           answerQuestion: (mailbox, question, now) =>
             answerMailQuestion(knowledge(), mailbox, question, now),
+          getDraftModel,
           getEnv: () => connections.environment(),
           getScope: acquisitionScope,
           acquisitionSources: () => acquisitionOutreachSources(jobs(), plans()),
@@ -532,9 +537,7 @@ export function createApp({
               request,
               url,
               service: outreach(),
-              draftModel: localMailInspection
-                ? localMailInspection.draftModel
-                : mailDraftModel(connections.environment(), fetchImpl),
+              draftModel: getDraftModel(),
               localMailInspection: !!localMailInspection,
               readJson: (input) =>
                 readJson(

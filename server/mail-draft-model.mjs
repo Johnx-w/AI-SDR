@@ -1,4 +1,5 @@
 import { researchProviderConfig } from './acquisition-config.mjs';
+import { createHash } from 'node:crypto';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
@@ -20,24 +21,40 @@ export function mailDraftModel(env, fetchImpl) {
     return null;
   return {
     name,
+    connectionId: createHash('sha256')
+      .update(JSON.stringify([provider, baseUrl, name]))
+      .digest('hex'),
     async generate(messages) {
       let response;
       try {
-        response = await fetchImpl(baseUrl + '/chat/completions', {
-          method: 'POST',
-          redirect: 'error',
-          signal: AbortSignal.timeout(60000),
-          headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: name,
-            messages,
-            ...(provider === 'deepseek' ? { thinking: { type: 'disabled' } } : {}),
-            response_format: { type: 'json_object' },
-            max_tokens: 1200,
-          }),
-        });
+        const payload = {
+          model: name,
+          messages,
+          ...(provider === 'deepseek' ? { thinking: { type: 'disabled' } } : {}),
+          response_format: { type: 'json_object' },
+          max_tokens: 1200,
+        };
+        const signal = AbortSignal.timeout(60000);
+        for (;;) {
+          response = await fetchImpl(baseUrl + '/chat/completions', {
+            method: 'POST',
+            redirect: 'error',
+            signal,
+            headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          if (provider !== 'openai_compatible' || response.status !== 400) break;
+          const { error } = (await response.json().catch(() => null)) || {};
+          if (!['unsupported_parameter', 'unsupported_value'].includes(error?.code)) break;
+          if (error.param === 'response_format' && payload.response_format)
+            delete payload.response_format;
+          else if (error.param === 'max_tokens' && payload.max_tokens) {
+            payload.max_completion_tokens = payload.max_tokens;
+            delete payload.max_tokens;
+          } else break;
+        }
       } catch {
-        throw fail(502, '连接草稿模型服务 失败或超时，请重试');
+        throw fail(502, '连接草稿模型服务失败或超时，请重试');
       }
       if (response.status === 401 || response.status === 403)
         throw fail(503, '草稿模型鉴权失败，请核对当前模型连接的 API Key');

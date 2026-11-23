@@ -9,7 +9,7 @@ import { MaterialLibrary } from '../server/materials.mjs';
 import { answerMailQuestion } from '../server/mail-knowledge.mjs';
 
 export async function honeybadgerFixture(
-  dir = String.raw`C:\Users\Johnson\Desktop\产品资料`,
+  dir = process.env.MAIL_QA_MATERIALS_DIR || String.raw`C:\Users\Johnson\Desktop\工作\产品资料`,
   databasePath = ':memory:',
 ) {
   if (databasePath !== ':memory:' && existsSync(databasePath))

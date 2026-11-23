@@ -28,14 +28,14 @@ T12 自动同步随本次版本交付，使用运行环境有效飞书连接和�
 
 ## 术语、开发约定与规则资产
 
-| 内容                   | 入口                                                         | 用法                                         |
-| ---------------------- | ------------------------------------------------------------ | -------------------------------------------- |
-| 业务术语               | [GLOSSARY](../GLOSSARY.md)                                   | 领域含义；不承担功能已实现的证明             |
-| 开发约定与文档读取范围 | [AGENTS](../AGENTS.md)                                       | 提交、发布、正式数据目标及归档排除规则       |
-| 领域文档读取           | [Domain docs](agents/domain.md)                              | 本仓库使用根词汇表和当前 ADR                 |
-| Issue 与规格维护       | [Issue tracker](agents/issue-tracker.md)                     | GitHub Issues 与 `gh` CLI                    |
-| 首封写作               | [First-touch writer](../agents/first-touch-writer/system.md) | 现行首封运行模块读取的写作规则               |
-| 四品类规则与协议       | [四品类业务员](../agents/export-sales/README.md)             | 来信规则、图纸和知识准备资产；正式接待待接入 |
+| 内容                   | 入口                                                         | 用法                                           |
+| ---------------------- | ------------------------------------------------------------ | ---------------------------------------------- |
+| 业务术语               | [GLOSSARY](../GLOSSARY.md)                                   | 领域含义；不承担功能已实现的证明               |
+| 开发约定与文档读取范围 | [AGENTS](../AGENTS.md)                                       | 提交、发布、正式数据目标及归档排除规则         |
+| 领域文档读取           | [Domain docs](agents/domain.md)                              | 本仓库使用根词汇表和当前 ADR                   |
+| Issue 与规格维护       | [Issue tracker](agents/issue-tracker.md)                     | GitHub Issues 与 `gh` CLI                      |
+| 首封写作               | [First-touch writer](../agents/first-touch-writer/system.md) | 现行首封运行模块读取的写作规则                 |
+| 四品类规则与协议       | [四品类业务员](../agents/export-sales/README.md)             | 来信规则、图纸和知识准备资产；四品类协议待接入 |
 
 四品类的 `shared-system.md` 与 `category-profiles.json` 生成四份来信提示词；`conversation-contract.md`、`mailbox-routing.md`、`knowledge-checklist.md` 和 `drawing-protocol.md` 分别维护协议、品牌路由、资料准备和图纸规则。现有 Schema 为 1.3，正式接待的 1.4 为待实现设计，不能提前声称已升级。
 
@@ -47,7 +47,7 @@ T12 自动同步随本次版本交付，使用运行环境有效飞书连接和�
 | --------------------------------------------------------------------------- | ---------------------------------------------- |
 | [ADR-0001](adr/0001-separate-company-and-supply-opportunities.md)           | 企业与供货方向分别判断，T12 只镜像最新评估     |
 | [ADR-0002](adr/0002-web-primary-operational-interface.md)                   | 网页操作、服务器主库和飞书协作镜像             |
-| [ADR-0003](adr/0003-category-demands-with-shared-conversations.md)          | 四品类与统一回信，正式接待待实现               |
+| [ADR-0003](adr/0003-category-demands-with-shared-conversations.md)          | 四品类与统一回信，四品类协作待实现             |
 | [ADR-0004](adr/0004-reviewed-drawing-facts-and-versioned-assets.md)         | 候选准备已有；参数级批准及自动附图待实现       |
 | [ADR-0005](adr/0005-one-mailbox-per-customer-with-shared-catalog.md)        | 固定邮箱已有；回信总目录协作待接入             |
 | [ADR-0008](adr/0008-broad-company-capture-and-initial-priority.md)          | 宽泛收录与主库新增口径                         |

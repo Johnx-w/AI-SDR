@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateMailDraft } from '../server/mail-assisted-draft.mjs';
+import { mailDraftModel } from '../server/mail-draft-model.mjs';
 import { OutreachService } from '../server/outreach-service.mjs';
 const peer = 'buyer@dealer.test';
 function harness(t, mode = 'auto') {
@@ -61,8 +62,20 @@ function harness(t, mode = 'auto') {
       automatic: true,
       body: 'Material: aluminium',
       reason: '技术参数',
-      sources: [{ productId: 'p', version: h.version, ref: 'B2' }],
+      sources: [
+        { productId: 'p', version: h.version, ref: 'B2', field: 'Material', value: 'aluminium' },
+      ],
     }),
+    getDraftModel: () => h.model,
+  };
+  h.model = {
+    name: 'fixture-chat',
+    generate: async (messages) =>
+      JSON.stringify(
+        messages[0].content.includes('Verify')
+          ? { supported: true }
+          : { body: 'The material is aluminium.', sourceIndexes: [0] },
+      ),
   };
   h.s = new OutreachService(options);
   h.restart = async () => {
@@ -152,9 +165,11 @@ test('新来信与游标落库后重启，两个执行者及重复同步只发�
   await h.s.reception.tick();
   assert.equal(h.sends.length, 1);
   assert.equal(h.sends[0].inReplyTo, mail.messageId);
+  assert.match(h.sends[0].text, /The material is aluminium\./);
   const thread = h.thread();
   assert.equal(h.s.reception.detail(thread).state, 'done');
   assert.equal(h.s.replies.operations(thread.id)[0].provenance.sources[0].ref, 'B2');
+  assert.equal(h.s.replies.operations(thread.id)[0].provenance.model, 'fixture-chat');
   await h.restart();
   await h.s.reception.tick();
   assert.equal(h.sends.length, 1);
@@ -177,6 +192,145 @@ test('逐封审核、过期资料重做、重试批准以及不同幂等编号�
   assert.equal(h.sends.length, 1);
   assert.equal(h.s.reception.list().total, 0);
   assert.throws(() => h.approve(next, 'other-key'), /草稿/);
+});
+
+test('自动接待的模型或引用异常进入待处理，复核不通过保留草稿，修复后可重新生成', async (t) => {
+  for (const [scenario, state] of [
+    ['offline', 'attention'],
+    ['unavailable', 'attention'],
+    ['badSource', 'attention'],
+    ['unsupported', 'review'],
+  ]) {
+    const h = harness(t);
+    const model = h.model;
+    h.model =
+      scenario === 'unavailable'
+        ? null
+        : {
+            name: model.name,
+            generate: async (messages) => {
+              if (scenario === 'offline') throw Error('transport failed');
+              if (scenario === 'badSource')
+                return JSON.stringify({ body: 'Hello', sourceIndexes: [5] });
+              if (messages[0].content.includes('Verify')) return '{"supported":false}';
+              return model.generate(messages);
+            },
+          };
+    h.incoming();
+    await h.sync();
+    await h.s.reception.tick();
+    const [row] = h.s.reception.list().items;
+    assert.equal(row.state, state);
+    assert.equal(h.sends.length, 0);
+    h.model = model;
+    await h.s.reception.prepare(row.sourceId, { regenerate: true });
+    assert.equal(h.s.reception.row(row.sourceId).state, 'review');
+    assert.match(h.s.replies.draft(row.threadId).bodyText, /The material is aluminium/);
+    assert.equal(h.sends.length, 0);
+  }
+});
+
+test('后台模型等待时撤回资料、人工接管、编辑草稿或切换模型均阻止过期答复', async (t) => {
+  for (const change of ['material', 'takeover', 'draft', 'model']) {
+    const h = harness(t);
+    h.incoming();
+    await h.sync();
+    const id = h.thread().id,
+      source = h.s.conversations.detail(id).messages[0].id;
+    const writer = h.model;
+    const gate = Promise.withResolvers(),
+      started = Promise.withResolvers();
+    h.model = {
+      ...writer,
+      generate: async (messages) => {
+        started.resolve();
+        await gate.promise;
+        return writer.generate(messages);
+      },
+    };
+    const work = h.s.reception.tick();
+    await started.promise;
+    if (change === 'material') h.version++;
+    if (change === 'takeover') await h.s.reception.ownership(id, 'takeover');
+    if (change === 'draft')
+      h.s.replies.saveDraft(id, {
+        replyToMessageId: source,
+        expectedRevision: 0,
+        bodyText: 'My draft',
+      });
+    if (change === 'model') h.model = { ...writer, name: 'another-model' };
+    gate.resolve();
+    await work;
+    assert.equal(h.s.replies.draft(id)?.bodyText, change === 'draft' ? 'My draft' : undefined);
+    assert.equal(
+      h.s.reception.row(source).state,
+      change === 'takeover' ? 'cancelled' : 'attention',
+    );
+    assert.equal(h.sends.length, 0);
+  }
+});
+
+test('来信中自行提供的规格数值不能当作已审核产品资料自动确认', async (t) => {
+  const h = harness(t);
+  h.incoming({ bodyText: 'Is the thickness 5 mm?' });
+  h.model.generate = async (messages) => {
+    assert.ok(!messages[0].content.includes('Verify'));
+    return JSON.stringify({ body: 'The thickness is 5 mm.', sourceIndexes: [0] });
+  };
+  await h.sync();
+  await h.s.reception.tick();
+  assert.equal(h.s.reception.list().items[0].state, 'review');
+  assert.equal(h.sends.length, 0);
+});
+
+test('后台接待使用当前聊天补全连接完成起草与事实复核', async (t) => {
+  const h = harness(t);
+  const calls = [];
+  const live = process.env.MAIL_MODEL_LIVE_SMOKE === '1';
+  const config = live
+    ? process.env
+    : {
+        RESEARCH_MODEL_PROVIDER: 'openai_compatible',
+        RESEARCH_MODEL_BASE_URL: 'https://model.example.test/v1',
+        RESEARCH_MODEL_MODEL: 'sample-chat',
+        RESEARCH_MODEL_API_KEY: 'fixture',
+      };
+  h.model = mailDraftModel(
+    config,
+    live
+      ? fetch
+      : async (url, init) => {
+          assert.equal(url, 'https://model.example.test/v1/chat/completions');
+          const payload = JSON.parse(init.body);
+          assert.equal('thinking' in payload, false);
+          calls.push(payload.messages);
+          return Response.json({
+            choices: [
+              {
+                finish_reason: 'stop',
+                message: {
+                  content:
+                    calls.length === 1
+                      ? '{"body":"The material is aluminium.","sourceIndexes":[0]}'
+                      : '{"supported":true}',
+                },
+              },
+            ],
+          });
+        },
+  );
+  h.incoming({ bodyText: 'What material is the A211 track made of?' });
+  h.s.answerQuestion = () => ({
+    automatic: true,
+    reason: '已审核参数',
+    sources: [{ field: 'A211 material', value: 'aluminium', ref: 'B2' }],
+  });
+  await h.sync();
+  await h.s.reception.tick();
+  assert.equal(h.sends.length, 1, h.s.reception.list().items[0]?.reason);
+  assert.match(h.sends[0].text, /alumin[i]?um/i);
+  assert.equal(h.s.replies.operations(h.thread().id)[0].provenance.model, h.model.name);
+  if (!live) assert.equal(calls.length, 2);
 });
 test('客户固定邮箱待核对时保留待办，核实归属后可重新起草', async (t) => {
   const h = harness(t);

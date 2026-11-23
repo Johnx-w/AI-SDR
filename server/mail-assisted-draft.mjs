@@ -7,7 +7,7 @@ const fail = (status, message) =>
   Object.assign(new Error(message), { status, code: 'REPLY_POLICY_CHANGED' });
 const stampOf = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
-function basisFor(s, id, source, except = '') {
+export function mailDraftBasis(s, id, source, except = '') {
   const detail = s.conversations.detail(id),
     thread = detail.conversation;
   const box = s.replies.boundMailbox(thread);
@@ -64,7 +64,7 @@ function basisFor(s, id, source, except = '') {
     history,
     sources,
   ]);
-  return { box, mail, question, history, sources, signature, stamp };
+  return { box, mail, question, history, sources, signature, stamp, answer };
 }
 
 function draftState(s, id, revision, source) {
@@ -165,27 +165,13 @@ export function guardAssistedDraft(service, { id, source, draft, origin, key }) 
   if (
     origin !== 'manual' ||
     service.replies.draft(id)?.revision !== draft.revision ||
-    basisFor(service, id, source, key).stamp !== draft.provenance.stamp
+    mailDraftBasis(service, id, source, key).stamp !== draft.provenance.stamp
   )
     throw fail(409, '来信、资料或草稿已变化，请重新核对后人工发送');
 }
 
-export async function generateMailDraft(service, id, input, model) {
-  const { sourceId, expectedRevision } = input || {};
-  if (
-    typeof sourceId !== 'string' ||
-    !sourceId ||
-    !Number.isSafeInteger(expectedRevision) ||
-    expectedRevision < 0
-  )
-    throw fail(400, '请选择来信并提供当前草稿版本');
+export async function composeMailDraft(service, basis, model) {
   if (!model?.generate || !model.name) throw fail(503, '草稿模型未就绪，请核对服务端模型连接配置');
-  const basis = basisFor(service, id, sourceId);
-  const before = draftState(service, id, expectedRevision, sourceId);
-  const row = service.reception.row(sourceId);
-  // Stop any background automatic reply for this message before yielding to the model.
-  if (row?.thread_id === id && row.state === 'pending')
-    service.reception.finish(sourceId, 'attention', '业务员已选择起草，请审核后发送');
   const messages = [
     {
       role: 'system',
@@ -205,11 +191,35 @@ export async function generateMailDraft(service, id, input, model) {
   ];
   const raw = await model.generate(messages);
   if (service.closed || service.isMaintaining()) throw fail(409, '服务正在维护，请稍后重新起草');
-  const result = readAnswer(raw, basis, service.mailboxes.list());
+  return readAnswer(raw, basis, service.mailboxes.list());
+}
+
+export function signedMailDraft(body, signature) {
+  return {
+    bodyText: [body, signature.text].filter(Boolean).join('\n\n'),
+    bodyHtml: signaturePlainTextHtml(body) + (signature.html ? '<br><br>' + signature.html : ''),
+  };
+}
+
+export async function generateMailDraft(service, id, input, model) {
+  const { sourceId, expectedRevision } = input || {};
+  if (
+    typeof sourceId !== 'string' ||
+    !sourceId ||
+    !Number.isSafeInteger(expectedRevision) ||
+    expectedRevision < 0
+  )
+    throw fail(400, '请选择来信并提供当前草稿版本');
+  const basis = mailDraftBasis(service, id, sourceId);
+  const before = draftState(service, id, expectedRevision, sourceId);
+  const row = service.reception.row(sourceId);
+  if (row?.thread_id === id && row.state === 'pending')
+    service.reception.finish(sourceId, 'attention', '业务员已选择起草，请审核后发送');
+  const result = await composeMailDraft(service, basis, model);
   return service.transaction(() => {
     if (
       draftState(service, id, expectedRevision, sourceId) !== before ||
-      basisFor(service, id, sourceId).stamp !== basis.stamp
+      mailDraftBasis(service, id, sourceId).stamp !== basis.stamp
     )
       throw fail(409, '来信、资料或草稿已变化，请重新打开会话');
     const reason = result.sources.length
@@ -229,10 +239,7 @@ export async function generateMailDraft(service, id, input, model) {
       {
         replyToMessageId: sourceId,
         expectedRevision,
-        bodyText: [result.body, basis.signature.text].filter(Boolean).join('\n\n'),
-        bodyHtml:
-          signaturePlainTextHtml(result.body) +
-          (basis.signature.html ? '<br><br>' + basis.signature.html : ''),
+        ...signedMailDraft(result.body, basis.signature),
       },
       provenance,
     );

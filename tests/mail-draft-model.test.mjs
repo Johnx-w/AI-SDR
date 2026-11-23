@@ -5,6 +5,41 @@ import { mailDraftModel } from '../server/mail-draft-model.mjs';
 
 const messages = [{ role: 'user', content: '测试草稿' }];
 
+test('兼容网关明确拒绝可选字段后用支持的格式起草，普通请求错误不重试', async () => {
+  const config = {
+    RESEARCH_MODEL_PROVIDER: 'openai_compatible',
+    RESEARCH_MODEL_MODEL: 'chat',
+    RESEARCH_MODEL_API_KEY: 'fixture',
+    RESEARCH_MODEL_BASE_URL: 'https://example.test/v1',
+  };
+  const calls = [];
+  const model = mailDraftModel(config, async (_, init) => {
+    const p = JSON.parse(init.body);
+    calls.push(p);
+    const param = p.response_format ? 'response_format' : p.max_tokens ? 'max_tokens' : '';
+    return param
+      ? Response.json({ error: { code: 'unsupported_parameter', param } }, { status: 400 })
+      : Response.json({
+          choices: [{ finish_reason: 'stop', message: { content: '{"supported":true}' } }],
+        });
+  });
+  assert.equal(JSON.parse(await model.generate(messages)).supported, true);
+  assert.equal(calls.length, 3);
+  assert.equal(calls[2].max_completion_tokens, 1200);
+  let failed = 0;
+  await assert.rejects(
+    mailDraftModel(config, async () => {
+      failed++;
+      return Response.json(
+        { error: { code: 'invalid_request', param: 'messages' } },
+        { status: 400 },
+      );
+    }).generate(messages),
+    { status: 502 },
+  );
+  assert.equal(failed, 1);
+});
+
 test('主动起草跟随服务端 API 连接切换模型，每次仅使用对应端点与密钥', async () => {
   const connections = new ApiConnections({ env: { DEEPSEEK_API_KEY: 'test-only-native' } });
   const calls = [];

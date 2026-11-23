@@ -10,6 +10,7 @@ import { OutreachMailboxes } from '../server/outreach-mailboxes.mjs';
 import { createMailboxReader } from '../server/mailbox-reader.mjs';
 import { OutreachService } from '../server/outreach-service.mjs';
 import { answerMailQuestion } from '../server/mail-knowledge.mjs';
+import { mailDraftModel } from '../server/mail-draft-model.mjs';
 import { honeybadgerFixture } from './verify-mail-knowledge.mjs';
 
 export const internalAccounts = [
@@ -21,6 +22,8 @@ const allowed = new Set(internalAccounts.map((a) => a.toLowerCase()));
 
 // No production store, acquisition source or queue is opened. The transport enforces the envelope.
 export async function runInternal(passwords, log = console.log) {
+  const model = mailDraftModel(process.env, fetch);
+  assert.ok(model, '真实内部环测需要配置回信模型');
   const token = randomUUID(),
     marker = '[AI-SDR internal QA ' + token + ']';
   const root = resolve('.codex-tmp');
@@ -133,6 +136,7 @@ export async function runInternal(passwords, log = console.log) {
     );
     service = new OutreachService({
       mailboxes: boxes,
+      getDraftModel: () => model,
       products: () => knowledge.list(),
       customers: () => [{ id: 'qa-peer', name: 'Internal QA', email: internalAccounts[2] }],
       businessState: () => ({
@@ -180,7 +184,7 @@ export async function runInternal(passwords, log = console.log) {
           assert.equal(mail.from, delivery.from.toLowerCase());
           if (delivery.id === accepted[3]?.id) {
             assert.equal(mail.inReplyTo, accepted[2].id);
-            assert.match(mail.bodyText, /100%Polyester/);
+            assert.match(mail.bodyText, /100\s*%\s*polyester/i);
             assert.equal(mail.classification, 'auto_reply');
           }
           if (!received.has(delivery.id))
@@ -209,9 +213,10 @@ export async function runInternal(passwords, log = console.log) {
         .data,
     );
     assert.equal(op.origin, 'automatic');
-    assert.match(op.payload.text, /100%Polyester/);
+    assert.match(op.payload.text, /100\s*%\s*polyester/i);
+    assert.equal(op.provenance.model, model.name);
     assert.equal(op.payload.inReplyTo, accepted[2].id);
-    assert.equal(op.provenance.sources.at(-1).ref, 'B2');
+    assert.ok(op.provenance.sources.some((s) => s.ref === 'B2'));
     assert.equal(service.campaigns().length, 0);
     log(
       JSON.stringify({

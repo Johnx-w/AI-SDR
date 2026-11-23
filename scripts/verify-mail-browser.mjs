@@ -75,6 +75,20 @@ const service = new OutreachService({
   businessState: () => crm.view(),
   recordCommunication: record,
   answerQuestion: (b, q) => answerMailQuestion(knowledge, b, q),
+  getDraftModel: () => ({
+    name: 'browser-reception',
+    generate: async (messages) => {
+      const { evidence } = JSON.parse(messages[1].content);
+      assert.deepEqual(
+        evidence.map((s) => s.value),
+        ['ZX-01', 'Aluminium alloy'],
+      );
+      return JSON.stringify({
+        body: 'For ZX-01, the material is Aluminium alloy.',
+        sourceIndexes: [0, 1],
+      });
+    },
+  }),
   setMailOwnership: async (detail, ownership, owner) => {
     const result = await record(detail);
     const c = crm.get('conversations', result.conversationId);
@@ -237,7 +251,7 @@ try {
   assert.equal(sent.length, 1);
   assert.equal(sent[0].to, peer);
   assert.equal(sent[0].inReplyTo, '<browser-1@dealer.test>');
-  assert.match(sent[0].text, /Material: Aluminium alloy/);
+  assert.match(sent[0].text, /For ZX-01, the material is Aluminium alloy/);
   await button('返回全部会话').click();
   await page.getByRole('button', { name: /Track material/ }).click();
   await button('联系人资料').click();
