@@ -34,3 +34,10 @@
   --chart-5: #9ba8c6;
   --chart-6: #c3cbe0;
 }
+
+/* An opaque native scrollbar track can paint over a rounded scroll container's corners. */
+@media (forced-colors: none) {
+  body {
+    scrollbar-color: var(--color-text-muted) transparent;
+  }
+}

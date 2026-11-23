@@ -37,7 +37,7 @@ const groups = [
     detail: '依据证据生成企业画像并执行准入判断。模型服务独立配置，可替换。',
   },
   {
-    title: '素材库 · DeepSeek 文档解析',
+    title: '素材库 · 文档解析',
     icon: Sparkles,
     view: 'models',
     prefix: 'MATERIAL_DEEPSEEK_',
@@ -111,7 +111,7 @@ export function ApiConnections() {
       const payload = connectionFormPayload(settings, form);
       accept(await connectionsApi.save(payload.values, payload.clear));
       leadLibrary.reset();
-      notify('API 配置已保存，直连引擎已使用新配置');
+      notify('API 配置已保存');
     } catch (e) {
       setError(e instanceof Error ? e.message : '保存失败');
     } finally {

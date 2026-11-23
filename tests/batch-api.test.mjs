@@ -97,6 +97,36 @@ test('批量接口持久、幂等且活跃任务保护共享连接，允许独�
     assert.equal(view.fields.find((f) => f.key === 'DOCUMENT_MODEL_API_KEY').configured, true);
     assert.ok(!JSON.stringify(view).includes('test-document-secret'));
     assert.equal((await update({ values: {}, clear: ['DOCUMENT_MODEL_API_KEY'] })).status, 200);
+    const materialKey = 'MATERIAL_DEEPSEEK_API_KEY';
+    const materialSecret = 'sample-material-secret';
+    const materialSave = await update({ values: { [materialKey]: materialSecret } });
+    assert.equal(materialSave.status, 200, '正在获客时可以保存素材库密钥');
+    for (const result of [await materialSave.json(), await (await fetch(connectionUrl)).json()]) {
+      const field = result.fields.find((f) => f.key === materialKey);
+      assert.equal(field.value, '');
+      assert.equal(field.maskedValue, 'samp********cret');
+      assert.equal(field.configured, true);
+      assert.ok(!JSON.stringify(result).includes(materialSecret));
+    }
+    for (const shared of ['WEB_SEARCH_API_KEY', 'FEISHU_APP_SECRET', 'RESEARCH_MODEL_API_KEY']) {
+      assert.equal(
+        (await update({ values: { [shared]: 'sample-new-value' }, clear: [materialKey] })).status,
+        409,
+      );
+      assert.equal(
+        (await update({ values: { [materialKey]: 'sample-new-value' }, clear: [shared] })).status,
+        409,
+      );
+    }
+    const afterMixed = await (await fetch(connectionUrl)).json();
+    assert.equal(
+      afterMixed.fields.find((f) => f.key === materialKey).maskedValue,
+      'samp********cret',
+    );
+    assert.equal((await update({ values: {}, clear: [materialKey] })).status, 200);
+    const afterClear = await (await fetch(connectionUrl)).json();
+    assert.equal(afterClear.fields.find((f) => f.key === materialKey).configured, false);
+    assert.equal(closes, 0);
     for (const payload of [
       { values: { DOCUMENT_MODEL_MODEL: 'new-model', DEEPSEEK_MODEL: 'new-model' } },
       { values: { DOCUMENT_MODEL_MODEL: 'new-model' }, clear: ['DEEPSEEK_API_KEY'] },
