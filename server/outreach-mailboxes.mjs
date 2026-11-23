@@ -297,10 +297,11 @@ function dpapi(operation, value) {
       clearTimeout(timer);
       error ? reject(fail('MAILBOX_CREDENTIAL_FAILED', 503)) : resolve(result);
     };
+    // The first Windows PowerShell and DPAPI startup can exceed 15 s under concurrent load.
     const timer = setTimeout(() => {
       child.kill();
       finish(true);
-    }, 15_000);
+    }, 45_000);
     child.stdout.on('data', (chunk) => {
       length += chunk.length;
       if (length > 64 * 1024) {
