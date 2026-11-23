@@ -11,7 +11,7 @@ const fail = (n, msg) => Object.assign(new Error(msg), { status: n });
 
 // Return promptly through the public proxy while a catalogue is being recognised.
 // Only progress and the small final receipt live here. Originals and passages are stored in SQLite.
-function processPdf(jobs, action) {
+function processMaterial(jobs, action) {
   const processingId = randomUUID();
   const job = { status: 202, result: { processingId } };
   jobs.set(processingId, job);
@@ -24,7 +24,7 @@ function processPdf(jobs, action) {
     })
     .catch((error) => {
       job.status = error.status || 500;
-      job.result = { error: error.status ? error.message : 'PDF 提取失败，请重新打开资料重试。' };
+      job.result = { error: error.status ? error.message : '原件提取失败，请重新打开资料重试。' };
     })
     .finally(() => setTimeout(() => jobs.delete(processingId), 5 * 60 * 1000).unref());
   return { processingId };
@@ -110,18 +110,18 @@ export async function handleMaterials({
   onChange,
   sites,
   uploads,
-  pdfJobs,
+  jobs,
 }) {
   const library = new MaterialLibrary(knowledge, sites?.() || []);
   const method = request.method,
     endpoint = url.pathname.slice('/api/v1/materials'.length);
   const progress = /^\/processing\/([\da-f-]{36})$/u.exec(endpoint);
   if (progress && method === 'GET') {
-    const job = pdfJobs.get(progress[1]);
+    const job = jobs.get(progress[1]);
     if (!job) throw fail(410, '提取进度已过期，请重新打开资料查看结果。');
     return json(response, job.status, job.result);
   }
-  const asyncPdf = request.headers.prefer === 'respond-async';
+  const respondAsync = request.headers.prefer === 'respond-async';
   const parts = method === 'POST' && /^\/(?:pk_[a-f0-9]{32}\/versions\/)?parts$/u.test(endpoint);
   const path = parts ? endpoint.slice(0, -'/parts'.length) : endpoint,
     q = Object.fromEntries(url.searchParams);
@@ -168,8 +168,8 @@ export async function handleMaterials({
       onChange?.();
       return data;
     };
-    if (type === 'application/pdf' && asyncPdf)
-      return json(response, 202, processPdf(pdfJobs, save));
+    if ((type === 'application/pdf' || type.startsWith('image/')) && respondAsync)
+      return json(response, 202, processMaterial(jobs, save));
     return json(response, 201, await save());
   }
   if (id && !op) {
@@ -193,10 +193,10 @@ export async function handleMaterials({
   }
   if (id && op === 'extract' && docId && method === 'POST') {
     const extract = async (onPage) => {
-      await knowledge.documents.extract(id, docId, { env, fetchImpl, pdfText: true, onPage });
+      await knowledge.documents.extract(id, docId, { env, fetchImpl, material: true, onPage });
       return { ok: true };
     };
-    if (asyncPdf) return json(response, 202, processPdf(pdfJobs, extract));
+    if (respondAsync) return json(response, 202, processMaterial(jobs, extract));
     return json(response, 200, await extract());
   }
   if (id && op === 'document' && docId && method === 'GET') {

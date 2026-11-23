@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ProductKnowledge } from '../server/product-knowledge.mjs';
+import { extractText } from '../server/material-formats.mjs';
 import { MaterialLibrary } from '../server/materials.mjs';
 import { createApp } from '../server/app.mjs';
 import { answerMailQuestion } from '../server/mail-knowledge.mjs';
@@ -44,6 +45,13 @@ test('素材直接上传、重试幂等、站点隔离、换版撤回及跨重�
   assert.equal(d.product.version, 1);
   assert.deepEqual(d.sites, []);
   assert.equal(d.documents[0].extraction.facts[1].location, '第 2 段');
+  assert.equal(lib.list().items[0].extractionStatus, 'ready');
+  assert.equal(lib.list().items[0].extractionCount, 2);
+  const extracted = d.documents[0].extraction;
+  k.documents.saveExtractionFailure(documentId, '测试失败');
+  assert.equal(lib.list().items[0].extractionStatus, 'failed');
+  k.documents.saveLocalExtraction(documentId, { extraction: extracted });
+  assert.equal(lib.list().items[0].extractionStatus, 'ready');
   assert.equal(lib.list({ site: 'unassigned' }).total, 1);
   let item = lib.edit(id, {
     version: 1,
@@ -86,6 +94,40 @@ test('素材直接上传、重试幂等、站点隔离、换版撤回及跨重�
   assert.equal(lib.list({ status: 'archived' }).total, 1);
   assert.equal(lib.detail(id).documents[0].id, replacement.documentId);
 });
+test('长段落跨分块仍保留型号末尾和 Markdown 标题位置', async () => {
+  const text = 'Check the complete catalogue. '.repeat(155) + 'Item ZX-427 is 1.25 mm thick.';
+  const result = await extractText({
+    contentType: 'text/markdown',
+    bytes: Buffer.from('# Products\n## Tracks\n' + text),
+  });
+  const chunks = result.facts.filter((fact) => fact.location.startsWith('第 3 段'));
+  assert.ok(chunks.length > 1);
+  assert.equal(chunks.map((fact) => fact.text).join(' '), text);
+  assert.match(chunks.at(-1).location, /分块 \d+ · Products \/ Tracks/u);
+  assert.deepEqual(result.warnings, []);
+});
+
+test('素材图片自动本机 OCR，重复读取不改版，损坏换版保留原图', async (t) => {
+  const k = new ProductKnowledge();
+  t.after(() => k.close());
+  const lib = new MaterialLibrary(k, boxes);
+  const bytes = readFileSync(new URL('./fixtures/material-spec.webp', import.meta.url));
+  const input = data('spec.webp', bytes);
+  const { id, documentId, warning } = await lib.upload(input);
+  assert.equal(warning, '');
+  const before = lib.detail(id);
+  const result = before.documents[0].extraction;
+  assert.equal(result.model, 'local-image');
+  assert.match(result.facts.map((f) => f.text).join(' '), /MX42 track width is 73 mm/iu);
+  assert.equal((await lib.upload(input)).reused, true);
+  await assert.rejects(
+    lib.upload({ ...data('bad.webp', bytes.subarray(0, 16)), id, version: 1 }),
+    /无法读取图片/,
+  );
+  assert.deepEqual(lib.detail(id), before);
+  assert.equal(lib.detail(id).documents[0].id, documentId);
+});
+
 test('素材自动识别 PDF 文字、图内中英参数和扫描页，回读后可按页引用', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'material-pdf-'));
   const path = join(dir, 'knowledge.sqlite');
@@ -239,6 +281,11 @@ test('换版文件可上传但无法解析时，保留已审核版本、原件�
     sourceFacts: [{ documentId, location: '第 1 段', text: 'Width 72 mm' }],
   });
   const before = lib.detail(id);
+  await assert.rejects(
+    lib.upload({ ...data('空正文.txt', '   \n  '), id, version: approved.version }),
+    /没有可读文字/u,
+  );
+  assert.deepEqual(lib.detail(id), before);
   const file = readFileSync(new URL('./fixtures/material-slats.docx', import.meta.url));
   const upload = {
     name: '误选工作簿.xlsx',

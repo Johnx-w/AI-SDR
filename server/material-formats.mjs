@@ -1,5 +1,6 @@
 import { Open } from 'unzipper-esm';
 import { Parser } from 'saxen';
+import { splitMaterialText } from './material-chunks.mjs';
 import { checkMaterialSize, videoTypes } from '../src/domain/material-upload.mjs';
 import { workbookType, checkOfficeArchive } from './product-workbooks.mjs';
 
@@ -97,22 +98,41 @@ export async function extractText(file) {
   const facts = [];
   let truncated = false,
     number = 0;
-  for (const p of paragraphs) {
+  const headings = [];
+  let fence = '';
+  paragraphsLoop: for (const p of paragraphs) {
     number++;
     const text = p.trim();
     if (!text) continue;
-    if (facts.length >= 200) {
-      truncated = true;
-      break;
+    if (file.contentType === types.md) {
+      const marker = /^(`{3,}|~{3,})/u.exec(text)?.[1];
+      if (marker && !fence) fence = marker;
+      else if (fence && marker?.startsWith(fence) && text === marker) fence = '';
+      const heading = !fence && /^(#{1,6})\s+(.+)$/u.exec(text);
+      if (heading) {
+        headings.length = heading[1].length - 1;
+        headings.push(heading[2]);
+      }
     }
-    if (p.length > 4000) truncated = true;
-    facts.push({ text: text.slice(0, 4000), page: 1, location: '第 ' + number + ' 段' });
+    const context = headings.filter(Boolean).join(' / ').slice(0, 160);
+    let part = 0;
+    for (const chunk of splitMaterialText(text)) {
+      if (facts.length >= 200) {
+        truncated = true;
+        break paragraphsLoop;
+      }
+      const location = '第 ' + number + ' 段' + (text.length > 1600 ? ' · 分块 ' + ++part : '');
+      facts.push({
+        text: chunk,
+        page: 1,
+        location: context ? location + ' · ' + context : location,
+      });
+    }
   }
+  if (!facts.length) throw fail('正文没有可读文字，请检查原件。');
   return {
     facts,
-    warnings: truncated
-      ? ['正文超过预览上限，仅显示前 200 个非空段落、每段 4000 字。完整内容可下载原件。']
-      : [],
+    warnings: truncated ? ['正文超过预览上限，仅显示前 200 个片段。完整内容可下载原件。'] : [],
     model: 'local-text',
     extractedAt: new Date().toISOString(),
   };

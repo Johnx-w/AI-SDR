@@ -16,10 +16,11 @@ export type Material = {
   keywords: string[];
   sites: string[];
   documentId: string | null;
-  preview: (string | null)[] | null;
   contentType: string | null;
   size: number;
   format: string;
+  extractionStatus: 'pending' | 'processing' | 'ready' | 'failed' | 'manual';
+  extractionCount: number;
 };
 export type MaterialList = {
   items: Material[];
@@ -42,6 +43,7 @@ export type StoredDocument = {
     sheets?: { name: string; rows: number }[];
     model: string;
     pageCount?: number;
+    extractedAt?: string;
   };
 };
 export type Product = {
@@ -70,11 +72,11 @@ export type MaterialDetail = {
 export const materialApi = '/api/v1/materials';
 export const sourceUrl = (id: string, document: string) =>
   materialApi + '/' + id + '/document/' + document;
-type PdfProgress = (page: number, total: number) => void;
+type ExtractionProgress = (page: number, total: number) => void;
 export async function materialsRequest<T>(
   path: string,
   init: RequestInit = {},
-  onPage?: PdfProgress,
+  onPage?: ExtractionProgress,
 ): Promise<T> {
   let response = await fetch(materialApi + path, init);
   while (true) {
@@ -105,7 +107,7 @@ export async function uploadMaterial(
   file: File,
   options: { site?: string; category?: string; id?: string; version?: number },
   key: string,
-  onPage?: PdfProgress,
+  onPage?: ExtractionProgress,
 ) {
   checkMaterialSize(file.name, file.size);
   const q = new URLSearchParams({ name: file.name });
@@ -116,7 +118,7 @@ export async function uploadMaterial(
   const headers = {
     'Content-Type': 'application/octet-stream',
     'Idempotency-Key': key,
-    ...(/\.pdf$/iu.test(file.name) ? { Prefer: 'respond-async' } : {}),
+    ...(/\.(?:pdf|png|jpe?g|webp|gif)$/iu.test(file.name) ? { Prefer: 'respond-async' } : {}),
   };
   type Result = { id: string; documentId: string; warning: string; reused: boolean };
   if (file.size <= materialPartBytes)

@@ -157,7 +157,10 @@ test('上传拒绝伪造类型、危险文件名、无效及超大内容，错�
           }),
         (error) => error.status === 502,
       );
-      assert.equal(store.documents.get(current.id, document.id).extraction, null);
+      const failure = store.documents.get(current.id, document.id).extraction;
+      assert.equal(failure.model, 'failed');
+      assert.deepEqual(failure.facts, []);
+      assert.match(failure.warnings[0], /提取结果|重试/u);
       assert.deepEqual(store.get(current.id), current);
       assert.equal(store.documents.running.size, 0);
     }

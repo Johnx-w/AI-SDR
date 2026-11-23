@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { chromium } from 'playwright-core';
 import { createApp } from '../server/app.mjs';
@@ -14,7 +14,9 @@ assert.deepEqual(
   [v1, v2, over].map((p) => statSync(p).size),
   [52428800, 52428800, 52428801],
 );
-const database = mkdtempSync(join(dir, 'browser-'));
+const scratch = resolve('.codex-tmp');
+mkdirSync(scratch, { recursive: true });
+const database = mkdtempSync(join(scratch, 'browser-'));
 const proxy = process.env.MATERIAL_QA_PROXY;
 if (proxy) assert.equal(new URL(proxy).hostname, '127.0.0.1');
 const env = {
@@ -57,11 +59,12 @@ try {
         }
       : {},
   );
-  const dialog = page.getByRole('dialog', { name: '素材详情' });
+  const dialog = page.getByRole('region', { name: '素材详情' });
   const button = (name) => page.getByRole('button', { name, exact: true });
   const preview = (name) => button('预览 ' + name).click();
-  const close = () => button('关闭素材详情').click();
+  const close = () => button('返回素材库').click();
   async function choose(name, path) {
+    if (name === '选择文件上传') await button('新建 / 导入').click();
     const chooser = page.waitForEvent('filechooser');
     await button(name).click();
     await (await chooser).setFiles(path);
@@ -88,8 +91,9 @@ try {
 
   // The browser reads the actual file from disk for its native drag/drop event.
   const cdp = await page.context().newCDPSession(page);
-  await page.locator('.mat-entry').scrollIntoViewIfNeeded();
-  const drop = await page.locator('.mat-entry').boundingBox();
+  const area = page.getByRole('region', { name: '素材库' });
+  await area.scrollIntoViewIfNeeded();
+  const drop = await area.boundingBox();
   for (const type of ['dragEnter', 'dragOver', 'drop']) {
     await cdp.send('Input.dispatchDragEvent', {
       type,
@@ -145,6 +149,7 @@ try {
       frame.url().startsWith('chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/');
     if (!tab.frames().some(isReader)) await tab.waitForEvent('framenavigated', isReader);
   };
+  await button('查看原文').click();
   if (original.headers()['x-frame-options'] === 'DENY') {
     const open = page.waitForEvent('popup');
     await dialog.getByRole('link', { name: '在新窗口查看 PDF 原件' }).click();
@@ -156,6 +161,22 @@ try {
     await waitForReader(page);
   }
   console.log('PASS Chrome 阅读器打开完整 PDF，回读字节与原件一致。');
+  await close();
+  const fileName = 'catalog-page';
+  await page.getByRole('checkbox', { name: '选择 ' + fileName, exact: true }).check();
+  page.once('dialog', (prompt) => prompt.accept());
+  await button('停用').click();
+  await button('预览 ' + fileName).waitFor({ state: 'hidden' });
+  await page.goto(base + '/materials?status=archived');
+  const enabled = page.getByRole('switch', { name: '启用 ' + fileName, exact: true });
+  await enabled.waitFor();
+  assert.equal(await enabled.getAttribute('aria-checked'), 'false');
+  await enabled.click();
+  await enabled.waitFor({ state: 'hidden' });
+  await page.goto(base + '/materials?status=draft');
+  await preview(fileName);
+  await dialog.getByRole('button', { name: '审核通过' }).waitFor();
+  console.log('PASS 在集合表停用文件、筛选停用记录并重新启用，恢复后需要审核。');
 } finally {
   await browser?.close();
   if (app.listening) await new Promise((ok) => app.close(ok));
