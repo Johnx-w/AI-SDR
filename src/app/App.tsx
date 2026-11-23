@@ -191,7 +191,7 @@ export function App({
         <button className="sidebar-shade" aria-label="关闭导航" onClick={() => setMobile(false)} />
       )}
       <aside className={`sidebar ${mobile ? 'open' : ''}`}>
-        <NavLink className="brand" to="/">
+        <NavLink className="brand" to="/" aria-label="ShadeFlow 首页" title="ShadeFlow 首页">
           <span className="brand-mark">
             <span />
             <span />
@@ -218,6 +218,8 @@ export function App({
           {nav.map(({ path, name, icon: Icon }) => (
             <NavLink
               key={path}
+              title={name}
+              aria-label={name}
               to={path}
               end={path === '/'}
               onClick={() => setMobile(false)}

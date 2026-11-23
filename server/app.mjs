@@ -484,7 +484,9 @@ export function createApp({
           const localEdit =
             (request.method === 'PUT' && url.pathname === '/api/v1/outreach/sequence-policy') ||
             (request.method === 'PATCH' &&
-              /^\/api\/v1\/outreach\/mailboxes\/[\w-]+\/(?:note|writing)$/.test(url.pathname)) ||
+              /^\/api\/v1\/outreach\/mailboxes\/[\w-]+\/(?:note|writing|reply-settings)$/.test(
+                url.pathname,
+              )) ||
             (request.method === 'PATCH' &&
               /^\/api\/v1\/outreach\/conversations\/[\w-]+\/workflow$/.test(url.pathname)) ||
             (request.method === 'POST' &&
