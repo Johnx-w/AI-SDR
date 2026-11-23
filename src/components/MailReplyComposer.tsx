@@ -441,7 +441,7 @@ export function MailReplyComposer({
           <button
             type="button"
             className="inbox-draft-assist"
-            title={generateReason || '根据本邮箱已选资料起草回复，供人工审核'}
+            title={generateReason || '按本邮箱身份、邮件往来和可用资料起草正式回信'}
             disabled={!!generateReason || busy || generating}
             aria-busy={generating}
             onClick={() => void generateDraft()}

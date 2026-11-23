@@ -46,6 +46,13 @@ const attributes = [
 const commercial =
   /付款|定金|折扣|报价|交期|价格|运费|合同|认证|投诉|\b(?:payment|deposit|discount|price|quote|shipping|lead time|guarantee|contract|certif\w*|complaint)\b/iu;
 const needsReview = /待核对|核对事项|warning|unverified/iu;
+export function requiresProductOrCommercialReview(text, mailbox) {
+  return (
+    mentionsOtherSite(text, mailbox) ||
+    commercial.test(text) ||
+    attributes.some((a) => a.query.test(text))
+  );
+}
 const normal = (s) => s.toLowerCase().replace(/\s+/gu, ' ').trim();
 const escape = (s) => s.replace(/[.*+?^`{}()|[\]\\$]/gu, '\\$&');
 function named(question, label) {

@@ -549,7 +549,136 @@ test('输入原信发生变化或生成期间有人工编辑，保留现稿且�
   assert.equal(h.s.replies.draft(id), null);
 });
 
-test('无匹配资料时仅生成澄清草稿，拒绝虚假参数、越界品牌、伪造引用及模型缺失', async (t) => {
+test('常规业务自动回复在原线程推进采购转介，重启及重复同步只提交一次', async (t) => {
+  const h = harness(t);
+  const box = h.s.mailboxes.get('own');
+  box.draftPersona = 'Write formal business correspondence on behalf of the project sales team.';
+  box.autoBusinessReplies = true;
+  box.businessReplySince = box.replyEnabledAt;
+  h.s.answerQuestion = () => ({ automatic: false, sources: [] });
+  const live = process.env.MAIL_MODEL_LIVE_SMOKE === '1';
+  if (live) h.model = mailDraftModel(process.env, fetch);
+  else
+    h.model.generate = async (messages) => {
+      if (messages[0].content.includes('Verify')) {
+        assert.match(messages[0].content, /routineBusinessEmail/);
+        return '{"routineBusinessEmail":true,"sellerClaims":[]}';
+      }
+      assert.ok(messages[0].content.includes(box.draftPersona));
+      return JSON.stringify({
+        body: 'Dear Jordan,\n\nI understand that your purchasing team handles supplier enquiries. You are welcome to forward this email to the colleague coordinating the project so they can reply directly in this thread.\n\nFor their reference, I am the sales contact for this enquiry. An outline of their project priorities would give us a starting point for a focused discussion.\n\nKind regards,',
+        sourceIndexes: [],
+      });
+    };
+  const mail = h.incoming({
+    subject: 'Introduction for our purchasing team',
+    bodyText:
+      'Our purchasing team handles new suppliers. Please write an introduction I can forward internally, with a practical next step. Kind regards, Jordan.',
+  });
+  await h.sync();
+  await Promise.all([h.s.reception.tick(), h.s.reception.tick()]);
+  assert.equal(h.sends.length, 1, h.s.reception.list().items[0]?.reason);
+  const sent = h.sends[0];
+  assert.equal(sent.to, peer);
+  assert.equal(sent.inReplyTo, mail.messageId);
+  assert.match(sent.text, /purchas|procur|suppli|forward/i);
+  assert.match(sent.text, /Sales office$/);
+  const paragraphs = sent.text
+    .split(/\n\s*\n/u)
+    .filter((line) => line.trim().split(/\s+/).length >= 8);
+  assert.ok(paragraphs.length >= 2, '应包含多段实质正文');
+  if (live) console.log('真实模型合成采购转介回信（仅测试传输）：\n' + sent.text);
+  await h.restart();
+  h.events.push(mail);
+  await h.sync();
+  await h.s.reception.tick();
+  assert.equal(h.sends.length, 1);
+});
+
+test('扩大自动接待范围须逐邮箱启用，启用前的来信、商务问题、未通过复核的回复均待审', async (t) => {
+  for (const scenario of [
+    'previous',
+    'before',
+    'quote',
+    'review',
+    'declined',
+    'fragment',
+    'sellerClaim',
+  ]) {
+    const h = harness(t, scenario === 'review' ? 'review' : 'auto');
+    const box = h.s.mailboxes.get('own');
+    box.autoBusinessReplies = scenario !== 'previous';
+    box.businessReplySince =
+      scenario === 'before' ? new Date(h.now + 1000).toISOString() : box.replyEnabledAt;
+    h.s.answerQuestion = () => ({ automatic: false, sources: [], reason: '未匹配资料' });
+    let verified = false;
+    h.model.generate = async (messages) => {
+      if (messages[0].content.includes('Verify')) {
+        verified = true;
+        if (scenario === 'sellerClaim')
+          return '{"routineBusinessEmail":true,"sellerClaims":["We supply blinds to commercial customers."]}';
+        return '{"routineBusinessEmail":false}';
+      }
+      if (scenario === 'fragment') return '{"body":"Who handles purchasing?","sourceIndexes":[]}';
+      return JSON.stringify({
+        body: 'Dear colleague,\n\nI understand that you are considering the next step for this project.\n\nWe can continue the discussion in this thread when your team is ready.\n\nKind regards,',
+        sourceIndexes: [],
+      });
+    };
+    h.incoming({
+      subject: 'Project enquiry',
+      bodyText:
+        scenario === 'quote'
+          ? 'Please quote the price.'
+          : 'I would like an introduction for our purchasing team.',
+    });
+    await h.sync();
+    await h.s.reception.tick();
+    assert.equal(verified, scenario === 'declined' || scenario === 'sellerClaim');
+    assert.equal(h.s.reception.list().items[0].state, 'review');
+    assert.equal(h.sends.length, 0);
+  }
+});
+
+test('无匹配资料时按邮箱身份为采购转介起草，保存待审且不发信', async (t) => {
+  const h = harness(t, 'manual');
+  const persona = '你是项目销售联络人。用简洁的英文给采购团队写可转发的介绍。';
+  h.s.mailboxes.get('own').draftPersona = persona;
+  h.s.answerQuestion = () => ({ sources: [] });
+  h.incoming({
+    subject: 'Purchasing team introduction',
+    bodyText: 'Our purchasing team handles this. Please write a short note I can forward to them.',
+  });
+  await h.sync();
+  const id = h.thread().id;
+  const sourceId = h.s.conversations.detail(id).messages[0].id;
+  let prompt;
+  const live = process.env.MAIL_MODEL_LIVE_SMOKE === '1' && mailDraftModel(process.env, fetch);
+  const model = {
+    name: live ? live.name : 'fixture-chat',
+    generate: async (messages) => {
+      prompt = messages;
+      if (process.env.MAIL_MODEL_LIVE_SMOKE === '1') {
+        assert.ok(live, '请先配置验收模型连接');
+        return live.generate(messages);
+      }
+      return JSON.stringify({
+        body: 'I understand that your purchasing team handles this. Please forward my contact details to the buyer handling this project.',
+        sourceIndexes: [],
+      });
+    },
+  };
+  const { draft } = await generateMailDraft(h.s, id, { sourceId, expectedRevision: 0 }, model);
+  assert.ok(prompt.some((message) => message.content.includes(persona)));
+  assert.deepEqual(JSON.parse(prompt.at(-1).content).evidence, []);
+  assert.match(draft.bodyText, /purchas|procur|buy|forward/i);
+  assert.match(draft.bodyText, /Sales office$/);
+  assert.deepEqual(draft.provenance.sources, []);
+  assert.equal(draft.provenance.automatic, false);
+  assert.equal(h.sends.length, 0);
+});
+
+test('无匹配资料时可以起草澄清问题，拒绝虚假参数、越界品牌、伪造引用及模型缺失', async (t) => {
   const h = harness(t, 'manual');
   h.s.answerQuestion = () => ({ sources: [] });
   h.incoming();

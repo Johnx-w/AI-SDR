@@ -84,7 +84,7 @@ test('业务备注与发件配置分开存储，单改、清空、重启及并�
   );
 });
 
-test('本地查看模式的邮箱编辑只允许写入业务备注', async (t) => {
+test('本地查看可保存备注、起草身份及回复选材，不能开启自动发送', async (t) => {
   const { registry } = fixture(t);
   const box = await registry.save({ ...settings, productIds: ['legacy'] });
   const server = createApp({
@@ -107,6 +107,22 @@ test('本地查看模式的邮箱编辑只允许写入业务备注', async (t) =
   assert.equal((await edit('', 'PUT', { owner: 'Kate', businessNote: '' })).status, 403);
   assert.equal((await edit('/note', 'POST', { businessNote: '' })).status, 403);
   assert.deepEqual(registry.get(box.id), box);
+  assert.equal(
+    (
+      await edit('/writing', 'PATCH', {
+        draftPersona: '工程销售',
+        knowledgeProductIds: ['catalog'],
+      })
+    ).status,
+    200,
+  );
+  assert.equal((await (await fetch(url)).json()).draftPersona, '工程销售');
+  assert.deepEqual(registry.get(box.id).knowledgeProductIds, ['catalog']);
+  assert.equal(
+    (await edit('/writing', 'PATCH', { draftPersona: 'x', autoBusinessReplies: true })).status,
+    400,
+  );
+  assert.equal(registry.get(box.id).replyMode, box.replyMode);
   assert.equal((await (await fetch(url)).json()).businessNote, '接手工程客户');
 });
 
@@ -158,6 +174,34 @@ test('接待策略放在旧邮箱记录之外，回退后再升级也不会自�
   delete saved.receptionSettings;
   writeFileSync(path, JSON.stringify(saved));
   assert.equal(new OutreachMailboxes(config).get(box.id).replyMode, 'manual');
+});
+
+test('常规业务回信的授权时间与起草身份按邮箱保存，撤销和旧配置回读均关闭扩展自动发送', async (t) => {
+  const { registry, config, path } = fixture(t);
+  const box = await registry.save({
+    ...settings,
+    replyMode: 'auto',
+    draftPersona: '工程项目销售',
+    autoBusinessReplies: true,
+  });
+  assert.ok(Date.parse(box.businessReplySince));
+  const reopened = new OutreachMailboxes(config);
+  assert.equal(reopened.get(box.id).autoBusinessReplies, true);
+  assert.equal(reopened.get(box.id).draftPersona, '工程项目销售');
+  assert.equal(
+    (await reopened.save({ id: box.id, draftPersona: '' })).businessReplySince,
+    box.businessReplySince,
+  );
+  const saved = JSON.parse(readFileSync(path, 'utf8'));
+  for (const zone of [saved.mailboxes[0], saved.receptionSettings[box.id]])
+    for (const key of ['draftPersona', 'autoBusinessReplies', 'businessReplySince'])
+      assert.equal(Object.hasOwn(zone, key), false);
+  const manual = await reopened.save({ id: box.id, replyMode: 'manual' });
+  assert.equal(manual.businessReplySince, null);
+  assert.equal(new OutreachMailboxes(config).get(box.id).autoBusinessReplies, false);
+  delete saved.mailWriting;
+  writeFileSync(path, JSON.stringify(saved));
+  assert.equal(new OutreachMailboxes(config).get(box.id).autoBusinessReplies, false);
 });
 test('structured signatures persist per account and follow identity edits without replacing old plain signatures', async (t) => {
   const { registry, config } = fixture(t);

@@ -369,6 +369,8 @@ function normalize(input, previous) {
     'knowledgeProductIds',
     'owner',
     'replyMode',
+    'draftPersona',
+    'autoBusinessReplies',
     'priority',
     'dailyLimit',
     'intervalSeconds',
@@ -390,7 +392,8 @@ function normalize(input, previous) {
   if (
     !Array.isArray(knowledgeProductIds) ||
     knowledgeProductIds.length > 500 ||
-    !['manual', 'review', 'auto'].includes(replyMode)
+    !['manual', 'review', 'auto'].includes(replyMode) ||
+    typeof (value.autoBusinessReplies ?? false) !== 'boolean'
   )
     throw fail();
   const paused = value.paused ?? true;
@@ -409,6 +412,8 @@ function normalize(input, previous) {
     knowledgeProductIds: [...new Set(knowledgeProductIds.map((id) => text(id, 180, true)))],
     owner: text(value.owner ?? value.displayName ?? '', 160),
     replyMode,
+    draftPersona: text(value.draftPersona ?? '', 2000, false, true),
+    autoBusinessReplies: replyMode === 'auto' && value.autoBusinessReplies === true,
     priority: integer(value.priority ?? 100, 0, 10000),
     dailyLimit: integer(value.dailyLimit ?? 50, 1, 500),
     intervalSeconds: integer(value.intervalSeconds ?? 60, 5, 86400),
@@ -481,7 +486,18 @@ export class OutreachMailboxes {
             replyEnabledAt,
             ...settings
           } = { ...record, ...policy };
-          const normalized = normalize({ ...settings, paused: settings.paused ?? false });
+          const writing = Object.hasOwn(document.mailWriting || {}, record.id)
+            ? document.mailWriting[record.id]
+            : {};
+          const since = writing.businessReplySince;
+          if (since != null && (typeof since !== 'string' || !Number.isFinite(Date.parse(since))))
+            throw fail();
+          const normalized = normalize({
+            ...settings,
+            draftPersona: writing.draftPersona,
+            autoBusinessReplies: !!since,
+            paused: settings.paused ?? false,
+          });
           if (
             this.records.has(normalized.id) ||
             [...this.records.values()].some(
@@ -510,6 +526,7 @@ export class OutreachMailboxes {
           );
           this.records.set(normalized.id, {
             ...normalized,
+            businessReplySince: normalized.autoBusinessReplies ? since : null,
             replyEnabledAt:
               typeof replyEnabledAt === 'string' && Number.isFinite(Date.parse(replyEnabledAt))
                 ? replyEnabledAt
@@ -537,9 +554,21 @@ export class OutreachMailboxes {
       const temporary = this.path + '.' + randomUUID() + '.tmp';
       // The production v1 reader validates every mailbox key and ignores extra top-level sections.
       const receptionSettings = Object.create(null);
+      const mailWriting = Object.create(null);
       const mailboxes = [...records.values()].map(
-        ({ owner, replyMode, knowledgeProductIds, replyEnabledAt, ...mailbox }) => {
+        ({
+          owner,
+          replyMode,
+          knowledgeProductIds,
+          replyEnabledAt,
+          draftPersona,
+          autoBusinessReplies,
+          businessReplySince,
+          ...mailbox
+        }) => {
           receptionSettings[mailbox.id] = { owner, replyMode, knowledgeProductIds, replyEnabledAt };
+          if (draftPersona || autoBusinessReplies)
+            mailWriting[mailbox.id] = { draftPersona, businessReplySince };
           return mailbox;
         },
       );
@@ -550,6 +579,7 @@ export class OutreachMailboxes {
             schemaVersion: 1,
             mailboxes,
             receptionSettings,
+            mailWriting,
             businessNotes: Object.fromEntries(businessNotes),
           },
           null,
@@ -640,6 +670,11 @@ export class OutreachMailboxes {
     const now = new Date().toISOString();
     return {
       ...record,
+      businessReplySince: record.autoBusinessReplies
+        ? !previous?.businessReplySince || identityChanged || previous.website !== record.website
+          ? now
+          : previous.businessReplySince
+        : null,
       replyEnabledAt:
         record.replyMode === 'manual'
           ? null

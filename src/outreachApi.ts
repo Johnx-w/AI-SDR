@@ -37,6 +37,8 @@ export interface OutreachMailbox {
   knowledgeProductIds?: string[];
   owner?: string;
   replyMode?: 'manual' | 'review' | 'auto';
+  draftPersona?: string;
+  autoBusinessReplies?: boolean;
   priority: number;
   dailyLimit: number;
   intervalSeconds: number;

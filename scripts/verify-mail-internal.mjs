@@ -21,7 +21,11 @@ export const internalAccounts = [
 const allowed = new Set(internalAccounts.map((a) => a.toLowerCase()));
 
 // No production store, acquisition source or queue is opened. The transport enforces the envelope.
-export async function runInternal(passwords, log = console.log) {
+export async function runInternal(
+  passwords,
+  log = console.log,
+  { purchasingIntroduction = false } = {},
+) {
   const model = mailDraftModel(process.env, fetch);
   assert.ok(model, '真实内部环测需要配置回信模型');
   const token = randomUUID(),
@@ -107,7 +111,11 @@ export async function runInternal(passwords, log = console.log) {
         paused: false,
         intervalSeconds: 5,
         replyMode: i === 0 ? 'auto' : 'manual',
-        knowledgeProductIds: i === 0 ? box.knowledgeProductIds : [],
+        autoBusinessReplies: i === 0 && purchasingIntroduction,
+        draftPersona: purchasingIntroduction
+          ? 'You are the project sales representative. Write a formal introduction the customer can forward to purchasing.'
+          : '',
+        knowledgeProductIds: i === 0 && !purchasingIntroduction ? box.knowledgeProductIds : [],
       });
       ids.push(b.id);
     }
@@ -151,10 +159,19 @@ export async function runInternal(passwords, log = console.log) {
         to,
         expectedAccount: from,
         messageId: '<' + token + '-' + i + '@' + from.split('@')[1] + '>',
-        subject: marker + ' ' + (i === 2 ? 'Product question' : 'Ring check'),
+        subject:
+          marker +
+          ' ' +
+          (i === 2
+            ? purchasingIntroduction
+              ? 'Purchasing introduction'
+              : 'Product question'
+            : 'Ring check'),
         text:
           i === 2
-            ? 'What material is A211 made of?'
+            ? purchasingIntroduction
+              ? 'Our purchasing team handles supplier enquiries. Please send an introduction I can forward internally with a practical next step. Kind regards, Jordan.'
+              : 'What material is A211 made of?'
             : 'Company-internal mail delivery test. No action required.',
       });
       assert.ok(result.accepted.includes(to));
@@ -184,7 +201,13 @@ export async function runInternal(passwords, log = console.log) {
           assert.equal(mail.from, delivery.from.toLowerCase());
           if (delivery.id === accepted[3]?.id) {
             assert.equal(mail.inReplyTo, accepted[2].id);
-            assert.match(mail.bodyText, /100\s*%\s*polyester/i);
+            if (purchasingIntroduction) {
+              assert.match(mail.bodyText, /purchas|procur|suppli|forward/i);
+              assert.ok(
+                mail.bodyText.split(/\r?\n\s*\r?\n/u).filter((p) => p.trim().length >= 20).length >=
+                  2,
+              );
+            } else assert.match(mail.bodyText, /100\s*%\s*polyester/i);
             assert.equal(mail.classification, 'auto_reply');
           }
           if (!received.has(delivery.id))
@@ -206,17 +229,17 @@ export async function runInternal(passwords, log = console.log) {
             .all(),
         }),
       );
-    assert.equal(accepted.length, 4, '应有三封内部探测和一封知识回信');
+    assert.equal(accepted.length, 4, '应有三封内部探测和一封原线程自动回信');
     assert.equal(received.size, 4, '尚未由收件箱核实全部测试邮件');
     const op = JSON.parse(
       service.db.prepare("SELECT data FROM mail_reply_operations WHERE status='accepted'").get()
         .data,
     );
     assert.equal(op.origin, 'automatic');
-    assert.match(op.payload.text, /100\s*%\s*polyester/i);
     assert.equal(op.provenance.model, model.name);
     assert.equal(op.payload.inReplyTo, accepted[2].id);
-    assert.ok(op.provenance.sources.some((s) => s.ref === 'B2'));
+    if (purchasingIntroduction) assert.deepEqual(op.provenance.sources, []);
+    else assert.ok(op.provenance.sources.some((s) => s.ref === 'B2'));
     assert.equal(service.campaigns().length, 0);
     log(
       JSON.stringify({
@@ -224,7 +247,7 @@ export async function runInternal(passwords, log = console.log) {
         imapReceived: 4,
         automaticReply: true,
         threadMatched: true,
-        source: '产品规格!B2',
+        source: purchasingIntroduction ? '采购转介来信，无产品资料引用' : '产品规格!B2',
         productionCampaigns: 0,
         runId: token,
       }),
@@ -249,7 +272,9 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
     const passwords = JSON.parse(input);
     input = '';
     assert.deepEqual(Object.keys(passwords).sort(), [...allowed].sort());
-    await runInternal(passwords);
+    await runInternal(passwords, console.log, {
+      purchasingIntroduction: process.argv.includes('--purchasing-introduction'),
+    });
   } catch {
     console.error('真实内部验收未完成，请核对标准输入、三个账号的连接及本轮收件记录。');
     process.exitCode = 1;
