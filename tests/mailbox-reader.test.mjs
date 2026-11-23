@@ -228,9 +228,24 @@ test('automatic replies retain reliable headers as a classification without gues
     ],
   );
   for (const call of calls.filter((call) => call[0] === 'fetch' && call[3].headers)) {
-    for (const name of ['auto-submitted', 'x-autoreply', 'x-autorespond', 'precedence'])
-      assert.ok(call[3].headers.includes(name), `IMAP must request ${name}`);
+    assert.equal(call[3].headers, true, '阿里邮箱仅在完整邮件头中可靠返回 Auto-Submitted');
   }
+});
+
+test('完整邮件头超过解析上限时保留信封和正文，来信待核实', async () => {
+  const message = row(1, { headers: ['X-Trace: ' + 'a'.repeat(65536)] });
+  message.envelope = {
+    from: [{ address: 'buyer@customer.example' }],
+    to: [{ address: account }],
+    subject: 'Forwarded enquiry',
+    messageId: '<oversize@customer.example>',
+  };
+  const { reader } = fixture({ inbox: [message], sentFolder: false });
+  const result = await reader.read({ since });
+  const [received] = result.folders[0].messages;
+  assert.equal(received.messageId, message.envelope.messageId);
+  assert.equal(received.classification, 'unverified');
+  assert.equal(received.bodyText, message.body);
 });
 
 test('initial sync is recent-only, UID sorted and bounded; pagination leaves a resumable cursor', async () => {
