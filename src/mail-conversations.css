@@ -240,9 +240,6 @@
   font-size: 15px;
   line-height: 1.5;
 }
-.outreach-page:has(#outreach-panel-inbox) > .outreach-tabs {
-  margin-bottom: 16px;
-}
 .sales-inbox button,
 .sales-inbox input,
 .sales-inbox select,

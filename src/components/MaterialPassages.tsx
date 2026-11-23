@@ -16,7 +16,7 @@ function passagesFor(doc: StoredDocument, facts: Reference[]) {
   const pdf = doc.contentType === 'application/pdf';
   const extracted = doc.extraction?.facts || [];
   const locations = extracted.map((f) =>
-    pdf ? '第 ' + f.page + ' 页 · ' + f.location : f.location,
+    pdf || doc.extraction?.mode ? '第 ' + f.page + ' 页 · ' + f.location : f.location,
   );
   const unique = new Set<string>(),
     duplicate = new Set<string>();

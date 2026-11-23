@@ -1,9 +1,12 @@
+import { SectionWorkspace } from '../components/SectionWorkspace';
 import { useEffect, useRef, useState } from 'react';
 import * as ToggleGroup from '@radix-ui/react-toggle-group';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   ArrowRight,
   CalendarDays,
+  History,
+  Zap,
   CheckCircle2,
   ChevronDown,
   LoaderCircle,
@@ -555,582 +558,581 @@ export function Automation() {
       )}
     </aside>
   );
+  const taskViews = [
+    { id: 'new', label: editPlan ? '编辑计划' : '新建任务', icon: Plus },
+    { id: 'schedules', label: '定时计划', icon: CalendarDays },
+    { id: 'runs', label: '执行记录', icon: History },
+  ];
   return (
-    <div className="acq-page">
-      <PageHeading eyebrow="ACQUISITION" title="获客任务">
-        <button className="btn secondary" onClick={() => setRevision((n) => n + 1)}>
-          <RefreshCw size={15} />
-          刷新
-        </button>
-      </PageHeading>
-      <div className="acq-topline">
-        <p>设置目标企业，让系统完成发现与研究。</p>
-      </div>
-      <nav className="acq-page-tabs" aria-label="获客任务页面">
-        {[
-          ['new', editPlan ? '编辑计划' : '新建任务'],
-          ['schedules', '定时计划'],
-          ['runs', '执行记录'],
-        ].map(([value, label]) => (
-          <button
-            key={value}
-            aria-current={tab === value ? 'page' : undefined}
-            className={tab === value ? 'selected' : ''}
-            onClick={() => setParams(value === 'new' ? {} : { tab: value })}
-          >
-            {label}
+    <SectionWorkspace
+      title="获客任务"
+      icon={Zap}
+      selected={tab}
+      onSelect={(value) => setParams(value === 'new' ? {} : { tab: value })}
+      sections={[{ items: taskViews }]}
+    >
+      <div className="acq-page section-page">
+        <PageHeading eyebrow="ACQUISITION" title={taskViews.find((view) => view.id === tab)!.label}>
+          <button className="btn secondary" onClick={() => setRevision((n) => n + 1)}>
+            <RefreshCw size={15} />
+            刷新
           </button>
-        ))}
-      </nav>
-      {tab === 'schedules' ? (
-        <ScheduledAcquisition />
-      ) : tab === 'runs' ? (
-        <ExecutionRecords selectedId={params.get('job') || undefined} />
-      ) : (
-        <>
-          {(statusError || (status && !status.configured)) && (
-            <div className="acq-notice" role="status">
-              <strong>{statusError || '请先配置获客服务连接'}</strong>
-              <Link to="/settings">
-                前往API连接 <ArrowRight size={14} />
-              </Link>
-            </div>
-          )}
-          {catalogError && !allProductScope && (
-            <div className="acq-notice">
-              常用产品目录读取失败，当前可使用内置产品。
-              <button type="button" onClick={() => setRevision((n) => n + 1)}>
-                重新读取
-              </button>
-            </div>
-          )}
-          {editId && (editing?.id !== editId || editError) ? (
-            <div className="acq-notice" role="status">
-              {editError || '正在读取计划…'}
-              {editError && <Link to="/automation?tab=schedules">返回定时计划</Link>}
-            </div>
-          ) : null}
-          {editPlan && (
-            <div className="acq-notice" role="status">
-              正在编辑“{editPlan.name}”。修改将在后续轮次生效，已开始的任务沿用原设置。
-              <Link to="/automation?tab=schedules">取消编辑</Link>
-            </div>
-          )}
-          {!editPlan && pending && !submitting && (
-            <div className="acq-notice" role="status">
-              <span>上次提交结果待核对，配置已保留。</span>
-              <button className="btn secondary" onClick={() => void submit(true)}>
-                核对本次提交
-              </button>
-            </div>
-          )}
-          {error && (
-            <p className="error-message" role="alert">
-              {error}
-            </p>
-          )}
-          <div
-            className="acq-create-layout"
-            style={editId && !editPlan ? { display: 'none' } : undefined}
-          >
-            <form
-              id="acquisition-create"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void submit();
-              }}
+        </PageHeading>
+
+        {tab === 'schedules' ? (
+          <ScheduledAcquisition />
+        ) : tab === 'runs' ? (
+          <ExecutionRecords selectedId={params.get('job') || undefined} />
+        ) : (
+          <>
+            {(statusError || (status && !status.configured)) && (
+              <div className="acq-notice" role="status">
+                <strong>{statusError || '请先配置获客服务连接'}</strong>
+                <Link to="/settings">
+                  前往API连接 <ArrowRight size={14} />
+                </Link>
+              </div>
+            )}
+            {catalogError && !allProductScope && (
+              <div className="acq-notice">
+                常用产品目录读取失败，当前可使用内置产品。
+                <button type="button" onClick={() => setRevision((n) => n + 1)}>
+                  重新读取
+                </button>
+              </div>
+            )}
+            {editId && (editing?.id !== editId || editError) ? (
+              <div className="acq-notice" role="status">
+                {editError || '正在读取计划…'}
+                {editError && <Link to="/automation?tab=schedules">返回定时计划</Link>}
+              </div>
+            ) : null}
+            {editPlan && (
+              <div className="acq-notice" role="status">
+                正在编辑“{editPlan.name}”。修改将在后续轮次生效，已开始的任务沿用原设置。
+                <Link to="/automation?tab=schedules">取消编辑</Link>
+              </div>
+            )}
+            {!editPlan && pending && !submitting && (
+              <div className="acq-notice" role="status">
+                <span>上次提交结果待核对，配置已保留。</span>
+                <button className="btn secondary" onClick={() => void submit(true)}>
+                  核对本次提交
+                </button>
+              </div>
+            )}
+            {error && (
+              <p className="error-message" role="alert">
+                {error}
+              </p>
+            )}
+            <div
+              className="acq-create-layout"
+              style={editId && !editPlan ? { display: 'none' } : undefined}
             >
-              <fieldset className="acq-form-fields" disabled={locked}>
-                <section className="panel acq-config-section">
-                  <header>
-                    <span className="acq-step-number">01</span>
-                    <div>
-                      <h2>目标客户</h2>
-                      <p>选择市场、产品和企业经营角色</p>
-                    </div>
-                  </header>
-                  <div className="acq-form-grid">
-                    <label>
-                      目标国家／市场
-                      <select
-                        aria-label="任务国家"
-                        value={input.country}
-                        onChange={(e) => patch({ country: e.target.value, region: '' })}
-                      >
-                        {(
-                          locations?.markets || [
-                            { value: 'United States', label: '美国 · United States' },
-                            { value: 'Australia', label: '澳大利亚 · Australia' },
-                          ]
-                        ).map((m) => (
-                          <option value={m.value} key={m.value}>
-                            {m.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      州／地区
-                      <select
-                        aria-label="州 / 地区"
-                        value={input.region}
-                        disabled={locationsLoading || !!locationError}
-                        onChange={(e) => patch({ region: e.target.value })}
-                      >
-                        <option value="">全部州／地区</option>
-                        {(locations?.country === input.country ? locations.regions : []).map(
-                          (r) => (
-                            <option key={r.code} value={r.name}>
-                              {r.label ? r.label + ' · ' : ''}
-                              {r.name}
-                            </option>
-                          ),
-                        )}
-                      </select>
-                      {locationsLoading && <small>正在读取地区…</small>}
-                    </label>
-                  </div>
-                  {locationError && (
-                    <p className="error-message" role="alert">
-                      {locationError}
-                      <button type="button" onClick={() => setRevision((n) => n + 1)}>
-                        重新读取
-                      </button>
-                    </p>
-                  )}
-                  <div className="acq-field-label">产品范围</div>
-                  <div className="acq-scope-options" role="radiogroup" aria-label="产品范围">
-                    <label className={allProductScope ? 'selected' : ''}>
-                      <input
-                        type="radio"
-                        name="product-scope"
-                        value="all"
-                        checked={allProductScope}
-                        onChange={() => {
-                          specificProductsRef.current = selected;
-                          patch({
-                            product_scope: 'all',
-                            products: [],
-                            product: ALL_PRODUCTS_VALUE,
-                          });
-                        }}
-                      />
-                      <span>
-                        {ALL_PRODUCTS_LABEL}
-                        <small>日常广泛获客，系统自动扩展相关品类</small>
-                      </span>
-                    </label>
-                    <label className={!allProductScope ? 'selected' : ''}>
-                      <input
-                        type="radio"
-                        name="product-scope"
-                        value="specific"
-                        checked={!allProductScope}
-                        onChange={() => {
-                          const products = specificProductsRef.current;
-                          patch({
-                            product_scope: 'specific',
-                            products,
-                            product: products.map((product) => product.value).join(', '),
-                          });
-                        }}
-                      />
-                      <span>
-                        指定产品
-                        <small>用于专项开发，已选产品会限制本次获客范围</small>
-                      </span>
-                    </label>
-                  </div>
-                  {!allProductScope && (
-                    <>
-                      <p className="acq-preference-help">
-                        选择本次要开发的产品，满足其中任意一种即可；成品、材料配件均可选择。
-                      </p>
-                      <ProductPicker
-                        catalog={catalog}
-                        selected={selected}
-                        disabled={locked}
-                        onSaved={(product) =>
-                          setCatalog((current) => [
-                            ...current.filter(
-                              (item) => item.value.toLowerCase() !== product.value.toLowerCase(),
-                            ),
-                            product,
-                          ])
-                        }
-                        onChange={(products) => {
-                          specificProductsRef.current = products;
-                          patch({
-                            product_scope: 'specific',
-                            products,
-                            product: products.map((product) => product.value).join(', '),
-                          });
-                        }}
-                      />
-                      {!hasProductSelection && (
-                        <p className="acq-preference-help">请至少选择一个产品后开始获客。</p>
-                      )}
-                    </>
-                  )}
-                  {allProductScope && (
-                    <>
-                      <div className="acq-field-label">
-                        产品偏好<span>选填 · 调整寻找重点</span>
+              <form
+                id="acquisition-create"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void submit();
+                }}
+              >
+                <fieldset className="acq-form-fields" disabled={locked}>
+                  <section className="panel acq-config-section">
+                    <header>
+                      <span className="acq-step-number">01</span>
+                      <div>
+                        <h2>目标客户</h2>
+                        <p>选择市场、产品和企业经营角色</p>
                       </div>
-                      <div
-                        className="acq-environment-options"
-                        role="radiogroup"
-                        aria-label="产品偏好"
-                      >
-                        {(['all', 'indoor', 'outdoor'] as const).map((value) => (
+                    </header>
+                    <div className="acq-form-grid">
+                      <label>
+                        目标国家／市场
+                        <select
+                          aria-label="任务国家"
+                          value={input.country}
+                          onChange={(e) => patch({ country: e.target.value, region: '' })}
+                        >
+                          {(
+                            locations?.markets || [
+                              { value: 'United States', label: '美国 · United States' },
+                              { value: 'Australia', label: '澳大利亚 · Australia' },
+                            ]
+                          ).map((m) => (
+                            <option value={m.value} key={m.value}>
+                              {m.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        州／地区
+                        <select
+                          aria-label="州 / 地区"
+                          value={input.region}
+                          disabled={locationsLoading || !!locationError}
+                          onChange={(e) => patch({ region: e.target.value })}
+                        >
+                          <option value="">全部州／地区</option>
+                          {(locations?.country === input.country ? locations.regions : []).map(
+                            (r) => (
+                              <option key={r.code} value={r.name}>
+                                {r.label ? r.label + ' · ' : ''}
+                                {r.name}
+                              </option>
+                            ),
+                          )}
+                        </select>
+                        {locationsLoading && <small>正在读取地区…</small>}
+                      </label>
+                    </div>
+                    {locationError && (
+                      <p className="error-message" role="alert">
+                        {locationError}
+                        <button type="button" onClick={() => setRevision((n) => n + 1)}>
+                          重新读取
+                        </button>
+                      </p>
+                    )}
+                    <div className="acq-field-label">产品范围</div>
+                    <div className="acq-scope-options" role="radiogroup" aria-label="产品范围">
+                      <label className={allProductScope ? 'selected' : ''}>
+                        <input
+                          type="radio"
+                          name="product-scope"
+                          value="all"
+                          checked={allProductScope}
+                          onChange={() => {
+                            specificProductsRef.current = selected;
+                            patch({
+                              product_scope: 'all',
+                              products: [],
+                              product: ALL_PRODUCTS_VALUE,
+                            });
+                          }}
+                        />
+                        <span>
+                          {ALL_PRODUCTS_LABEL}
+                          <small>日常广泛获客，系统自动扩展相关品类</small>
+                        </span>
+                      </label>
+                      <label className={!allProductScope ? 'selected' : ''}>
+                        <input
+                          type="radio"
+                          name="product-scope"
+                          value="specific"
+                          checked={!allProductScope}
+                          onChange={() => {
+                            const products = specificProductsRef.current;
+                            patch({
+                              product_scope: 'specific',
+                              products,
+                              product: products.map((product) => product.value).join(', '),
+                            });
+                          }}
+                        />
+                        <span>
+                          指定产品
+                          <small>用于专项开发，已选产品会限制本次获客范围</small>
+                        </span>
+                      </label>
+                    </div>
+                    {!allProductScope && (
+                      <>
+                        <p className="acq-preference-help">
+                          选择本次要开发的产品，满足其中任意一种即可；成品、材料配件均可选择。
+                        </p>
+                        <ProductPicker
+                          catalog={catalog}
+                          selected={selected}
+                          disabled={locked}
+                          onSaved={(product) =>
+                            setCatalog((current) => [
+                              ...current.filter(
+                                (item) => item.value.toLowerCase() !== product.value.toLowerCase(),
+                              ),
+                              product,
+                            ])
+                          }
+                          onChange={(products) => {
+                            specificProductsRef.current = products;
+                            patch({
+                              product_scope: 'specific',
+                              products,
+                              product: products.map((product) => product.value).join(', '),
+                            });
+                          }}
+                        />
+                        {!hasProductSelection && (
+                          <p className="acq-preference-help">请至少选择一个产品后开始获客。</p>
+                        )}
+                      </>
+                    )}
+                    {allProductScope && (
+                      <>
+                        <div className="acq-field-label">
+                          产品偏好<span>选填 · 调整寻找重点</span>
+                        </div>
+                        <div
+                          className="acq-environment-options"
+                          role="radiogroup"
+                          aria-label="产品偏好"
+                        >
+                          {(['all', 'indoor', 'outdoor'] as const).map((value) => (
+                            <label
+                              key={value}
+                              className={environmentPreference === value ? 'selected' : ''}
+                            >
+                              <input
+                                type="radio"
+                                name="environment-preference"
+                                value={value}
+                                checked={environmentPreference === value}
+                                onChange={() => patch({ environment_preference: value })}
+                              />
+                              {environmentLabels[value]}
+                            </label>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                    <div className="acq-field-label">
+                      客户类型<span>可多选，满足任意一种即可；不选则不限</span>
+                    </div>
+                    <div className="acq-role-options">
+                      {acquisition.customerTypes
+                        .filter((t) => t.value !== 'other')
+                        .map((type) => (
                           <label
-                            key={value}
-                            className={environmentPreference === value ? 'selected' : ''}
+                            className={input.customer_types?.includes(type.value) ? 'selected' : ''}
+                            key={type.value}
                           >
                             <input
-                              type="radio"
-                              name="environment-preference"
-                              value={value}
-                              checked={environmentPreference === value}
-                              onChange={() => patch({ environment_preference: value })}
-                            />
-                            {environmentLabels[value]}
-                          </label>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                  <div className="acq-field-label">
-                    客户类型<span>可多选，满足任意一种即可；不选则不限</span>
-                  </div>
-                  <div className="acq-role-options">
-                    {acquisition.customerTypes
-                      .filter((t) => t.value !== 'other')
-                      .map((type) => (
-                        <label
-                          className={input.customer_types?.includes(type.value) ? 'selected' : ''}
-                          key={type.value}
-                        >
-                          <input
-                            type="checkbox"
-                            value={type.value}
-                            checked={!!input.customer_types?.includes(type.value)}
-                            onChange={(e) =>
-                              patch({
-                                customer_types: e.target.checked
-                                  ? [...(input.customer_types || []), type.value]
-                                  : input.customer_types?.filter((v) => v !== type.value),
-                              })
-                            }
-                          />
-                          {type.label}
-                        </label>
-                      ))}
-                  </div>
-                </section>
-                <section className="panel acq-config-section">
-                  <header>
-                    <span className="acq-step-number">02</span>
-                    <div>
-                      <h2>执行安排</h2>
-                      <p>确定每轮数量，以及何时开始运行</p>
-                    </div>
-                  </header>
-                  <label className="acq-block-label">
-                    每轮新增企业目标
-                    <div className="acq-quantity">
-                      <input
-                        aria-label="本次新增客户目标"
-                        type="number"
-                        min={1}
-                        max={200}
-                        step={1}
-                        required
-                        value={Number.isNaN(targetCount) ? '' : targetCount}
-                        onChange={(e) => setTargetCount(e.target.valueAsNumber)}
-                      />
-                      <span>家</span>
-                    </div>
-                  </label>
-                  <p className="acq-preference-help">
-                    按去重后实际新增收录计数，每个执行时间点各运行一轮。
-                  </p>
-                  <div className="acq-quantity-presets">
-                    {[5, 10, 20, 50, 100, 200].map((n) => (
-                      <button
-                        type="button"
-                        className={targetCount === n ? 'selected' : ''}
-                        key={n}
-                        onClick={() => setTargetCount(n)}
-                      >
-                        {n} 家
-                      </button>
-                    ))}
-                  </div>
-                  {!editPlan && (
-                    <div className="acq-run-mode" role="radiogroup" aria-label="执行方式">
-                      {[
-                        ['now', '立即获客'],
-                        ['scheduled', '定时获客'],
-                      ].map(([value, label]) => (
-                        <label className={runMode === value ? 'selected' : ''} key={value}>
-                          <input
-                            type="radio"
-                            name="run-mode"
-                            value={value}
-                            checked={runMode === value}
-                            onChange={() => setRunMode(value)}
-                          />
-                          {value === 'now' ? <Play size={17} /> : <CalendarDays size={17} />}
-                          {label}
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                  {runMode === 'scheduled' && (
-                    <div className="acq-schedule-config">
-                      <div className="acq-field-label">
-                        <CalendarDays size={16} />
-                        定时设置<span>北京时间</span>
-                      </div>
-                      <div className="acq-run-mode" role="radiogroup" aria-label="重复方式">
-                        {(
-                          [
-                            ['once', '仅执行一次'],
-                            ['weekly', '重复执行'],
-                          ] as const
-                        ).map(([value, label]) => (
-                          <label className={timing.repeat === value ? 'selected' : ''} key={value}>
-                            <input
-                              type="radio"
-                              name="schedule-repeat"
-                              value={value}
-                              checked={timing.repeat === value}
-                              onChange={() =>
-                                setTiming({
-                                  ...timing,
-                                  repeat: value,
-                                  times: value === 'once' ? timing.times.slice(0, 1) : timing.times,
+                              type="checkbox"
+                              value={type.value}
+                              checked={!!input.customer_types?.includes(type.value)}
+                              onChange={(e) =>
+                                patch({
+                                  customer_types: e.target.checked
+                                    ? [...(input.customer_types || []), type.value]
+                                    : input.customer_types?.filter((v) => v !== type.value),
                                 })
                               }
                             />
+                            {type.label}
+                          </label>
+                        ))}
+                    </div>
+                  </section>
+                  <section className="panel acq-config-section">
+                    <header>
+                      <span className="acq-step-number">02</span>
+                      <div>
+                        <h2>执行安排</h2>
+                        <p>确定每轮数量，以及何时开始运行</p>
+                      </div>
+                    </header>
+                    <label className="acq-block-label">
+                      每轮新增企业目标
+                      <div className="acq-quantity">
+                        <input
+                          aria-label="本次新增客户目标"
+                          type="number"
+                          min={1}
+                          max={200}
+                          step={1}
+                          required
+                          value={Number.isNaN(targetCount) ? '' : targetCount}
+                          onChange={(e) => setTargetCount(e.target.valueAsNumber)}
+                        />
+                        <span>家</span>
+                      </div>
+                    </label>
+                    <p className="acq-preference-help">
+                      按去重后实际新增收录计数，每个执行时间点各运行一轮。
+                    </p>
+                    <div className="acq-quantity-presets">
+                      {[5, 10, 20, 50, 100, 200].map((n) => (
+                        <button
+                          type="button"
+                          className={targetCount === n ? 'selected' : ''}
+                          key={n}
+                          onClick={() => setTargetCount(n)}
+                        >
+                          {n} 家
+                        </button>
+                      ))}
+                    </div>
+                    {!editPlan && (
+                      <div className="acq-run-mode" role="radiogroup" aria-label="执行方式">
+                        {[
+                          ['now', '立即获客'],
+                          ['scheduled', '定时获客'],
+                        ].map(([value, label]) => (
+                          <label className={runMode === value ? 'selected' : ''} key={value}>
+                            <input
+                              type="radio"
+                              name="run-mode"
+                              value={value}
+                              checked={runMode === value}
+                              onChange={() => setRunMode(value)}
+                            />
+                            {value === 'now' ? <Play size={17} /> : <CalendarDays size={17} />}
                             {label}
                           </label>
                         ))}
                       </div>
-                      {timing.repeat !== 'once' && (
-                        <div className="acq-weekday-field">
-                          <div className="acq-field-label" id="acq-weekday-label">
-                            每周执行日<span>可多选</span>
-                          </div>
-                          <ToggleGroup.Root
-                            type="multiple"
-                            className="acq-weekdays"
-                            aria-labelledby="acq-weekday-label"
-                            value={(timing.weekdays ?? []).map(String)}
-                            disabled={locked}
-                            onValueChange={(values) =>
-                              setTiming({
-                                ...timing,
-                                repeat: 'weekly',
-                                weekdays: values.map(Number).sort((a, b) => a - b),
-                              })
-                            }
-                          >
-                            {weekdays.map(({ value, label }) => (
-                              <ToggleGroup.Item
-                                key={value}
-                                value={String(value)}
-                                aria-label={label}
-                              >
-                                {label}
-                              </ToggleGroup.Item>
-                            ))}
-                          </ToggleGroup.Root>
+                    )}
+                    {runMode === 'scheduled' && (
+                      <div className="acq-schedule-config">
+                        <div className="acq-field-label">
+                          <CalendarDays size={16} />
+                          定时设置<span>北京时间</span>
                         </div>
-                      )}
-                      {timing.repeat === 'once' && (
-                        <label className="acq-block-label">
-                          执行日期
-                          <input
-                            aria-label="执行日期"
-                            type="date"
-                            min={dateInBeijing()}
-                            required
-                            value={timing.startDate}
-                            onChange={(e) => setTiming({ ...timing, startDate: e.target.value })}
-                          />
-                        </label>
-                      )}
-                      <div className="acq-time-list">
-                        {timing.times.map((time, i) => (
-                          <div key={i}>
-                            <label>
-                              {timing.repeat === 'once' ? '执行时间' : `执行时间 ${i + 1}`}
+                        <div className="acq-run-mode" role="radiogroup" aria-label="重复方式">
+                          {(
+                            [
+                              ['once', '仅执行一次'],
+                              ['weekly', '重复执行'],
+                            ] as const
+                          ).map(([value, label]) => (
+                            <label
+                              className={timing.repeat === value ? 'selected' : ''}
+                              key={value}
+                            >
                               <input
-                                aria-label={`执行时间 ${i + 1}（北京时间）`}
-                                type="time"
-                                required
-                                value={time}
-                                onChange={(e) =>
+                                type="radio"
+                                name="schedule-repeat"
+                                value={value}
+                                checked={timing.repeat === value}
+                                onChange={() =>
                                   setTiming({
                                     ...timing,
-                                    times: timing.times.map((t, index) =>
-                                      index === i ? e.target.value : t,
-                                    ),
+                                    repeat: value,
+                                    times:
+                                      value === 'once' ? timing.times.slice(0, 1) : timing.times,
                                   })
                                 }
                               />
+                              {label}
                             </label>
-                            {timing.repeat !== 'once' && (
-                              <button
-                                type="button"
-                                aria-label={`删除执行时间 ${i + 1}`}
-                                disabled={timing.times.length === 1}
-                                onClick={() =>
-                                  setTiming({
-                                    ...timing,
-                                    times: timing.times.filter((_, index) => index !== i),
-                                  })
-                                }
-                              >
-                                <X size={16} />
-                              </button>
-                            )}
+                          ))}
+                        </div>
+                        {timing.repeat !== 'once' && (
+                          <div className="acq-weekday-field">
+                            <div className="acq-field-label" id="acq-weekday-label">
+                              每周执行日<span>可多选</span>
+                            </div>
+                            <ToggleGroup.Root
+                              type="multiple"
+                              className="acq-weekdays"
+                              aria-labelledby="acq-weekday-label"
+                              value={(timing.weekdays ?? []).map(String)}
+                              disabled={locked}
+                              onValueChange={(values) =>
+                                setTiming({
+                                  ...timing,
+                                  repeat: 'weekly',
+                                  weekdays: values.map(Number).sort((a, b) => a - b),
+                                })
+                              }
+                            >
+                              {weekdays.map(({ value, label }) => (
+                                <ToggleGroup.Item
+                                  key={value}
+                                  value={String(value)}
+                                  aria-label={label}
+                                >
+                                  {label}
+                                </ToggleGroup.Item>
+                              ))}
+                            </ToggleGroup.Root>
                           </div>
-                        ))}
+                        )}
+                        {timing.repeat === 'once' && (
+                          <label className="acq-block-label">
+                            执行日期
+                            <input
+                              aria-label="执行日期"
+                              type="date"
+                              min={dateInBeijing()}
+                              required
+                              value={timing.startDate}
+                              onChange={(e) => setTiming({ ...timing, startDate: e.target.value })}
+                            />
+                          </label>
+                        )}
+                        <div className="acq-time-list">
+                          {timing.times.map((time, i) => (
+                            <div key={i}>
+                              <label>
+                                {timing.repeat === 'once' ? '执行时间' : `执行时间 ${i + 1}`}
+                                <input
+                                  aria-label={`执行时间 ${i + 1}（北京时间）`}
+                                  type="time"
+                                  required
+                                  value={time}
+                                  onChange={(e) =>
+                                    setTiming({
+                                      ...timing,
+                                      times: timing.times.map((t, index) =>
+                                        index === i ? e.target.value : t,
+                                      ),
+                                    })
+                                  }
+                                />
+                              </label>
+                              {timing.repeat !== 'once' && (
+                                <button
+                                  type="button"
+                                  aria-label={`删除执行时间 ${i + 1}`}
+                                  disabled={timing.times.length === 1}
+                                  onClick={() =>
+                                    setTiming({
+                                      ...timing,
+                                      times: timing.times.filter((_, index) => index !== i),
+                                    })
+                                  }
+                                >
+                                  <X size={16} />
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                        {timing.repeat !== 'once' && (
+                          <button
+                            type="button"
+                            className="acq-text-button"
+                            disabled={timing.times.length >= 24}
+                            onClick={() => {
+                              const available = Array.from(
+                                { length: 24 },
+                                (_, h) => `${String(h).padStart(2, '0')}:00`,
+                              ).find((t) => !timing.times.includes(t));
+                              if (available)
+                                setTiming({ ...timing, times: [...timing.times, available] });
+                            }}
+                          >
+                            <Plus size={15} />
+                            添加执行时间
+                          </button>
+                        )}
+                        <label className="acq-block-label">
+                          计划名称
+                          <input
+                            aria-label="计划名称"
+                            maxLength={80}
+                            required
+                            value={name ?? scheduleName}
+                            onChange={(e) => setName(e.target.value)}
+                          />
+                        </label>
+                        {timingError && (
+                          <p className="error-message" role="alert">
+                            {timingError}
+                          </p>
+                        )}
                       </div>
-                      {timing.repeat !== 'once' && (
-                        <button
-                          type="button"
-                          className="acq-text-button"
-                          disabled={timing.times.length >= 24}
-                          onClick={() => {
-                            const available = Array.from(
-                              { length: 24 },
-                              (_, h) => `${String(h).padStart(2, '0')}:00`,
-                            ).find((t) => !timing.times.includes(t));
-                            if (available)
-                              setTiming({ ...timing, times: [...timing.times, available] });
-                          }}
-                        >
-                          <Plus size={15} />
-                          添加执行时间
-                        </button>
-                      )}
-                      <label className="acq-block-label">
-                        计划名称
+                    )}
+                  </section>
+                  <section className="panel acq-config-section">
+                    <header>
+                      <span className="acq-step-number">03</span>
+                      <div>
+                        <h2>获客后处理</h2>
+                        <p>明确本次是否会自动向客户发送邮件</p>
+                      </div>
+                    </header>
+                    <div className="acq-followup-options" role="radiogroup" aria-label="获客后处理">
+                      <label className={!input.auto_first_touch ? 'selected' : ''}>
                         <input
-                          aria-label="计划名称"
-                          maxLength={80}
-                          required
-                          value={name ?? scheduleName}
-                          onChange={(e) => setName(e.target.value)}
+                          type="radio"
+                          name="acquisition-followup"
+                          checked={!input.auto_first_touch}
+                          onChange={() => patch({ auto_first_touch: false })}
                         />
+                        <span>
+                          <strong>仅获客</strong>
+                          <small>收录企业和研究资料，由你后续处理。</small>
+                        </span>
                       </label>
-                      {timingError && (
-                        <p className="error-message" role="alert">
-                          {timingError}
-                        </p>
-                      )}
+                      <label className={input.auto_first_touch ? 'selected' : ''}>
+                        <input
+                          type="radio"
+                          name="acquisition-followup"
+                          checked={input.auto_first_touch === true}
+                          onChange={() =>
+                            patch({
+                              auto_first_touch: true,
+                              auto_follow_up: input.auto_follow_up ?? true,
+                            })
+                          }
+                        />
+                        <span>
+                          <strong>获客后自动首发</strong>
+                          <small>
+                            符合条件、尚未首发的客户自动发送；无可用商务邮箱跳过本次，其他缺项保留原因。
+                          </small>
+                        </span>
+                      </label>
                     </div>
-                  )}
-                </section>
-                <section className="panel acq-config-section">
-                  <header>
-                    <span className="acq-step-number">03</span>
-                    <div>
-                      <h2>获客后处理</h2>
-                      <p>明确本次是否会自动向客户发送邮件</p>
-                    </div>
-                  </header>
-                  <div className="acq-followup-options" role="radiogroup" aria-label="获客后处理">
-                    <label className={!input.auto_first_touch ? 'selected' : ''}>
-                      <input
-                        type="radio"
-                        name="acquisition-followup"
-                        checked={!input.auto_first_touch}
-                        onChange={() => patch({ auto_first_touch: false })}
-                      />
+                    {input.auto_first_touch && (
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={input.auto_follow_up === true}
+                          onChange={(event) => patch({ auto_follow_up: event.target.checked })}
+                        />
+                        首封未回复时按跟进序列执行（定时计划用于后续轮次）
+                      </label>
+                    )}
+                    {input.auto_first_touch && (
+                      <p className="acq-preference-help">
+                        根据客户经营证据匹配最新已审核产品和可用邮箱。同一企业只安排一封首信。
+                      </p>
+                    )}
+                  </section>
+                </fieldset>
+                <section className="panel acq-search-strategy">
+                  <details>
+                    <summary>
                       <span>
-                        <strong>仅获客</strong>
-                        <small>收录企业和研究资料，由你后续处理。</small>
+                        <Search size={17} />
+                        搜索词与搜索策略
                       </span>
-                    </label>
-                    <label className={input.auto_first_touch ? 'selected' : ''}>
-                      <input
-                        type="radio"
-                        name="acquisition-followup"
-                        checked={input.auto_first_touch === true}
-                        onChange={() =>
-                          patch({
-                            auto_first_touch: true,
-                            auto_follow_up: input.auto_follow_up ?? true,
-                          })
-                        }
-                      />
                       <span>
-                        <strong>获客后自动首发</strong>
-                        <small>
-                          符合条件、尚未首发的客户自动发送；无可用商务邮箱跳过本次，其他缺项保留原因。
-                        </small>
+                        {previewLoading ? '正在生成…' : `${preview.length} 条查询`}
+                        <ChevronDown size={15} />
                       </span>
-                    </label>
-                  </div>
-                  {input.auto_first_touch && (
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={input.auto_follow_up === true}
-                        onChange={(event) => patch({ auto_follow_up: event.target.checked })}
-                      />
-                      首封未回复时按跟进序列执行（定时计划用于后续轮次）
-                    </label>
-                  )}
-                  {input.auto_first_touch && (
-                    <p className="acq-preference-help">
-                      根据客户经营证据匹配最新已审核产品和可用邮箱。同一企业只安排一封首信。
+                    </summary>
+                    <p className="muted">
+                      系统根据产品、市场和客户条件生成查询；执行后可在记录中查看实际产出。
                     </p>
-                  )}
+                    {previewError && (
+                      <p className="error-message" role="alert">
+                        {previewError}
+                      </p>
+                    )}
+                    <ol>
+                      {preview.map((q, i) => (
+                        <li key={`${q.country}:${q.query}`}>
+                          <small>
+                            {i + 1} · 官网搜索 · {q.country}
+                          </small>
+                          <span>{q.query}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </details>
                 </section>
-              </fieldset>
-              <section className="panel acq-search-strategy">
-                <details>
-                  <summary>
-                    <span>
-                      <Search size={17} />
-                      搜索词与搜索策略
-                    </span>
-                    <span>
-                      {previewLoading ? '正在生成…' : `${preview.length} 条查询`}
-                      <ChevronDown size={15} />
-                    </span>
-                  </summary>
-                  <p className="muted">
-                    系统根据产品、市场和客户条件生成查询；执行后可在记录中查看实际产出。
-                  </p>
-                  {previewError && (
-                    <p className="error-message" role="alert">
-                      {previewError}
-                    </p>
-                  )}
-                  <ol>
-                    {preview.map((q, i) => (
-                      <li key={`${q.country}:${q.query}`}>
-                        <small>
-                          {i + 1} · 官网搜索 · {q.country}
-                        </small>
-                        <span>{q.query}</span>
-                      </li>
-                    ))}
-                  </ol>
-                </details>
-              </section>
-            </form>
-            {summary}
-          </div>
-        </>
-      )}
-    </div>
+              </form>
+              {summary}
+            </div>
+          </>
+        )}
+      </div>
+    </SectionWorkspace>
   );
 }

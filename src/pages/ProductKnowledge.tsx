@@ -1,3 +1,4 @@
+import { SectionWorkspace } from '../components/SectionWorkspace';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -22,10 +23,12 @@ import {
   UploadCloud,
   X,
 } from 'lucide-react';
+import { MaterialParseMode } from '../components/MaterialParseMode';
 import { MaterialDocument } from '../components/MaterialDetail';
 import { MaterialSearchTest } from '../components/MaterialSearchTest';
 import { documentLimitMiB, videoLimitMiB } from '../domain/material-upload.mjs';
 import {
+  type ParseMode,
   acceptMaterials,
   fileSize,
   materialFormats,
@@ -44,7 +47,7 @@ const statuses: Record<Material['extractionStatus'], string> = {
   pending: '等待提取',
   processing: '解析中',
   failed: '解析异常',
-  manual: '人工核对',
+  manual: '附件素材',
 };
 const statusOptions = [
   ['active', '在用资料'],
@@ -87,6 +90,7 @@ export function ProductKnowledgePage() {
     [error, setError] = useState(''),
     [loading, setLoading] = useState(true),
     [tick, setTick] = useState(0);
+  const [parseMode, setParseMode] = useState<ParseMode>('rich_layout_recognition');
   const [importing, setImporting] = useState(false),
     [busy, setBusy] = useState(false),
     [drag, setDrag] = useState(false),
@@ -166,7 +170,7 @@ export function ProductKnowledgePage() {
       try {
         const r = await uploadMaterial(
           f,
-          { site: site === 'unassigned' ? '' : site },
+          { site: site === 'unassigned' ? '' : site, mode: parseMode },
           crypto.randomUUID(),
           (n, total) => setProgress(label + ' · 正在解析第 ' + n + ' / ' + total + ' 页'),
         );
@@ -245,482 +249,520 @@ export function ProductKnowledgePage() {
   }
   const openFile = (value: string) =>
     navigate({ id: value, product: null, productId: null, sourcePage: null });
-  if (id)
-    return (
-      <MaterialDocument
-        key={id}
-        id={id}
-        initialPage={Math.max(1, parseInt(params.get('sourcePage') || '1', 10) || 1)}
-        openSource={params.has('sourcePage')}
-        onClose={() => openFile('')}
-        onChanged={refresh}
-      />
-    );
   const filtered = Boolean(search || site || format || status !== 'active');
   return (
-    <section
-      aria-label="素材库"
-      className={'kb-workspace' + (drag ? ' kb-drag' : '')}
-      onDragOver={(e) => {
-        if (tab === 'data' && e.dataTransfer.types.includes('Files')) {
-          e.preventDefault();
-          if (!busy) setDrag(true);
-        }
-      }}
-      onDragLeave={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDrag(false);
-      }}
-      onDrop={(e) => {
-        if (tab === 'data' && e.dataTransfer.types.includes('Files')) {
-          e.preventDefault();
-          setDrag(false);
-          void upload(Array.from(e.dataTransfer.files));
-        }
-      }}
+    <SectionWorkspace
+      key={id ? 'document' : 'list'}
+      title="素材库"
+      icon={FolderOpen}
+      selected={id ? 'data' : tab}
+      sections={[
+        {
+          items: [
+            { id: 'data', label: '数据集', icon: Files },
+            { id: 'test', label: '搜索测试', icon: Search },
+          ],
+        },
+      ]}
+      onSelect={(value) =>
+        navigate({
+          tab: value === 'test' ? 'test' : null,
+          id: null,
+          product: null,
+          productId: null,
+          sourcePage: null,
+        })
+      }
+      className="section-materials"
+      collapsible={!!id}
     >
-      <div className="kb-surface">
-        <header className="kb-titlebar">
-          <div className="kb-title">
-            <span className="kb-avatar">
-              <BookOpen size={19} />
-            </span>
-            <h1>素材库</h1>
-          </div>
-          <nav className="kb-tabs" aria-label="素材库视图">
-            <button
-              aria-current={tab === 'data' ? 'page' : undefined}
-              onClick={() => navigate({ tab: null })}
-            >
-              <Files size={15} />
-              数据集
-            </button>
-            <button
-              aria-current={tab === 'test' ? 'page' : undefined}
-              onClick={() => navigate({ tab: 'test' })}
-            >
-              <Search size={15} />
-              搜索测试
-            </button>
-          </nav>
-          <button
-            className="kb-mobile-info kb-icon"
-            aria-label="素材库信息"
-            aria-expanded={showInfo}
-            onClick={() => setShowInfo(!showInfo)}
-          >
-            <Info size={17} />
-          </button>
-        </header>
-        {tab === 'test' ? (
-          <MaterialSearchTest />
-        ) : (
-          <>
-            <div className="kb-toolbar">
-              <h2>
-                <FolderOpen size={17} />
-                根目录
-              </h2>
-              <label className="kb-search">
-                <Search size={15} />
-                <input
-                  type="search"
-                  aria-label="搜索素材"
-                  placeholder="搜索文件"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                />
-              </label>
-              <details className="kb-filter">
-                <summary aria-label="筛选文件">
-                  <ListFilter size={16} />
-                  <span>筛选</span>
-                </summary>
-                <div className="kb-popover">
-                  <label>
-                    品牌邮箱
-                    <select
-                      aria-label="品牌邮箱筛选"
-                      value={site}
-                      onChange={(e) => {
-                        setSite(e.target.value);
-                        setPage(1);
-                      }}
-                    >
-                      <option value="">全部品牌邮箱</option>
-                      <option value="unassigned">未分配</option>
-                      {data?.sites.map((s) => (
-                        <option key={s.site} value={s.site}>
-                          {s.brand} · {s.site}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    文件格式
-                    <select
-                      value={format}
-                      onChange={(e) => {
-                        setFormat(e.target.value);
-                        setPage(1);
-                      }}
-                    >
-                      <option value="">全部格式</option>
-                      {[...materialFormats, '产品资料'].map((f) => (
-                        <option key={f}>{f}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    审核状态
-                    <select
-                      value={status}
-                      onChange={(e) => {
-                        navigate(
-                          { status: e.target.value === 'active' ? null : e.target.value },
-                          true,
-                        );
-                        setPage(1);
-                      }}
-                    >
-                      {statusOptions.map(([s, n]) => (
-                        <option key={s} value={s}>
-                          {n}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-              </details>
-              <button className="kb-primary" disabled={busy} onClick={() => setImporting(true)}>
-                <Plus size={16} />
-                新建 / 导入
+      {id ? (
+        <MaterialDocument
+          key={id}
+          id={id}
+          initialPage={Math.max(1, parseInt(params.get('sourcePage') || '1', 10) || 1)}
+          openSource={params.has('sourcePage')}
+          onClose={() => openFile('')}
+          onChanged={refresh}
+        />
+      ) : (
+        <section
+          aria-label="素材库"
+          className={'kb-workspace' + (drag ? ' kb-drag' : '')}
+          onDragOver={(e) => {
+            if (tab === 'data' && e.dataTransfer.types.includes('Files')) {
+              e.preventDefault();
+              if (!busy) setDrag(true);
+            }
+          }}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDrag(false);
+          }}
+          onDrop={(e) => {
+            if (tab === 'data' && e.dataTransfer.types.includes('Files')) {
+              e.preventDefault();
+              setDrag(false);
+              void upload(Array.from(e.dataTransfer.files));
+            }
+          }}
+        >
+          <div className="kb-surface">
+            <header className="kb-titlebar">
+              <div className="kb-title">
+                <span className="kb-avatar">
+                  <BookOpen size={19} />
+                </span>
+                <h1>{tab === 'test' ? '搜索测试' : '数据集'}</h1>
+              </div>
+
+              <button
+                className="kb-mobile-info kb-icon"
+                aria-label="素材库信息"
+                aria-expanded={showInfo}
+                onClick={() => setShowInfo(!showInfo)}
+              >
+                <Info size={17} />
               </button>
-            </div>
-            {filtered && (
-              <div className="kb-filtered">
-                当前筛选 ·{' '}
-                {[
-                  search,
-                  site ? siteName : '',
-                  format,
-                  status !== 'active' ? statusOptions.find(([key]) => key === status)?.[1] : '',
-                ]
-                  .filter(Boolean)
-                  .join(' / ')}
-                <button
-                  aria-label="清除筛选"
-                  onClick={() => {
-                    setQuery('');
-                    setSearch('');
-                    setSite('');
-                    setFormat('');
-                    setPage(1);
-                    navigate({ status: null }, true);
-                  }}
-                >
-                  <X size={14} />
-                </button>
-              </div>
-            )}
-            {(progress || report) && (
-              <div className="kb-notice" role="status">
-                {busy ? <UploadCloud size={16} /> : <Check size={16} />}
-                <span>{progress || report}</span>
-                {!busy && (
-                  <button className="kb-icon" aria-label="关闭通知" onClick={() => setReport('')}>
-                    <X size={13} />
+            </header>
+            {tab === 'test' ? (
+              <MaterialSearchTest />
+            ) : (
+              <>
+                <div className="kb-toolbar">
+                  <h2>
+                    <FolderOpen size={17} />
+                    根目录
+                  </h2>
+                  <label className="kb-search">
+                    <Search size={15} />
+                    <input
+                      type="search"
+                      aria-label="搜索素材"
+                      placeholder="搜索文件"
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                    />
+                  </label>
+                  <details className="kb-filter">
+                    <summary aria-label="筛选文件">
+                      <ListFilter size={16} />
+                      <span>筛选</span>
+                    </summary>
+                    <div className="kb-popover">
+                      <label>
+                        品牌邮箱
+                        <select
+                          aria-label="品牌邮箱筛选"
+                          value={site}
+                          onChange={(e) => {
+                            setSite(e.target.value);
+                            setPage(1);
+                          }}
+                        >
+                          <option value="">全部品牌邮箱</option>
+                          <option value="unassigned">未分配</option>
+                          {data?.sites.map((s) => (
+                            <option key={s.site} value={s.site}>
+                              {s.brand} · {s.site}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        文件格式
+                        <select
+                          value={format}
+                          onChange={(e) => {
+                            setFormat(e.target.value);
+                            setPage(1);
+                          }}
+                        >
+                          <option value="">全部格式</option>
+                          {[...materialFormats, '产品资料'].map((f) => (
+                            <option key={f}>{f}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        审核状态
+                        <select
+                          value={status}
+                          onChange={(e) => {
+                            navigate(
+                              { status: e.target.value === 'active' ? null : e.target.value },
+                              true,
+                            );
+                            setPage(1);
+                          }}
+                        >
+                          {statusOptions.map(([s, n]) => (
+                            <option key={s} value={s}>
+                              {n}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                  </details>
+                  <button className="kb-primary" disabled={busy} onClick={() => setImporting(true)}>
+                    <Plus size={16} />
+                    新建 / 导入
                   </button>
+                </div>
+                {filtered && (
+                  <div className="kb-filtered">
+                    当前筛选 ·{' '}
+                    {[
+                      search,
+                      site ? siteName : '',
+                      format,
+                      status !== 'active' ? statusOptions.find(([key]) => key === status)?.[1] : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' / ')}
+                    <button
+                      aria-label="清除筛选"
+                      onClick={() => {
+                        setQuery('');
+                        setSearch('');
+                        setSite('');
+                        setFormat('');
+                        setPage(1);
+                        navigate({ status: null }, true);
+                      }}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
                 )}
-              </div>
-            )}
-            {error && (
-              <p className="kb-error" role="alert">
-                {error} <button onClick={refresh}>重新读取</button>
-              </p>
-            )}
-            {selected.length > 0 && (
-              <div className="kb-selected">
-                <span>已选择 {selected.length} 项</span>
-                <button
-                  disabled={
-                    applying ||
-                    !data?.items.some((m) => selected.includes(m.id) && m.status !== 'archived')
-                  }
-                  onClick={() =>
-                    void enable(
-                      data!.items.filter((m) => selected.includes(m.id) && m.status !== 'archived'),
-                      false,
-                    )
-                  }
-                >
-                  停用
-                </button>
-                <button
-                  disabled={
-                    applying ||
-                    !data?.items.some((m) => selected.includes(m.id) && m.status === 'archived')
-                  }
-                  onClick={() =>
-                    void enable(
-                      data!.items.filter((m) => selected.includes(m.id) && m.status === 'archived'),
-                      true,
-                    )
-                  }
-                >
-                  启用
-                </button>
-                <button onClick={() => setSelected([])}>取消选择</button>
-              </div>
-            )}
-            <div className="kb-table-wrap">
-              <table className="kb-table" aria-label="素材文件" aria-busy={loading}>
-                <thead>
-                  <tr>
-                    <th aria-sort={sortState('name')}>
-                      <div className="kb-cell-name">
-                        <input
-                          type="checkbox"
-                          aria-label="选择当页文件"
-                          checked={
-                            !!data?.items.length && data.items.every((m) => selected.includes(m.id))
-                          }
-                          onChange={(e) =>
-                            setSelected(
-                              e.target.checked ? (data?.items || []).map((m) => m.id) : [],
-                            )
-                          }
-                        />
-                        <button className="kb-sort" onClick={() => order('name')}>
-                          集合名称
-                          <ArrowDownUp size={12} />
-                        </button>
-                      </div>
-                    </th>
-                    <th>处理方式</th>
-                    <th>数据量</th>
-                    <th aria-sort={sortState('updated')}>
-                      <button className="kb-sort" onClick={() => order('updated')}>
-                        更新时间
-                        <ArrowDownUp size={12} />
+                {(progress || report) && (
+                  <div className="kb-notice" role="status">
+                    {busy ? <UploadCloud size={16} /> : <Check size={16} />}
+                    <span>{progress || report}</span>
+                    {!busy && (
+                      <button
+                        className="kb-icon"
+                        aria-label="关闭通知"
+                        onClick={() => setReport('')}
+                      >
+                        <X size={13} />
                       </button>
-                    </th>
-                    <th>状态</th>
-                    <th>启用</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data?.items.map((m) => {
-                    const Icon = formatIcon(m.format);
-                    return (
-                      <tr key={m.id}>
-                        <td>
+                    )}
+                  </div>
+                )}
+                {error && (
+                  <p className="kb-error" role="alert">
+                    {error} <button onClick={refresh}>重新读取</button>
+                  </p>
+                )}
+                {selected.length > 0 && (
+                  <div className="kb-selected">
+                    <span>已选择 {selected.length} 项</span>
+                    <button
+                      disabled={
+                        applying ||
+                        !data?.items.some((m) => selected.includes(m.id) && m.status !== 'archived')
+                      }
+                      onClick={() =>
+                        void enable(
+                          data!.items.filter(
+                            (m) => selected.includes(m.id) && m.status !== 'archived',
+                          ),
+                          false,
+                        )
+                      }
+                    >
+                      停用
+                    </button>
+                    <button
+                      disabled={
+                        applying ||
+                        !data?.items.some((m) => selected.includes(m.id) && m.status === 'archived')
+                      }
+                      onClick={() =>
+                        void enable(
+                          data!.items.filter(
+                            (m) => selected.includes(m.id) && m.status === 'archived',
+                          ),
+                          true,
+                        )
+                      }
+                    >
+                      启用
+                    </button>
+                    <button onClick={() => setSelected([])}>取消选择</button>
+                  </div>
+                )}
+                <div className="kb-table-wrap">
+                  <table className="kb-table" aria-label="素材文件" aria-busy={loading}>
+                    <thead>
+                      <tr>
+                        <th aria-sort={sortState('name')}>
                           <div className="kb-cell-name">
                             <input
                               type="checkbox"
-                              aria-label={'选择 ' + m.name}
-                              checked={selected.includes(m.id)}
+                              aria-label="选择当页文件"
+                              checked={
+                                !!data?.items.length &&
+                                data.items.every((m) => selected.includes(m.id))
+                              }
                               onChange={(e) =>
                                 setSelected(
-                                  e.target.checked
-                                    ? [...selected, m.id]
-                                    : selected.filter((id) => id !== m.id),
+                                  e.target.checked ? (data?.items || []).map((m) => m.id) : [],
                                 )
                               }
                             />
-                            <button
-                              className="kb-row-name"
-                              aria-label={'预览 ' + m.name}
-                              onClick={() => openFile(m.id)}
-                            >
-                              <span className="kb-file-icon" data-format={m.format}>
-                                <Icon size={20} />
-                              </span>
-                              <span>
-                                <strong>{m.name}</strong>
-                                <small>
-                                  {[m.format, m.size ? fileSize(m.size) : '', statusName(m.status)]
-                                    .filter(Boolean)
-                                    .join(' · ')}
-                                </small>
-                              </span>
+                            <button className="kb-sort" onClick={() => order('name')}>
+                              集合名称
+                              <ArrowDownUp size={12} />
                             </button>
                           </div>
-                        </td>
-                        <td>
-                          {m.extractionStatus === 'manual'
-                            ? '人工录入'
-                            : m.format === 'Excel'
-                              ? '表格解析'
-                              : '分块存储'}
-                        </td>
-                        <td>
-                          {m.format === 'Excel' &&
-                          !m.extractionCount &&
-                          m.extractionStatus === 'ready'
-                            ? '按行查看'
-                            : m.extractionCount.toLocaleString()}
-                        </td>
-                        <td>{m.updatedAt.slice(0, 10)}</td>
-                        <td>
-                          <span className={'kb-state ' + m.extractionStatus}>
-                            {statuses[m.extractionStatus]}
-                          </span>
-                        </td>
-                        <td>
-                          <button
-                            className="kb-switch"
-                            role="switch"
-                            aria-label={'启用 ' + m.name}
-                            aria-checked={m.status !== 'archived'}
-                            disabled={applying}
-                            onClick={() => void enable([m], m.status === 'archived')}
-                          />
-                        </td>
+                        </th>
+                        <th>处理方式</th>
+                        <th>数据量</th>
+                        <th aria-sort={sortState('updated')}>
+                          <button className="kb-sort" onClick={() => order('updated')}>
+                            更新时间
+                            <ArrowDownUp size={12} />
+                          </button>
+                        </th>
+                        <th>状态</th>
+                        <th>启用</th>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            {!data?.items.length && !error && (
-              <div className="kb-empty">
-                <FolderOpen size={34} />
-                <p>{loading ? '正在读取文件…' : filtered ? '没有符合条件的文件' : '暂无文件'}</p>
-                {!loading && !filtered && (
-                  <button onClick={() => setImporting(true)}>导入本地文件</button>
+                    </thead>
+                    <tbody>
+                      {data?.items.map((m) => {
+                        const Icon = formatIcon(m.format);
+                        return (
+                          <tr key={m.id}>
+                            <td>
+                              <div className="kb-cell-name">
+                                <input
+                                  type="checkbox"
+                                  aria-label={'选择 ' + m.name}
+                                  checked={selected.includes(m.id)}
+                                  onChange={(e) =>
+                                    setSelected(
+                                      e.target.checked
+                                        ? [...selected, m.id]
+                                        : selected.filter((id) => id !== m.id),
+                                    )
+                                  }
+                                />
+                                <button
+                                  className="kb-row-name"
+                                  aria-label={'预览 ' + m.name}
+                                  onClick={() => openFile(m.id)}
+                                >
+                                  <span className="kb-file-icon" data-format={m.format}>
+                                    <Icon size={20} />
+                                  </span>
+                                  <span>
+                                    <strong>{m.name}</strong>
+                                    <small>
+                                      {[
+                                        m.format,
+                                        m.size ? fileSize(m.size) : '',
+                                        statusName(m.status),
+                                      ]
+                                        .filter(Boolean)
+                                        .join(' · ')}
+                                    </small>
+                                  </span>
+                                </button>
+                              </div>
+                            </td>
+                            <td>
+                              {m.extractionStatus === 'manual'
+                                ? '人工录入'
+                                : m.format === 'Excel'
+                                  ? '表格解析'
+                                  : '分块存储'}
+                            </td>
+                            <td>
+                              {m.format === 'Excel' &&
+                              !m.extractionCount &&
+                              m.extractionStatus === 'ready'
+                                ? '按行查看'
+                                : m.extractionCount.toLocaleString()}
+                            </td>
+                            <td>{m.updatedAt.slice(0, 10)}</td>
+                            <td>
+                              <span className={'kb-state ' + m.extractionStatus}>
+                                {statuses[m.extractionStatus]}
+                              </span>
+                            </td>
+                            <td>
+                              <button
+                                className="kb-switch"
+                                role="switch"
+                                aria-label={'启用 ' + m.name}
+                                aria-checked={m.status !== 'archived'}
+                                disabled={applying}
+                                onClick={() => void enable([m], m.status === 'archived')}
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                {!data?.items.length && !error && (
+                  <div className="kb-empty">
+                    <FolderOpen size={34} />
+                    <p>
+                      {loading ? '正在读取文件…' : filtered ? '没有符合条件的文件' : '暂无文件'}
+                    </p>
+                    {!loading && !filtered && (
+                      <button onClick={() => setImporting(true)}>导入本地文件</button>
+                    )}
+                  </div>
                 )}
-              </div>
+                <footer className="kb-pagination">
+                  <span>共 {data?.total ?? 0} 条</span>
+                  <select
+                    aria-label="每页条数"
+                    value={size}
+                    onChange={(e) => {
+                      setSize(Number(e.target.value));
+                      setPage(1);
+                    }}
+                  >
+                    {[10, 20, 50].map((n) => (
+                      <option key={n} value={n}>
+                        {n} 条 / 页
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    aria-label="上一页"
+                    disabled={page === 1}
+                    onClick={() => setPage(page - 1)}
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+                  <b>{page}</b>
+                  <button
+                    aria-label="下一页"
+                    disabled={page * size >= (data?.total ?? 0)}
+                    onClick={() => setPage(page + 1)}
+                  >
+                    <ChevronRight size={16} />
+                  </button>
+                </footer>
+              </>
             )}
-            <footer className="kb-pagination">
-              <span>共 {data?.total ?? 0} 条</span>
-              <select
-                aria-label="每页条数"
-                value={size}
-                onChange={(e) => {
-                  setSize(Number(e.target.value));
-                  setPage(1);
-                }}
-              >
-                {[10, 20, 50].map((n) => (
-                  <option key={n} value={n}>
-                    {n} 条 / 页
-                  </option>
-                ))}
-              </select>
-              <button aria-label="上一页" disabled={page === 1} onClick={() => setPage(page - 1)}>
-                <ChevronLeft size={16} />
-              </button>
-              <b>{page}</b>
+          </div>
+          <aside
+            className={'kb-aside' + (showInfo ? ' kb-aside-open' : '')}
+            aria-label="素材库概览"
+          >
+            <div className="kb-aside-heading">
+              <span className="kb-avatar big">
+                <BookOpen size={24} />
+              </span>
+              <h2>素材库</h2>
               <button
-                aria-label="下一页"
-                disabled={page * size >= (data?.total ?? 0)}
-                onClick={() => setPage(page + 1)}
+                className="kb-mobile-info kb-icon"
+                aria-label="关闭素材库信息"
+                onClick={() => setShowInfo(false)}
               >
-                <ChevronRight size={16} />
+                <X size={16} />
               </button>
-            </footer>
-          </>
-        )}
-      </div>
-      <aside className={'kb-aside' + (showInfo ? ' kb-aside-open' : '')} aria-label="素材库概览">
-        <div className="kb-aside-heading">
-          <span className="kb-avatar big">
-            <BookOpen size={24} />
-          </span>
-          <h2>素材库</h2>
-          <button
-            className="kb-mobile-info kb-icon"
-            aria-label="关闭素材库信息"
-            onClick={() => setShowInfo(false)}
-          >
-            <X size={16} />
-          </button>
-        </div>
-        <div className="kb-side-section">
-          <h3>
-            <Database size={15} />
-            知识库信息
-          </h3>
-          <dl>
-            <dt>类型</dt>
-            <dd>文件知识库</dd>
-            <dt>来源</dt>
-            <dd>本地上传</dd>
-            <dt>文件解析</dt>
-            <dd>本机文字提取与 OCR</dd>
-          </dl>
-        </div>
-        <div className="kb-side-section">
-          <h3>
-            <SlidersHorizontal size={15} />
-            导入配置
-          </h3>
-          <dl>
-            <dt>处理方式</dt>
-            <dd>自动分块</dd>
-            <dt>文档 / 图片</dt>
-            <dd>{documentLimitMiB} MiB / 份</dd>
-            <dt>视频</dt>
-            <dd>{videoLimitMiB} MiB / 份</dd>
-          </dl>
-        </div>
-        <div className="kb-side-section">
-          <h3>
-            <Layers size={15} />
-            引用范围
-          </h3>
-          <p>邮件草稿使用当前邮箱选用并已审核的资料。</p>
-        </div>
-      </aside>
-      {drag && (
-        <div className="kb-drop-indicator">
-          <UploadCloud size={34} />
-          松开即可导入文件
-        </div>
+            </div>
+            <div className="kb-side-section">
+              <h3>
+                <Database size={15} />
+                知识库信息
+              </h3>
+              <dl>
+                <dt>类型</dt>
+                <dd>文件知识库</dd>
+                <dt>来源</dt>
+                <dd>本地上传</dd>
+                <dt>文件解析</dt>
+                <dd>DeepSeek 文档解析</dd>
+              </dl>
+            </div>
+            <div className="kb-side-section">
+              <h3>
+                <SlidersHorizontal size={15} />
+                导入配置
+              </h3>
+              <dl>
+                <dt>处理方式</dt>
+                <dd>自动分块</dd>
+                <dt>文档 / 图片</dt>
+                <dd>{documentLimitMiB} MiB / 份</dd>
+                <dt>视频</dt>
+                <dd>{videoLimitMiB} MiB / 份</dd>
+              </dl>
+            </div>
+            <div className="kb-side-section">
+              <h3>
+                <Layers size={15} />
+                引用范围
+              </h3>
+              <p>邮件草稿使用当前邮箱选用并已审核的资料。</p>
+            </div>
+          </aside>
+          {drag && (
+            <div className="kb-drop-indicator">
+              <UploadCloud size={34} />
+              松开即可导入文件
+            </div>
+          )}
+          {importing && (
+            <dialog
+              ref={uploadDialog}
+              className="kb-modal kb-import"
+              aria-label="导入本地文件"
+              onCancel={() => setImporting(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setDrag(false);
+                void upload(Array.from(e.dataTransfer.files));
+              }}
+            >
+              <header>
+                <h2>导入本地文件</h2>
+                <button
+                  className="kb-icon"
+                  aria-label="关闭导入"
+                  onClick={() => setImporting(false)}
+                >
+                  <X size={18} />
+                </button>
+              </header>
+              <MaterialParseMode value={parseMode} onChange={setParseMode} />
+              <button
+                className="kb-picker"
+                aria-label="选择文件上传"
+                onClick={() => picker.current?.click()}
+              >
+                <UploadCloud size={32} />
+                <strong>选择文件上传</strong>
+                <span>或将多个文件拖到此处</span>
+              </button>
+              <input
+                hidden
+                type="file"
+                multiple
+                accept={acceptMaterials}
+                aria-label="选择本地文件"
+                ref={picker}
+                onChange={(e) => void upload(Array.from(e.target.files || []))}
+              />
+              <p>
+                文档和图片每份最多 {documentLimitMiB} MiB，视频 {videoLimitMiB} MiB。PDF、DOCX、PPTX
+                由 DeepSeek 解析。独立图片和视频保存为附件素材。
+              </p>
+            </dialog>
+          )}
+        </section>
       )}
-      {importing && (
-        <dialog
-          ref={uploadDialog}
-          className="kb-modal kb-import"
-          aria-label="导入本地文件"
-          onCancel={() => setImporting(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setDrag(false);
-            void upload(Array.from(e.dataTransfer.files));
-          }}
-        >
-          <header>
-            <h2>导入本地文件</h2>
-            <button className="kb-icon" aria-label="关闭导入" onClick={() => setImporting(false)}>
-              <X size={18} />
-            </button>
-          </header>
-          <button
-            className="kb-picker"
-            aria-label="选择文件上传"
-            onClick={() => picker.current?.click()}
-          >
-            <UploadCloud size={32} />
-            <strong>选择文件上传</strong>
-            <span>或将多个文件拖到此处</span>
-          </button>
-          <input
-            hidden
-            type="file"
-            multiple
-            accept={acceptMaterials}
-            aria-label="选择本地文件"
-            ref={picker}
-            onChange={(e) => void upload(Array.from(e.target.files || []))}
-          />
-          <p>
-            文档和图片每份最多 {documentLimitMiB} MiB，视频 {videoLimitMiB}{' '}
-            MiB。选好文件后自动解析。
-          </p>
-        </dialog>
-      )}
-    </section>
+    </SectionWorkspace>
   );
 }

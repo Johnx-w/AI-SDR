@@ -25,6 +25,7 @@ const fields = [
   ],
   ['DEEPSEEK_API_KEY', 'DeepSeek API Key', true],
   ['DEEPSEEK_MODEL', 'DeepSeek 模型', false],
+  ['MATERIAL_DEEPSEEK_API_KEY', '素材库 DeepSeek API Key', true],
   ['DOCUMENT_MODEL_BASE_URL', '资料识别 API 基础地址（含 /v1）', false],
   ['DOCUMENT_MODEL_API_KEY', '资料识别 API Key', true],
   ['DOCUMENT_MODEL_MODEL', '支持图片和 PDF 的模型名称', false],

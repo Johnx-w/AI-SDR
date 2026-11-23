@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -55,6 +56,73 @@ const nav = [
   { path: '/materials', name: '素材库', icon: FolderOpen },
   { path: '/settings', name: 'API 连接', icon: Settings2 },
 ];
+function WorkspaceNavigation({ onNavigate }: { onNavigate: () => void }) {
+  const [hint, setHint] = useState<{ name: string; left: number; top: number } | null>(null);
+  function showLabel(link: HTMLAnchorElement, name: string) {
+    if (!window.matchMedia('(min-width: 761px)').matches) return;
+    const { right, top, height } = link.getBoundingClientRect();
+    setHint({ name, left: right + 8, top: top + height / 2 });
+  }
+  useEffect(() => {
+    if (!hint) return;
+    const hide = () => setHint(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') hide();
+    };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('resize', hide);
+    window.addEventListener('scroll', hide, true);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', hide);
+      window.removeEventListener('scroll', hide, true);
+    };
+  }, [hint]);
+  return (
+    <>
+      {' '}
+      <nav>
+        {nav.map(({ path, name, icon: Icon }) => (
+          <NavLink
+            key={path}
+            aria-label={name}
+            to={path}
+            end={path === '/'}
+            onPointerEnter={(event) => {
+              if (event.pointerType !== 'touch') showLabel(event.currentTarget, name);
+            }}
+            onPointerLeave={() => setHint(null)}
+            onFocus={(event) => {
+              if (event.currentTarget.matches(':focus-visible'))
+                showLabel(event.currentTarget, name);
+            }}
+            onBlur={() => setHint(null)}
+            onClick={() => {
+              setHint(null);
+              onNavigate();
+            }}
+            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+          >
+            <Icon size={18} />
+            <span>{name}</span>
+          </NavLink>
+        ))}
+      </nav>
+      {hint &&
+        createPortal(
+          <div
+            key={hint.name}
+            aria-hidden="true"
+            className="workspace-nav-hint"
+            style={{ left: hint.left, top: hint.top }}
+          >
+            {hint.name}
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
 export function App({
   library,
   initial,
@@ -186,12 +254,12 @@ export function App({
     document.getElementById('root')?.setAttribute('data-interactive', 'true');
   }, []);
   return (
-    <div className="app-shell">
+    <div className="app-shell workspace-shell">
       {mobile && (
         <button className="sidebar-shade" aria-label="关闭导航" onClick={() => setMobile(false)} />
       )}
       <aside className={`sidebar ${mobile ? 'open' : ''}`}>
-        <NavLink className="brand" to="/">
+        <NavLink className="brand" to="/" aria-label="ShadeFlow 首页" title="ShadeFlow 首页">
           <span className="brand-mark">
             <span />
             <span />
@@ -214,20 +282,7 @@ export function App({
           <ChevronDown size={14} />
         </button>
         <div className="nav-caption">WORKSPACE</div>
-        <nav>
-          {nav.map(({ path, name, icon: Icon }) => (
-            <NavLink
-              key={path}
-              to={path}
-              end={path === '/'}
-              onClick={() => setMobile(false)}
-              className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-            >
-              <Icon size={18} />
-              <span>{name}</span>
-            </NavLink>
-          ))}
-        </nav>
+        <WorkspaceNavigation onNavigate={() => setMobile(false)} />
         <div className="sidebar-market">
           <span className="tiny-label">获客范围</span>
           <div>

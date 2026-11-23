@@ -10,34 +10,10 @@
   gap: 12px;
   margin: -6px 0 22px;
 }
-.acq-topline p {
-  margin: 0;
-  color: var(--color-text-muted);
-  font-size: 13px;
-}
 .acq-page .badge {
   display: inline-flex;
   gap: 5px;
   align-items: center;
-}
-.acq-page-tabs {
-  display: flex;
-  gap: 25px;
-  border-bottom: 1px solid var(--color-border);
-  margin-bottom: 24px;
-}
-.acq-page-tabs button {
-  padding: 12px 4px 15px;
-  background: transparent;
-  border: 0;
-  border-bottom: 3px solid transparent;
-  color: var(--color-text-muted);
-  font-size: 14px;
-  font-weight: 600;
-}
-.acq-page-tabs button.selected {
-  color: var(--color-primary);
-  border-bottom-color: var(--color-primary);
 }
 .acq-create-layout {
   display: grid;
@@ -894,12 +870,6 @@
   }
   .acq-span-2 {
     grid-column: auto;
-  }
-  .acq-topline {
-    flex-wrap: wrap;
-  }
-  .acq-page-tabs {
-    gap: 18px;
   }
   .acq-field-label {
     align-items: start;

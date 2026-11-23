@@ -1,9 +1,32 @@
 import { listSequences, sequenceDetail } from './outreach-sequences.mjs';
-import { generateMailDraft } from './mail-assisted-draft.mjs';
+import { verifyGrounding } from './mail-reception.mjs';
+import { requiresProductOrCommercialReview } from './mail-knowledge.mjs';
+import { renderMailboxSignature } from '../src/domain/mail-signature.mjs';
+import { composeMailDraft, signedMailDraft, generateMailDraft } from './mail-assisted-draft.mjs';
 import { addInternalNote, threadWorkflow, updateThreadWorkflow } from './mail-thread-workflow.mjs';
 import { sequencePolicy, saveSequencePolicy } from './outreach-sequence-policy.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
+
+function replySettings(value) {
+  if (
+    !value ||
+    !['manual', 'auto', 'review'].includes(value.replyMode) ||
+    typeof value.autoBusinessReplies !== 'boolean' ||
+    typeof value.draftPersona !== 'string' ||
+    value.draftPersona.length > 2000 ||
+    !Array.isArray(value.knowledgeProductIds) ||
+    value.knowledgeProductIds.length > 500 ||
+    value.knowledgeProductIds.some((id) => typeof id !== 'string' || id.length > 180)
+  )
+    throw fail(400, '回复设置无效');
+  return {
+    replyMode: value.replyMode,
+    autoBusinessReplies: value.replyMode === 'auto' && value.autoBusinessReplies,
+    draftPersona: value.draftPersona,
+    knowledgeProductIds: value.knowledgeProductIds,
+  };
+}
 
 export async function handleOutreach({
   request,
@@ -167,7 +190,9 @@ export async function handleOutreach({
     const body = await readJson(request);
     return { mailboxes: await service.mailboxes.import(body.items, () => service.salesProducts()) };
   }
-  const mailbox = path.match(/^\/mailboxes\/([\w-]+)(?:\/(verify|preview|note|writing))?$/);
+  const mailbox = path.match(
+    /^\/mailboxes\/([\w-]+)(?:\/(verify|preview|note|writing|reply-settings))?$/,
+  );
   if (mailbox) {
     const [, id, action] = mailbox;
     if (!action && method === 'GET') return service.mailboxes.get(id, { withBusinessNote: true });
@@ -188,6 +213,11 @@ export async function handleOutreach({
       service.mailboxes.get(id);
       return service.mailboxes.save({ ...body, id });
     }
+    if (action === 'reply-settings' && method === 'PATCH') {
+      const settings = replySettings(await readJson(request));
+      service.mailboxes.get(id);
+      return service.mailboxes.save({ ...settings, id });
+    }
     if (action === 'verify' && method === 'POST') {
       const mailbox = await service.mailboxes.verify(id);
       if (url.searchParams.get('check') === 'both') {
@@ -198,9 +228,59 @@ export async function handleOutreach({
       return mailbox;
     }
     if (action === 'preview' && method === 'POST') {
-      const { question } = await readJson(request);
+      const { question, subject = '', settings } = await readJson(request);
       if (typeof question !== 'string' || !question.trim() || question.length > 4000)
         throw fail(400, '请输入 1 至 4000 字的问题');
+      if (settings !== undefined) {
+        if (typeof subject !== 'string' || subject.length > 500) throw fail(400, '邮件主题过长');
+        const box = { ...service.mailboxes.get(id), ...replySettings(settings) };
+        const answer = service.answerQuestion(box, question, service.now(), {
+          subject,
+          forDraft: true,
+        });
+        const signature = renderMailboxSignature(box);
+        const businessCorrespondence =
+          box.autoBusinessReplies &&
+          !answer.sources?.length &&
+          !requiresProductOrCommercialReview(subject + ' ' + question, box);
+        const basis = {
+          box,
+          mail: { subject },
+          question,
+          history: [],
+          sources: answer.draftSources || answer.sources || [],
+          answer,
+          businessCorrespondence,
+        };
+        const result = await composeMailDraft(service, basis, draftModel);
+        const automatic =
+          box.replyMode === 'auto' &&
+          !box.paused &&
+          !!signature.text &&
+          !result.needsManager &&
+          (answer.automatic || businessCorrespondence) &&
+          result.sources.every((s) => answer.sources.includes(s)) &&
+          (await verifyGrounding(draftModel, basis, result));
+        const decision =
+          box.replyMode === 'manual' ? '业务员手动回复' : automatic ? '预计自动回复' : '需人工审核';
+        const reason = result.needsManager
+          ? '资料未覆盖全部问题，需与上级确认。'
+          : automatic
+            ? '实际发送仍需核对原信、收件人及会话状态。'
+            : box.paused
+              ? '邮箱已暂停。'
+              : box.replyMode === 'review'
+                ? '此邮箱设置为逐封审核。'
+                : box.replyMode === 'manual'
+                  ? '此邮箱由业务员接待。'
+                  : answer.reason;
+        return {
+          decision,
+          reason,
+          body: signedMailDraft(result.body, signature).bodyText,
+          sources: result.sources,
+        };
+      }
       return service.answerQuestion(service.mailboxes.get(id), question, service.now());
     }
     if (!action && method === 'PUT') {

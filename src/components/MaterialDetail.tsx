@@ -12,10 +12,13 @@ import {
   Layers,
   X,
 } from 'lucide-react';
+import { MaterialParseMode, modeLabel } from './MaterialParseMode';
+import { isPagedMaterial } from '../domain/material-upload.mjs';
 import { MaterialOriginal } from './MaterialOriginal';
 import { MaterialPassages } from './MaterialPassages';
 import { WorkbookPreview } from './WorkbookPreview';
 import {
+  type ParseMode,
   acceptMaterials,
   fileSize,
   materialsRequest,
@@ -56,7 +59,7 @@ export function MaterialDocument({
   const [edits, setEdits] = useState<Correction[]>([]);
   const [editingChunk, setEditingChunk] = useState(false);
   const [ocrProgress, setOcrProgress] = useState(''),
-    [ocrAttempt, retryOcr] = useState(0);
+    [modeOverride, setModeOverride] = useState<ParseMode | null>(null);
   useEffect(() => {
     const controller = new AbortController();
     setError('');
@@ -81,7 +84,10 @@ export function MaterialDocument({
   const p = data?.product,
     doc = data?.documents.find((d) => d.id === docId),
     active = p?.version === data?.currentVersion;
-  const visual = doc?.contentType === 'application/pdf' || doc?.contentType.startsWith('image/');
+  const visual = isPagedMaterial(doc?.contentType);
+  const storedMode = doc?.extraction?.mode ?? doc?.parseMode ?? 'rich_layout_recognition';
+  const parseMode = modeOverride ?? storedMode;
+  useEffect(() => setModeOverride(null), [docId, revision]);
   const ocrDocument =
     view === 'preview' &&
     active &&
@@ -89,11 +95,14 @@ export function MaterialDocument({
     doc &&
     visual &&
     !doc.extraction?.facts.length &&
-    (doc.extraction?.model !== 'failed' || ocrAttempt > 0)
+    doc.extraction?.model !== 'failed'
       ? doc.id
       : '';
   useEffect(() => {
-    if (!ocrDocument) return;
+    if (!ocrDocument) {
+      setOcrProgress('');
+      return;
+    }
     const controller = new AbortController();
     setOcrProgress('正在识别原件中的文字…');
     setError('');
@@ -134,7 +143,7 @@ export function MaterialDocument({
         if (!controller.signal.aborted) setOcrProgress('');
       });
     return () => controller.abort();
-  }, [id, ocrDocument, ocrAttempt, onChanged]);
+  }, [id, ocrDocument, onChanged]);
   async function perform(action: () => Promise<unknown>, message: string) {
     if (busy) return false;
     setBusy(true);
@@ -407,28 +416,29 @@ export function MaterialDocument({
                       </p>
                     ) : (
                       writable &&
+                      !visual &&
                       !doc.extraction?.facts.length &&
                       !doc.extraction?.sheets &&
                       doc.extraction?.model !== 'manual' && (
                         <button
                           onClick={() =>
-                            visual
-                              ? retryOcr((n) => n + 1)
-                              : void perform(
-                                  () =>
-                                    materialsRequest('/' + id + '/extract/' + doc.id, {
-                                      method: 'POST',
-                                    }),
-                                  '已提取原件',
-                                )
+                            void perform(
+                              () =>
+                                materialsRequest('/' + id + '/extract/' + doc.id, {
+                                  method: 'POST',
+                                }),
+                              '已提取原件',
+                            )
                           }
                         >
                           重新提取
-                          {visual ? (doc.contentType === 'application/pdf' ? ' PDF' : '图片') : ''}
                         </button>
                       )
                     )}
-                    {doc.extraction?.sheets ? (
+                    {doc.extraction?.model === 'manual' &&
+                    !facts.some((f) => f.documentId === doc.id) ? (
+                      <MaterialOriginal doc={doc} url={original} page={1} />
+                    ) : doc.extraction?.sheets ? (
                       <>
                         <WorkbookPreview
                           key={doc.id}
@@ -546,6 +556,12 @@ export function MaterialDocument({
                   <dt>审核状态</dt>
                   <dd>{statusName(p.status)}</dd>
                 </dl>
+                {doc?.extraction?.mode && (
+                  <p>
+                    {doc.extraction.model === 'failed' ? '上次尝试' : '最近解析'} · DeepSeek ·{' '}
+                    {modeLabel(doc.extraction.mode)}
+                  </p>
+                )}
                 {doc && (
                   <a className="kb-side-action" href={original + '?download=1'} download>
                     <Download size={15} />
@@ -582,6 +598,35 @@ export function MaterialDocument({
                 </button>
                 {active && (
                   <footer className="kb-manage" inert={editingChunk}>
+                    {p.status !== 'archived' && visual && (
+                      <>
+                        <MaterialParseMode
+                          value={parseMode}
+                          onChange={setModeOverride}
+                          disabled={busy || !!ocrDocument}
+                        />
+                        {visual && doc && (
+                          <button
+                            type="button"
+                            disabled={busy || !!ocrDocument}
+                            onClick={() =>
+                              void perform(async () => {
+                                setNotice('正在使用 DeepSeek 解析…');
+                                return materialsRequest(
+                                  '/' + id + '/extract/' + doc.id + '?reparse=1&mode=' + parseMode,
+                                  { method: 'POST', headers: { Prefer: 'respond-async' } },
+                                  (n, total) =>
+                                    setNotice('正在解析第 ' + n + ' / ' + total + ' 页'),
+                                );
+                              }, '解析结果已更新，请核对片段')
+                            }
+                          >
+                            重新解析
+                          </button>
+                        )}
+                      </>
+                    )}
+
                     <input
                       type="file"
                       ref={upload}
@@ -594,7 +639,7 @@ export function MaterialDocument({
                           void perform(async () => {
                             const r = await uploadMaterial(
                               file,
-                              { id, version: p.version },
+                              { id, version: p.version, mode: parseMode },
                               crypto.randomUUID(),
                               (page, total) =>
                                 setNotice('正在提取新版第 ' + page + ' / ' + total + ' 页'),

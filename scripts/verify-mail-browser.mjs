@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, existsSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { materialService } from '../tests/fixtures/deepseek-material-service.mjs';
 import { chromium } from 'playwright-core';
 import { createApp } from '../server/app.mjs';
 import { OutreachMailboxes } from '../server/outreach-mailboxes.mjs';
@@ -109,15 +110,39 @@ const app = createApp({
   env,
   outreachServiceFactory: () => service,
   fetchImpl: async (url, init) => {
+    if (
+      String(url).endsWith('/tools/ocr') ||
+      (String(url).endsWith('/chat/completions') &&
+        Array.isArray(JSON.parse(init.body).messages?.[1]?.content))
+    )
+      return materialService(url, init);
     assert.equal(
       String(url),
       'https://api.deepseek.com/chat/completions',
       '本验收只允许本地模拟的起草请求',
     );
-    modelCalls++;
     const payload = JSON.parse(init.body);
     assert.match(payload.model, /deepseek/i);
     const data = JSON.parse(payload.messages.find((message) => message.role === 'user').content);
+    if (data.incoming?.subject === 'Preview only') {
+      const index = data.evidence.findIndex((s) => s.value === 'Aluminium alloy');
+      assert.ok(index >= 0);
+      return Response.json({
+        choices: [
+          {
+            finish_reason: 'stop',
+            message: {
+              content: JSON.stringify({
+                coverage: 'answered',
+                body: 'The material is Aluminium alloy.',
+                sourceIndexes: [index],
+              }),
+            },
+          },
+        ],
+      });
+    }
+    modelCalls++;
     if (payload.messages[0].content.startsWith('Find terms')) {
       return Response.json({
         choices: [
@@ -311,26 +336,33 @@ try {
   await button('返回素材库').click();
 
   await page.goto(base + '/inbox');
-  await button('配置').click();
+  await page.getByRole('link', { name: '自动回复设置', exact: true }).click();
   const mode = page.getByRole('combobox', { name: /接待方式/ });
+  await page.locator('summary').filter({ hasText: '引用资料' }).click();
+  await page.locator('summary').filter({ hasText: '身份与语气' }).click();
   assert.equal(await page.getByRole('checkbox', { name: /mail-specimen/ }).isChecked(), false);
-  await page.getByRole('textbox', { name: /AI起草身份与语气/ }).fill(persona);
-  await button('保存邮箱').click();
-  await page.getByRole('dialog').waitFor({ state: 'hidden' });
-  await button('配置').click();
-  assert.equal(await page.getByRole('textbox', { name: /AI起草身份与语气/ }).inputValue(), persona);
+  await page.getByRole('textbox', { name: /AI 起草身份与语气/ }).fill(persona);
+  await button('保存设置').click();
+  await page.getByText('设置已保存', { exact: true }).waitFor();
+  await page.reload();
+  await page.locator('summary').filter({ hasText: '身份与语气' }).click();
+  assert.equal(
+    await page.getByRole('textbox', { name: /AI 起草身份与语气/ }).inputValue(),
+    persona,
+  );
   await mode.selectOption('business');
-  await button('保存邮箱').click();
-  await page.getByRole('dialog').waitFor({ state: 'hidden' });
+  await button('保存设置').click();
+  await page.getByText('设置已保存', { exact: true }).waitFor();
   assert.equal(boxes.get(configuration.id).autoBusinessReplies, true);
-  await button('配置').click();
+  await page.reload();
   assert.equal(await mode.inputValue(), 'business');
   await mode.selectOption('review');
+  await page.locator('summary').filter({ hasText: '引用资料' }).click();
   await page.getByRole('checkbox', { name: /mail-specimen/ }).check();
   await page.getByRole('checkbox', { name: /care-note/ }).check();
   await page.getByRole('checkbox', { name: /material-mixed-catalog/ }).check();
-  await button('保存邮箱').click();
-  await page.getByRole('dialog').waitFor({ state: 'hidden' });
+  await button('保存设置').click();
+  await page.getByText('设置已保存', { exact: true }).waitFor();
   const mailbox = boxes.list()[0];
   assert.deepEqual(mailbox.productIds, [saleProduct.id]);
   assert.deepEqual(mailbox.knowledgeProductIds.map((id) => knowledge.get(id).name).sort(), [
@@ -338,15 +370,14 @@ try {
     'mail-specimen',
     'material-mixed-catalog',
   ]);
-  await page.getByText('按此邮箱资料试问', { exact: true }).click();
-  await label('客户问题').fill('What material is ZX-01 made of?');
-  await button('预览答复').click();
-  await page.getByText(/Material: Aluminium alloy/).waitFor();
-  await label('客户问题').fill('What material is Shuangsheng ZX-01 made of?');
-  await button('预览答复').click();
-  await page.getByText('问题超出当前官网资料范围', { exact: true }).waitFor();
-  assert.equal(await page.getByText(/Material: Aluminium alloy/).count(), 0);
-  console.log('PASS 邮箱配置、资料授权、SMTP 与 IMAP 替身验证、问答及跨站隔离');
+  await button('试运行').click();
+  await label('主题').fill('Preview only');
+  await label('客户来信').fill('What material is ZX-01 made of?');
+  await button('预览回复').click();
+  await page.locator('.studio-mail').filter({ hasText: 'Aluminium alloy' }).waitFor();
+  await page.getByText('需人工审核', { exact: true }).waitFor();
+  await page.getByRole('link', { name: '邮箱管理', exact: true }).click();
+  console.log('PASS 回复设置持久化、当前配置试写及审核提示');
   inbox.push({
     uid: 1,
     from: peer,
@@ -364,7 +395,7 @@ try {
     .getByRole('button', { name: /Track material/ })
     .first()
     .waitFor();
-  await page.getByRole('button', { name: /^待审草稿/ }).click();
+  await page.getByRole('tab', { name: /^待审草稿/ }).click();
   await page.getByRole('button', { name: /Track material/ }).click({ timeout: 20_000 });
   await page.getByText('查看回复依据 · 2', { exact: true }).click();
   await page.getByText(/mail-specimen.xlsx.*规格!B2/).waitFor();
@@ -709,6 +740,54 @@ try {
   assert.ok(await chunkEditor.evaluate((e) => e.scrollWidth <= e.clientWidth + 1));
   await chunkEditor.getByRole('button', { name: '取消', exact: true }).click();
   console.log('PASS 素材库文件排序与选择、实际邮箱检索命中与隔离、手机分块编辑对照原页。');
+  await button('展开栏目导航').click();
+  await button('收起栏目导航').click();
+  await button('返回素材库').click();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  for (const [module, view] of [
+    ['获客任务', '定时计划'],
+    ['跟进任务', '邮箱来信跟进'],
+    ['素材库', '搜索测试'],
+  ]) {
+    await page.locator('.sidebar').getByRole('link', { name: module, exact: true }).click();
+    const item = page
+      .getByRole('navigation', { name: module + '栏目' })
+      .getByRole('button', { name: view, exact: true });
+    await item.click();
+    await page.reload();
+    await item.and(page.locator('[aria-current="page"]')).waitFor();
+    assert.equal(
+      await page.locator('.sidebar').evaluate((el) => el.getBoundingClientRect().width),
+      58,
+    );
+  }
+  console.log('PASS 共用主栏、模块栏目切换与刷新、资料校对收起和展开导航。');
+  const settingsLink = page
+    .locator('.sidebar')
+    .getByRole('link', { name: 'API 连接', exact: true });
+  await settingsLink.hover();
+  await page.locator('.workspace-nav-hint').filter({ hasText: 'API 连接' }).waitFor();
+  await page.keyboard.press('Escape');
+  await page.locator('.workspace-nav-hint').waitFor({ state: 'detached' });
+  await settingsLink.click();
+  const apiNav = page.getByRole('navigation', { name: 'API 连接栏目' });
+  await page.locator('#WEB_SEARCH_BASE_URL').fill('https://search.example.test');
+  await apiNav.getByRole('button', { name: '飞书同步' }).click();
+  await page.locator('#FEISHU_APP_ID').fill('test-navigation-only');
+  await apiNav.getByRole('button', { name: '大语言模型 API' }).click();
+  assert.equal(await page.locator('.connection-group').count(), 3);
+  assert.equal(await page.locator('#FEISHU_APP_ID').count(), 0);
+  await page.goBack();
+  assert.equal(await page.locator('#FEISHU_APP_ID').inputValue(), 'test-navigation-only');
+  await apiNav.getByRole('button', { name: '搜索 API' }).click();
+  assert.equal(
+    await page.locator('#WEB_SEARCH_BASE_URL').inputValue(),
+    'https://search.example.test',
+  );
+  await apiNav.getByRole('button', { name: '大语言模型 API' }).click();
+  await page.reload();
+  await page.getByRole('heading', { name: '大语言模型 API', exact: true }).waitFor();
+  console.log('PASS 一级导航悬停提示、API 连接三栏切换与跨栏编辑保留。');
 } catch (e) {
   console.error(
     '测试收件处理',

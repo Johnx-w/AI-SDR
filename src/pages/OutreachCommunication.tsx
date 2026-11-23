@@ -1,3 +1,4 @@
+import { SectionWorkspace } from '../components/SectionWorkspace';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -23,11 +24,12 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import { PageHeading } from '../components/PageHeading';
+import { Bot, ChevronRight, MessagesSquare } from 'lucide-react';
+import './FinCenter.css';
 import { SalesInbox, type InboxView } from '../components/SalesInbox';
 import { FollowUpSequences } from '../components/FollowUpSequences';
 import { MailboxLabels } from '../components/MailboxLabels';
-import { ReplyPreview } from '../components/ReplyPreview';
+import { MailReplySettings } from '../components/MailReplySettings';
 import { MailMessageBody } from '../components/MailMessageBody';
 import { MailSignatureFields, defaultSignatureDesign } from '../components/MailSignatureFields';
 import { renderMailboxSignature } from '../domain/mail-signature.mjs';
@@ -405,39 +407,46 @@ function MailboxEditor({
               placeholder="记录此邮箱的客户分工或团队交接事项"
             />
           </label>
-          <h3>客户回信</h3>
-          <label>
-            接待方式
-            <select
-              value={replyMode}
-              onChange={(e) => setReplyMode(e.target.value as typeof replyMode)}
-            >
-              <option value="manual">业务员手动回复</option>
-              <option value="review">生成草稿，逐封审核</option>
-              <option value="business">自动回复常规业务与已核实的产品问题</option>
-              <option value="auto">仅自动回复已核实的产品问题</option>
-            </select>
-          </label>
-          <label>
-            AI起草身份与语气
-            <textarea
-              name="draftPersona"
-              rows={3}
-              maxLength={2000}
-              defaultValue={mailbox?.draftPersona || ''}
-              placeholder="例如：你是本品牌的工程项目销售。先回应客户当前项目，再提出方便采购团队执行的下一步。"
-            />
-            <small>留空时按本品牌外贸业务员的身份撰写正式邮件。</small>
-          </label>
-          <h4>回复可用资料</h4>
-          <ProductOptions
-            products={allowedKnowledge}
-            selected={knowledge}
-            onChange={setKnowledge}
-            approvedOnly
-            emptyText="请先在产品资料中审核并填写此官网或适用品牌。"
-          />
-          <Link to="/materials">管理产品资料</Link>
+          {!mailbox ? (
+            <>
+              <h3>客户回信</h3>
+              <label>
+                接待方式
+                <select
+                  value={replyMode}
+                  onChange={(e) => setReplyMode(e.target.value as typeof replyMode)}
+                >
+                  <option value="manual">业务员手动回复</option>
+                  <option value="review">生成草稿，逐封审核</option>
+                  <option value="business">自动回复常规业务与已核实的产品问题</option>
+                  <option value="auto">仅自动回复已核实的产品问题</option>
+                </select>
+              </label>
+              <label>
+                AI起草身份与语气
+                <textarea
+                  name="draftPersona"
+                  rows={3}
+                  maxLength={2000}
+                  placeholder="例如：你是本品牌的工程项目销售。先回应客户当前项目，再提出方便采购团队执行的下一步。"
+                />
+                <small>留空时按本品牌外贸业务员的身份撰写正式邮件。</small>
+              </label>
+              <h4>回复可用资料</h4>
+              <ProductOptions
+                products={allowedKnowledge}
+                selected={knowledge}
+                onChange={setKnowledge}
+                approvedOnly
+                emptyText="请先在产品资料中审核并填写此官网或适用品牌。"
+              />
+              <Link to="/materials">管理产品资料</Link>
+            </>
+          ) : (
+            <Link to={'/inbox?tab=mailboxes&replySettings=' + mailbox.id} onClick={onClose}>
+              自动回复设置
+            </Link>
+          )}
           <small>已开启的未回复跟进会沿用首封邮件线程，客户回信后停止。</small>
         </div>
         <div className="outreach-form-section">
@@ -1522,1281 +1531,1385 @@ export function OutreachCommunication({
     }
   }
 
+  const settingsId = tab === 'mailboxes' && searchParams.get('replySettings');
+  const settingsBox = mailboxes.find((m) => m.id === settingsId);
+  const review = tab === 'inbox' && requestedFolder === 'review';
+  const sections = [
+    {
+      group: '会话',
+      items: [
+        { id: 'inbox', label: '收件箱', icon: Inbox },
+        { id: 'review', label: '待审草稿', icon: FileText, count: state?.reviewCount },
+      ],
+    },
+    {
+      group: '邮件渠道',
+      items: [
+        { id: 'mailboxes', label: '邮箱管理', icon: Mail },
+        { id: 'agent', label: '自动回复', icon: Bot },
+      ],
+    },
+    {
+      group: '外联',
+      items: [
+        { id: 'campaigns', label: '触达计划', icon: Send },
+        { id: 'sequences', label: '跟进序列', icon: Clock3 },
+      ],
+    },
+  ];
+  const selected = settingsId ? 'agent' : review ? 'review' : tab;
+  const section = sections.find((group) => group.items.some((item) => item.id === selected))!;
+  const title = section.items.find((item) => item.id === selected)!.label;
+  function openSection(id: string) {
+    if (id === 'review') setSearchParams({ tab: 'inbox', folder: 'review' });
+    else if (id === 'agent')
+      setSearchParams({ tab: 'mailboxes', replySettings: mailboxes[0]?.id || 'select' });
+    else setTab(id as Tab);
+  }
   return (
-    <div className="outreach-page">
-      <PageHeading
-        eyebrow="COMMUNICATION CENTER"
-        title="沟通中心"
-        description="查看邮箱往来，按客户实际情况匹配产品和发件邮箱，管理首封开发计划。"
-      >
-        <button
-          className="btn secondary"
-          disabled={!!busy || loading}
-          onClick={() => {
-            setError(null);
-            setLoading(true);
-            setSignatureRefresh((current) => current + 1);
-            setInboxRefresh((value) => value + 1);
-            setTagRefresh((v) => v + 1);
-            void refresh()
-              .catch((reason: unknown) => setError(message(reason)))
-              .finally(() => setLoading(false));
-          }}
-        >
-          <RefreshCw size={15} className={loading ? 'outreach-spin' : ''} />
-          刷新
-        </button>
-        {tab === 'mailboxes' && (
-          <button type="button" className="btn secondary" onClick={() => setShowLabels(true)}>
-            邮箱标签
-          </button>
-        )}
-        {tab === 'inbox' && (
-          <button
-            type="button"
-            className="btn secondary"
-            onClick={() => setSearchParams({ tab: 'inbox', folder: 'review' })}
-          >
-            <FileText size={15} />
-            待审草稿 {state?.reviewCount ?? 0}
-          </button>
-        )}
-        {['mailboxes', 'campaigns'].includes(tab) && (
-          <button
-            className="btn primary"
-            disabled={!!busy}
-            onClick={() =>
-              tab === 'mailboxes'
-                ? setMailboxEditor({ value: null })
-                : setCampaignEditor({ value: null })
-            }
-          >
-            <Plus size={16} />
-            {tab === 'mailboxes' ? '添加邮箱' : '新建计划'}
-          </button>
-        )}
-      </PageHeading>
-      <InlineError value={error} />
-      {notice && (
-        <div className="outreach-alert success" role="status">
-          <CheckCircle2 size={17} />
-          <span>{notice}</span>
-          <button className="icon-button" aria-label="关闭提示" onClick={() => setNotice(null)}>
-            <X size={15} />
-          </button>
+    <SectionWorkspace
+      title="沟通中心"
+      icon={MessagesSquare}
+      sections={sections}
+      selected={selected}
+      onSelect={openSection}
+      className="fin-center"
+      panelPrefix="outreach-tab-"
+      sidebarExtra={
+        mailboxes.length > 0 && (
+          <div className="fin-accounts">
+            <div className="section-caption">按邮箱查看</div>
+            {mailboxes.map((box, i) => (
+              <button
+                key={box.id}
+                title={box.email}
+                onClick={() => openMailboxConversations(box.id)}
+                aria-pressed={tab === 'inbox' && conversationMailboxId === box.id}
+              >
+                <i className={`fin-dot tone-${i % 3}`} />
+                <span>{box.email}</span>
+              </button>
+            ))}
+          </div>
+        )
+      }
+    >
+      <div className="outreach-page fin-body">
+        <div className="fin-crumb">
+          {section.group}
+          <ChevronRight size={13} />
+          <strong>{title}</strong>
         </div>
-      )}
-      <div className="outreach-tabs" role="tablist" aria-label="沟通中心栏目">
-        {(
-          [
-            { id: 'mailboxes', label: '邮箱管理', icon: Mail, count: mailboxes.length },
-            { id: 'campaigns', label: '触达计划', icon: Send, count: state?.counts?.total ?? null },
-            { id: 'inbox', label: '收件箱', icon: Inbox, count: null },
-            { id: 'sequences', label: '跟进序列', icon: Clock3, count: null },
-          ] as const
-        ).map((item) => (
-          <button
-            key={item.id}
-            role="tab"
-            aria-selected={tab === item.id}
-            aria-controls={`outreach-panel-${item.id}`}
-            id={`outreach-tab-${item.id}`}
-            className={tab === item.id ? 'selected' : ''}
-            onClick={() => setTab(item.id)}
-          >
-            <item.icon size={17} />
-            {item.label}
-            {item.count !== null && <span>{item.count}</span>}
-          </button>
-        ))}
-      </div>
-      {!state && loading ? (
-        <div className="outreach-loading">
-          <LoaderCircle size={22} className="outreach-spin" />
-          正在读取邮箱和计划…
-        </div>
-      ) : (
-        state && (
-          <div role="tabpanel" id={`outreach-panel-${tab}`} aria-labelledby={`outreach-tab-${tab}`}>
-            {tab === 'inbox' && (
-              <SalesInbox
-                key={JSON.stringify([
-                  conversationMailboxId,
-                  searchParams.get('thread'),
-                  searchParams.get('customerId'),
-                  searchParams.get('inboundOnly'),
-                  requestedFolder === 'review',
-                ])}
-                view={inboxView}
-                initialQuery={searchParams.get('q') || ''}
-                onViewChange={changeInboxView}
-                initialThread={searchParams.get('thread') || ''}
-                customerId={searchParams.get('customerId') || ''}
-                inboundOnly={searchParams.get('inboundOnly') === '1'}
-                mailboxId={conversationMailboxId}
-                mailboxes={mailboxes}
-                onMailboxChange={openMailboxConversations}
-                review={searchParams.get('folder') === 'review'}
-                reviewCount={state.reviewCount}
-                refreshToken={inboxRefresh}
-                onExitReview={() => setSearchParams({ tab: 'inbox' })}
-              />
-            )}
-            {tab === 'sequences' && (
-              <FollowUpSequences
-                mailboxes={mailboxes}
-                sequenceId={searchParams.get('sequenceId') || ''}
-                refreshToken={inboxRefresh}
-                onSelect={(id) =>
-                  setSearchParams(id ? { tab: 'sequences', sequenceId: id } : { tab: 'sequences' })
-                }
-              />
-            )}
-            {tab === 'campaigns' && state && (
-              <>
-                <div className="outreach-metrics">
-                  {[
-                    {
-                      label: '可用发件邮箱',
-                      value: connected.length,
-                      detail: `共 ${mailboxes.length} 个邮箱`,
-                      icon: Mail,
-                    },
-                    {
-                      label: '已发送',
-                      value: deliveryStats?.accepted || 0,
-                      detail: '含公司试发及已核实发送',
-                      icon: CheckCircle2,
-                    },
-                    {
-                      label: '待发送',
-                      value: state.deliveryGroups?.pending || 0,
-                      detail: '按计划节奏执行',
-                      icon: Clock3,
-                    },
-                    {
-                      label: '需处理',
-                      value: state.deliveryGroups?.attention || 0,
-                      detail: '查看具体原因',
-                      icon: FileText,
-                    },
-                  ].map((metric) => (
-                    <div className="panel outreach-metric" key={metric.label}>
-                      <div>
-                        <span>{metric.label}</span>
-                        <metric.icon size={17} />
-                      </div>
-                      <strong>{metric.value}</strong>
-                      <small>{metric.detail}</small>
-                    </div>
-                  ))}
-                </div>
-                <section className="outreach-test-strip">
-                  <span className="outreach-feature-icon">
-                    <Send size={22} />
-                  </span>
-                  <div>
-                    <h3>公司邮箱发送测试</h3>
-                    <p>测试邮件仅发送到已配置的公司邮箱，使用带标记的固定测试内容。</p>
-                  </div>
-                  <div className="outreach-strip-actions">
-                    <button
-                      className="btn secondary"
-                      disabled={!!busy || connected.length < 2}
-                      onClick={() => {
-                        internalTestKey.current = crypto.randomUUID();
-                        setTestMailboxes(connected);
-                        setTestOpen(true);
-                      }}
-                    >
-                      公司邮箱试发
-                      <ArrowRight size={15} />
-                    </button>
-                  </div>
-                </section>
-                {!state.readiness.generatorConfigured && (
-                  <div className="outreach-alert">
-                    邮件生成服务尚未配置。可以先完成邮箱配置和计划草稿。
-                  </div>
+        {settingsId ? (
+          settingsBox ? (
+            <MailReplySettings
+              key={settingsBox.id}
+              box={settingsBox}
+              boxes={mailboxes}
+              products={products}
+              onSaved={() => refresh()}
+            />
+          ) : (
+            <section className="fin-missing">
+              <h1>自动回复</h1>
+              <p>{error || (loading ? '正在读取邮箱…' : '请选择已配置的邮箱。')}</p>
+              <Link to="/inbox?tab=mailboxes">返回邮箱管理</Link>
+            </section>
+          )
+        ) : (
+          <>
+            <header className="fin-heading page-heading">
+              <h1>{title}</h1>
+              <div className="fin-actions">
+                <button
+                  className="btn secondary"
+                  disabled={!!busy || loading}
+                  onClick={() => {
+                    setError(null);
+                    setLoading(true);
+                    setSignatureRefresh((current) => current + 1);
+                    setInboxRefresh((value) => value + 1);
+                    setTagRefresh((v) => v + 1);
+                    void refresh()
+                      .catch((reason: unknown) => setError(message(reason)))
+                      .finally(() => setLoading(false));
+                  }}
+                >
+                  <RefreshCw size={15} className={loading ? 'outreach-spin' : ''} />
+                  刷新
+                </button>
+                {tab === 'mailboxes' && (
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    onClick={() => setShowLabels(true)}
+                  >
+                    邮箱标签
+                  </button>
                 )}
-                <div className="outreach-section-heading">
-                  <div>
-                    <h2>触达计划</h2>
-                    <p>选择客户范围，启动后自动生成开发信并按规则发送。</p>
-                  </div>
-                  <span>{state.counts.active} 个运行中</span>
-                </div>
-                <section className="panel outreach-records">
-                  <div className="outreach-campaign-views" aria-label="计划视图">
-                    {[
-                      ['current', '当前计划'],
-                      ['history', '历史计划'],
-                      ['tests', '公司试发'],
-                    ].map(([value, label]) => (
-                      <button
-                        key={value}
-                        className="btn secondary"
-                        aria-pressed={campaignView === value}
-                        onClick={() => {
-                          setCampaignView(value);
-                          setCampaignStatus('all');
-                          setCampaignPage(1);
-                        }}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="outreach-record-toolbar">
-                    <label className="outreach-search">
-                      <Search size={16} />
-                      <input
-                        aria-label="搜索计划名称"
-                        placeholder="搜索计划名称"
-                        value={campaignQuery}
-                        onChange={(event) => {
-                          setCampaignQuery(event.target.value);
-                          setCampaignPage(1);
-                        }}
-                      />
-                    </label>
-                    <select
-                      aria-label="按计划状态筛选"
-                      value={campaignStatus}
-                      onChange={(event) => {
-                        setCampaignStatus(event.target.value);
-                        setCampaignPage(1);
-                      }}
-                    >
-                      <option value="all">全部状态</option>
-                      <option value="attention">需处理</option>
-                      {(campaignView === 'history'
-                        ? ['completed', 'cancelled']
-                        : campaignView === 'current'
-                          ? ['draft', 'preparing', 'ready', 'active', 'paused']
-                          : [
-                              'draft',
-                              'preparing',
-                              'ready',
-                              'active',
-                              'paused',
-                              'completed',
-                              'cancelled',
-                            ]
-                      ).map((status) => (
-                        <option key={status} value={status}>
-                          {status === 'draft'
-                            ? '未启动'
-                            : status === 'preparing'
-                              ? '准备中'
-                              : statusLabel(status)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <nav className="outreach-record-pagination" aria-label="触达计划分页">
-                    <span aria-live="polite">共 {filteredCount} 个计划</span>
-                    <label>
-                      每页
-                      <select
-                        aria-label="每页计划条数"
-                        value={campaignPageSize}
-                        onChange={(event) => {
-                          setCampaignPageSize(Number(event.target.value));
-                          setCampaignPage(1);
-                        }}
-                      >
-                        {[10, 20, 50, 100].map((size) => (
-                          <option key={size} value={size}>
-                            {size} 条
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <div className="outreach-record-page-actions">
-                      <button
-                        className="btn secondary"
-                        disabled={currentCampaignPage <= 1}
-                        onClick={() => setCampaignPage(currentCampaignPage - 1)}
-                      >
-                        上一页
-                      </button>
-                      <span>
-                        第 {currentCampaignPage} / {campaignTotalPages} 页
-                      </span>
-                      <button
-                        className="btn secondary"
-                        disabled={currentCampaignPage >= campaignTotalPages}
-                        onClick={() => setCampaignPage(currentCampaignPage + 1)}
-                      >
-                        下一页
-                      </button>
-                    </div>
-                  </nav>
-                  {visibleCampaigns.length ? (
-                    <div className="outreach-table-wrap">
-                      <table className="outreach-table outreach-campaign-table">
-                        <thead>
-                          <tr>
-                            <th>计划名称</th>
-                            <th>状态</th>
-                            <th>已发送 / 目标</th>
-                            <th>需处理</th>
-                            <th>创建时间</th>
-                            <th>操作</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {visibleCampaigns.map((campaign) => (
-                            <tr key={campaign.id} onClick={() => setDetailId(campaign.id)}>
-                              <td className="outreach-campaign-name">
-                                <strong>{campaign.name}</strong>
-                                {campaign.acquisitionSource && <small>获客后自动首发</small>}
-                                {campaign.lastError && (
-                                  <small className="outreach-row-error">{campaign.lastError}</small>
-                                )}
-                              </td>
-                              <td>
-                                <Badge tone={tone(campaign.status)}>
-                                  {campaignStatusLabel(campaign)}
-                                </Badge>
-                              </td>
-                              <td className="outreach-campaign-progress-cell">
-                                <strong>
-                                  {campaign.stats?.accepted || 0} /{' '}
-                                  {campaign.acquisitionSource
-                                    ? campaign.customerCount || 0
-                                    : campaign.targetCount}
-                                </strong>
-                                {campaign.acquisitionSource && <small>已发送 / 本轮收录客户</small>}
-                                {!!campaign.stats?.skipped && (
-                                  <small>已跳过 {campaign.stats.skipped} 家</small>
-                                )}
-                                <div className="outreach-progress-track" aria-hidden="true">
-                                  <span
-                                    style={{
-                                      width: `${Math.min(100, ((campaign.stats?.accepted || 0) / Math.max(1, campaign.acquisitionSource ? campaign.customerCount || 0 : campaign.targetCount || 0)) * 100)}%`,
-                                    }}
-                                  />
-                                </div>
-                              </td>
-                              <td>
-                                <Badge
-                                  tone={campaign.deliveryGroups?.attention ? 'amber' : 'neutral'}
-                                >
-                                  {campaign.deliveryGroups?.attention || 0}
-                                </Badge>
-                              </td>
-                              <td className="outreach-time-cell">
-                                {formatTime(campaign.createdAt)}
-                              </td>
-                              <td onClick={(event) => event.stopPropagation()}>
-                                <div className="outreach-card-actions">
-                                  <button
-                                    className="btn secondary"
-                                    disabled={!!busy}
-                                    onClick={() => setDetailId(campaign.id)}
-                                  >
-                                    <Eye size={15} />
-                                    执行详情
-                                  </button>
-                                  {campaign.acquisitionSource && (
-                                    <Link
-                                      className="btn secondary"
-                                      to={
-                                        campaign.acquisitionSource.scheduleId
-                                          ? '/automation?tab=schedules'
-                                          : `/automation?tab=runs&job=${campaign.acquisitionSource.jobId}`
-                                      }
-                                    >
-                                      管理获客与自动首发
-                                    </Link>
-                                  )}
-                                  {!campaign.acquisitionSource && campaign.status === 'active' && (
-                                    <button
-                                      className="btn secondary"
-                                      disabled={!!busy}
-                                      onClick={() =>
-                                        void act(
-                                          `pause-${campaign.id}`,
-                                          pathFor('campaigns', campaign.id, 'pause'),
-                                          {},
-                                          '计划已暂停。',
-                                        )
-                                      }
-                                    >
-                                      <Pause size={15} />
-                                      暂停计划
-                                    </button>
-                                  )}
-                                  {canCancelCampaign(campaign) && (
-                                    <details className="outreach-campaign-more">
-                                      <summary>更多</summary>
-                                      <div className="outreach-card-actions">
-                                        {campaign.mode === 'production' &&
-                                          !['active', 'preparing'].includes(campaign.status) && (
-                                            <button
-                                              className="btn subtle"
-                                              disabled={!!busy}
-                                              onClick={() => setCampaignEditor({ value: campaign })}
-                                            >
-                                              编辑
-                                            </button>
-                                          )}
-                                        <button
-                                          className="btn danger"
-                                          disabled={!!busy}
-                                          onClick={() => confirmCancellation(campaign)}
-                                        >
-                                          取消计划
-                                        </button>
-                                      </div>
-                                    </details>
-                                  )}
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : state?.viewKey !== viewKey && !error ? (
-                    <p role="status">正在读取触达计划…</p>
-                  ) : (
-                    <Empty
-                      title={
-                        campaignQuery.trim() || campaignStatus !== 'all'
-                          ? '没有符合筛选条件的计划'
-                          : campaignView === 'current'
-                            ? '暂无当前正式计划'
-                            : campaignView === 'history'
-                              ? '暂无历史计划'
-                              : '暂无公司试发计划'
-                      }
-                      detail={
-                        campaignView === 'current'
-                          ? '新建计划开始开发，或切换到历史计划、公司试发查看已有记录。'
-                          : '可调整搜索词或状态筛选。'
+                {['mailboxes', 'campaigns'].includes(tab) && (
+                  <button
+                    className="btn primary"
+                    disabled={!!busy}
+                    onClick={() =>
+                      tab === 'mailboxes'
+                        ? setMailboxEditor({ value: null })
+                        : setCampaignEditor({ value: null })
+                    }
+                  >
+                    <Plus size={16} />
+                    {tab === 'mailboxes' ? '添加邮箱' : '新建计划'}
+                  </button>
+                )}
+              </div>
+            </header>
+            <InlineError value={error} />
+            {notice && (
+              <div className="outreach-alert success" role="status">
+                <CheckCircle2 size={17} />
+                <span>{notice}</span>
+                <button
+                  className="icon-button"
+                  aria-label="关闭提示"
+                  onClick={() => setNotice(null)}
+                >
+                  <X size={15} />
+                </button>
+              </div>
+            )}
+            {!state && loading ? (
+              <div className="outreach-loading">
+                <LoaderCircle size={22} className="outreach-spin" />
+                正在读取邮箱和计划…
+              </div>
+            ) : (
+              state && (
+                <div
+                  role="tabpanel"
+                  id={`outreach-panel-${tab}`}
+                  aria-labelledby={`outreach-tab-${selected}`}
+                >
+                  {tab === 'inbox' && (
+                    <SalesInbox
+                      key={JSON.stringify([
+                        conversationMailboxId,
+                        searchParams.get('thread'),
+                        searchParams.get('customerId'),
+                        searchParams.get('inboundOnly'),
+                        requestedFolder === 'review',
+                      ])}
+                      view={inboxView}
+                      initialQuery={searchParams.get('q') || ''}
+                      onViewChange={changeInboxView}
+                      initialThread={searchParams.get('thread') || ''}
+                      customerId={searchParams.get('customerId') || ''}
+                      inboundOnly={searchParams.get('inboundOnly') === '1'}
+                      mailboxId={conversationMailboxId}
+                      mailboxes={mailboxes}
+                      onMailboxChange={openMailboxConversations}
+                      review={searchParams.get('folder') === 'review'}
+                      reviewCount={state.reviewCount}
+                      refreshToken={inboxRefresh}
+                      onExitReview={() => setSearchParams({ tab: 'inbox' })}
+                    />
+                  )}
+                  {tab === 'sequences' && (
+                    <FollowUpSequences
+                      mailboxes={mailboxes}
+                      sequenceId={searchParams.get('sequenceId') || ''}
+                      refreshToken={inboxRefresh}
+                      onSelect={(id) =>
+                        setSearchParams(
+                          id ? { tab: 'sequences', sequenceId: id } : { tab: 'sequences' },
+                        )
                       }
                     />
                   )}
-                </section>
-              </>
-            )}
-            {tab === 'mailboxes' && (
-              <>
-                <div className="outreach-section-heading">
-                  <div>
-                    <h2>发件邮箱</h2>
-                  </div>
-                  <button
-                    className="btn secondary"
-                    disabled={!!busy}
-                    onClick={() => setImportOpen(true)}
-                  >
-                    <Upload size={15} />
-                    批量导入
-                  </button>
-                </div>
-                {!!tagState?.tags.length && (
-                  <label className="mail-tag-filter">
-                    邮箱标签{' '}
-                    <select
-                      aria-label="邮箱标签"
-                      value={mailFilter}
-                      onChange={(e) => setMailFilter(e.target.value)}
-                    >
-                      <option value="">全部标签</option>
-                      {tagState.tags.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-                <InlineError value={tagError || signatureError} />
-                {mailboxes.length ? (
-                  <div className="outreach-mailbox-grid">
-                    {!filteredMailboxes.length && (
-                      <Empty
-                        title="没有使用此标签的邮箱"
-                        detail="选择其他标签，或在邮箱标签中分配邮箱。"
-                      />
-                    )}
-                    {filteredMailboxes.map((mailbox, index) => (
-                      <section className="panel outreach-mailbox-card" key={mailbox.id}>
-                        <div className="outreach-card-heading">
-                          <span className={`outreach-brand-mark mark-${index % 3}`}>
-                            <Mail size={23} />
-                          </span>
-                          <div>
-                            <h3>{mailbox.email}</h3>
-                            <p>
-                              {mailbox.owner || mailbox.displayName || '待设置负责人'} ·{' '}
-                              {mailbox.replyMode === 'auto'
-                                ? '自动接待'
-                                : mailbox.replyMode === 'review'
-                                  ? '逐封审核'
-                                  : '手动接待'}
-                            </p>
+                  {tab === 'campaigns' && state && (
+                    <>
+                      <div className="outreach-metrics">
+                        {[
+                          {
+                            label: '可用发件邮箱',
+                            value: connected.length,
+                            detail: `共 ${mailboxes.length} 个邮箱`,
+                            icon: Mail,
+                          },
+                          {
+                            label: '已发送',
+                            value: deliveryStats?.accepted || 0,
+                            detail: '含公司试发及已核实发送',
+                            icon: CheckCircle2,
+                          },
+                          {
+                            label: '待发送',
+                            value: state.deliveryGroups?.pending || 0,
+                            detail: '按计划节奏执行',
+                            icon: Clock3,
+                          },
+                          {
+                            label: '需处理',
+                            value: state.deliveryGroups?.attention || 0,
+                            detail: '查看具体原因',
+                            icon: FileText,
+                          },
+                        ].map((metric) => (
+                          <div className="panel outreach-metric" key={metric.label}>
+                            <div>
+                              <span>{metric.label}</span>
+                              <metric.icon size={17} />
+                            </div>
+                            <strong>{metric.value}</strong>
+                            <small>{metric.detail}</small>
                           </div>
-                          <Badge tone={mailbox.paused ? 'amber' : tone(mailbox.smtpStatus)}>
-                            {mailbox.paused
-                              ? '已暂停'
-                              : mailbox.configured
-                                ? statusLabel(mailbox.smtpStatus)
-                                : '待配置密码'}
-                          </Badge>
+                        ))}
+                      </div>
+                      <section className="outreach-test-strip">
+                        <span className="outreach-feature-icon">
+                          <Send size={22} />
+                        </span>
+                        <div>
+                          <h3>公司邮箱发送测试</h3>
+                          <p>测试邮件仅发送到已配置的公司邮箱，使用带标记的固定测试内容。</p>
                         </div>
-                        {tagState && (
-                          <div className="outreach-product-tags">
-                            {tagState.tags
-                              .filter((t) =>
-                                tagState.assignments.some(
-                                  (a) => a.mailboxId === mailbox.id && a.tagId === t.id,
-                                ),
-                              )
-                              .map((t) => (
-                                <span key={t.id}>{t.name}</span>
-                              ))}
-                          </div>
-                        )}
-                        <div className="outreach-mailbox-coverage">
-                          {mailbox.businessNote && (
-                            <>
-                              <span>业务备注</span>
-                              <p className="outreach-business-note">{mailbox.businessNote}</p>
-                            </>
-                          )}
-                          {mailbox.replyMode && mailbox.replyMode !== 'manual' && (
-                            <Link to="/materials">
-                              回复资料 · 已选 {mailbox.knowledgeProductIds?.length || 0} 项
-                            </Link>
-                          )}
-                          <ReplyPreview id={mailbox.id} />
-                        </div>
-                        <div className="outreach-mailbox-signature">
-                          <span>邮件签名</span>
-                          {mailbox.signature ? (
-                            <div
-                              className="mail-signature-card-preview"
-                              dangerouslySetInnerHTML={{
-                                __html: renderMailboxSignature(
-                                  signatureMailboxes[mailbox.id] || mailbox,
-                                ).html,
-                              }}
-                            />
-                          ) : (
-                            <p>尚未填写；请点击配置完善。</p>
-                          )}
-                        </div>
-                        <div className="outreach-mailbox-numbers">
-                          <div>
-                            <strong>
-                              {mailbox.dailyLimit}
-                              <small>封</small>
-                            </strong>
-                            <span>每日上限</span>
-                          </div>
-                          <div>
-                            <strong>
-                              {mailbox.intervalSeconds}
-                              <small>秒</small>
-                            </strong>
-                            <span>发送间隔</span>
-                          </div>
-                        </div>
-                        {mailbox.lastError && (
-                          <div className="outreach-alert error">{mailbox.lastError}</div>
-                        )}
-                        <p className="outreach-last-check">
-                          最近验证 {formatTime(mailbox.lastCheckedAt)}
-                        </p>
-                        <div className="outreach-card-actions">
-                          <button
-                            className="btn subtle"
-                            onClick={() => openMailboxConversations(mailbox.id)}
-                          >
-                            <Inbox size={15} />
-                            查看邮件
-                          </button>
+                        <div className="outreach-strip-actions">
                           <button
                             className="btn secondary"
-                            disabled={!!busy}
-                            onClick={() => void editMailbox(mailbox.id)}
+                            disabled={!!busy || connected.length < 2}
+                            onClick={() => {
+                              internalTestKey.current = crypto.randomUUID();
+                              setTestMailboxes(connected);
+                              setTestOpen(true);
+                            }}
                           >
-                            <Settings2 size={15} />
-                            {mailbox.configured === false ? '连接邮箱' : '配置'}
-                          </button>
-                          <button
-                            className="btn subtle"
-                            disabled={!!busy || !mailbox.configured}
-                            onClick={() =>
-                              void act(
-                                `verify-${mailbox.id}`,
-                                pathFor('mailboxes', mailbox.id, 'verify') + '?check=both',
-                                {},
-                                'SMTP 发件与 IMAP 收件、已发送文件夹均已验证。',
-                              )
-                            }
-                          >
-                            <BusyIcon busy={busy === `verify-${mailbox.id}`}>
-                              <RefreshCw size={15} />
-                            </BusyIcon>
-                            验证连接
-                          </button>
-                          <button
-                            className="outreach-icon-action"
-                            disabled={!!busy}
-                            aria-label={`${mailbox.paused ? '恢复' : '暂停'} ${mailbox.email}`}
-                            title={mailbox.paused ? '恢复此邮箱' : '暂停此邮箱'}
-                            onClick={() =>
-                              void act(
-                                `toggle-${mailbox.id}`,
-                                pathFor('mailboxes', mailbox.id),
-                                { paused: !mailbox.paused },
-                                mailbox.paused ? '邮箱已恢复。' : '邮箱已暂停。',
-                                'PUT',
-                              )
-                            }
-                          >
-                            {mailbox.paused ? <Play size={16} /> : <Pause size={16} />}
+                            公司邮箱试发
+                            <ArrowRight size={15} />
                           </button>
                         </div>
                       </section>
-                    ))}
-                  </div>
-                ) : (
-                  <section className="panel">
-                    <Empty
-                      title="接入公司发件邮箱"
-                      detail="填写邮箱、第三方密码、发件人名称和签名，验证后加入发送池。"
-                    />
-                    <div className="outreach-empty-action">
-                      <button
-                        className="btn primary"
-                        onClick={() => setMailboxEditor({ value: null })}
-                      >
-                        <Plus size={16} />
-                        添加邮箱
-                      </button>
-                    </div>
-                  </section>
-                )}
-              </>
-            )}
-          </div>
-        )
-      )}
-      {showLabels && (
-        <MailboxLabels
-          mailboxes={mailboxes}
-          state={tagState}
-          loadError={tagError}
-          onRetry={() => setTagRefresh((v) => v + 1)}
-          onClose={() => setShowLabels(false)}
-          onChange={(value) => {
-            ++tagGeneration.current;
-            setTagState(value);
-            setMailFilter('');
-          }}
-        />
-      )}
-      {mailboxEditor && (
-        <MailboxEditor
-          mailbox={mailboxEditor.value}
-          products={products}
-          onClose={() => {
-            setMailboxEditor(null);
-            if (requestedBox) setTab('mailboxes');
-          }}
-          onSave={saveMailbox}
-        />
-      )}
-      {importOpen && (
-        <MailboxImport
-          onClose={() => setImportOpen(false)}
-          onSave={async (items) => {
-            await outreachApi('/mailboxes/import', {
-              method: 'POST',
-              body: JSON.stringify({ items }),
-            });
-            await refresh();
-            setNotice('邮箱已导入，请完善签名并验证连接。');
-          }}
-        />
-      )}
-      {campaignEditor && (
-        <CampaignEditor
-          campaign={campaignEditor.value}
-          mailboxes={mailboxes}
-          products={products}
-          onClose={() => setCampaignEditor(null)}
-          onSave={saveCampaign}
-        />
-      )}
-      {detailId && (
-        <Modal
-          wide
-          title={shownDetail?.campaign.name || '计划详情'}
-          onClose={() => {
-            if (!busy) setDetailId(null);
-          }}
-        >
-          <div className="modal-body outreach-detail">
-            <InlineError value={detailError} />
-            <InlineError value={error} />
-            {!shownDetail ? (
-              detailError ? (
-                <button className="btn secondary" onClick={() => void refreshDetail(detailId)}>
-                  重试读取计划
-                </button>
-              ) : (
-                <div className="outreach-loading" role="status">
-                  <LoaderCircle className="outreach-spin" size={20} />
-                  正在读取计划…
-                </div>
-              )
-            ) : (
-              <>
-                <div className="outreach-detail-summary">
-                  <Badge tone={tone(shownDetail.campaign.status)}>
-                    {campaignStatusLabel(shownDetail.campaign)}
-                  </Badge>
-                  <span>
-                    {shownDetail.campaign.acquisitionSource
-                      ? `本轮收录 ${shownDetail.campaign.customerIds?.length || 0} 家`
-                      : `目标 ${shownDetail.campaign.targetCount} 封`}
-                  </span>
-                  <span>
-                    已发送 {shownDetail.campaign.stats?.accepted || 0} 家 · 已跳过{' '}
-                    {shownDetail.campaign.stats?.skipped || 0} 家
-                  </span>
-                  <span>版本 {shownDetail.campaign.revision}</span>
-                  <span>LLM 自动生成 · 固定签名</span>
-                </div>
-                <InlineError value={shownDetail.campaign.lastError || null} />
-                {shownDetail.campaign.mode === 'production' &&
-                  shownDetail.campaign.status !== 'cancelled' && (
-                    <div className="outreach-plan-rules">
-                      <p>
-                        首封未回复跟进：
-                        {shownDetail.campaign.followUpEnabled
-                          ? shownDetail.campaign.followUpPaused
-                            ? '已暂停'
-                            : '已开启'
-                          : '未开启'}
-                        。开启后成功发送的首封将采用当时的跟进序列，在客户回信时停止。
-                      </p>
-                      <button
-                        className="btn secondary"
-                        disabled={!!busy}
-                        onClick={() =>
-                          void act(
-                            'follow-up',
-                            `/campaigns/${shownDetail.campaign.id}/follow-ups`,
-                            { action: shownDetail.campaign.followUpEnabled ? 'disable' : 'enable' },
-                          )
-                        }
-                      >
-                        {shownDetail.campaign.followUpEnabled
-                          ? '关闭剩余追信'
-                          : '开启后续首封的自动追信'}
-                      </button>
-                      {shownDetail.campaign.followUpEnabled && (
-                        <>
-                          <button
-                            className="btn secondary"
-                            disabled={!!busy}
-                            onClick={() =>
-                              void act(
-                                'follow-up',
-                                `/campaigns/${shownDetail.campaign.id}/follow-ups`,
-                                { action: 'pause' },
-                              )
-                            }
-                          >
-                            暂停追信
-                          </button>
-                          <button
-                            className="btn secondary"
-                            disabled={!!busy}
-                            onClick={() =>
-                              void act(
-                                'follow-up',
-                                `/campaigns/${shownDetail.campaign.id}/follow-ups`,
-                                { action: 'resume' },
-                              )
-                            }
-                          >
-                            已核对来信，恢复追信
-                          </button>
-                        </>
+                      {!state.readiness.generatorConfigured && (
+                        <div className="outreach-alert">
+                          邮件生成服务尚未配置。可以先完成邮箱配置和计划草稿。
+                        </div>
                       )}
-                    </div>
+                      <div className="outreach-section-heading">
+                        <div>
+                          <h2>触达计划</h2>
+                          <p>选择客户范围，启动后自动生成开发信并按规则发送。</p>
+                        </div>
+                        <span>{state.counts.active} 个运行中</span>
+                      </div>
+                      <section className="panel outreach-records">
+                        <div className="outreach-campaign-views" aria-label="计划视图">
+                          {[
+                            ['current', '当前计划'],
+                            ['history', '历史计划'],
+                            ['tests', '公司试发'],
+                          ].map(([value, label]) => (
+                            <button
+                              key={value}
+                              className="btn secondary"
+                              aria-pressed={campaignView === value}
+                              onClick={() => {
+                                setCampaignView(value);
+                                setCampaignStatus('all');
+                                setCampaignPage(1);
+                              }}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="outreach-record-toolbar">
+                          <label className="outreach-search">
+                            <Search size={16} />
+                            <input
+                              aria-label="搜索计划名称"
+                              placeholder="搜索计划名称"
+                              value={campaignQuery}
+                              onChange={(event) => {
+                                setCampaignQuery(event.target.value);
+                                setCampaignPage(1);
+                              }}
+                            />
+                          </label>
+                          <select
+                            aria-label="按计划状态筛选"
+                            value={campaignStatus}
+                            onChange={(event) => {
+                              setCampaignStatus(event.target.value);
+                              setCampaignPage(1);
+                            }}
+                          >
+                            <option value="all">全部状态</option>
+                            <option value="attention">需处理</option>
+                            {(campaignView === 'history'
+                              ? ['completed', 'cancelled']
+                              : campaignView === 'current'
+                                ? ['draft', 'preparing', 'ready', 'active', 'paused']
+                                : [
+                                    'draft',
+                                    'preparing',
+                                    'ready',
+                                    'active',
+                                    'paused',
+                                    'completed',
+                                    'cancelled',
+                                  ]
+                            ).map((status) => (
+                              <option key={status} value={status}>
+                                {status === 'draft'
+                                  ? '未启动'
+                                  : status === 'preparing'
+                                    ? '准备中'
+                                    : statusLabel(status)}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <nav className="outreach-record-pagination" aria-label="触达计划分页">
+                          <span aria-live="polite">共 {filteredCount} 个计划</span>
+                          <label>
+                            每页
+                            <select
+                              aria-label="每页计划条数"
+                              value={campaignPageSize}
+                              onChange={(event) => {
+                                setCampaignPageSize(Number(event.target.value));
+                                setCampaignPage(1);
+                              }}
+                            >
+                              {[10, 20, 50, 100].map((size) => (
+                                <option key={size} value={size}>
+                                  {size} 条
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <div className="outreach-record-page-actions">
+                            <button
+                              className="btn secondary"
+                              disabled={currentCampaignPage <= 1}
+                              onClick={() => setCampaignPage(currentCampaignPage - 1)}
+                            >
+                              上一页
+                            </button>
+                            <span>
+                              第 {currentCampaignPage} / {campaignTotalPages} 页
+                            </span>
+                            <button
+                              className="btn secondary"
+                              disabled={currentCampaignPage >= campaignTotalPages}
+                              onClick={() => setCampaignPage(currentCampaignPage + 1)}
+                            >
+                              下一页
+                            </button>
+                          </div>
+                        </nav>
+                        {visibleCampaigns.length ? (
+                          <div className="outreach-table-wrap">
+                            <table className="outreach-table outreach-campaign-table">
+                              <thead>
+                                <tr>
+                                  <th>计划名称</th>
+                                  <th>状态</th>
+                                  <th>已发送 / 目标</th>
+                                  <th>需处理</th>
+                                  <th>创建时间</th>
+                                  <th>操作</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {visibleCampaigns.map((campaign) => (
+                                  <tr key={campaign.id} onClick={() => setDetailId(campaign.id)}>
+                                    <td className="outreach-campaign-name">
+                                      <strong>{campaign.name}</strong>
+                                      {campaign.acquisitionSource && <small>获客后自动首发</small>}
+                                      {campaign.lastError && (
+                                        <small className="outreach-row-error">
+                                          {campaign.lastError}
+                                        </small>
+                                      )}
+                                    </td>
+                                    <td>
+                                      <Badge tone={tone(campaign.status)}>
+                                        {campaignStatusLabel(campaign)}
+                                      </Badge>
+                                    </td>
+                                    <td className="outreach-campaign-progress-cell">
+                                      <strong>
+                                        {campaign.stats?.accepted || 0} /{' '}
+                                        {campaign.acquisitionSource
+                                          ? campaign.customerCount || 0
+                                          : campaign.targetCount}
+                                      </strong>
+                                      {campaign.acquisitionSource && (
+                                        <small>已发送 / 本轮收录客户</small>
+                                      )}
+                                      {!!campaign.stats?.skipped && (
+                                        <small>已跳过 {campaign.stats.skipped} 家</small>
+                                      )}
+                                      <div className="outreach-progress-track" aria-hidden="true">
+                                        <span
+                                          style={{
+                                            width: `${Math.min(100, ((campaign.stats?.accepted || 0) / Math.max(1, campaign.acquisitionSource ? campaign.customerCount || 0 : campaign.targetCount || 0)) * 100)}%`,
+                                          }}
+                                        />
+                                      </div>
+                                    </td>
+                                    <td>
+                                      <Badge
+                                        tone={
+                                          campaign.deliveryGroups?.attention ? 'amber' : 'neutral'
+                                        }
+                                      >
+                                        {campaign.deliveryGroups?.attention || 0}
+                                      </Badge>
+                                    </td>
+                                    <td className="outreach-time-cell">
+                                      {formatTime(campaign.createdAt)}
+                                    </td>
+                                    <td onClick={(event) => event.stopPropagation()}>
+                                      <div className="outreach-card-actions">
+                                        <button
+                                          className="btn secondary"
+                                          disabled={!!busy}
+                                          onClick={() => setDetailId(campaign.id)}
+                                        >
+                                          <Eye size={15} />
+                                          执行详情
+                                        </button>
+                                        {campaign.acquisitionSource && (
+                                          <Link
+                                            className="btn secondary"
+                                            to={
+                                              campaign.acquisitionSource.scheduleId
+                                                ? '/automation?tab=schedules'
+                                                : `/automation?tab=runs&job=${campaign.acquisitionSource.jobId}`
+                                            }
+                                          >
+                                            管理获客与自动首发
+                                          </Link>
+                                        )}
+                                        {!campaign.acquisitionSource &&
+                                          campaign.status === 'active' && (
+                                            <button
+                                              className="btn secondary"
+                                              disabled={!!busy}
+                                              onClick={() =>
+                                                void act(
+                                                  `pause-${campaign.id}`,
+                                                  pathFor('campaigns', campaign.id, 'pause'),
+                                                  {},
+                                                  '计划已暂停。',
+                                                )
+                                              }
+                                            >
+                                              <Pause size={15} />
+                                              暂停计划
+                                            </button>
+                                          )}
+                                        {canCancelCampaign(campaign) && (
+                                          <details className="outreach-campaign-more">
+                                            <summary>更多</summary>
+                                            <div className="outreach-card-actions">
+                                              {campaign.mode === 'production' &&
+                                                !['active', 'preparing'].includes(
+                                                  campaign.status,
+                                                ) && (
+                                                  <button
+                                                    className="btn subtle"
+                                                    disabled={!!busy}
+                                                    onClick={() =>
+                                                      setCampaignEditor({ value: campaign })
+                                                    }
+                                                  >
+                                                    编辑
+                                                  </button>
+                                                )}
+                                              <button
+                                                className="btn danger"
+                                                disabled={!!busy}
+                                                onClick={() => confirmCancellation(campaign)}
+                                              >
+                                                取消计划
+                                              </button>
+                                            </div>
+                                          </details>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : state?.viewKey !== viewKey && !error ? (
+                          <p role="status">正在读取触达计划…</p>
+                        ) : (
+                          <Empty
+                            title={
+                              campaignQuery.trim() || campaignStatus !== 'all'
+                                ? '没有符合筛选条件的计划'
+                                : campaignView === 'current'
+                                  ? '暂无当前正式计划'
+                                  : campaignView === 'history'
+                                    ? '暂无历史计划'
+                                    : '暂无公司试发计划'
+                            }
+                            detail={
+                              campaignView === 'current'
+                                ? '新建计划开始开发，或切换到历史计划、公司试发查看已有记录。'
+                                : '可调整搜索词或状态筛选。'
+                            }
+                          />
+                        )}
+                      </section>
+                    </>
                   )}
-                {shownDetail.campaign.status === 'cancelled' && (
-                  <p className="outreach-hint" role="status">
-                    此计划已取消
-                    {shownDetail.campaign.cancelledAt
-                      ? `（${formatTime(shownDetail.campaign.cancelledAt)}）`
-                      : ''}
-                    ，不会继续准备邮件或安排发送。已提交的邮件及其实际结果保留在计划详情。
-                  </p>
-                )}
-                {shownDetail.campaign.mode === 'production' && (
-                  <>
-                    {canCancelCampaign(shownDetail.campaign) && (
-                      <p className="outreach-hint">
-                        启动后，系统从客户库筛选合适客户，生成开发信、附上固定签名并自动发送。可在此查看实际邮件与执行结果。
-                      </p>
-                    )}
-                    <details className="outreach-plan-rules" open>
-                      <summary>本次计划的客户范围与产品内容</summary>
-                      <dl>
+                  {tab === 'mailboxes' && (
+                    <>
+                      <div className="outreach-section-heading">
                         <div>
-                          <dt>市场</dt>
-                          <dd>{shownDetail.campaign.filters?.markets.join('、') || '全部市场'}</dd>
+                          <h2>发件邮箱</h2>
                         </div>
-                        <div>
-                          <dt>客户评级</dt>
-                          <dd>
-                            {shownDetail.campaign.filters?.grades.join('、') ||
-                              '不限制优先级，仍须具备匹配与联系依据'}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>产品品类</dt>
-                          <dd>
-                            {shownDetail.campaign.filters?.categories?.length
-                              ? shownDetail.campaign.filters.categories
-                                  .map(
-                                    (id) =>
-                                      productCategories.find((category) => category.id === id)
-                                        ?.label || id,
-                                  )
-                                  .join('、')
-                              : '在所选邮箱负责的产品范围内按客户情况匹配'}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>客户来源</dt>
-                          <dd>
-                            {shownDetail.campaign.acquisitionSource
-                              ? '仅本轮新增和更新的未首发客户'
-                              : shownDetail.campaign.includeExisting
-                                ? '包含现有未开发客户'
-                                : '仅计划创建后新增客户'}
-                            {shownDetail.campaign.acquisitionSource
-                              ? '；客户首发条件不足时跳过本次，旧计划不恢复发送'
-                              : shownDetail.campaign.continuous
-                                ? '；持续加入符合条件的新客户'
-                                : '；固定批次'}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>发件邮箱</dt>
-                          <dd>
-                            {shownDetail.campaign.mailboxIds
-                              .map(
-                                (id) => mailboxes.find((mailbox) => mailbox.id === id)?.email || id,
-                              )
-                              .join('、')}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>分配方式</dt>
-                          <dd>
-                            先按客户产品匹配负责邮箱，同产品范围内再按连接状态、额度和间隔安排
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>发送节奏</dt>
-                          <dd>
-                            间隔 {shownDetail.campaign.intervalSeconds} 秒，同时遵守各邮箱每日上限
-                          </dd>
-                        </div>
-                      </dl>
-                      <p className="outreach-hint">
-                        根据客户资料和邮箱负责的已确认产品范围生成基础介绍，使用该邮箱的固定签名。
-                      </p>
-                    </details>
-                  </>
-                )}
-                {shownDetail.deliveries.length ? (
-                  <div className="outreach-preview-layout">
-                    <div className="outreach-preview-list">
-                      {shownDetail.deliveries.map((delivery) => (
-                        <button
-                          key={delivery.id}
-                          className={sample?.id === delivery.id ? 'selected' : ''}
-                          onClick={() => setSampleId(delivery.id)}
-                        >
-                          <strong>{delivery.companyName || delivery.to}</strong>
-                          <span>
-                            {delivery.status === 'skipped'
-                              ? delivery.reason
-                              : delivery.subject || '尚未生成'}
-                          </span>
-                          <small>{deliveryDetailLabel(delivery)}</small>
-                        </button>
-                      ))}
-                    </div>
-                    {samplePreview?.delivery ? (
-                      <>
-                        <InlineError value={verificationError} />
-                        <MessagePreview
-                          key={samplePreview.delivery.id}
-                          delivery={samplePreview.delivery}
-                          campaignName={shownDetail.campaign.name}
-                          onReconcile={(delivery) => void verifyDelivery(delivery)}
-                          onResolve={(delivery) => {
-                            setResolutionTarget(delivery);
-                            setResolutionOutcome('accepted');
-                            setResolutionEvidence('');
-                            setResolutionOperator('');
-                            setVerificationError(null);
-                          }}
-                          verifying={busy === `verify-${samplePreview.delivery.id}`}
-                          onSuppress={(delivery) => {
-                            setSuppressionReason('人工标记不再联系');
-                            setSuppressionTarget(delivery);
-                          }}
-                        />
-                      </>
-                    ) : samplePreview?.error ? (
-                      <div>
-                        <InlineError value={samplePreview.error} />
                         <button
                           className="btn secondary"
-                          onClick={() => setSampleRetry((value) => value + 1)}
+                          disabled={!!busy}
+                          onClick={() => setImportOpen(true)}
                         >
-                          重试读取正文
+                          <Upload size={15} />
+                          批量导入
                         </button>
                       </div>
+                      {!!tagState?.tags.length && (
+                        <label className="mail-tag-filter">
+                          邮箱标签{' '}
+                          <select
+                            aria-label="邮箱标签"
+                            value={mailFilter}
+                            onChange={(e) => setMailFilter(e.target.value)}
+                          >
+                            <option value="">全部标签</option>
+                            {tagState.tags.map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
+                      <InlineError value={tagError || signatureError} />
+                      {mailboxes.length ? (
+                        <div className="outreach-mailbox-grid">
+                          {!filteredMailboxes.length && (
+                            <Empty
+                              title="没有使用此标签的邮箱"
+                              detail="选择其他标签，或在邮箱标签中分配邮箱。"
+                            />
+                          )}
+                          {filteredMailboxes.map((mailbox, index) => (
+                            <section className="panel outreach-mailbox-card" key={mailbox.id}>
+                              <div className="outreach-card-heading">
+                                <span className={`outreach-brand-mark mark-${index % 3}`}>
+                                  <Mail size={23} />
+                                </span>
+                                <div>
+                                  <h3>{mailbox.email}</h3>
+                                  <p>
+                                    {mailbox.owner || mailbox.displayName || '待设置负责人'} ·{' '}
+                                    {mailbox.replyMode === 'auto'
+                                      ? '自动接待'
+                                      : mailbox.replyMode === 'review'
+                                        ? '逐封审核'
+                                        : '手动接待'}
+                                  </p>
+                                </div>
+                                <Badge tone={mailbox.paused ? 'amber' : tone(mailbox.smtpStatus)}>
+                                  {mailbox.paused
+                                    ? '已暂停'
+                                    : mailbox.configured
+                                      ? statusLabel(mailbox.smtpStatus)
+                                      : '待配置密码'}
+                                </Badge>
+                              </div>
+                              {tagState && (
+                                <div className="outreach-product-tags">
+                                  {tagState.tags
+                                    .filter((t) =>
+                                      tagState.assignments.some(
+                                        (a) => a.mailboxId === mailbox.id && a.tagId === t.id,
+                                      ),
+                                    )
+                                    .map((t) => (
+                                      <span key={t.id}>{t.name}</span>
+                                    ))}
+                                </div>
+                              )}
+                              <div className="outreach-mailbox-coverage">
+                                {mailbox.businessNote && (
+                                  <>
+                                    <span>业务备注</span>
+                                    <p className="outreach-business-note">{mailbox.businessNote}</p>
+                                  </>
+                                )}
+                                {mailbox.replyMode && mailbox.replyMode !== 'manual' && (
+                                  <Link to="/materials">
+                                    回复资料 · 已选 {mailbox.knowledgeProductIds?.length || 0} 项
+                                  </Link>
+                                )}
+                              </div>
+                              <details className="fin-channel-details">
+                                <summary>签名与发送限制</summary>
+                                <div className="outreach-mailbox-signature">
+                                  <span>邮件签名</span>
+                                  {mailbox.signature ? (
+                                    <div
+                                      className="mail-signature-card-preview"
+                                      dangerouslySetInnerHTML={{
+                                        __html: renderMailboxSignature(
+                                          signatureMailboxes[mailbox.id] || mailbox,
+                                        ).html,
+                                      }}
+                                    />
+                                  ) : (
+                                    <p>尚未填写；请点击配置完善。</p>
+                                  )}
+                                </div>
+                                <div className="outreach-mailbox-numbers">
+                                  <div>
+                                    <strong>
+                                      {mailbox.dailyLimit}
+                                      <small>封</small>
+                                    </strong>
+                                    <span>每日上限</span>
+                                  </div>
+                                  <div>
+                                    <strong>
+                                      {mailbox.intervalSeconds}
+                                      <small>秒</small>
+                                    </strong>
+                                    <span>发送间隔</span>
+                                  </div>
+                                </div>
+                              </details>
+                              {mailbox.lastError && (
+                                <div className="outreach-alert error">{mailbox.lastError}</div>
+                              )}
+                              <p className="outreach-last-check">
+                                最近验证 {formatTime(mailbox.lastCheckedAt)}
+                              </p>
+                              <div className="outreach-card-actions">
+                                {' '}
+                                <Link to={'/inbox?tab=mailboxes&replySettings=' + mailbox.id}>
+                                  <Settings2 size={14} /> 自动回复设置
+                                </Link>
+                                <button
+                                  className="btn subtle"
+                                  onClick={() => openMailboxConversations(mailbox.id)}
+                                >
+                                  <Inbox size={15} />
+                                  查看邮件
+                                </button>
+                                <button
+                                  className="btn secondary"
+                                  disabled={!!busy}
+                                  onClick={() => void editMailbox(mailbox.id)}
+                                >
+                                  <Settings2 size={15} />
+                                  {mailbox.configured === false ? '连接邮箱' : '配置'}
+                                </button>
+                                <button
+                                  className="btn subtle"
+                                  disabled={!!busy || !mailbox.configured}
+                                  onClick={() =>
+                                    void act(
+                                      `verify-${mailbox.id}`,
+                                      pathFor('mailboxes', mailbox.id, 'verify') + '?check=both',
+                                      {},
+                                      'SMTP 发件与 IMAP 收件、已发送文件夹均已验证。',
+                                    )
+                                  }
+                                >
+                                  <BusyIcon busy={busy === `verify-${mailbox.id}`}>
+                                    <RefreshCw size={15} />
+                                  </BusyIcon>
+                                  验证连接
+                                </button>
+                                <button
+                                  className="outreach-icon-action"
+                                  disabled={!!busy}
+                                  aria-label={`${mailbox.paused ? '恢复' : '暂停'} ${mailbox.email}`}
+                                  title={mailbox.paused ? '恢复此邮箱' : '暂停此邮箱'}
+                                  onClick={() =>
+                                    void act(
+                                      `toggle-${mailbox.id}`,
+                                      pathFor('mailboxes', mailbox.id),
+                                      { paused: !mailbox.paused },
+                                      mailbox.paused ? '邮箱已恢复。' : '邮箱已暂停。',
+                                      'PUT',
+                                    )
+                                  }
+                                >
+                                  {mailbox.paused ? <Play size={16} /> : <Pause size={16} />}
+                                </button>
+                              </div>
+                            </section>
+                          ))}
+                        </div>
+                      ) : (
+                        <section className="panel">
+                          <Empty
+                            title="接入公司发件邮箱"
+                            detail="填写邮箱、第三方密码、发件人名称和签名，验证后加入发送池。"
+                          />
+                          <div className="outreach-empty-action">
+                            <button
+                              className="btn primary"
+                              onClick={() => setMailboxEditor({ value: null })}
+                            >
+                              <Plus size={16} />
+                              添加邮箱
+                            </button>
+                          </div>
+                        </section>
+                      )}
+                    </>
+                  )}
+                </div>
+              )
+            )}
+            {showLabels && (
+              <MailboxLabels
+                mailboxes={mailboxes}
+                state={tagState}
+                loadError={tagError}
+                onRetry={() => setTagRefresh((v) => v + 1)}
+                onClose={() => setShowLabels(false)}
+                onChange={(value) => {
+                  ++tagGeneration.current;
+                  setTagState(value);
+                  setMailFilter('');
+                }}
+              />
+            )}
+            {mailboxEditor && (
+              <MailboxEditor
+                mailbox={mailboxEditor.value}
+                products={products}
+                onClose={() => {
+                  setMailboxEditor(null);
+                  if (requestedBox) setTab('mailboxes');
+                }}
+                onSave={saveMailbox}
+              />
+            )}
+            {importOpen && (
+              <MailboxImport
+                onClose={() => setImportOpen(false)}
+                onSave={async (items) => {
+                  await outreachApi('/mailboxes/import', {
+                    method: 'POST',
+                    body: JSON.stringify({ items }),
+                  });
+                  await refresh();
+                  setNotice('邮箱已导入，请完善签名并验证连接。');
+                }}
+              />
+            )}
+            {campaignEditor && (
+              <CampaignEditor
+                campaign={campaignEditor.value}
+                mailboxes={mailboxes}
+                products={products}
+                onClose={() => setCampaignEditor(null)}
+                onSave={saveCampaign}
+              />
+            )}
+            {detailId && (
+              <Modal
+                wide
+                title={shownDetail?.campaign.name || '计划详情'}
+                onClose={() => {
+                  if (!busy) setDetailId(null);
+                }}
+              >
+                <div className="modal-body outreach-detail">
+                  <InlineError value={detailError} />
+                  <InlineError value={error} />
+                  {!shownDetail ? (
+                    detailError ? (
+                      <button
+                        className="btn secondary"
+                        onClick={() => void refreshDetail(detailId)}
+                      >
+                        重试读取计划
+                      </button>
                     ) : (
                       <div className="outreach-loading" role="status">
                         <LoaderCircle className="outreach-spin" size={20} />
-                        正在读取邮件正文…
+                        正在读取计划…
                       </div>
-                    )}
-                  </div>
-                ) : (
-                  <Empty
-                    title="还没有执行邮件"
-                    detail={
-                      shownDetail.campaign.status === 'cancelled'
-                        ? '此计划已取消，不会再生成样稿或发送邮件。'
-                        : '启动计划后自动生成并发送，可在此查看执行结果。'
-                    }
-                  />
-                )}
-                <div className="outreach-detail-actions">
-                  {shownDetail.campaign.acquisitionSource && (
-                    <Link
-                      className="btn secondary"
-                      to={
-                        shownDetail.campaign.acquisitionSource.scheduleId
-                          ? '/automation?tab=schedules'
-                          : `/automation?tab=runs&job=${shownDetail.campaign.acquisitionSource.jobId}`
-                      }
-                    >
-                      管理获客与自动首发
-                    </Link>
-                  )}
-                  {shownDetail.campaign.mode === 'production' &&
-                    canCancelCampaign(shownDetail.campaign) && (
-                      <>
-                        {shownDetail.campaign.status === 'active' ? (
-                          <button
+                    )
+                  ) : (
+                    <>
+                      <div className="outreach-detail-summary">
+                        <Badge tone={tone(shownDetail.campaign.status)}>
+                          {campaignStatusLabel(shownDetail.campaign)}
+                        </Badge>
+                        <span>
+                          {shownDetail.campaign.acquisitionSource
+                            ? `本轮收录 ${shownDetail.campaign.customerIds?.length || 0} 家`
+                            : `目标 ${shownDetail.campaign.targetCount} 封`}
+                        </span>
+                        <span>
+                          已发送 {shownDetail.campaign.stats?.accepted || 0} 家 · 已跳过{' '}
+                          {shownDetail.campaign.stats?.skipped || 0} 家
+                        </span>
+                        <span>版本 {shownDetail.campaign.revision}</span>
+                        <span>LLM 自动生成 · 固定签名</span>
+                      </div>
+                      <InlineError value={shownDetail.campaign.lastError || null} />
+                      {shownDetail.campaign.mode === 'production' &&
+                        shownDetail.campaign.status !== 'cancelled' && (
+                          <div className="outreach-plan-rules">
+                            <p>
+                              首封未回复跟进：
+                              {shownDetail.campaign.followUpEnabled
+                                ? shownDetail.campaign.followUpPaused
+                                  ? '已暂停'
+                                  : '已开启'
+                                : '未开启'}
+                              。开启后成功发送的首封将采用当时的跟进序列，在客户回信时停止。
+                            </p>
+                            <button
+                              className="btn secondary"
+                              disabled={!!busy}
+                              onClick={() =>
+                                void act(
+                                  'follow-up',
+                                  `/campaigns/${shownDetail.campaign.id}/follow-ups`,
+                                  {
+                                    action: shownDetail.campaign.followUpEnabled
+                                      ? 'disable'
+                                      : 'enable',
+                                  },
+                                )
+                              }
+                            >
+                              {shownDetail.campaign.followUpEnabled
+                                ? '关闭剩余追信'
+                                : '开启后续首封的自动追信'}
+                            </button>
+                            {shownDetail.campaign.followUpEnabled && (
+                              <>
+                                <button
+                                  className="btn secondary"
+                                  disabled={!!busy}
+                                  onClick={() =>
+                                    void act(
+                                      'follow-up',
+                                      `/campaigns/${shownDetail.campaign.id}/follow-ups`,
+                                      { action: 'pause' },
+                                    )
+                                  }
+                                >
+                                  暂停追信
+                                </button>
+                                <button
+                                  className="btn secondary"
+                                  disabled={!!busy}
+                                  onClick={() =>
+                                    void act(
+                                      'follow-up',
+                                      `/campaigns/${shownDetail.campaign.id}/follow-ups`,
+                                      { action: 'resume' },
+                                    )
+                                  }
+                                >
+                                  已核对来信，恢复追信
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      {shownDetail.campaign.status === 'cancelled' && (
+                        <p className="outreach-hint" role="status">
+                          此计划已取消
+                          {shownDetail.campaign.cancelledAt
+                            ? `（${formatTime(shownDetail.campaign.cancelledAt)}）`
+                            : ''}
+                          ，不会继续准备邮件或安排发送。已提交的邮件及其实际结果保留在计划详情。
+                        </p>
+                      )}
+                      {shownDetail.campaign.mode === 'production' && (
+                        <>
+                          {canCancelCampaign(shownDetail.campaign) && (
+                            <p className="outreach-hint">
+                              启动后，系统从客户库筛选合适客户，生成开发信、附上固定签名并自动发送。可在此查看实际邮件与执行结果。
+                            </p>
+                          )}
+                          <details className="outreach-plan-rules" open>
+                            <summary>本次计划的客户范围与产品内容</summary>
+                            <dl>
+                              <div>
+                                <dt>市场</dt>
+                                <dd>
+                                  {shownDetail.campaign.filters?.markets.join('、') || '全部市场'}
+                                </dd>
+                              </div>
+                              <div>
+                                <dt>客户评级</dt>
+                                <dd>
+                                  {shownDetail.campaign.filters?.grades.join('、') ||
+                                    '不限制优先级，仍须具备匹配与联系依据'}
+                                </dd>
+                              </div>
+                              <div>
+                                <dt>产品品类</dt>
+                                <dd>
+                                  {shownDetail.campaign.filters?.categories?.length
+                                    ? shownDetail.campaign.filters.categories
+                                        .map(
+                                          (id) =>
+                                            productCategories.find((category) => category.id === id)
+                                              ?.label || id,
+                                        )
+                                        .join('、')
+                                    : '在所选邮箱负责的产品范围内按客户情况匹配'}
+                                </dd>
+                              </div>
+                              <div>
+                                <dt>客户来源</dt>
+                                <dd>
+                                  {shownDetail.campaign.acquisitionSource
+                                    ? '仅本轮新增和更新的未首发客户'
+                                    : shownDetail.campaign.includeExisting
+                                      ? '包含现有未开发客户'
+                                      : '仅计划创建后新增客户'}
+                                  {shownDetail.campaign.acquisitionSource
+                                    ? '；客户首发条件不足时跳过本次，旧计划不恢复发送'
+                                    : shownDetail.campaign.continuous
+                                      ? '；持续加入符合条件的新客户'
+                                      : '；固定批次'}
+                                </dd>
+                              </div>
+                              <div>
+                                <dt>发件邮箱</dt>
+                                <dd>
+                                  {shownDetail.campaign.mailboxIds
+                                    .map(
+                                      (id) =>
+                                        mailboxes.find((mailbox) => mailbox.id === id)?.email || id,
+                                    )
+                                    .join('、')}
+                                </dd>
+                              </div>
+                              <div>
+                                <dt>分配方式</dt>
+                                <dd>
+                                  先按客户产品匹配负责邮箱，同产品范围内再按连接状态、额度和间隔安排
+                                </dd>
+                              </div>
+                              <div>
+                                <dt>发送节奏</dt>
+                                <dd>
+                                  间隔 {shownDetail.campaign.intervalSeconds}{' '}
+                                  秒，同时遵守各邮箱每日上限
+                                </dd>
+                              </div>
+                            </dl>
+                            <p className="outreach-hint">
+                              根据客户资料和邮箱负责的已确认产品范围生成基础介绍，使用该邮箱的固定签名。
+                            </p>
+                          </details>
+                        </>
+                      )}
+                      {shownDetail.deliveries.length ? (
+                        <div className="outreach-preview-layout">
+                          <div className="outreach-preview-list">
+                            {shownDetail.deliveries.map((delivery) => (
+                              <button
+                                key={delivery.id}
+                                className={sample?.id === delivery.id ? 'selected' : ''}
+                                onClick={() => setSampleId(delivery.id)}
+                              >
+                                <strong>{delivery.companyName || delivery.to}</strong>
+                                <span>
+                                  {delivery.status === 'skipped'
+                                    ? delivery.reason
+                                    : delivery.subject || '尚未生成'}
+                                </span>
+                                <small>{deliveryDetailLabel(delivery)}</small>
+                              </button>
+                            ))}
+                          </div>
+                          {samplePreview?.delivery ? (
+                            <>
+                              <InlineError value={verificationError} />
+                              <MessagePreview
+                                key={samplePreview.delivery.id}
+                                delivery={samplePreview.delivery}
+                                campaignName={shownDetail.campaign.name}
+                                onReconcile={(delivery) => void verifyDelivery(delivery)}
+                                onResolve={(delivery) => {
+                                  setResolutionTarget(delivery);
+                                  setResolutionOutcome('accepted');
+                                  setResolutionEvidence('');
+                                  setResolutionOperator('');
+                                  setVerificationError(null);
+                                }}
+                                verifying={busy === `verify-${samplePreview.delivery.id}`}
+                                onSuppress={(delivery) => {
+                                  setSuppressionReason('人工标记不再联系');
+                                  setSuppressionTarget(delivery);
+                                }}
+                              />
+                            </>
+                          ) : samplePreview?.error ? (
+                            <div>
+                              <InlineError value={samplePreview.error} />
+                              <button
+                                className="btn secondary"
+                                onClick={() => setSampleRetry((value) => value + 1)}
+                              >
+                                重试读取正文
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="outreach-loading" role="status">
+                              <LoaderCircle className="outreach-spin" size={20} />
+                              正在读取邮件正文…
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <Empty
+                          title="还没有执行邮件"
+                          detail={
+                            shownDetail.campaign.status === 'cancelled'
+                              ? '此计划已取消，不会再生成样稿或发送邮件。'
+                              : '启动计划后自动生成并发送，可在此查看执行结果。'
+                          }
+                        />
+                      )}
+                      <div className="outreach-detail-actions">
+                        {shownDetail.campaign.acquisitionSource && (
+                          <Link
                             className="btn secondary"
-                            disabled={!!busy}
-                            onClick={() =>
-                              void act(
-                                'pause',
-                                pathFor('campaigns', shownDetail.campaign.id, 'pause'),
-                                {},
-                                '计划已暂停。',
-                              )
+                            to={
+                              shownDetail.campaign.acquisitionSource.scheduleId
+                                ? '/automation?tab=schedules'
+                                : `/automation?tab=runs&job=${shownDetail.campaign.acquisitionSource.jobId}`
                             }
                           >
-                            <Pause size={15} />
-                            暂停
-                          </button>
-                        ) : (
+                            管理获客与自动首发
+                          </Link>
+                        )}
+                        {shownDetail.campaign.mode === 'production' &&
+                          canCancelCampaign(shownDetail.campaign) && (
+                            <>
+                              {shownDetail.campaign.status === 'active' ? (
+                                <button
+                                  className="btn secondary"
+                                  disabled={!!busy}
+                                  onClick={() =>
+                                    void act(
+                                      'pause',
+                                      pathFor('campaigns', shownDetail.campaign.id, 'pause'),
+                                      {},
+                                      '计划已暂停。',
+                                    )
+                                  }
+                                >
+                                  <Pause size={15} />
+                                  暂停
+                                </button>
+                              ) : (
+                                <button
+                                  className="btn primary"
+                                  disabled={
+                                    !!busy ||
+                                    !['draft', 'ready', 'paused'].includes(
+                                      shownDetail.campaign.status,
+                                    )
+                                  }
+                                  onClick={() =>
+                                    void act(
+                                      'start',
+                                      pathFor('campaigns', shownDetail.campaign.id, 'start'),
+                                      { revision: shownDetail.campaign.revision },
+                                      '计划已启动，按设定节奏自动发送。',
+                                    )
+                                  }
+                                >
+                                  <Play size={15} />
+                                  {shownDetail.campaign.status === 'paused'
+                                    ? '恢复计划'
+                                    : '启动自动发送'}
+                                </button>
+                              )}
+                            </>
+                          )}
+                        {canCancelCampaign(shownDetail.campaign) && (
                           <button
-                            className="btn primary"
-                            disabled={
-                              !!busy ||
-                              !['draft', 'ready', 'paused'].includes(shownDetail.campaign.status)
-                            }
-                            onClick={() =>
-                              void act(
-                                'start',
-                                pathFor('campaigns', shownDetail.campaign.id, 'start'),
-                                { revision: shownDetail.campaign.revision },
-                                '计划已启动，按设定节奏自动发送。',
-                              )
-                            }
+                            className="btn danger"
+                            disabled={!!busy}
+                            onClick={() => confirmCancellation(shownDetail.campaign)}
                           >
-                            <Play size={15} />
-                            {shownDetail.campaign.status === 'paused' ? '恢复计划' : '启动自动发送'}
+                            <X size={15} />
+                            取消计划
                           </button>
                         )}
-                      </>
-                    )}
-                  {canCancelCampaign(shownDetail.campaign) && (
+                      </div>
+                    </>
+                  )}
+                </div>
+              </Modal>
+            )}
+            {cancelTarget && (
+              <Modal
+                title="取消触达计划"
+                onClose={() => {
+                  if (!busy) setCancelTarget(null);
+                }}
+              >
+                <div className="modal-body outreach-form">
+                  <p>
+                    确认取消 <strong>{cancelTarget.name}</strong>？
+                  </p>
+                  <p>
+                    取消后将停止准备邮件和后续发送，未发送任务会取消，已发送记录与计划详情会保留。此计划不能恢复，需要再次开发时请新建计划。
+                  </p>
+                  <p className="outreach-hint">
+                    已提交到邮件服务商的邮件无法撤回，正在提交的邮件仍会记录实际发送结果。
+                  </p>
+                  <InlineError value={error} />
+                  <div className="modal-actions">
+                    <button
+                      className="btn secondary"
+                      disabled={!!busy}
+                      onClick={() => setCancelTarget(null)}
+                    >
+                      保留计划
+                    </button>
                     <button
                       className="btn danger"
                       disabled={!!busy}
-                      onClick={() => confirmCancellation(shownDetail.campaign)}
+                      onClick={() => {
+                        void act(
+                          `cancel-${cancelTarget.id}`,
+                          pathFor('campaigns', cancelTarget.id, 'cancel'),
+                          { revision: cancelTarget.revision, confirmed: true },
+                          '计划已取消，后续发送已停止，已有记录已保留。',
+                        ).then((ok) => {
+                          if (ok) setCancelTarget(null);
+                        });
+                      }}
                     >
-                      <X size={15} />
-                      取消计划
+                      <BusyIcon busy={busy === `cancel-${cancelTarget.id}`}>
+                        <X size={15} />
+                      </BusyIcon>
+                      {busy === `cancel-${cancelTarget.id}` ? '正在取消…' : '确认取消计划'}
                     </button>
+                  </div>
+                </div>
+              </Modal>
+            )}
+            {resolutionTarget && (
+              <Modal
+                title="记录发送核实结论"
+                onClose={() => {
+                  if (!busy) setResolutionTarget(null);
+                }}
+              >
+                <form
+                  className="modal-body outreach-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void verifyDelivery(
+                      resolutionTarget,
+                      resolutionOutcome,
+                      resolutionEvidence.trim(),
+                      resolutionOperator.trim(),
+                    );
+                  }}
+                >
+                  <p>请依据原发件邮箱或服务商日志核实。未找到已发送邮件，不能证明邮件没有发出。</p>
+                  <label>
+                    核实结论
+                    <select
+                      value={resolutionOutcome}
+                      onChange={(event) =>
+                        setResolutionOutcome(event.target.value as 'accepted' | 'failed')
+                      }
+                    >
+                      <option value="accepted">确认服务商已接受发送</option>
+                      <option value="failed">确认未成功提交</option>
+                    </select>
+                  </label>
+                  <label>
+                    操作人（请填写姓名或标识）
+                    <input
+                      value={resolutionOperator}
+                      onChange={(event) => setResolutionOperator(event.target.value)}
+                      maxLength={100}
+                      required
+                    />
+                  </label>
+                  <label>
+                    证据说明
+                    <textarea
+                      value={resolutionEvidence}
+                      onChange={(event) => setResolutionEvidence(event.target.value)}
+                      rows={4}
+                      maxLength={1000}
+                      required
+                      placeholder="例如原邮箱已发送记录的邮件编号、服务商日志的查询时间与结果"
+                    />
+                  </label>
+                  <InlineError value={verificationError} />
+                  <button
+                    className="btn primary"
+                    type="submit"
+                    disabled={!!busy || !resolutionEvidence.trim() || !resolutionOperator.trim()}
+                  >
+                    <BusyIcon busy={busy === `verify-${resolutionTarget.id}`}>
+                      <Check size={15} />
+                    </BusyIcon>
+                    保存核实结论
+                  </button>
+                </form>
+              </Modal>
+            )}
+            {suppressionTarget && (
+              <Modal
+                title="标记不再联系"
+                onClose={() => {
+                  if (!busy) setSuppressionTarget(null);
+                }}
+              >
+                <form
+                  className="modal-body outreach-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void act(
+                      'suppress',
+                      '/suppress',
+                      {
+                        customerId: suppressionTarget.customerId,
+                        email: suppressionTarget.to,
+                        reason: suppressionReason.trim(),
+                      },
+                      '已标记不再联系，后续发送将排除此客户。',
+                    ).then((ok) => {
+                      if (ok) setSuppressionTarget(null);
+                    });
+                  }}
+                >
+                  <p>
+                    从后续发送中排除{' '}
+                    <strong>{suppressionTarget.companyName || suppressionTarget.to}</strong>
+                    ，保留已有记录。
+                  </p>
+                  <label>
+                    标记原因
+                    <textarea
+                      value={suppressionReason}
+                      onChange={(event) => setSuppressionReason(event.target.value)}
+                      rows={3}
+                      maxLength={200}
+                      required
+                      placeholder="例如：已由业务员联系，或客户明确要求停止联系"
+                    />
+                  </label>
+                  <InlineError value={error} />
+                  <div className="modal-actions">
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      disabled={!!busy}
+                      onClick={() => setSuppressionTarget(null)}
+                    >
+                      取消
+                    </button>
+                    <button className="btn primary" disabled={!!busy || !suppressionReason.trim()}>
+                      确认标记
+                    </button>
+                  </div>
+                </form>
+              </Modal>
+            )}
+            {testOpen && (
+              <Modal
+                title="确认公司邮箱试发"
+                onClose={() => {
+                  if (!busy) setTestOpen(false);
+                }}
+              >
+                <div className="modal-body outreach-form">
+                  <p>
+                    将发送 {testMailboxes.length} 封带测试标记的固定测试信，确认各邮箱的发送链路。
+                  </p>
+                  <div className="outreach-ring">
+                    {testMailboxes.map((mailbox, index) => (
+                      <div key={mailbox.id}>
+                        <span>{mailbox.email}</span>
+                        <ArrowRight size={16} />
+                        <strong>{testMailboxes[(index + 1) % testMailboxes.length]?.email}</strong>
+                      </div>
+                    ))}
+                  </div>
+                  <InlineError value={error} />
+                  {testRingChanged && (
+                    <div className="outreach-alert">
+                      邮箱列表已变化，请关闭此窗口后重新确认试发对象。
+                    </div>
                   )}
+                  <div className="modal-actions">
+                    <button
+                      className="btn secondary"
+                      disabled={!!busy}
+                      onClick={() => setTestOpen(false)}
+                    >
+                      取消
+                    </button>
+                    <button
+                      className="btn primary"
+                      disabled={!!busy || testMailboxes.length < 2 || testRingChanged}
+                      onClick={() => {
+                        void act(
+                          'test',
+                          '/internal-test',
+                          {
+                            confirmed: true,
+                            expectedMailboxIds: testMailboxes.map((mailbox) => mailbox.id),
+                            expectedMailboxEmails: testMailboxes.map((mailbox) => mailbox.email),
+                          },
+                          '公司试发已创建，请在公司试发计划中查看结果。',
+                          'POST',
+                          {
+                            'Idempotency-Key':
+                              internalTestKey.current ||
+                              (internalTestKey.current = crypto.randomUUID()),
+                          },
+                        ).then((ok) => {
+                          if (ok) setTestOpen(false);
+                        });
+                      }}
+                    >
+                      <BusyIcon busy={busy === 'test'}>
+                        <Send size={15} />
+                      </BusyIcon>
+                      发送这 {testMailboxes.length} 封测试信
+                    </button>
+                  </div>
                 </div>
-              </>
+              </Modal>
             )}
-          </div>
-        </Modal>
-      )}
-      {cancelTarget && (
-        <Modal
-          title="取消触达计划"
-          onClose={() => {
-            if (!busy) setCancelTarget(null);
-          }}
-        >
-          <div className="modal-body outreach-form">
-            <p>
-              确认取消 <strong>{cancelTarget.name}</strong>？
-            </p>
-            <p>
-              取消后将停止准备邮件和后续发送，未发送任务会取消，已发送记录与计划详情会保留。此计划不能恢复，需要再次开发时请新建计划。
-            </p>
-            <p className="outreach-hint">
-              已提交到邮件服务商的邮件无法撤回，正在提交的邮件仍会记录实际发送结果。
-            </p>
-            <InlineError value={error} />
-            <div className="modal-actions">
-              <button
-                className="btn secondary"
-                disabled={!!busy}
-                onClick={() => setCancelTarget(null)}
-              >
-                保留计划
-              </button>
-              <button
-                className="btn danger"
-                disabled={!!busy}
-                onClick={() => {
-                  void act(
-                    `cancel-${cancelTarget.id}`,
-                    pathFor('campaigns', cancelTarget.id, 'cancel'),
-                    { revision: cancelTarget.revision, confirmed: true },
-                    '计划已取消，后续发送已停止，已有记录已保留。',
-                  ).then((ok) => {
-                    if (ok) setCancelTarget(null);
-                  });
-                }}
-              >
-                <BusyIcon busy={busy === `cancel-${cancelTarget.id}`}>
-                  <X size={15} />
-                </BusyIcon>
-                {busy === `cancel-${cancelTarget.id}` ? '正在取消…' : '确认取消计划'}
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
-      {resolutionTarget && (
-        <Modal
-          title="记录发送核实结论"
-          onClose={() => {
-            if (!busy) setResolutionTarget(null);
-          }}
-        >
-          <form
-            className="modal-body outreach-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void verifyDelivery(
-                resolutionTarget,
-                resolutionOutcome,
-                resolutionEvidence.trim(),
-                resolutionOperator.trim(),
-              );
-            }}
-          >
-            <p>请依据原发件邮箱或服务商日志核实。未找到已发送邮件，不能证明邮件没有发出。</p>
-            <label>
-              核实结论
-              <select
-                value={resolutionOutcome}
-                onChange={(event) =>
-                  setResolutionOutcome(event.target.value as 'accepted' | 'failed')
-                }
-              >
-                <option value="accepted">确认服务商已接受发送</option>
-                <option value="failed">确认未成功提交</option>
-              </select>
-            </label>
-            <label>
-              操作人（请填写姓名或标识）
-              <input
-                value={resolutionOperator}
-                onChange={(event) => setResolutionOperator(event.target.value)}
-                maxLength={100}
-                required
-              />
-            </label>
-            <label>
-              证据说明
-              <textarea
-                value={resolutionEvidence}
-                onChange={(event) => setResolutionEvidence(event.target.value)}
-                rows={4}
-                maxLength={1000}
-                required
-                placeholder="例如原邮箱已发送记录的邮件编号、服务商日志的查询时间与结果"
-              />
-            </label>
-            <InlineError value={verificationError} />
-            <button
-              className="btn primary"
-              type="submit"
-              disabled={!!busy || !resolutionEvidence.trim() || !resolutionOperator.trim()}
-            >
-              <BusyIcon busy={busy === `verify-${resolutionTarget.id}`}>
-                <Check size={15} />
-              </BusyIcon>
-              保存核实结论
-            </button>
-          </form>
-        </Modal>
-      )}
-      {suppressionTarget && (
-        <Modal
-          title="标记不再联系"
-          onClose={() => {
-            if (!busy) setSuppressionTarget(null);
-          }}
-        >
-          <form
-            className="modal-body outreach-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void act(
-                'suppress',
-                '/suppress',
-                {
-                  customerId: suppressionTarget.customerId,
-                  email: suppressionTarget.to,
-                  reason: suppressionReason.trim(),
-                },
-                '已标记不再联系，后续发送将排除此客户。',
-              ).then((ok) => {
-                if (ok) setSuppressionTarget(null);
-              });
-            }}
-          >
-            <p>
-              从后续发送中排除{' '}
-              <strong>{suppressionTarget.companyName || suppressionTarget.to}</strong>
-              ，保留已有记录。
-            </p>
-            <label>
-              标记原因
-              <textarea
-                value={suppressionReason}
-                onChange={(event) => setSuppressionReason(event.target.value)}
-                rows={3}
-                maxLength={200}
-                required
-                placeholder="例如：已由业务员联系，或客户明确要求停止联系"
-              />
-            </label>
-            <InlineError value={error} />
-            <div className="modal-actions">
-              <button
-                type="button"
-                className="btn secondary"
-                disabled={!!busy}
-                onClick={() => setSuppressionTarget(null)}
-              >
-                取消
-              </button>
-              <button className="btn primary" disabled={!!busy || !suppressionReason.trim()}>
-                确认标记
-              </button>
-            </div>
-          </form>
-        </Modal>
-      )}
-      {testOpen && (
-        <Modal
-          title="确认公司邮箱试发"
-          onClose={() => {
-            if (!busy) setTestOpen(false);
-          }}
-        >
-          <div className="modal-body outreach-form">
-            <p>将发送 {testMailboxes.length} 封带测试标记的固定测试信，确认各邮箱的发送链路。</p>
-            <div className="outreach-ring">
-              {testMailboxes.map((mailbox, index) => (
-                <div key={mailbox.id}>
-                  <span>{mailbox.email}</span>
-                  <ArrowRight size={16} />
-                  <strong>{testMailboxes[(index + 1) % testMailboxes.length]?.email}</strong>
-                </div>
-              ))}
-            </div>
-            <InlineError value={error} />
-            {testRingChanged && (
-              <div className="outreach-alert">邮箱列表已变化，请关闭此窗口后重新确认试发对象。</div>
-            )}
-            <div className="modal-actions">
-              <button
-                className="btn secondary"
-                disabled={!!busy}
-                onClick={() => setTestOpen(false)}
-              >
-                取消
-              </button>
-              <button
-                className="btn primary"
-                disabled={!!busy || testMailboxes.length < 2 || testRingChanged}
-                onClick={() => {
-                  void act(
-                    'test',
-                    '/internal-test',
-                    {
-                      confirmed: true,
-                      expectedMailboxIds: testMailboxes.map((mailbox) => mailbox.id),
-                      expectedMailboxEmails: testMailboxes.map((mailbox) => mailbox.email),
-                    },
-                    '公司试发已创建，请在公司试发计划中查看结果。',
-                    'POST',
-                    {
-                      'Idempotency-Key':
-                        internalTestKey.current || (internalTestKey.current = crypto.randomUUID()),
-                    },
-                  ).then((ok) => {
-                    if (ok) setTestOpen(false);
-                  });
-                }}
-              >
-                <BusyIcon busy={busy === 'test'}>
-                  <Send size={15} />
-                </BusyIcon>
-                发送这 {testMailboxes.length} 封测试信
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
-    </div>
+          </>
+        )}
+      </div>
+    </SectionWorkspace>
   );
 }

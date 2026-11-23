@@ -1,3 +1,4 @@
+import { SectionWorkspace } from '../components/SectionWorkspace';
 import {
   businessNavigation,
   matchesTaskNavigation,
@@ -5,7 +6,7 @@ import {
 } from '../domain/business-navigation.mjs';
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, ClipboardList, Mail, ListChecks } from 'lucide-react';
 import { PageHeading } from '../components/PageHeading';
 import { customerBusinessApi } from '../services/customerBusiness';
 import type { BusinessWorkspace } from '../services/customerBusiness';
@@ -78,140 +79,140 @@ export function CustomerBusiness() {
     )
     .sort((a, b) => b.dueAt.localeCompare(a.dueAt));
   return (
-    <div className="business-page">
-      <PageHeading
-        eyebrow="AUTOMATIC FOLLOW-UP"
-        title="跟进任务"
-        description={
-          showReplies
-            ? '根据实际往来核对客户回信，点击邮件主题可在原线程跟进。'
-            : '查看系统安排的后续追信和真实结果。暂停、恢复或关闭请进入所属发送计划。'
-        }
-      >
-        <button
-          className="btn secondary"
-          disabled={!showReplies && loading}
-          onClick={() => (showReplies ? setRevision((r) => r + 1) : void load())}
+    <SectionWorkspace
+      title="跟进任务"
+      icon={ClipboardList}
+      selected={showReplies ? 'replies' : 'tasks'}
+      onSelect={(id) => selectView(id === 'replies')}
+      sections={[
+        {
+          items: [
+            { id: 'tasks', label: '自动追信任务', icon: ListChecks },
+            { id: 'replies', label: '邮箱来信跟进', icon: Mail },
+          ],
+        },
+      ]}
+    >
+      <div className="business-page section-page">
+        <PageHeading
+          eyebrow="AUTOMATIC FOLLOW-UP"
+          title={showReplies ? '邮箱来信跟进' : '自动追信任务'}
+          description={
+            showReplies
+              ? '根据实际往来核对客户回信，点击邮件主题可在原线程跟进。'
+              : '查看系统安排的后续追信和真实结果。暂停、恢复或关闭请进入所属发送计划。'
+          }
         >
-          <RefreshCw size={16} />
-          刷新
-        </button>
-      </PageHeading>
-      <div className="business-view-picker" role="group" aria-label="跟进视图">
-        <button
-          className={'btn ' + (showReplies ? 'secondary' : 'primary')}
-          aria-pressed={!showReplies}
-          onClick={() => selectView(false)}
-        >
-          自动追信任务
-        </button>
-        <button
-          className={'btn ' + (showReplies ? 'primary' : 'secondary')}
-          aria-pressed={showReplies}
-          onClick={() => selectView(true)}
-        >
-          邮箱来信跟进
-        </button>
-      </div>
-      {showReplies ? (
-        <MailReplyHistory revision={revision} />
-      ) : (
-        <>
-          {error && <p role="alert">{error}</p>}
-          {data?.feishu?.error && <p role="status">飞书同步待处理：{data.feishu.error}</p>}
-          <div className="business-filters">
-            <label>
-              搜索客户或任务
-              <input value={query} onChange={(e) => setQuery(e.target.value)} />
-            </label>
-            <label>
-              状态
-              <select
-                value={status}
-                onChange={(e) =>
-                  setParams(updateBusinessNavigation(params, 'state', e.target.value))
-                }
-              >
-                <option value="all">全部</option>
-                {Object.entries(statusNames).map(([key, name]) => (
-                  <option key={key} value={key}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {navigation.bucket && (
-              <p>
-                当前筛选：到期跟进（北京时间）{' '}
-                <Link
-                  to={
-                    customerId
-                      ? '/business?customerId=' + encodeURIComponent(customerId)
-                      : '/business'
+          <button
+            className="btn secondary"
+            disabled={!showReplies && loading}
+            onClick={() => (showReplies ? setRevision((r) => r + 1) : void load())}
+          >
+            <RefreshCw size={16} />
+            刷新
+          </button>
+        </PageHeading>
+
+        {showReplies ? (
+          <MailReplyHistory revision={revision} />
+        ) : (
+          <>
+            {error && <p role="alert">{error}</p>}
+            {data?.feishu?.error && <p role="status">飞书同步待处理：{data.feishu.error}</p>}
+            <div className="business-filters">
+              <label>
+                搜索客户或任务
+                <input value={query} onChange={(e) => setQuery(e.target.value)} />
+              </label>
+              <label>
+                状态
+                <select
+                  value={status}
+                  onChange={(e) =>
+                    setParams(updateBusinessNavigation(params, 'state', e.target.value))
                   }
                 >
-                  清除筛选
-                </Link>
+                  <option value="all">全部</option>
+                  {Object.entries(statusNames).map(([key, name]) => (
+                    <option key={key} value={key}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {navigation.bucket && (
+                <p>
+                  当前筛选：到期跟进（北京时间）{' '}
+                  <Link
+                    to={
+                      customerId
+                        ? '/business?customerId=' + encodeURIComponent(customerId)
+                        : '/business'
+                    }
+                  >
+                    清除筛选
+                  </Link>
+                </p>
+              )}
+              {customerId && <Link to="/business">查看全部客户</Link>}
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>客户</th>
+                    <th>跟进安排</th>
+                    <th>计划时间（北京）</th>
+                    <th>状态</th>
+                    <th>执行说明</th>
+                    <th>所属计划</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tasks.map((task) => (
+                    <tr key={task.id}>
+                      <td>
+                        <Link
+                          to={
+                            '/inbox?tab=inbox&inboundOnly=1&customerId=' +
+                            encodeURIComponent(task.customerId)
+                          }
+                        >
+                          {names.get(task.customerId) || task.customerId}
+                        </Link>
+                      </td>
+                      <td>
+                        {task.title}
+                        {task.displayId && <small> · {task.displayId}</small>}
+                      </td>
+                      <td>{formatBeijingTime(task.dueAt)}</td>
+                      <td>{statusNames[task.status]}</td>
+                      <td>{task.notes || task.completionNotes || '按计划等待执行'}</td>
+                      <td>
+                        <Link
+                          to={
+                            '/inbox?tab=campaigns&campaignId=' +
+                            encodeURIComponent(task.campaignId || '')
+                          }
+                        >
+                          查看计划
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {!tasks.length && (
+              <p role="status">
+                {loading
+                  ? '正在读取任务…'
+                  : '暂无符合条件的自动追信任务。首封发送和即时回复不计入跟进任务。'}
               </p>
             )}
-            {customerId && <Link to="/business">查看全部客户</Link>}
-          </div>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>客户</th>
-                  <th>跟进安排</th>
-                  <th>计划时间（北京）</th>
-                  <th>状态</th>
-                  <th>执行说明</th>
-                  <th>所属计划</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tasks.map((task) => (
-                  <tr key={task.id}>
-                    <td>
-                      <Link
-                        to={
-                          '/inbox?tab=inbox&inboundOnly=1&customerId=' +
-                          encodeURIComponent(task.customerId)
-                        }
-                      >
-                        {names.get(task.customerId) || task.customerId}
-                      </Link>
-                    </td>
-                    <td>
-                      {task.title}
-                      {task.displayId && <small> · {task.displayId}</small>}
-                    </td>
-                    <td>{formatBeijingTime(task.dueAt)}</td>
-                    <td>{statusNames[task.status]}</td>
-                    <td>{task.notes || task.completionNotes || '按计划等待执行'}</td>
-                    <td>
-                      <Link
-                        to={
-                          '/inbox?tab=campaigns&campaignId=' +
-                          encodeURIComponent(task.campaignId || '')
-                        }
-                      >
-                        查看计划
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {!tasks.length && (
-            <p role="status">
-              {loading
-                ? '正在读取任务…'
-                : '暂无符合条件的自动追信任务。首封发送和即时回复不计入跟进任务。'}
-            </p>
-          )}
-        </>
-      )}
-    </div>
+          </>
+        )}
+      </div>
+    </SectionWorkspace>
   );
 }

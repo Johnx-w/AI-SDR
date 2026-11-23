@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { materialService } from './fixtures/deepseek-material-service.mjs';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -23,6 +24,8 @@ const data = (name, body, site = '') => ({
   bytes: Buffer.from(body),
   site,
   key: randomUUID(),
+  env: { MATERIAL_DEEPSEEK_API_KEY: 'fixture' },
+  fetchImpl: materialService,
 });
 test('素材直接上传、重试幂等、站点隔离、换版撤回及跨重启回读', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'materials-')),
@@ -50,7 +53,7 @@ test('素材直接上传、重试幂等、站点隔离、换版撤回及跨重�
   const extracted = d.documents[0].extraction;
   k.documents.saveExtractionFailure(documentId, '测试失败');
   assert.equal(lib.list().items[0].extractionStatus, 'failed');
-  k.documents.saveLocalExtraction(documentId, { extraction: extracted });
+  k.documents.saveExtraction(documentId, { extraction: extracted });
   assert.equal(lib.list().items[0].extractionStatus, 'ready');
   assert.equal(lib.list({ site: 'unassigned' }).total, 1);
   let item = lib.edit(id, {
@@ -107,7 +110,7 @@ test('长段落跨分块仍保留型号末尾和 Markdown 标题位置', async (
   assert.deepEqual(result.warnings, []);
 });
 
-test('素材图片自动本机 OCR，重复读取不改版，损坏换版保留原图', async (t) => {
+test('独立图片按附件保存，重复读取不改版，损坏换版保留原图', async (t) => {
   const k = new ProductKnowledge();
   t.after(() => k.close());
   const lib = new MaterialLibrary(k, boxes);
@@ -117,8 +120,8 @@ test('素材图片自动本机 OCR，重复读取不改版，损坏换版保留�
   assert.equal(warning, '');
   const before = lib.detail(id);
   const result = before.documents[0].extraction;
-  assert.equal(result.model, 'local-image');
-  assert.match(result.facts.map((f) => f.text).join(' '), /MX42 track width is 73 mm/iu);
+  assert.equal(result.model, 'manual');
+  assert.deepEqual(result.facts, []);
   assert.equal((await lib.upload(input)).reused, true);
   await assert.rejects(
     lib.upload({ ...data('bad.webp', bytes.subarray(0, 16)), id, version: 1 }),
@@ -166,7 +169,7 @@ test('素材自动识别 PDF 文字、图内中英参数和扫描页，回读后
   assert.ok(ask().draftSources.some((s) => s.ref === ref && s.value.includes('73')));
   await assert.rejects(
     lib.upload({ ...data('损坏新版.pdf', '%PDF-1.7\ninvalid'), id, version: approved.version }),
-    /PDF/,
+    /DeepSeek|PDF/,
   );
   assert.equal(lib.detail(id).product.version, approved.version);
   assert.equal(lib.detail(id).documents[0].id, documentId);
@@ -198,11 +201,9 @@ test('旧 PDF 空提取从素材接口后台补齐，同一原件重试保留审
     .run(JSON.stringify({ facts: [], warnings: ['未提取'], model: 'previous' }), doc.id);
   k.close();
   const app = createApp({
-    env: { PRODUCT_KNOWLEDGE_DB_PATH: path },
+    env: { PRODUCT_KNOWLEDGE_DB_PATH: path, MATERIAL_DEEPSEEK_API_KEY: 'fixture' },
     outreachServiceFactory: () => ({ mailboxes: { list: () => boxes }, close() {} }),
-    fetchImpl: () => {
-      throw Error('禁止外部请求');
-    },
+    fetchImpl: materialService,
   });
   await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
   t.after(async () => {

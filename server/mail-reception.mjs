@@ -16,7 +16,7 @@ const locked = "('sending','accepted','unknown')";
 const timestamp = (m) => Date.parse(m.receivedAt || m.occurredAt);
 const modelIdentity = (model) => model?.connectionId || model?.name;
 
-async function verifyGrounding(model, basis, { body, sources }) {
+export async function verifyGrounding(model, basis, { body, sources }) {
   const business = basis.businessCorrespondence;
   if ((!business && !sources.length) || sources.some((s) => !s.value)) return false;
   if (business && body.split(/\n\s*\n/u).filter((p) => p.trim().length >= 20).length < 2)
