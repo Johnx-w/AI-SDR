@@ -40,6 +40,8 @@ export function MaterialDialog({
     [notice, setNotice] = useState('');
   const [edits, setEdits] = useState<Correction[]>([]),
     [facts, setFacts] = useState<Reference[]>([]);
+  const [pdfProgress, setPdfProgress] = useState(''),
+    [pdfAttempt, retryPdf] = useState(0);
   useEffect(() => {
     const el = dialog.current;
     el?.showModal();
@@ -69,6 +71,52 @@ export function MaterialDialog({
   const p = data?.product,
     doc = data?.documents.find((d) => d.id === docId),
     active = p?.version === data?.currentVersion;
+  const pdfToRead =
+    view === 'preview' &&
+    active &&
+    p?.status !== 'archived' &&
+    doc?.contentType === 'application/pdf' &&
+    !doc.extraction?.facts.length
+      ? doc.id
+      : '';
+  useEffect(() => {
+    if (!pdfToRead) return;
+    const controller = new AbortController();
+    setPdfProgress('正在提取 PDF 文字和图片…');
+    setError('');
+    void materialsRequest(
+      '/' + id + '/extract/' + pdfToRead,
+      {
+        method: 'POST',
+        headers: { Prefer: 'respond-async' },
+        signal: controller.signal,
+      },
+      (page, total) => {
+        if (!controller.signal.aborted)
+          setPdfProgress('正在提取第 ' + page + ' / ' + total + ' 页');
+      },
+    )
+      .then(() => materialsRequest<Detail>('/' + id, { signal: controller.signal }))
+      .then((next) => {
+        if (controller.signal.aborted) return;
+        const parsed = next.documents.find((d) => d.id === pdfToRead);
+        if (parsed)
+          setData(
+            (prior) =>
+              prior && {
+                ...prior,
+                documents: prior.documents.map((d) => (d.id === pdfToRead ? parsed : d)),
+              },
+          );
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) setError(messageOf(error));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setPdfProgress('');
+      });
+    return () => controller.abort();
+  }, [id, pdfToRead, pdfAttempt]);
   async function perform(action: () => Promise<unknown>, message: string) {
     if (busy) return;
     setBusy(true);
@@ -338,6 +386,20 @@ export function MaterialDialog({
                       </div>
                       <div>
                         <h3>引用片段</h3>
+                        {doc.extraction?.pageCount && (
+                          <p>
+                            原件共 {doc.extraction.pageCount} 页，已提取 {passages.length}{' '}
+                            个候选片段。请对照原页核对后采用。
+                          </p>
+                        )}
+                        {pdfToRead &&
+                          (pdfProgress ? (
+                            <p role="status">{pdfProgress}</p>
+                          ) : (
+                            <button type="button" onClick={() => retryPdf((n) => n + 1)}>
+                              重新提取 PDF
+                            </button>
+                          ))}
                         {writable && passages.length > 1 && (
                           <button
                             type="button"
@@ -359,7 +421,9 @@ export function MaterialDialog({
                         {doc.extraction?.facts.map((f, i) => (
                           <div className="mat-evidence" key={i}>
                             <small>
-                              {f.page > 1 ? '第 ' + f.page + ' 页 · ' : ''}
+                              {doc.contentType === 'application/pdf' || f.page > 1
+                                ? '第 ' + f.page + ' 页 · '
+                                : ''}
                               {f.location}
                             </small>
                             <p>{f.text}</p>
@@ -370,10 +434,10 @@ export function MaterialDialog({
                             )}
                           </div>
                         ))}
-                        {(!doc.extraction || !doc.extraction.facts.length) && (
+                        {!pdfToRead && (!doc.extraction || !doc.extraction.facts.length) && (
                           <p>对照原件填写可引用的内容和位置。</p>
                         )}
-                        {writable && !doc.extraction && (
+                        {writable && !pdfToRead && !doc.extraction && (
                           <button
                             type="button"
                             onClick={() =>
@@ -386,8 +450,7 @@ export function MaterialDialog({
                               )
                             }
                           >
-                            {doc.contentType === 'application/pdf' ||
-                            doc.contentType.startsWith('image/')
+                            {doc.contentType.startsWith('image/')
                               ? '使用已配置的 AI 提取'
                               : '重新提取'}
                           </button>
@@ -501,6 +564,8 @@ export function MaterialDialog({
                         file,
                         { id, version: p.version },
                         crypto.randomUUID(),
+                        (page, total) =>
+                          setNotice('正在提取新版第 ' + page + ' / ' + total + ' 页'),
                       );
                       return r;
                     }, '已保存新版本');

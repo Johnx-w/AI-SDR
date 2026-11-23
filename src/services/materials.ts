@@ -41,6 +41,7 @@ export type StoredDocument = {
     warnings: string[];
     sheets?: { name: string; rows: number }[];
     model: string;
+    pageCount?: number;
   };
 };
 export type Product = {
@@ -69,17 +70,30 @@ export type MaterialDetail = {
 export const materialApi = '/api/v1/materials';
 export const sourceUrl = (id: string, document: string) =>
   materialApi + '/' + id + '/document/' + document;
-export async function materialsRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(materialApi + path, init);
-  const data = await response.json().catch(() => null);
-  if (!response.ok || !data)
-    throw new Error(
-      data?.error ||
-        (response.status === 413
-          ? '上传请求超过网关上限，请联系管理员检查素材上传配置'
-          : '素材操作失败，请刷新后重试'),
-    );
-  return data as T;
+type PdfProgress = (page: number, total: number) => void;
+export async function materialsRequest<T>(
+  path: string,
+  init: RequestInit = {},
+  onPage?: PdfProgress,
+): Promise<T> {
+  let response = await fetch(materialApi + path, init);
+  while (true) {
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data)
+      throw new Error(
+        data?.error ||
+          (response.status === 413
+            ? '上传请求超过网关上限，请联系管理员检查素材上传配置'
+            : '素材操作失败，请刷新后重试'),
+      );
+    if (response.status !== 202 || !data.processingId) return data as T;
+    if (data.page) onPage?.(data.page, data.total);
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    response = await fetch(materialApi + '/processing/' + data.processingId, {
+      signal: init.signal,
+      cache: 'no-store',
+    });
+  }
 }
 export const sendJson = <T>(path: string, method: string, body: unknown) =>
   materialsRequest<T>(path, {
@@ -91,6 +105,7 @@ export async function uploadMaterial(
   file: File,
   options: { site?: string; category?: string; id?: string; version?: number },
   key: string,
+  onPage?: PdfProgress,
 ) {
   checkMaterialSize(file.name, file.size);
   const q = new URLSearchParams({ name: file.name });
@@ -98,10 +113,18 @@ export async function uploadMaterial(
   if (options.category) q.set('category', options.category);
   if (options.version) q.set('version', String(options.version));
   const path = options.id ? '/' + options.id + '/versions' : '';
-  const headers = { 'Content-Type': 'application/octet-stream', 'Idempotency-Key': key };
+  const headers = {
+    'Content-Type': 'application/octet-stream',
+    'Idempotency-Key': key,
+    ...(/\.pdf$/iu.test(file.name) ? { Prefer: 'respond-async' } : {}),
+  };
   type Result = { id: string; documentId: string; warning: string; reused: boolean };
   if (file.size <= materialPartBytes)
-    return materialsRequest<Result>(path + '?' + q, { method: 'POST', headers, body: file });
+    return materialsRequest<Result>(
+      path + '?' + q,
+      { method: 'POST', headers, body: file },
+      onPage,
+    );
   const parts = path + '/parts?' + q;
   for (let start = 0; ; start += materialPartBytes) {
     const end = Math.min(file.size, start + materialPartBytes);
@@ -113,7 +136,7 @@ export async function uploadMaterial(
       },
       body: file.slice(start, end),
     };
-    if (end === file.size) return materialsRequest<Result>(parts, init);
+    if (end === file.size) return materialsRequest<Result>(parts, init, onPage);
     const { received } = await materialsRequest<{ received: number }>(parts, init);
     if (received !== end) throw new Error('素材分段未完整接收，请重新上传');
   }

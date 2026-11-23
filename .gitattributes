@@ -1,2 +1,3 @@
 # 历史文档保留在 Git，排除出云端发布包。
 docs/archive export-ignore
+tests/fixtures/*.pdf binary

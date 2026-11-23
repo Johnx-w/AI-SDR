@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { Worker } from 'node:worker_threads';
 import { materialType, types, validateFile, extractText } from './material-formats.mjs';
 import { platformJson, providerBaseUrl } from './acquisition-config.mjs';
 import { parseWorkbook, workbookType } from './product-workbooks.mjs';
@@ -101,9 +102,36 @@ function extracted(data, contentType) {
   }
 }
 
-export const parsesLocally = (type) => type !== types.pdf && !type.startsWith('image/');
+export const parsesLocally = (type) => !type.startsWith('image/');
 
-async function localExtraction(file) {
+function extractPdf(bytes, onPage) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('./material-pdf-worker.mjs', import.meta.url), {
+      workerData: bytes,
+      execArgv: [],
+    });
+    const timer = setTimeout(
+      () => {
+        reject(fail(422, 'PDF 识别时间过长，请分册提取。'));
+        void worker.terminate();
+      },
+      20 * 60 * 1000,
+    ).unref();
+    worker.on('message', (message) => {
+      if (message.page) onPage?.(message.page, message.total);
+      else if (message.error) reject(fail(422, message.error));
+      else resolve({ extraction: message.extraction });
+    });
+    worker.once('error', () => reject(fail(500, 'PDF 识别未完成，请重试。')));
+    worker.once('exit', () => {
+      clearTimeout(timer);
+      reject(fail(500, 'PDF 识别进程提前结束，请重试。'));
+    });
+  });
+}
+
+async function localExtraction(file, onPage) {
+  if (file.contentType === types.pdf) return extractPdf(file.bytes, onPage);
   if (file.contentType === workbookType) return parseWorkbook(file.bytes);
   const extraction = file.contentType.startsWith('video/')
     ? {
@@ -196,8 +224,8 @@ export class ProductDocuments {
       this.running.delete(key);
     }
   }
-  prepareReplacement(file) {
-    return this.runExtraction(file, () => localExtraction(file));
+  prepareReplacement(file, onPage) {
+    return this.runExtraction(file, () => localExtraction(file, onPage));
   }
   saveLocalExtraction(id, { extraction, rows }) {
     // Also used inside the transaction that switches the active version.
@@ -210,20 +238,25 @@ export class ProductDocuments {
         for (const row of rows) insert.run(id, ...row);
       }
       this.db
-        .prepare('UPDATE product_documents SET extraction=? WHERE id=? AND extraction IS NULL')
-        .run(JSON.stringify(extraction), id);
+        .prepare(
+          `UPDATE product_documents SET extraction=? WHERE id=? AND
+        (extraction IS NULL OR (?='local-pdf' AND json_array_length(extraction,'$.facts')=0))`,
+        )
+        .run(JSON.stringify(extraction), id, extraction.model);
       this.db.exec('RELEASE material_extraction');
     } catch (error) {
       this.db.exec('ROLLBACK TO material_extraction; RELEASE material_extraction');
       throw error;
     }
   }
-  async extract(productId, id, { env, fetchImpl = fetch }) {
+  async extract(productId, id, { env, fetchImpl = fetch, pdfText = false, onPage }) {
     const file = this.get(productId, id);
-    if (file.extraction) return this.list(productId).find((item) => item.id === id);
+    const localPdf = file.contentType === types.pdf && pdfText;
+    if (file.extraction && !(localPdf && !file.extraction.facts.length))
+      return this.list(productId).find((item) => item.id === id);
     return this.runExtraction(id, async () => {
-      if (parsesLocally(file.contentType)) {
-        this.saveLocalExtraction(id, await localExtraction(file));
+      if (localPdf || (file.contentType !== types.pdf && parsesLocally(file.contentType))) {
+        this.saveLocalExtraction(id, await localExtraction(file, onPage));
         return this.list(productId).find((item) => item.id === id);
       }
       const config = documentModelConfig(env);
