@@ -11,10 +11,11 @@ const input = {
   search_query: 'outdoor zip screens Florida',
   target_count: 1,
 };
-test('批量接口立即接收、持久查询、幂等返回、校验数量且活跃任务阻止连接修改', async () => {
+test('批量接口持久、幂等且活跃任务保护共享连接，允许独立资料识别配置', async () => {
   let release;
   const gate = new Promise((r) => (release = r));
   let calls = 0;
+  let closes = 0;
   const app = createApp({
     env,
     fetchImpl: withFeishuAuth(async () =>
@@ -27,7 +28,9 @@ test('批量接口立即接收、持久查询、幂等返回、校验数量且�
         return { candidates: [] };
       },
       decorateLeads: (data) => data,
-      close() {},
+      close() {
+        closes++;
+      },
     },
   });
   await new Promise((r) => app.listen(0, '127.0.0.1', r));
@@ -72,6 +75,36 @@ test('批量接口立即接收、持久查询、幂等返回、校验数量且�
         })
       ).status,
       409,
+    );
+    const connectionUrl = new URL('/api/v1/connections', root);
+    const update = (payload) =>
+      fetch(connectionUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    const saved = await update({
+      values: {
+        DOCUMENT_MODEL_BASE_URL: 'https://api.deepseek.com',
+        DOCUMENT_MODEL_MODEL: 'deepseek-flash',
+        DOCUMENT_MODEL_API_KEY: 'test-document-secret',
+      },
+    });
+    assert.equal(saved.status, 200, '单独保存资料识别配置应允许获客继续执行');
+    assert.equal(closes, 0, '资料识别配置不应重建获客服务');
+    const view = await (await fetch(connectionUrl)).json();
+    assert.equal(view.fields.find((f) => f.key === 'DOCUMENT_MODEL_MODEL').value, 'deepseek-flash');
+    assert.equal(view.fields.find((f) => f.key === 'DOCUMENT_MODEL_API_KEY').configured, true);
+    assert.ok(!JSON.stringify(view).includes('test-document-secret'));
+    assert.equal((await update({ values: {}, clear: ['DOCUMENT_MODEL_API_KEY'] })).status, 200);
+    for (const payload of [
+      { values: { DOCUMENT_MODEL_MODEL: 'new-model', DEEPSEEK_MODEL: 'new-model' } },
+      { values: { DOCUMENT_MODEL_MODEL: 'new-model' }, clear: ['DEEPSEEK_API_KEY'] },
+    ])
+      assert.equal((await update(payload)).status, 409, '混合修改其他配置仍需原有任务保护');
+    assert.equal(
+      (await update({ values: { DOCUMENT_MODEL_BASE_URL: 'http://unsafe.invalid' } })).status,
+      400,
     );
     const list = await (await fetch(root + '/jobs')).json();
     assert.equal(list.jobs[0].id, job.id);

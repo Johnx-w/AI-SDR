@@ -560,6 +560,16 @@ export function createApp({
           if (request.method === 'GET') return json(response, 200, connections.view());
           if (request.method === 'PUT') {
             const body = await readJson(request);
+            const keys = [
+              ...Object.keys(body?.values || {}),
+              ...(Array.isArray(body?.clear) ? body.clear : []),
+            ];
+            const documentOnly =
+              keys.length > 0 &&
+              keys.every((key) => /^DOCUMENT_MODEL_(BASE_URL|API_KEY|MODEL)$/.test(key));
+            // Document extraction reads these settings per request.
+            if (documentOnly && !productKnowledge?.documents.running.size)
+              return json(response, 200, connections.update(body));
             if (
               running ||
               business.active ||

@@ -200,6 +200,58 @@ test('资料模型独立配置、脱敏保存且不改变获客必填条件', ()
   );
 });
 
+test('独立保存资料识别配置仍等待当前提取完成，错误提交保留原配置', async () => {
+  let release, entered;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const app = createApp({
+    env,
+    fetchImpl: async () => {
+      entered();
+      await gate;
+      return Response.json(completed());
+    },
+  });
+  await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
+  const base = 'http://127.0.0.1:' + app.address().port;
+  const call = (path, method = 'GET', body) =>
+    fetch(base + path, {
+      method,
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'document-config-test' },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+  let pending;
+  try {
+    const { product: saved } = await (
+      await call('/api/v1/products/knowledge', 'POST', product)
+    ).json();
+    const path = '/api/v1/products/knowledge/' + saved.id + '/documents';
+    const { document } = await (await call(path, 'POST', png)).json();
+    pending = call(path + '/' + document.id + '/extract', 'POST');
+    await started;
+    const payload = { values: { DOCUMENT_MODEL_MODEL: 'next-vision' } };
+    assert.equal((await call('/api/v1/connections', 'PUT', payload)).status, 409);
+    release();
+    assert.equal((await pending).status, 200);
+    assert.equal((await call('/api/v1/connections', 'PUT', payload)).status, 200);
+    assert.equal(
+      (await call('/api/v1/connections', 'PUT', { values: {}, clear: ['DOCUMENT_MODEL_UNKNOWN'] }))
+        .status,
+      400,
+    );
+    const view = await (await call('/api/v1/connections')).json();
+    assert.equal(view.fields.find((f) => f.key === 'DOCUMENT_MODEL_MODEL').value, 'next-vision');
+  } finally {
+    release();
+    await pending;
+    await new Promise((resolve) => app.close(resolve));
+  }
+});
+
 test('API 支持 PDF 文件输入、下载和重试；跨站、错配产品及归档写入被拒绝', async () => {
   let modelCalls = 0;
   const app = createApp({
