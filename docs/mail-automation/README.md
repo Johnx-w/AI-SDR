@@ -1,6 +1,6 @@
 # 多邮箱销售邮件
 
-本地功能分支为 `codex/production-mail-automation`。2026-11-22 通过 GitHub API 核对，远端 main、production 的成功部署 7891868583 和开发起点均为 `736e160955076ea19846487b1e3785e207cd886e`。本地回退标签为 `mail-automation-production-baseline-20261122`。
+最新生产版本和在办工作见[当前进展与验收](status.md)。最初的功能分支 `codex/production-mail-automation` 从 2026-11-22 的生产提交 `736e160` 建立，对应本地回退标签 `mail-automation-production-baseline-20261122`。
 
 ## 本机实数工作区
 
