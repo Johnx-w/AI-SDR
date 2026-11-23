@@ -37,7 +37,8 @@ test('只有同源文档导航取得无缓存首屏；脚本边界、作用域�
   t.after(() => new Promise((resolve) => app.close(resolve)));
   const url = 'http://127.0.0.1:' + app.address().port;
   const headers = { 'Sec-Fetch-Site': 'same-origin', 'Sec-Fetch-Dest': 'document' };
-  const read = (extra) => fetch(url + '/inbox', { headers: { ...headers, ...extra } });
+  const read = (extra) =>
+    fetch(url + '/inbox?tab=campaigns', { headers: { ...headers, ...extra } });
   const res = await read({});
   assert.match(res.headers.get('cache-control'), /no-store/);
   const body = await res.text();

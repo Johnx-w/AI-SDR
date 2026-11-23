@@ -3,15 +3,17 @@ export function acquisitionOutreachSources(jobs, plans) {
   const schedules = new Map(plans.list().map((plan) => [plan.id, plan]));
   return jobs.outreachJobs().map((job) => {
     const plan = job.scheduleId ? schedules.get(job.scheduleId) : null;
-    const status = job.autoFirstTouchCancelled
+    const cancelled =
+      job.autoFirstTouchCancelled || (job.scheduleId && (!plan || plan.status === 'closed'));
+    const paused =
+      job.autoFirstTouchPaused ||
+      (plan && (plan.status === 'paused' || !plan.input.auto_first_touch));
+    const superseded = plan?.lastJobId && plan.lastJobId !== job.id;
+    const status = cancelled
       ? 'cancelled'
-      : job.scheduleId
-        ? !plan || plan.status === 'closed' || (plan.lastJobId && plan.lastJobId !== job.id)
-          ? 'cancelled'
-          : plan.status === 'paused' || !plan.input.auto_first_touch
-            ? 'paused'
-            : 'active'
-        : job.autoFirstTouchPaused
+      : superseded
+        ? 'completed'
+        : paused
           ? 'paused'
           : 'active';
     return {
@@ -20,7 +22,8 @@ export function acquisitionOutreachSources(jobs, plans) {
       scheduleId: job.scheduleId,
       scope: job.scope,
       name: `${plan?.name || '立即获客'} · ${new Date(job.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })} · 自动首发`,
-      status: job.autoFirstTouchPaused && status === 'active' ? 'paused' : status,
+      status,
+      followUpsAllowed: !cancelled && !paused,
       roundId: job.id,
       customerIds: [
         ...new Set(

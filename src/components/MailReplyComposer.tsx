@@ -1,15 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Check,
-  FileText,
-  LoaderCircle,
-  LockKeyhole,
-  Paperclip,
-  Reply,
-  Send,
-  Trash2,
-  X,
-} from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { LoaderCircle, Paperclip, Send, Sparkles, Trash2, Type, X } from 'lucide-react';
 import type {
   MailConversationDetail,
   MailDraftContent,
@@ -20,6 +11,7 @@ import type {
 import { mailConversationsApi } from '../services/mailConversations';
 import { plainTextHtml, replyRecipient, validateMailAttachments } from '../services/mailHtml';
 import { MailRichEditor } from './MailRichEditor';
+import { ReplySources } from './ReplyPreview';
 
 const contentKey = (draft: MailDraftContent) => JSON.stringify(draft);
 const textError = (error: unknown) =>
@@ -84,11 +76,15 @@ export function MailReplyResult({ reply }: { reply: MailReplyRecord }) {
 
 export function MailReplyComposer({
   detail,
+  expanded = false,
+  actionHost,
   targetMessageId,
   replyRequest,
   onCompleted,
 }: {
   detail: MailConversationDetail;
+  expanded?: boolean;
+  actionHost?: HTMLElement | null;
   targetMessageId?: string | null;
   replyRequest?: number;
   onCompleted: (detail: MailConversationDetail) => void;
@@ -96,29 +92,40 @@ export function MailReplyComposer({
   const { conversation, replyContext } = detail;
   const latestInbound = [...detail.messages].reverse().find((item) => item.direction === 'inbound');
   const initialTarget = replyContext?.replyToMessageId || latestInbound?.id || '';
+  const signature = useRef({
+    text: replyContext?.signature || '',
+    html: replyContext?.signatureHtml || plainTextHtml(replyContext?.signature || ''),
+  });
+  const appendSignature = useRef(true);
+  const [formatting, setFormatting] = useState(false);
+  const [editorReset, setEditorReset] = useState(0);
   const seed = useCallback(
     (target = initialTarget): MailDraftContent => ({
       replyToMessageId: target,
-      bodyHtml: `<p><br></p>${replyContext?.signature ? `<p><br></p><div>${replyContext.signatureHtml || plainTextHtml(replyContext.signature)}</div>` : ''}`,
-      bodyText: replyContext?.signature ? `\n\n${replyContext.signature}` : '',
+      bodyHtml: '',
+      bodyText: '',
       attachments: [],
     }),
-    [initialTarget, replyContext?.signature, replyContext?.signatureHtml],
+    [initialTarget],
   );
-  const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [draftRetry, setDraftRetry] = useState(0);
+  const [readFailed, setReadFailed] = useState(false);
   const [content, setContent] = useState<MailDraftContent>(() => seed());
   const [editorHtml, setEditorHtml] = useState(content.bodyHtml);
   const [error, setError] = useState('');
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'changed' | 'error'>('saved');
   const [sending, setSending] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const generationLock = useRef(false);
+  const [provenance, setProvenance] = useState<MailReplyDraft['provenance']>();
   const [readingFiles, setReadingFiles] = useState(false);
   const [result, setResult] = useState<MailReplyRecord | null>(null);
   const [discarding, setDiscarding] = useState(false);
   const mounted = useRef(true);
   const contentRef = useRef(content);
   const revision = useRef<number | undefined>(undefined);
-  const savedKey = useRef('');
+  const savedKey = useRef(contentKey(content));
   const saving = useRef<Promise<MailReplyDraft | null>>(Promise.resolve(null));
   const attempt = useRef<{ key: string; fingerprint: string } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -126,9 +133,14 @@ export function MailReplyComposer({
   const saveOnLeave = useRef(false);
   contentRef.current = content;
   const uncertain = result?.status === 'unknown' || result?.status === 'sending';
-  saveOnLeave.current = open && !loading && !uncertain && !sending && !discarding;
+  saveOnLeave.current =
+    !loading && !readFailed && !uncertain && !sending && !discarding && !generating;
   const targetMessage = detail.messages.find((item) => item.id === content.replyToMessageId);
   const recipient = replyContext ? replyRecipient(targetMessage, replyContext) : '';
+  const recipientName =
+    recipient && targetMessage?.from.toLowerCase() === recipient.toLowerCase()
+      ? targetMessage.fromName
+      : undefined;
   const canReply = !!replyContext?.canReply && !!content.replyToMessageId;
   const canSend = canReply && replyContext?.canSend !== false;
 
@@ -138,30 +150,37 @@ export function MailReplyComposer({
       mounted.current = false;
     };
   }, []);
+  const adoptDraft = useCallback((draft: MailReplyDraft) => {
+    const value = {
+      replyToMessageId: draft.replyToMessageId,
+      bodyHtml: draft.bodyHtml,
+      bodyText: draft.bodyText,
+      attachments: draft.attachments || [],
+    };
+    appendSignature.current = false;
+    revision.current = draft.revision;
+    savedKey.current = contentKey(value);
+    contentRef.current = value;
+    setContent(value);
+    setEditorHtml(value.bodyHtml);
+    setEditorReset((n) => n + 1);
+    setProvenance(draft.provenance);
+    setSaveState('saved');
+  }, []);
+
   useEffect(() => {
     const controller = new AbortController();
+    setLoading(true);
+    setReadFailed(false);
     void mailConversationsApi
       .draft(conversation.id, controller.signal)
       .then(({ draft }) => {
         if (controller.signal.aborted) return;
-        if (draft) {
-          const { revision: version, ...next } = draft;
-          const value = {
-            replyToMessageId: next.replyToMessageId,
-            bodyHtml: next.bodyHtml,
-            bodyText: next.bodyText,
-            attachments: next.attachments || [],
-          };
-          revision.current = version;
-          savedKey.current = contentKey(value);
-          contentRef.current = value;
-          setContent(value);
-          setEditorHtml(value.bodyHtml);
-          setOpen(true);
-        }
+        if (draft) adoptDraft(draft);
       })
       .catch((reason: unknown) => {
         if (!controller.signal.aborted) {
+          setReadFailed(true);
           setError(`草稿读取失败：${textError(reason)}`);
           setSaveState('error');
         }
@@ -170,7 +189,7 @@ export function MailReplyComposer({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [conversation.id]);
+  }, [conversation.id, draftRetry, adoptDraft]);
 
   const persist = useCallback(
     (value: MailDraftContent) => {
@@ -185,8 +204,10 @@ export function MailReplyComposer({
           });
           revision.current = draft.revision;
           savedKey.current = contentKey(value);
-          if (mounted.current)
+          if (mounted.current) {
+            setProvenance(draft.provenance);
             setSaveState(contentKey(contentRef.current) === savedKey.current ? 'saved' : 'changed');
+          }
           return draft;
         });
       saving.current = operation;
@@ -195,9 +216,9 @@ export function MailReplyComposer({
     [conversation.id],
   );
   useEffect(() => {
-    if (loading || !open || sending || discarding || uncertain) return;
+    if (loading || readFailed || !canReply || sending || discarding || uncertain || generating)
+      return;
     if (contentKey(content) === savedKey.current) return;
-    setSaveState('changed');
     const timeout = window.setTimeout(() => {
       void persist(content).catch((reason: unknown) => {
         if (mounted.current) {
@@ -207,7 +228,7 @@ export function MailReplyComposer({
       });
     }, 900);
     return () => window.clearTimeout(timeout);
-  }, [content, loading, open, sending, discarding, uncertain, persist]);
+  }, [content, loading, readFailed, canReply, sending, discarding, uncertain, generating, persist]);
   // Finish queued changes when switching conversations; this only saves a draft.
   useEffect(
     () => () => {
@@ -217,8 +238,7 @@ export function MailReplyComposer({
     [persist],
   );
   useEffect(() => {
-    if (!targetMessageId || loading) return;
-    setOpen(true);
+    if (!targetMessageId || loading || generationLock.current) return;
     setContent((current) => ({ ...current, replyToMessageId: targetMessageId }));
     const frame = window.requestAnimationFrame(() =>
       panel.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }),
@@ -245,6 +265,7 @@ export function MailReplyComposer({
     }
   }
   async function discard() {
+    if (generationLock.current) return;
     setDiscarding(true);
     setError('');
     try {
@@ -253,11 +274,13 @@ export function MailReplyComposer({
       if (!mounted.current) return;
       const value = seed();
       revision.current = undefined;
-      savedKey.current = '';
+      savedKey.current = contentKey(value);
       contentRef.current = value;
       setContent(value);
       setEditorHtml(value.bodyHtml);
-      setOpen(false);
+      setEditorReset((n) => n + 1);
+      appendSignature.current = true;
+      setProvenance(undefined);
       setSaveState('saved');
     } catch (reason) {
       if (mounted.current) setError(textError(reason));
@@ -266,8 +289,9 @@ export function MailReplyComposer({
     }
   }
   async function send() {
-    if (sending || !canSend || uncertain || readingFiles) return;
-    if (!content.bodyText.trim()) {
+    if (sending || !canSend || readFailed || uncertain || readingFiles || generationLock.current)
+      return;
+    if (!content.bodyText.trim() || content.bodyText.trim() === replyContext?.signature?.trim()) {
       setError('请填写回复内容。');
       return;
     }
@@ -305,13 +329,15 @@ export function MailReplyComposer({
           .catch(() => {});
       }
       if (response.reply.status === 'accepted') {
-        savedKey.current = '';
         revision.current = undefined;
         const value = seed();
+        savedKey.current = contentKey(value);
         contentRef.current = value;
         setContent(value);
         setEditorHtml(value.bodyHtml);
-        setOpen(false);
+        setEditorReset((n) => n + 1);
+        appendSignature.current = true;
+        setProvenance(undefined);
         attempt.current = null;
       } else if (response.reply.status === 'failed') attempt.current = null;
     } catch (reason) {
@@ -335,87 +361,161 @@ export function MailReplyComposer({
   }
   const pendingReply = detail.replies?.find((item) => ['unknown', 'sending'].includes(item.status));
   const latestReply = detail.replies?.[0];
+  const hasDraft = !!(
+    content.bodyText.trim() ||
+    content.attachments.length ||
+    /<img\b/i.test(content.bodyHtml)
+  );
+  const latestCustomerMail = [...detail.messages]
+    .reverse()
+    .find(
+      (message) =>
+        message.direction === 'inbound' &&
+        message.source === 'imap' &&
+        message.classification === 'normal',
+    );
+  const draftState =
+    saveState === 'saved' && contentKey(content) !== savedKey.current ? 'changed' : saveState;
+  const sourceEligible =
+    !!targetMessage &&
+    targetMessage.id === latestCustomerMail?.id &&
+    !targetMessage.bodyUnavailable &&
+    !!targetMessage.bodyText.trim();
+  let generateReason = '';
+  if (!sourceEligible || !canReply || detail.reception?.stopped)
+    generateReason = '请选择可回复的最新客户来信';
+  else if (hasDraft) generateReason = '已有草稿，正文及附件会保留';
+  else if (!replyContext?.draftModel) generateReason = '请先在 API 连接中配置起草模型';
+  const busy =
+    loading || readFailed || sending || discarding || readingFiles || !!uncertain || !!pendingReply;
+  async function generateDraft() {
+    if (generateReason || busy || generationLock.current) return;
+    generationLock.current = true;
+    setGenerating(true);
+    setError('');
+    try {
+      await saving.current.catch(() => null);
+      if (!mounted.current) return;
+      const { draft } = await mailConversationsApi.generateDraft(
+        conversation.id,
+        contentRef.current.replyToMessageId,
+        revision.current || 0,
+      );
+      if (mounted.current) adoptDraft(draft);
+    } catch (reason) {
+      if (!mounted.current) return;
+      const status = (reason as { status?: number })?.status;
+      if (status === 409 || !status) {
+        const current = await mailConversationsApi.draft(conversation.id).catch(() => null);
+        if (mounted.current && current?.draft) adoptDraft(current.draft);
+      }
+      if (mounted.current) setError(textError(reason));
+    } finally {
+      generationLock.current = false;
+      if (mounted.current) setGenerating(false);
+    }
+  }
   return (
-    <section ref={panel} className="mail-reply-panel" aria-label="回复邮件">
-      {result && <MailReplyResult reply={result} />}
-      {!result && latestReply && <MailReplyResult reply={latestReply} />}
-      {!open && error && (
-        <div className="mail-reply-error" role="alert">
-          {error}
-        </div>
-      )}
-      {loading ? (
-        <div className="mail-reply-loading">
-          <LoaderCircle size={15} className="outreach-spin" />
-          读取回复草稿…
-        </div>
-      ) : !open ? (
-        <div className="mail-reply-start">
+    <section
+      ref={panel}
+      className="mail-reply-panel"
+      aria-label="回复邮件"
+      data-empty={
+        !expanded &&
+        canReply &&
+        !hasDraft &&
+        revision.current === undefined &&
+        !provenance &&
+        draftState === 'saved' &&
+        !generating &&
+        !sending &&
+        !formatting &&
+        !loading &&
+        !error
+          ? true
+          : undefined
+      }
+    >
+      {actionHost &&
+        createPortal(
           <button
             type="button"
-            className="btn secondary"
-            disabled={!canReply || !!pendingReply}
+            className="inbox-draft-assist"
+            title={generateReason || '根据本邮箱已选资料起草回复，供人工审核'}
+            disabled={!!generateReason || busy || generating}
+            aria-busy={generating}
+            onClick={() => void generateDraft()}
+          >
+            {generating ? (
+              <LoaderCircle size={14} className="outreach-spin" />
+            ) : (
+              <Sparkles size={14} />
+            )}
+            <span>AI起草</span>
+          </button>,
+          actionHost,
+        )}
+      {result && <MailReplyResult reply={result} />}
+      {!result && latestReply && <MailReplyResult reply={latestReply} />}
+      {loading ? (
+        <p className="mail-reply-loading">正在读取草稿…</p>
+      ) : readFailed ? (
+        <p className="mail-reply-error" role="alert">
+          {error}{' '}
+          <button
+            type="button"
             onClick={() => {
-              setOpen(true);
               setError('');
+              setDraftRetry((n) => n + 1);
             }}
           >
-            <Reply size={16} />
-            回复
+            重试读取草稿
           </button>
-          <span>
-            {replyContext?.reason ||
-              (latestInbound
-                ? `回复 ${replyContext?.to || latestInbound.from}`
-                : '收到来信后可在这里回复')}
-          </span>
-        </div>
+        </p>
       ) : (
         <>
-          <header className="mail-reply-heading">
-            <strong>
-              <Reply size={16} />
-              回复邮件
-            </strong>
-            <span className={`mail-draft-state ${saveState}`}>
-              <FileText size={12} />
+          <div className="inbox-draft-meta">
+            <span
+              title={`发件人 ${replyContext?.from || conversation.account} · 收件人 ${recipient || '待核实'}`}
+            >
+              收件人 {recipientName ? `${recipientName} <${recipient}>` : recipient || '待核实'}
+            </span>
+            {provenance && (
+              <b role="status">
+                {provenance.generator === 'model' ? 'AI草稿 · 待审核' : '待审核回复'}
+              </b>
+            )}
+            <span className={'mail-draft-state ' + draftState}>
               {sending
-                ? '正在发送'
-                : saveState === 'saving'
+                ? '正在发送…'
+                : draftState === 'saving'
                   ? '正在保存草稿…'
-                  : saveState === 'changed'
+                  : draftState === 'changed'
                     ? '草稿待保存'
                     : saveState === 'error'
                       ? '草稿尚未保存'
-                      : '草稿已保存'}
+                      : revision.current !== undefined
+                        ? '草稿已保存'
+                        : ''}
             </span>
-          </header>
-          <dl className="mail-reply-addresses">
-            <div>
-              <dt>发件人</dt>
-              <dd>
-                <LockKeyhole size={12} />
-                {replyContext?.from || conversation.account}
-              </dd>
-            </div>
-            <div>
-              <dt>收件人</dt>
-              <dd>{recipient || '暂不可确定'}</dd>
-            </div>
-            <div>
-              <dt>主题</dt>
-              <dd>
-                {/^re:/i.test(targetMessage?.subject || conversation.subject)
-                  ? targetMessage?.subject || conversation.subject
-                  : `Re: ${targetMessage?.subject || conversation.subject}`}
-              </dd>
-            </div>
-          </dl>
+          </div>
+          {provenance && <ReplySources sources={provenance.sources} reason={provenance.reason} />}
           <MailRichEditor
+            key={editorReset}
+            formatting={formatting}
             initialHtml={editorHtml}
-            disabled={sending || !!uncertain || !!pendingReply}
+            disabled={!canReply || sending || generating || !!uncertain || !!pendingReply}
             onChange={(value) => {
-              setContent((current) => ({ ...current, ...value }));
+              if (generationLock.current) return;
+              const sig =
+                appendSignature.current && value.bodyText.trim() && signature.current.text
+                  ? signature.current
+                  : null;
+              setContent((current) => ({
+                ...current,
+                bodyHtml: sig ? value.bodyHtml + '<br><br>' + sig.html : value.bodyHtml,
+                bodyText: sig ? value.bodyText.trimEnd() + '\n\n' + sig.text : value.bodyText,
+              }));
               setError('');
             }}
           />
@@ -465,17 +565,32 @@ export function MailReplyComposer({
               )}
             </div>
           )}
-          {!canSend && (
-            <p className="mail-reply-error">{replyContext?.reason || '当前会话暂不可回复。'}</p>
-          )}
           <footer className="mail-reply-actions">
+            {!canSend && (
+              <small className="inbox-send-status">
+                {replyContext?.reason || '当前会话暂不可回复。'}
+              </small>
+            )}
+            <button
+              type="button"
+              className="inbox-icon"
+              aria-label="正文格式"
+              title="正文格式"
+              aria-pressed={formatting}
+              onClick={() => setFormatting(!formatting)}
+            >
+              <Type size={15} />
+            </button>
             <button
               type="button"
               className="btn primary"
               disabled={
                 sending ||
+                generating ||
                 loading ||
                 !canSend ||
+                !content.bodyText.trim() ||
+                content.bodyText.trim() === replyContext?.signature?.trim() ||
                 !!uncertain ||
                 !!pendingReply ||
                 readingFiles ||
@@ -484,12 +599,15 @@ export function MailReplyComposer({
               onClick={() => void send()}
             >
               {sending ? <LoaderCircle size={15} className="outreach-spin" /> : <Send size={15} />}
-              {sending ? '正在发送…' : '发送回复'}
+              {sending ? '正在发送…' : provenance ? '批准发送' : '发送回复'}
             </button>
             <button
               type="button"
               className="btn subtle"
-              disabled={sending || readingFiles || !!uncertain || !!pendingReply}
+              disabled={
+                !canReply || sending || generating || readingFiles || !!uncertain || !!pendingReply
+              }
+              title="添加附件（最多 10 个，共 10 MB）"
               onClick={() => fileInput.current?.click()}
             >
               <Paperclip size={15} />
@@ -507,22 +625,24 @@ export function MailReplyComposer({
                 void addFiles(files);
               }}
             />
-            <span className="mail-attachment-limit">最多 10 个，共 10 MB</span>
             <button
               type="button"
               className="icon-button mail-discard-draft"
               title="丢弃草稿"
               aria-label="丢弃草稿"
-              disabled={sending || discarding || !!uncertain || !!pendingReply}
+              disabled={
+                (!revision.current && contentKey(content) === savedKey.current) ||
+                sending ||
+                discarding ||
+                generating ||
+                !!uncertain ||
+                !!pendingReply
+              }
               onClick={() => void discard()}
             >
               <Trash2 size={15} />
             </button>
           </footer>
-          <p className="mail-reply-footer-note">
-            <Check size={12} />
-            使用当前会话邮箱和你的署名发送，仅回复此发件人。
-          </p>
         </>
       )}
       {(uncertain || pendingReply) && (

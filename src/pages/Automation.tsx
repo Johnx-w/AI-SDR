@@ -521,7 +521,7 @@ export function Automation() {
               : '仅收录客户和研究资料'}
           </small>
           {input.auto_first_touch && input.auto_follow_up && (
-            <small>首封未回复：第 3 天、第 7 天各自动跟进一次</small>
+            <small>首封未回复时按沟通中心的跟进序列执行</small>
           )}
         </p>
       </div>
@@ -1062,7 +1062,12 @@ export function Automation() {
                         type="radio"
                         name="acquisition-followup"
                         checked={input.auto_first_touch === true}
-                        onChange={() => patch({ auto_first_touch: true })}
+                        onChange={() =>
+                          patch({
+                            auto_first_touch: true,
+                            auto_follow_up: input.auto_follow_up ?? true,
+                          })
+                        }
                       />
                       <span>
                         <strong>获客后自动首发</strong>
@@ -1079,7 +1084,7 @@ export function Automation() {
                         checked={input.auto_follow_up === true}
                         onChange={(event) => patch({ auto_follow_up: event.target.checked })}
                       />
-                      首封未回复自动跟进（第3天、第7天，定时计划用于后续轮次）
+                      首封未回复时按跟进序列执行（定时计划用于后续轮次）
                     </label>
                   )}
                   {input.auto_first_touch && (

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { BatchJobs, validateAutoFirstTouch } from '../server/batch-jobs.mjs';
 import { AcquisitionSchedules } from '../server/acquisition-schedules.mjs';
 import { acquisitionOutreachSources } from '../server/acquisition-outreach.mjs';
+import { saveSequencePolicy } from '../server/outreach-sequence-policy.mjs';
 import { OutreachService } from '../server/outreach-service.mjs';
 import { OutreachMailboxes } from '../server/outreach-mailboxes.mjs';
 import { withApp } from './helpers/http.mjs';
@@ -109,7 +110,8 @@ function harness(path = ':memory:') {
           boxes.find((box) => box.id === value.id),
           value,
         ),
-      send: async (id, mail) => {
+      send: async (id, mail, options) => {
+        options?.beforeSend?.();
         state.sent.push({ id, ...mail });
         if (state.error) throw state.error;
         return { accepted: [mail.to], messageId: mail.messageId };
@@ -305,6 +307,80 @@ test('A07 已提交SMTP后关闭获客计划，保留首封结果并停止下一
   assert.equal(h.service.campaigns()[0].status, 'cancelled');
   assert.equal(h.service.deliveries(undefined, ['queued', 'sending', 'unknown']).length, 0);
 });
+
+test('首封在 SMTP 提交边界冻结跟进策略，准备连接及等待应答时发布的版本分别生效', async (t) => {
+  const h = await smtpHarness(t);
+  const job = h.create({ auto_follow_up: true });
+  await h.capture(job.id, buyer('policy-boundary'));
+  h.state.beforeTransport = () => {
+    h.state.beforeTransport = null;
+    saveSequencePolicy(h.service, {
+      revision: 1,
+      name: '提交前生效',
+      steps: [{ day: 2, instruction: '询问应用场景' }],
+    });
+  };
+  h.state.afterSubmit = () => {
+    h.state.afterSubmit = null;
+    saveSequencePolicy(h.service, { revision: 2, name: '下一封首信生效', steps: [] });
+  };
+  await h.pump();
+  const [first] = h.service.deliveries(undefined, ['accepted']);
+  assert.equal(h.state.sent.length, 1);
+  assert.equal(first.sequencePolicyRevision, 2);
+  assert.equal(h.service.followUps.policy().revision, 3);
+  assert.deepEqual(
+    h.service.followUps.all().map(({ day, policyRevision }) => ({ day, policyRevision })),
+    [{ day: 2, policyRevision: 2 }],
+  );
+});
+
+for (const direction of ['inbound', 'outbound']) {
+  const action = direction === 'inbound' ? '客户回信' : '业务员手动回信';
+  test(`首封已交 SMTP、成功应答前收到同线程${action}，到期也不会自动追信`, async (t) => {
+    const h = await smtpHarness(t);
+    const job = h.create({ auto_follow_up: true });
+    await h.capture(job.id, buyer('acknowledgement-race'));
+    h.service.generator.generateFollowUp = async () => 'Would you consider this model?';
+    h.state.afterSubmit = () => {
+      h.state.afterSubmit = null;
+      const [mail] = h.state.sent;
+      const mailbox = h.mailboxes.get('box');
+      h.state.now += 5000;
+      const at = new Date(h.state.now).toISOString();
+      h.service.conversations.putMessage(mailbox, {
+        identity: 'earlier-than-acknowledgement',
+        messageId: '<reply-before-acknowledgement@example.org>',
+        inReplyTo: mail.messageId,
+        references: [mail.messageId],
+        direction,
+        from: direction === 'inbound' ? mail.to : mailbox.email,
+        to: direction === 'inbound' ? mailbox.email : mail.to,
+        subject: 'Re: ' + mail.subject,
+        bodyText:
+          direction === 'inbound'
+            ? 'Please send the specifications.'
+            : 'I will send the specifications.',
+        classification: 'normal',
+        source: 'imap',
+        deliveryStatus: direction === 'inbound' ? 'received' : 'sent',
+        occurredAt: at,
+        receivedAt: at,
+      });
+      h.state.now += 5000;
+    };
+    await h.pump();
+    const [first] = h.service.deliveries(undefined, ['accepted']);
+    assert.equal(h.state.sent.length, 1);
+    assert.equal(h.state.now, h.state.sent[0].submittedAt + 10000);
+    for (const day of [3, 7]) {
+      h.state.now = Date.parse(first.sentAt) + day * 86400000;
+      await h.pump(0);
+      assert.equal(h.state.sent.length, 1);
+    }
+    assert.equal(h.service.followUps.pending().length, 0);
+  });
+}
 
 test('A08 两个获客任务共享邮箱每日2封和30秒间隔，次日继续剩余客户', async (t) => {
   const h = await smtpHarness(t);
@@ -928,10 +1004,47 @@ test('新轮次启动时停止旧轮次待发首封，保留已发送历史', as
     h.service.syncAcquisition();
     const old = h.service.campaign(`acquisition-${first.id}`);
     const current = h.service.campaign(`acquisition-${second.id}`);
-    assert.equal(old.status, 'cancelled');
+    assert.equal(old.status, 'completed');
     assert.equal(old.acquisitionSource.roundId, first.id);
     assert.equal(current.status, 'active');
     assert.equal(h.service.deliveries(undefined, ['accepted']).length, 1);
+  } finally {
+    await h.close();
+  }
+});
+
+test('定时获客自然换轮仍按原首封的自定义日期同线程跟进，定时计划暂停时暂缓', async () => {
+  const h = harness();
+  try {
+    const plan = h.plan();
+    h.plans.save({ ...h.plans.get(plan.id), input: { ...input, auto_follow_up: true } });
+    const rule = saveSequencePolicy(h.service, {
+      ...h.service.followUps.policy(),
+      steps: [{ day: 2, instruction: '确认采购需求' }],
+    });
+    const first = h.create({}, plan.id);
+    await h.capture(first.id, buyer('retained'));
+    h.options.mailboxes.readMailbox = async () => ({ folders: [], hasMore: false });
+    h.service.generator.generateFollowUp = async ({ instruction }) => {
+      assert.equal(instruction, rule.steps[0].instruction);
+      return 'Would you consider this model?';
+    };
+    await h.pump();
+    const sent = h.service.deliveries(undefined, ['accepted'])[0];
+    assert.ok(sent);
+    h.jobs.finish(h.jobs.get(first.id), 'target_reached');
+    h.create({}, plan.id);
+    h.service.syncAcquisition();
+    h.plans.control(plan.id, 'pause');
+    h.state.now = Date.parse(sent.sentAt) + 2 * 86400000;
+    await h.pump(0);
+    assert.equal(h.state.sent.length, 1);
+    assert.equal(h.service.followUps.pending().length, 1);
+    h.plans.control(plan.id, 'resume');
+    await h.pump(60);
+    assert.equal(h.state.sent.length, 2, JSON.stringify(h.service.followUps.all()));
+    assert.equal(h.state.sent[1].inReplyTo, sent.messageId);
+    assert.equal(h.service.followUps.all()[0].policyRevision, rule.revision);
   } finally {
     await h.close();
   }

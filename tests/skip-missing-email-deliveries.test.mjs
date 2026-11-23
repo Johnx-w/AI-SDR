@@ -104,7 +104,7 @@ test('一次性整理只改无邮箱未提交空记录：默认只读，备份�
     });
     try {
       assert.equal(reopened.delivery('eligible').status, 'skipped');
-      assert.equal(reopened.listDeliveries({ group: 'skipped' }).total, 1);
+      assert.equal(reopened.deliveryCounts('plan').stats.skipped, 1);
       assert.equal(
         reopened.db.prepare('SELECT count(*) AS n FROM outreach_reservations').get().n,
         1,

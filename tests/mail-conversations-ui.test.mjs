@@ -19,8 +19,11 @@ const loadModule = createModuleLoader((specifier) =>
 const { mailConversationsApi } = loadModule(
   new URL('../src/services/mailConversations.ts', import.meta.url),
 );
-const { MailConversations, MailConversationTimeline, MailSyncSummary } = loadModule(
-  new URL('../src/components/MailConversations.tsx', import.meta.url),
+const { SalesInbox, MailSyncSummary } = loadModule(
+  new URL('../src/components/SalesInbox.tsx', import.meta.url),
+);
+const { MailConversationTimeline } = loadModule(
+  new URL('../src/components/InboxThread.tsx', import.meta.url),
 );
 const {
   mailFramePolicy,
@@ -62,7 +65,10 @@ test('mail lookup encodes account and search filters while writes are limited to
       customerId: 'customer/a b',
       q: '  samples & quotes  ',
       unread: true,
+      hasReply: true,
       inboundOnly: true,
+      page: 3,
+      pageSize: 25,
     },
     controller.signal,
   );
@@ -72,7 +78,10 @@ test('mail lookup encodes account and search filters while writes are limited to
   assert.equal(url.searchParams.get('customerId'), 'customer/a b');
   assert.equal(url.searchParams.get('q'), 'samples & quotes');
   assert.equal(url.searchParams.get('unread'), '1');
+  assert.equal(url.searchParams.get('hasReply'), '1');
   assert.equal(url.searchParams.get('inboundOnly'), '1');
+  assert.equal(url.searchParams.get('page'), '3');
+  assert.equal(url.searchParams.get('pageSize'), '25');
   assert.equal(requests[0].init.signal, controller.signal);
   assert.equal(requests[0].init.method, undefined);
   await mailConversationsApi.detail('thread/a b', controller.signal);
@@ -101,6 +110,7 @@ test('mail timeline preserves original participants and plain text while disting
       {
         id: 'incoming',
         direction: 'inbound',
+        fromName: 'Alice Buyer',
         from: 'buyer@customer.example',
         to: 'sales@our.example',
         subject: 'Product enquiry',
@@ -122,6 +132,7 @@ test('mail timeline preserves original participants and plain text while disting
       },
     ],
   });
+  assert.match(html, /Alice Buyer/);
   assert.match(html, /已收到/);
   assert.match(html, /服务商已接受/);
   assert.match(html, /提交结果不代表对方已收到/);
@@ -193,7 +204,7 @@ test('mail sync failures remain visible per account and describe incomplete fold
 
 test('mail conversation entry shows the requested account, local-cache scope and read-only empty loading layout', () => {
   requests.length = 0;
-  const html = render(MailConversations, {
+  const html = render(SalesInbox, {
     mailboxes: [
       { id: 'mailbox-1', email: 'sales@our.example', configured: true },
       { id: 'mailbox-2', email: 'support@our.example', configured: true },
@@ -202,10 +213,15 @@ test('mail conversation entry shows the requested account, local-cache scope and
     onMailboxChange() {},
   });
   assert.match(html, /<option value="mailbox-2" selected="">support@our\.example<\/option>/);
-  assert.match(html, /首次同步读取最近 30 天的收件箱与可识别的已发件箱，之后继续增量读取/);
-  assert.match(html, /aria-label="刷新本地邮件缓存"/);
-  assert.match(html, /<button[^>]*>[\s\S]*?同步邮件<\/button>/);
-  assert.match(html, /仅看未读/);
+  assert.match(html, /aria-label="会话筛选"/);
+  assert.match(html, />全部<\/button>/);
+  assert.match(html, />未读<\/button>/);
+  assert.match(html, />有回复<\/button>/);
+  assert.match(html, /aria-label="其他处理状态"/);
+  assert.match(html, /aria-label="同步邮件"/);
+  assert.doesNotMatch(html, /会话筛选与同步|刷新本地邮件缓存|>刷新列表<|>待审<\/button>/);
+  assert.match(html, /稍后/);
+  assert.match(html, /已完成/);
   assert.match(html, /正在读取邮件会话/);
   assert.match(html, /选择一段邮件会话/);
   assert.doesNotMatch(html, /<textarea|审核并发送|回复邮件/);
@@ -226,11 +242,10 @@ test('message display offers original layout and plain text without placing unsa
   assert.match(html, /原邮件/);
   assert.match(html, /纯文本/);
   assert.match(html, /Plain text alternative/);
+  assert.doesNotMatch(html, /加载图片|这封邮件包含外链图片/);
   assert.doesNotMatch(html, /<script|onerror=|src="https:\/\/track\.example/);
-  assert.match(mailFramePolicy(false), /script-src 'none'/);
-  assert.match(mailFramePolicy(false), /img-src data:;/);
-  assert.doesNotMatch(mailFramePolicy(false), /https:/);
-  assert.match(mailFramePolicy(true), /img-src data: https: http:/);
+  assert.match(mailFramePolicy(), /script-src 'none'/);
+  assert.match(mailFramePolicy(), /img-src data: https: http:/);
 });
 
 test('CID image resolution permits raster data only and links reject script or document data navigation', () => {
@@ -293,15 +308,22 @@ test('draft operations remain separate from explicit reply sending and preserve 
   assert.equal(requests[2].init.method, 'DELETE');
   assert.deepEqual(JSON.parse(requests[2].init.body), { revision: 4 });
   assert.doesNotMatch(requests.map((request) => request.path).join(' '), /\/reply\b/);
+  await mailConversationsApi.generateDraft('thread/a', 'message-1', 0);
+  assert.equal(requests[3].path, '/conversations/thread%2Fa/generate-draft');
+  assert.equal(requests[3].init.method, 'POST');
+  assert.deepEqual(JSON.parse(requests[3].init.body), {
+    sourceId: 'message-1',
+    expectedRevision: 0,
+  });
   await mailConversationsApi.reply('thread/a', {
     ...content,
     draftRevision: 4,
     idempotencyKey: 'exact-operation-key',
   });
-  assert.equal(requests[3].path, '/conversations/thread%2Fa/reply');
-  assert.equal(requests[3].init.method, 'POST');
-  assert.equal(JSON.parse(requests[3].init.body).draftRevision, 4);
-  assert.equal(JSON.parse(requests[3].init.body).idempotencyKey, 'exact-operation-key');
+  assert.equal(requests[4].path, '/conversations/thread%2Fa/reply');
+  assert.equal(requests[4].init.method, 'POST');
+  assert.equal(JSON.parse(requests[4].init.body).draftRevision, 4);
+  assert.equal(JSON.parse(requests[4].init.body).idempotencyKey, 'exact-operation-key');
 });
 
 test('reply result separates SMTP acceptance, archive failure and unknown outcome without claiming recipient delivery', () => {

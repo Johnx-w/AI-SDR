@@ -29,7 +29,7 @@ import type { OverviewData } from '../services/overview';
 import { OverviewReminders } from '../components/OverviewReminders';
 import type { InitialPage } from './initialPage';
 import { leadLibrary as defaultLibrary, type LeadLibraryClient } from '../services/leadLibrary';
-import { outreachApi, type OutreachState, type OutreachDeliveryPage } from '../outreachApi';
+import { outreachApi, type OutreachState } from '../outreachApi';
 const Dashboard = lazy(() =>
   import('../pages/Dashboard').then((module) => ({ default: module.Dashboard })),
 );
@@ -147,7 +147,7 @@ export function App({
   }, []);
   const current = nav.find((item) => item.path === location.pathname);
   const boot = useRef(initial);
-  const outreachPages = useRef<Pick<InitialPage, 'outreach' | 'records'>>({});
+  const outreachPages = useRef<Pick<InitialPage, 'outreach'>>({});
   const warmed = useRef(false);
   useEffect(() => {
     if (location.pathname === '/settings') {
@@ -161,7 +161,7 @@ export function App({
       if (warmed.current || document.hidden) return;
       warmed.current = true;
       const inbox = location.pathname === '/inbox';
-      const tab = new URLSearchParams(location.search).get('tab') || 'campaigns';
+      const tab = new URLSearchParams(location.search).get('tab') || 'mailboxes';
       if (location.pathname !== '/leads' && !customerList.cachedList())
         void customerList
           .list('page=1&q=&market=&grade=&product=&status=', false, true)
@@ -171,13 +171,6 @@ export function App({
         void outreachApi<OutreachState>('/state?' + viewKey)
           .then((data) => {
             pages.outreach ??= { ...data, viewKey };
-          })
-          .catch(() => {});
-      const key = 'page=1&pageSize=20&group=all&q=';
-      if (!pages.records && !(inbox && tab === 'deliveries'))
-        void outreachApi<OutreachDeliveryPage>('/deliveries?' + key)
-          .then((data) => {
-            pages.records ??= { key, data };
           })
           .catch(() => {});
     };

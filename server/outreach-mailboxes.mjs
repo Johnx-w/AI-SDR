@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import nodemailer from 'nodemailer';
 import MailComposer from 'nodemailer/lib/mail-composer';
 import { ImapFlow } from 'imapflow';
+import { siteAllowsProduct, siteBrand } from '../src/domain/mail-site.mjs';
 import { createMailboxReader, MailboxReadError } from './mailbox-reader.mjs';
 import { normalizeSignatureDesign, embedSignatureImages } from './mail-signature.mjs';
 import { renderMailboxSignature } from '../src/domain/mail-signature.mjs';
@@ -14,11 +15,6 @@ const IMAP = Object.freeze({ host: 'imap.qiye.aliyun.com', port: 993, secure: tr
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 const DPAPI = 'windows-dpapi-current-user';
 const AES = 'aes-256-gcm-local-key';
-const brandNames = {
-  'honeybadgerblinds.com': 'Honey Badger Blinds',
-  'shutterblindssolutions.com': 'Shutter & Blinds Solutions',
-  'shuangshengshutter.com': 'Shuangsheng Shutter',
-};
 const messages = {
   MAILBOX_INVALID: '邮箱配置格式不正确',
   MAILBOX_NOT_FOUND: '邮箱不存在',
@@ -133,6 +129,7 @@ function outgoing(record, message) {
           'messageId',
           'inReplyTo',
           'references',
+          'autoReply',
           'attachments',
           'sentAt',
           'expectedAccount',
@@ -215,6 +212,9 @@ function outgoing(record, message) {
     ...(embedded.html ? { html: embedded.html } : {}),
     messageId,
     ...(inReplyTo ? { inReplyTo } : {}),
+    ...(message.autoReply === true
+      ? { headers: { 'Auto-Submitted': 'auto-replied', 'X-Auto-Response-Suppress': 'All' } }
+      : {}),
     ...(references.length ? { references } : {}),
     ...(attachments.length || embedded.attachments.length
       ? { attachments: [...attachments, ...embedded.attachments] }
@@ -366,6 +366,9 @@ function normalize(input, previous) {
     'signature',
     'signatureDesign',
     'productIds',
+    'knowledgeProductIds',
+    'owner',
+    'replyMode',
     'priority',
     'dailyLimit',
     'intervalSeconds',
@@ -379,9 +382,17 @@ function normalize(input, previous) {
   if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/u.test(id)) throw fail();
   const address = email(value.email);
   const site = website(value.website ?? 'https://' + address.split('@')[1]);
-  const defaultBrand = brandNames[new URL(site).hostname] || '';
+  const defaultBrand = siteBrand(site);
   const productIds = value.productIds ?? [];
   if (!Array.isArray(productIds) || productIds.length > 500) throw fail();
+  const knowledgeProductIds = value.knowledgeProductIds ?? [];
+  const replyMode = value.replyMode ?? 'manual';
+  if (
+    !Array.isArray(knowledgeProductIds) ||
+    knowledgeProductIds.length > 500 ||
+    !['manual', 'review', 'auto'].includes(replyMode)
+  )
+    throw fail();
   const paused = value.paused ?? true;
   if (typeof paused !== 'boolean') throw fail();
   const signatureDesign = normalizeSignatureDesign(value.signatureDesign);
@@ -395,6 +406,9 @@ function normalize(input, previous) {
     signature: text(value.signature ?? '', 8000, false, true),
     ...(signatureDesign ? { signatureDesign } : {}),
     productIds: [...new Set(productIds.map((id) => text(id, 180, true)))],
+    knowledgeProductIds: [...new Set(knowledgeProductIds.map((id) => text(id, 180, true)))],
+    owner: text(value.owner ?? value.displayName ?? '', 160),
+    replyMode,
     priority: integer(value.priority ?? 100, 0, 10000),
     dailyLimit: integer(value.dailyLimit ?? 50, 1, 500),
     intervalSeconds: integer(value.intervalSeconds ?? 60, 5, 86400),
@@ -426,6 +440,7 @@ export class OutreachMailboxes {
     this.unprotect =
       unprotect || ((value, protection) => unprotectCredential(value, protection, this.path));
     this.records = new Map();
+    this.businessNotes = new Map();
     this.serial = Promise.resolve();
     const existing = existsSync(this.path);
     const source = existing
@@ -439,6 +454,23 @@ export class OutreachMailboxes {
         if ((document.schemaVersion ?? document.schema) !== 1 || !Array.isArray(document.mailboxes))
           throw fail();
         for (const record of document.mailboxes) {
+          if (Object.hasOwn(document.businessNotes || {}, record.id))
+            this.businessNotes.set(
+              record.id,
+              text(document.businessNotes[record.id], 2000, false, true),
+            );
+          const policy = Object.hasOwn(document.receptionSettings || {}, record.id)
+            ? document.receptionSettings[record.id]
+            : null;
+          if (
+            policy &&
+            (!plainObject(policy) ||
+              Object.keys(policy).some(
+                (key) =>
+                  !['owner', 'replyMode', 'knowledgeProductIds', 'replyEnabledAt'].includes(key),
+              ))
+          )
+            throw fail();
           const {
             credential,
             credentialProtection,
@@ -446,8 +478,9 @@ export class OutreachMailboxes {
             sendingEnabled,
             createdAt,
             updatedAt,
+            replyEnabledAt,
             ...settings
-          } = record;
+          } = { ...record, ...policy };
           const normalized = normalize({ ...settings, paused: settings.paused ?? false });
           if (
             this.records.has(normalized.id) ||
@@ -477,6 +510,10 @@ export class OutreachMailboxes {
           );
           this.records.set(normalized.id, {
             ...normalized,
+            replyEnabledAt:
+              typeof replyEnabledAt === 'string' && Number.isFinite(Date.parse(replyEnabledAt))
+                ? replyEnabledAt
+                : null,
             credential: credential || null,
             credentialProtection: credential ? credentialProtection : null,
             verification: {
@@ -494,13 +531,30 @@ export class OutreachMailboxes {
       }
     }
   }
-  persist(records) {
+  persist(records, businessNotes = this.businessNotes) {
     try {
       mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
       const temporary = this.path + '.' + randomUUID() + '.tmp';
+      // The production v1 reader validates every mailbox key and ignores extra top-level sections.
+      const receptionSettings = Object.create(null);
+      const mailboxes = [...records.values()].map(
+        ({ owner, replyMode, knowledgeProductIds, replyEnabledAt, ...mailbox }) => {
+          receptionSettings[mailbox.id] = { owner, replyMode, knowledgeProductIds, replyEnabledAt };
+          return mailbox;
+        },
+      );
       writeFileSync(
         temporary,
-        JSON.stringify({ schemaVersion: 1, mailboxes: [...records.values()] }, null, 2),
+        JSON.stringify(
+          {
+            schemaVersion: 1,
+            mailboxes,
+            receptionSettings,
+            businessNotes: Object.fromEntries(businessNotes),
+          },
+          null,
+          2,
+        ),
         { flag: 'wx', mode: 0o600 },
       );
       renameSync(temporary, this.path);
@@ -519,17 +573,30 @@ export class OutreachMailboxes {
     if (!record) throw fail('MAILBOX_NOT_FOUND', 404);
     return record;
   }
-  list() {
+  list(options) {
     return [...this.records.values()]
       .sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id))
-      .map(publicMailbox);
+      .map((record) => this.get(record.id, options));
   }
-  get(id) {
-    return publicMailbox(this.required(id));
+  get(id, { withBusinessNote = false } = {}) {
+    const mailbox = publicMailbox(this.required(id));
+    if (withBusinessNote) mailbox.businessNote = this.businessNotes.get(id) || '';
+    return mailbox;
   }
-  async prepare(input, records) {
+  async prepare(input, records, salesProducts) {
     const previous = plainObject(input) && input.id ? records.get(input.id) : undefined;
     const record = normalize(input, previous);
+    if (!previous && salesProducts && !Object.hasOwn(input, 'productIds')) {
+      record.productIds = salesProducts()
+        .filter(
+          (p) =>
+            !p.materialOnly &&
+            (p.status ? p.status === 'approved' : p.approved === true) &&
+            siteAllowsProduct(p, record, true),
+        )
+        .map((p) => p.id);
+      if (record.productIds.length > 500) throw fail();
+    }
     if (
       [...records.values()].some(
         (item) => item.id !== record.id && item.email.toLowerCase() === record.email.toLowerCase(),
@@ -573,6 +640,12 @@ export class OutreachMailboxes {
     const now = new Date().toISOString();
     return {
       ...record,
+      replyEnabledAt:
+        record.replyMode === 'manual'
+          ? null
+          : !previous?.replyEnabledAt || identityChanged || previous.website !== record.website
+            ? now
+            : previous.replyEnabledAt,
       credential,
       credentialProtection,
       verification:
@@ -583,23 +656,51 @@ export class OutreachMailboxes {
       updatedAt: now,
     };
   }
-  save(input) {
+  notesWith(id, note) {
+    const next = new Map(this.businessNotes);
+    const value = text(note, 2000, false, true);
+    if (value) next.set(id, value);
+    else next.delete(id);
+    return next;
+  }
+  saveNote(id, input) {
+    return this.runSerial(() => {
+      this.required(id);
+      if (
+        !plainObject(input) ||
+        !Object.hasOwn(input, 'businessNote') ||
+        Object.keys(input).length !== 1
+      )
+        throw fail();
+      const notes = this.notesWith(id, input.businessNote);
+      this.persist(this.records, notes);
+      this.businessNotes = notes;
+      return { businessNote: notes.get(id) || '' };
+    });
+  }
+  save(input, salesProducts) {
     return this.runSerial(async () => {
+      if (!plainObject(input)) throw fail();
+      const { businessNote, ...settings } = input;
       const next = new Map(this.records);
-      const record = await this.prepare(input, next);
+      const record = await this.prepare(settings, next, salesProducts);
       next.set(record.id, record);
-      this.persist(next);
+      const notes = Object.hasOwn(input, 'businessNote')
+        ? this.notesWith(record.id, businessNote)
+        : this.businessNotes;
+      this.persist(next, notes);
       this.records = next;
+      this.businessNotes = notes;
       return publicMailbox(record);
     });
   }
-  import(list) {
+  import(list, salesProducts) {
     return this.runSerial(async () => {
       if (!Array.isArray(list) || list.length < 1 || list.length > 20) throw fail();
       const next = new Map(this.records);
       const imported = [];
       for (const input of list) {
-        const record = await this.prepare(input, next);
+        const record = await this.prepare(input, next, salesProducts);
         if (imported.some((item) => item.id === record.id)) throw fail('MAILBOX_DUPLICATE', 409);
         next.set(record.id, record);
         imported.push(record);
@@ -710,7 +811,14 @@ export class OutreachMailboxes {
           messageId,
         };
       } catch (error) {
-        if (error instanceof OutreachMailboxError || error.code === 'OUTREACH_PRE_SEND_BLOCKED')
+        if (
+          error instanceof OutreachMailboxError ||
+          [
+            'OUTREACH_PRE_SEND_BLOCKED',
+            'FOLLOWUP_PRE_SEND_BLOCKED',
+            'REPLY_POLICY_CHANGED',
+          ].includes(error.code)
+        )
           throw error;
         throw fail('MAILBOX_SEND_FAILED', 503);
       } finally {

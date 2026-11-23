@@ -25,3 +25,108 @@
   text-align: left;
   border-bottom: 1px solid var(--border);
 }
+.business-replies {
+  display: grid;
+  gap: 18px;
+}
+.business-replies td {
+  overflow-wrap: anywhere;
+}
+.business-replies td small {
+  display: block;
+}
+.business-view-picker,
+.business-page-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.business-page-controls {
+  justify-content: flex-end;
+}
+.business-replies .reply-table {
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+}
+.reply-table th {
+  background: var(--color-surface-muted);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+.business-replies .reply-table :is(td, th) {
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: middle;
+}
+.reply-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.reply-table td a {
+  color: var(--color-primary-text);
+  font-weight: 550;
+}
+.reply-status {
+  display: inline-block;
+  white-space: nowrap;
+  font-size: 12px;
+  border-radius: 5px;
+  background: var(--color-surface-muted);
+  padding: 2px 7px;
+}
+.reply-status.needs-reply {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+@media (max-width: 760px) {
+  .business-replies .reply-table {
+    overflow: visible;
+    border: 0;
+    background: none;
+  }
+  .reply-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .reply-table :is(table, tbody) {
+    display: block;
+  }
+  .reply-table tbody tr {
+    margin-bottom: 10px;
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    background: var(--color-surface);
+    padding: 12px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px 10px;
+  }
+  .business-replies .reply-table td {
+    display: block;
+    padding: 0;
+    border: 0;
+    grid-column: 1/-1;
+  }
+  .reply-table td:nth-child(2) {
+    order: -1;
+  }
+  .business-replies .reply-table td:nth-child(3),
+  .business-replies .reply-table td:nth-child(4),
+  .business-replies .reply-table td:nth-child(5) {
+    font-size: 12px;
+    color: var(--color-text-muted);
+  }
+  .reply-table td:nth-child(3)::before {
+    content: '收件邮箱 · ';
+  }
+  .business-replies .reply-table td:nth-child(5) {
+    grid-column: 1;
+    align-self: center;
+  }
+  .business-replies .reply-table td:nth-child(6) {
+    grid-column: 2;
+  }
+}

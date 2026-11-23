@@ -494,7 +494,7 @@ export class CustomerBusiness {
     }
     const classification = choice(
       value.classification,
-      ['normal', 'auto_reply', 'unsubscribe', 'hard_bounce', 'complaint'],
+      ['normal', 'auto_reply', 'unverified', 'unsubscribe', 'hard_bounce', 'complaint'],
       'normal',
       '消息分类',
     );
@@ -588,7 +588,7 @@ export class CustomerBusiness {
           source.channel === 'phone' &&
           source.deliveryStatus === 'recorded')
       ) ||
-      ['auto_reply', 'unsubscribe', 'hard_bounce'].includes(source.classification)
+      ['auto_reply', 'unverified', 'unsubscribe', 'hard_bounce'].includes(source.classification)
     )
       throw fail(409, '需求必须依据客户实际来信或已确认的通话记录，不能由潜客评分或已发邮件生成');
     const evidenceQuote = text(value.evidenceQuote, '需求原文引文', 5000, true);
@@ -604,7 +604,9 @@ export class CustomerBusiness {
         !message.actualConfirmed ||
         message.direction !== 'inbound' ||
         message.deliveryStatus !== 'received' ||
-        ['auto_reply', 'unsubscribe', 'hard_bounce'].includes(message.classification) ||
+        ['auto_reply', 'unverified', 'unsubscribe', 'hard_bounce'].includes(
+          message.classification,
+        ) ||
         !message.body.includes(text(item.quote, '需求引文', 5000, true))
       )
         throw fail(400, '需求补充必须有同会话真实客户原文');

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { OutreachService } from '../server/outreach-service.mjs';
+import { saveSequencePolicy } from '../server/outreach-sequence-policy.mjs';
 
 test('idle outreach ticks count history without loading historical message bodies', async () => {
   const service = new OutreachService({ mailboxes: { list: () => [] } });
@@ -62,4 +63,65 @@ test('idle outreach ticks count history without loading historical message bodie
     service.db = db;
     await service.close();
   }
+});
+
+test('未来十二步逐客户检查接管和退订，不加载全部跟进记录或发送邮件', async (t) => {
+  const now = Date.UTC(2026, 1, 1);
+  const mailbox = { id: 'team', email: 'team@example.org' };
+  const send = t.mock.fn();
+  const service = new OutreachService({
+    now: () => now,
+    mailboxes: { list: () => [mailbox], get: () => mailbox, send },
+    customerMailState: (id) => ({
+      context: { doNotContact: id === 'unsubscribed' },
+      conversations: id === 'managed' ? [{ ownership: 'human' }] : [],
+      demands: [],
+    }),
+  });
+  t.after(() => service.close());
+  const policy = saveSequencePolicy(service, {
+    revision: 1,
+    name: '十二步',
+    steps: Array.from({ length: 12 }, (_, i) => ({ day: i + 1, instruction: '确认需求' })),
+  });
+  const campaign = service.putCampaign({
+    id: 'campaign',
+    scope: 'local',
+    mode: 'production',
+    status: 'completed',
+    followUpEnabled: true,
+  });
+  for (const customerId of ['interested', 'managed', 'unsubscribed']) {
+    const to = customerId + '@buyer.example';
+    const first = service.putDelivery({
+      id: customerId,
+      customerId,
+      campaignId: campaign.id,
+      status: 'accepted',
+      mode: 'production',
+      mailboxId: mailbox.id,
+      from: mailbox.email,
+      to,
+      messageId: '<' + customerId + '@example.org>',
+      sentAt: new Date(now).toISOString(),
+      sequencePolicyRevision: policy.revision,
+      candidate: { customerId, to },
+      subject: 'Specifications',
+      bodyText: 'Here are the specifications.',
+    });
+    service.followUps.schedule(first, campaign);
+  }
+  const fullReads = t.mock.method(service.followUps, 'all');
+  await service.followUps.tick();
+  assert.equal(fullReads.mock.callCount(), 0);
+  assert.equal(send.mock.callCount(), 0);
+  assert.deepEqual(
+    service.followUps.pending().map((step) => step.customerId),
+    Array(12).fill('interested'),
+  );
+  assert.equal(
+    service.db.prepare("SELECT count(*) AS n FROM outreach_followups WHERE state='cancelled'").get()
+      .n,
+    24,
+  );
 });

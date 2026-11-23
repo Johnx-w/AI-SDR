@@ -1,6 +1,10 @@
+import { initializeThreadSearch, listThreadPage } from './mail-thread-page.mjs';
+import { initializeThreadWorkflow, mergeThreadWorkflow } from './mail-thread-workflow.mjs';
 import { createHash } from 'node:crypto';
 import { setImmediate as yieldToRequests } from 'node:timers/promises';
 import { mailSyncFailure } from './mail-sync-errors.mjs';
+import { incomingClassification } from './communication-rounds.mjs';
+import { initializeReplyHistory, listReplyHistory } from './mail-reply-history.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -14,6 +18,7 @@ const messageId = (value) => {
   return /^<[^<>\s@]+@[^<>\s@]+>$/u.test(id) ? id : '';
 };
 const keyFor = (mailbox) => hash([mailbox.id, address(mailbox.email)]);
+export { keyFor as mailboxAccountKey };
 const iso = (value) => new Date(value).toISOString();
 const attachmentMetadata = (value) =>
   Array.isArray(value)
@@ -33,6 +38,7 @@ export class MailConversations {
     customers = () => [],
     recordCommunication,
     recordDeliveryBounces,
+    onMessage,
     now = Date.now,
   }) {
     Object.assign(this, {
@@ -42,6 +48,7 @@ export class MailConversations {
       customers,
       recordCommunication,
       recordDeliveryBounces,
+      onMessage,
       now,
     });
     this.pending = new Map();
@@ -67,9 +74,46 @@ export class MailConversations {
         delivery_id TEXT PRIMARY KEY
       );
     `);
+    initializeReplyHistory(db);
+    initializeThreadSearch(db);
+    initializeThreadWorkflow(db);
+    this.db.function('mail_text_fold', { deterministic: true }, (value) =>
+      String(value ?? '').toLowerCase(),
+    );
+    this.db
+      .exec(`CREATE INDEX IF NOT EXISTS mailbox_thread_order ON mailbox_threads(account_key,json_extract(data,'$.updatedAt') DESC,id);
+      CREATE INDEX IF NOT EXISTS mailbox_inbound_thread ON mailbox_reply_headers(thread_id) WHERE direction='inbound';
+      CREATE INDEX IF NOT EXISTS mailbox_reply_evidence ON mailbox_reply_headers(account_key,thread_id)
+        WHERE direction='inbound' AND source='imap' AND parent_id IS NOT NULL;`);
+    this.db.exec(
+      'CREATE TABLE IF NOT EXISTS mailbox_summary_migrations (version INTEGER PRIMARY KEY)',
+    );
+    if (!this.db.prepare('SELECT 1 FROM mailbox_summary_migrations WHERE version=1').get())
+      this.transaction(() => {
+        if (
+          !this.db.prepare('INSERT OR IGNORE INTO mailbox_summary_migrations VALUES(1)').run()
+            .changes
+        )
+          return;
+        this.db.exec(`WITH names AS (
+          SELECT h.thread_id, json_extract(m.data,'$.fromName') AS name,
+            row_number() OVER (PARTITION BY h.thread_id ORDER BY json_extract(m.data,'$.occurredAt') DESC,m.id DESC) AS ordinal
+          FROM mailbox_reply_headers h JOIN mailbox_threads t ON t.id=h.thread_id
+          JOIN mailbox_thread_messages m ON m.id=h.id
+          WHERE h.direction='inbound' AND h.sender=json_extract(t.data,'$.participant')
+            AND trim(coalesce(json_extract(m.data,'$.fromName'),''))!=''
+        )
+        UPDATE mailbox_threads AS t SET data=json_set(t.data,'$.participantName',trim(names.name))
+          FROM names WHERE names.ordinal=1 AND names.thread_id=t.id`);
+      });
+  }
+
+  replyHistory(filters) {
+    return listReplyHistory(this, filters, keyFor);
   }
 
   transaction(work) {
+    if (this.db.isTransaction) return work();
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const value = work();
@@ -103,6 +147,7 @@ export class MailConversations {
       syncing: this.pending.has(keyFor(mailbox)),
       hasMore: state.hasMore || false,
       folders: state.folders || [],
+      folderCoverage: state.folderCoverage || null,
       since: state.since || null,
       skipped: state.skipped || 0,
     };
@@ -174,6 +219,14 @@ export class MailConversations {
       mailboxId: mailbox.id,
       account: mailbox.email,
       participant,
+      participantName: messages
+        .findLast(
+          (message) =>
+            message.direction === 'inbound' &&
+            message.from === participant &&
+            message.fromName?.trim(),
+        )
+        ?.fromName.trim(),
       subject: first.subject || latest.subject,
       updatedAt: latest.occurredAt,
       unread: messages.some((item) => item.unread),
@@ -189,7 +242,66 @@ export class MailConversations {
     return thread;
   }
 
-  putMessage(mailbox, input, extra = {}) {
+  linkMessage(accountKey, input, id, externalId, preferredId) {
+    const references = [
+      ...new Set(
+        [
+          ...(Array.isArray(input.references) ? input.references.slice(-100) : []),
+          input.inReplyTo,
+          externalId,
+        ]
+          .map(messageId)
+          .filter(Boolean),
+      ),
+    ];
+    const linked = references
+      .map(
+        (reference) =>
+          this.db
+            .prepare(
+              'SELECT thread_id FROM mailbox_thread_links WHERE account_key=? AND external_id=?',
+            )
+            .get(accountKey, reference)?.thread_id,
+      )
+      .filter(Boolean);
+    if (preferredId || input.threadId) {
+      const forced = this.db
+        .prepare('SELECT account_key FROM mailbox_threads WHERE id=?')
+        .get(preferredId || input.threadId);
+      if (!forced || forced.account_key !== accountKey) throw fail(409, '回复会话与邮箱归属不一致');
+      linked.unshift(preferredId || input.threadId);
+    }
+    const matches = [...new Set(linked)];
+    const threadId = matches[0] || 'thread_' + hash([accountKey, references[0] || id]);
+    // A late parent can join replies that arrived before it, including separate pages.
+    let inherited = {};
+    for (const other of matches.slice(1)) {
+      const row = this.db.prepare('SELECT data FROM mailbox_threads WHERE id=?').get(other);
+      if (row) {
+        const thread = JSON.parse(row.data);
+        if (thread.customerId)
+          inherited = { customerId: thread.customerId, companyName: thread.companyName };
+      }
+      this.db
+        .prepare('UPDATE mailbox_thread_messages SET thread_id=? WHERE thread_id=?')
+        .run(threadId, other);
+      this.db
+        .prepare('UPDATE mailbox_thread_links SET thread_id=? WHERE thread_id=?')
+        .run(threadId, other);
+      mergeThreadWorkflow(this.db, other, threadId);
+      this.db.prepare('DELETE FROM mailbox_threads WHERE id=?').run(other);
+    }
+    for (const reference of references)
+      this.db
+        .prepare(
+          `INSERT INTO mailbox_thread_links VALUES(?,?,?)
+      ON CONFLICT(account_key,external_id) DO UPDATE SET thread_id=excluded.thread_id`,
+        )
+        .run(accountKey, reference, threadId);
+    return { threadId, inherited };
+  }
+
+  putMessage(mailbox, input, extra = {}, lookup) {
     const accountKey = keyFor(mailbox);
     const externalId = messageId(input.messageId);
     const from = address(input.from);
@@ -226,21 +338,39 @@ export class MailConversations {
         enriched = {
           ...enriched,
           ...richFields,
+          inReplyTo: richFields.inReplyTo || old.inReplyTo,
+          references: richFields.references.length ? richFields.references : old.references || [],
+          classification:
+            input.direction === 'inbound' &&
+            (!old.classification || ['normal', 'unverified'].includes(old.classification))
+              ? incomingClassification({
+                  ...input,
+                  bodyText: input.bodyText || old.bodyText,
+                  bodyHtml: input.bodyHtml || old.bodyHtml,
+                })
+              : old.classification,
           attachments: input.attachments ? attachmentMetadata(input.attachments) : old.attachments,
         };
       }
       if (
-        ['outreach', 'manual'].includes(old.source) &&
+        ['outreach', 'manual', 'automatic'].includes(old.source) &&
         input.source === 'imap' &&
         input.direction === 'outbound' &&
         old.from === from
       ) {
-        enriched = { ...enriched, source: 'imap', deliveryStatus: 'sent' };
+        enriched = { ...enriched, sendOrigin: old.source, source: 'imap', deliveryStatus: 'sent' };
       }
       this.db
         .prepare('UPDATE mailbox_thread_messages SET data=? WHERE id=?')
         .run(JSON.stringify(enriched), id);
-      this.rebuild(prior.thread_id, mailbox, extra);
+      const changedHeaders =
+        (enriched.inReplyTo && enriched.inReplyTo !== old.inReplyTo) ||
+        (enriched.references?.length &&
+          JSON.stringify(old.references) !== JSON.stringify(enriched.references));
+      const inherited = changedHeaders
+        ? this.linkMessage(accountKey, enriched, id, externalId, prior.thread_id).inherited
+        : {};
+      this.rebuild(prior.thread_id, mailbox, { ...inherited, ...extra });
       return 0;
     }
     const occurredAt = Number.isFinite(Date.parse(input.occurredAt)) ? iso(input.occurredAt) : null;
@@ -249,53 +379,7 @@ export class MailConversations {
         code: 'MAILBOX_SYNC_INVALID',
       });
     }
-    const references = [
-      ...new Set(
-        [
-          ...(Array.isArray(input.references) ? input.references.slice(-100) : []),
-          input.inReplyTo,
-          externalId,
-        ]
-          .map(messageId)
-          .filter(Boolean),
-      ),
-    ];
-    const linked = references
-      .map(
-        (reference) =>
-          this.db
-            .prepare(
-              'SELECT thread_id FROM mailbox_thread_links WHERE account_key=? AND external_id=?',
-            )
-            .get(accountKey, reference)?.thread_id,
-      )
-      .filter(Boolean);
-    if (input.threadId) {
-      const forced = this.db
-        .prepare('SELECT account_key FROM mailbox_threads WHERE id=?')
-        .get(input.threadId);
-      if (!forced || forced.account_key !== accountKey) throw fail(409, '回复会话与邮箱归属不一致');
-      linked.unshift(input.threadId);
-    }
-    const matches = [...new Set(linked)];
-    const threadId = matches[0] || 'thread_' + hash([accountKey, references[0] || id]);
-    // A late parent can join replies that arrived before it, including separate pages.
-    let inherited = {};
-    for (const other of matches.slice(1)) {
-      const row = this.db.prepare('SELECT data FROM mailbox_threads WHERE id=?').get(other);
-      if (row) {
-        const thread = JSON.parse(row.data);
-        if (thread.customerId)
-          inherited = { customerId: thread.customerId, companyName: thread.companyName };
-      }
-      this.db
-        .prepare('UPDATE mailbox_thread_messages SET thread_id=? WHERE thread_id=?')
-        .run(threadId, other);
-      this.db
-        .prepare('UPDATE mailbox_thread_links SET thread_id=? WHERE thread_id=?')
-        .run(threadId, other);
-      this.db.prepare('DELETE FROM mailbox_threads WHERE id=?').run(other);
-    }
+    const { threadId, inherited } = this.linkMessage(accountKey, input, id, externalId);
     const data = {
       id,
       direction: input.direction,
@@ -307,12 +391,9 @@ export class MailConversations {
       bodyUnavailable: input.bodyUnavailable || undefined,
       attachments: attachmentMetadata(input.attachments),
       occurredAt,
+      receivedAt: input.receivedAt || occurredAt,
       deliveryStatus: input.deliveryStatus,
-      classification: ['normal', 'auto_reply', 'unsubscribe', 'hard_bounce', 'complaint'].includes(
-        input.classification,
-      )
-        ? input.classification
-        : 'normal',
+      classification: input.direction === 'inbound' ? incomingClassification(input) : 'normal',
       messageId: externalId || undefined,
       source: input.source,
       unread: input.direction === 'inbound' && input.unread !== false,
@@ -320,14 +401,22 @@ export class MailConversations {
     this.db
       .prepare('INSERT INTO mailbox_thread_messages VALUES(?,?,?,?)')
       .run(id, accountKey, threadId, JSON.stringify(data));
-    for (const reference of references)
+    const thread = this.rebuild(threadId, mailbox, { ...inherited, ...extra });
+    if (
+      data.direction === 'inbound' &&
+      ['normal', 'unverified', 'unsubscribe', 'complaint'].includes(data.classification)
+    ) {
+      const arrival = Number.isFinite(Date.parse(data.receivedAt))
+        ? iso(data.receivedAt)
+        : occurredAt;
       this.db
         .prepare(
-          `INSERT INTO mailbox_thread_links VALUES(?,?,?)
-      ON CONFLICT(account_key,external_id) DO UPDATE SET thread_id=excluded.thread_id`,
+          `UPDATE mail_thread_workflow SET state='open',snooze_until=NULL,updated_at=?
+        WHERE thread_id=? AND state!='open' AND updated_at<=?`,
         )
-        .run(accountKey, reference, threadId);
-    this.rebuild(threadId, mailbox, { ...inherited, ...extra });
+        .run(arrival, threadId, arrival);
+    }
+    this.onMessage?.(mailbox, thread, data, lookup);
     return 1;
   }
 
@@ -412,45 +501,37 @@ export class MailConversations {
     }
   }
 
-  list({ mailboxId = 'all', customerId = '', q = '', unread = false, inboundOnly = false } = {}) {
+  list(
+    {
+      mailboxId = 'all',
+      customerId = '',
+      q = '',
+      unread = false,
+      inboundOnly = false,
+      hasReply = false,
+      folder = '',
+      page = 1,
+      pageSize = 25,
+    } = {},
+    lookup = this.customerLookup(),
+  ) {
     this.importDeliveries();
-    const selected = this.selected(mailboxId);
-    const query = text(q, 500).toLowerCase().trim();
-    const customers = this.customerLookup();
-    const items = selected
-      .flatMap((mailbox) =>
-        this.db
-          .prepare('SELECT data FROM mailbox_threads WHERE account_key=?')
-          .all(keyFor(mailbox))
-          .map((row) => this.localCustomer(JSON.parse(row.data), customers)),
-      )
-      .filter(
-        (thread) =>
-          (!customerId || thread.customerId === customerId) &&
-          (!inboundOnly ||
-            this.messages(thread.id).some((message) => message.direction === 'inbound')) &&
-          (!unread || thread.unread) &&
-          (!query ||
-            [thread.account, thread.participant, thread.subject, thread.preview, thread.companyName]
-              .join(' ')
-              .toLowerCase()
-              .includes(query) ||
-            this.messages(thread.id).some((message) =>
-              [message.subject, message.from, message.to, message.bodyText]
-                .join(' ')
-                .toLowerCase()
-                .includes(query),
-            )),
-      )
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
+    const keys = this.selected(mailboxId).map(keyFor);
+    const result = listThreadPage(this, keys, lookup, {
+      customerId,
+      query: text(q, 500).toLowerCase().trim(),
+      unread,
+      inboundOnly,
+      hasReply,
+      folder,
+      page,
+      pageSize,
+    });
     return {
-      items: items.slice(0, 200),
-      total: items.length,
-      hasMore: items.length > 200,
+      ...result,
       mailboxes: this.mailboxes.list().map((mailbox) => this.syncState(mailbox)),
     };
   }
-
   detail(id) {
     this.importDeliveries();
     const row = this.db.prepare('SELECT account_key,data FROM mailbox_threads WHERE id=?').get(id);
@@ -478,19 +559,29 @@ export class MailConversations {
     return { conversation: this.localCustomer(updated) };
   }
 
-  syncOne(mailbox) {
+  syncOne(mailbox, requestedSince, rescan = false) {
     const key = keyFor(mailbox);
     if (this.pending.has(key)) return this.pending.get(key);
-    const operation = this.performSync(mailbox).finally(() => this.pending.delete(key));
+    const operation = this.performSync(mailbox, requestedSince, rescan).finally(() =>
+      this.pending.delete(key),
+    );
     this.pending.set(key, operation);
     return operation;
   }
 
-  async performSync(mailbox) {
+  async performSync(mailbox, requestedSince, rescan) {
     const key = keyFor(mailbox);
     const row = this.db.prepare('SELECT data FROM mailbox_sync_state WHERE account_key=?').get(key);
     const prior = row ? JSON.parse(row.data) : {};
-    const since = prior.since || iso(this.now() - 30 * 86400000);
+    const extendWindow =
+      requestedSince && prior.since && Date.parse(requestedSince) < Date.parse(prior.since);
+    const since =
+      requestedSince && (extendWindow || rescan || !prior.since)
+        ? iso(requestedSince)
+        : prior.since || iso(this.now() - 30 * 86400000);
+    const checkpointIsCurrent = () =>
+      this.db.prepare('SELECT data FROM mailbox_sync_state WHERE account_key=?').get(key)?.data ===
+      row?.data;
     let stage = 'read';
     try {
       if (!mailbox.configured)
@@ -500,7 +591,7 @@ export class MailConversations {
       const batch = await this.mailboxes.readMailbox(mailbox.id, {
         // One bounded rescan upgrades previously cached text-only messages. Later
         // pages continue from their returned cursors, using the original window.
-        cursors: prior.contentVersion === 2 ? prior.cursors || {} : {},
+        cursors: !extendWindow && !rescan && prior.contentVersion === 2 ? prior.cursors || {} : {},
         since,
       });
       const current = this.mailboxes.list().find((item) => item.id === mailbox.id);
@@ -511,9 +602,12 @@ export class MailConversations {
       stage = 'validate';
       if (!Array.isArray(batch.folders)) throw fail(502, '邮件同步结果无效');
       let imported = 0;
+      const lookup = this.customerLookup();
       stage = 'save';
       this.transaction(() => {
-        const cursors = { ...prior.cursors };
+        // Another reader may have committed this (or a newer) page while IMAP was open.
+        if (!checkpointIsCurrent()) return;
+        const cursors = extendWindow || rescan ? {} : { ...prior.cursors };
         for (const folder of batch.folders) {
           if (
             !folder.path ||
@@ -525,18 +619,23 @@ export class MailConversations {
             throw Object.assign(fail(502, '邮件同步位置无效'), { code: 'MAILBOX_SYNC_INVALID' });
           }
           for (const message of folder.messages) {
-            imported += this.putMessage(mailbox, {
-              ...message,
-              identity: [folder.path, folder.uidValidity, message.uid],
-              sourceLocator: {
-                folder: folder.path,
-                sent: folder.sent === true,
-                uidValidity: String(folder.uidValidity),
-                uid: message.uid,
+            imported += this.putMessage(
+              mailbox,
+              {
+                ...message,
+                identity: [folder.path, folder.uidValidity, message.uid],
+                sourceLocator: {
+                  folder: folder.path,
+                  sent: folder.sent === true,
+                  uidValidity: String(folder.uidValidity),
+                  uid: message.uid,
+                },
+                source: 'imap',
+                deliveryStatus: message.direction === 'inbound' ? 'received' : 'sent',
               },
-              source: 'imap',
-              deliveryStatus: message.direction === 'inbound' ? 'received' : 'sent',
-            });
+              {},
+              lookup,
+            );
           }
           cursors[folder.path] = {
             uidValidity: String(folder.uidValidity),
@@ -555,12 +654,13 @@ export class MailConversations {
           error: null,
           lastError: prior.lastError || null,
           folders: batch.folders.map((folder) => folder.path),
+          folderCoverage: batch.folderCoverage,
           hasMore: !!batch.hasMore,
           skipped: batch.folders.reduce((sum, folder) => sum + (folder.skipped || 0), 0),
         });
       });
       if (this.recordCommunication) {
-        for (const thread of this.list({ mailboxId: mailbox.id }).items) {
+        for (const thread of this.list({ mailboxId: mailbox.id, pageSize: 200 }, lookup).items) {
           await yieldToRequests();
           if (this.closed || !this.mailboxes.list().some((current) => keyFor(current) === key))
             break;
@@ -578,11 +678,18 @@ export class MailConversations {
       return imported;
     } catch (error) {
       const failure = mailSyncFailure(error, stage);
-      this.saveState(key, {
-        ...prior,
-        since,
-        error: failure.message,
-        lastError: { ...failure.diagnostic, message: failure.message, occurredAt: iso(this.now()) },
+      this.transaction(() => {
+        if (!checkpointIsCurrent()) return;
+        this.saveState(key, {
+          ...prior,
+          since: prior.since || since,
+          error: failure.message,
+          lastError: {
+            ...failure.diagnostic,
+            message: failure.message,
+            occurredAt: iso(this.now()),
+          },
+        });
       });
       return 0;
     }

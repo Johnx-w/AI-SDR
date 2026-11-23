@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Code2, Image, LayoutTemplate } from 'lucide-react';
+import { Code2, LayoutTemplate } from 'lucide-react';
 import type { MailMessage } from '../services/mailConversations';
 import { makeMailFrame, splitMailQuote } from '../services/mailHtml';
 
@@ -20,16 +20,15 @@ export function MailMessageBody({
   >;
 }) {
   const [mode, setMode] = useState<'html' | 'text'>(message.bodyHtml ? 'html' : 'text');
-  const [externalImages, setExternalImages] = useState(false);
   const [height, setHeight] = useState(180);
   const frameRef = useRef<HTMLIFrameElement>(null);
   const observer = useRef<ResizeObserver | null>(null);
   const content = useMemo(
     () =>
       message.bodyHtml
-        ? makeMailFrame(message.bodyHtml, message.inlineImages, externalImages, collapseQuotes)
+        ? makeMailFrame(message.bodyHtml, message.inlineImages, collapseQuotes)
         : null,
-    [message.bodyHtml, message.inlineImages, externalImages, collapseQuotes],
+    [message.bodyHtml, message.inlineImages, collapseQuotes],
   );
   const text = collapseQuotes
     ? splitMailQuote(message.bodyText || '')
@@ -86,29 +85,16 @@ export function MailMessageBody({
         </div>
       )}
       {mode === 'html' && content ? (
-        <>
-          {content.remoteImages > 0 && !externalImages && (
-            <div className="mail-remote-images">
-              <span>
-                <Image size={15} />
-                这封邮件包含外链图片
-              </span>
-              <button type="button" onClick={() => setExternalImages(true)}>
-                加载图片
-              </button>
-            </div>
-          )}
-          <iframe
-            ref={frameRef}
-            className="mail-html-frame"
-            title={`邮件正文：${message.subject || '无主题'}`}
-            sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-            referrerPolicy="no-referrer"
-            srcDoc={content.srcDoc}
-            onLoad={loaded}
-            style={{ height }}
-          />
-        </>
+        <iframe
+          ref={frameRef}
+          className="mail-html-frame"
+          title={`邮件正文：${message.subject || '无主题'}`}
+          sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+          referrerPolicy="no-referrer"
+          srcDoc={content.srcDoc}
+          onLoad={loaded}
+          style={{ height }}
+        />
       ) : (
         <div className="mail-conversation-body">
           {message.bodyUnavailable === 'too_large'

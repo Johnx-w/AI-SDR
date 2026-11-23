@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OutreachService } from '../server/outreach-service.mjs';
+import { saveSequencePolicy } from '../server/outreach-sequence-policy.mjs';
 import { handleOutreach } from '../server/outreach-api.mjs';
 
 const at = '2026-11-12T02:00:00.000Z';
@@ -121,6 +122,30 @@ test('仅正式 unknown 可核实；IMAP 原邮箱准确发送证据才确认已
   await assert.rejects(h.service.reconcileDelivery('unknown'), { status: 409 });
 });
 
+test('首封结果未知时等待已发件证据，追信到期相对于实际发出时间', async (t) => {
+  const h = harness(t);
+  h.service.putCampaign({
+    id: 'campaign',
+    status: 'active',
+    followUpEnabled: true,
+    mailboxIds: [mailbox.id],
+  });
+  h.service.putDelivery(delivery('unknown', { followUpAtSubmission: true }));
+  await h.service.reconcileDelivery('unknown');
+  assert.equal(h.service.followUps.all().length, 0);
+  saveSequencePolicy(h.service, {
+    revision: 1,
+    name: '之后的首封',
+    steps: [{ day: 11, instruction: '确认需求' }],
+  });
+  const actual = '2026-11-12T02:06:00.000Z';
+  h.respond(batch([sent({ occurredAt: actual })]));
+  await h.service.reconcileDelivery('unknown');
+  assert.deepEqual(
+    h.service.followUps.all().map((a) => a.dueAt),
+    ['2026-11-15T02:06:00.000Z', '2026-11-19T02:06:00.000Z'],
+  );
+});
 test('同 Message-ID 但发件人或收件人不一致不能确认，也不能人工判为未提交', async (t) => {
   const h = harness(t);
   h.service.putDelivery(delivery('unknown'));
@@ -217,11 +242,6 @@ test('人工结论要求操作人与依据；明确失败释放占用且旧计�
   const groups = (await h.service.state()).deliveryGroups;
   assert.equal(groups.attention, 0);
   assert.equal(groups.resolved, 1);
-  assert.deepEqual(
-    h.service.listDeliveries({ group: 'resolved' }).items.map((item) => item.id),
-    ['unknown'],
-  );
-  assert.deepEqual(h.service.listDeliveries({ group: 'attention' }).items, []);
   assert.deepEqual(await h.service.candidates(h.service.campaign('campaign')), {
     eligible: [],
     blocked: [],

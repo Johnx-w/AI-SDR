@@ -1,10 +1,18 @@
 import { outreachApi } from '../outreachApi';
+import type { ReplySource } from '../components/ReplyPreview';
 
+export type InboxFolder = 'open' | 'later' | 'done';
+export interface InboxWorkflow {
+  state: InboxFolder;
+  snoozeUntil?: string | null;
+  notes: { id: string; body: string; createdAt: string; author?: string }[];
+}
 export interface MailThread {
   id: string;
   mailboxId: string;
   account: string;
   participant: string;
+  participantName?: string;
   subject: string;
   updatedAt: string;
   unread: boolean;
@@ -19,6 +27,7 @@ export interface MailMessage {
   id: string;
   direction: 'inbound' | 'outbound';
   from: string;
+  fromName?: string;
   to: string;
   subject: string;
   bodyText: string;
@@ -35,7 +44,8 @@ export interface MailMessage {
   occurredAt: string;
   deliveryStatus: 'received' | 'sent' | 'accepted' | 'unknown' | 'failed' | 'sending';
   messageId?: string;
-  source: 'imap' | 'outreach' | 'manual';
+  source: 'imap' | 'outreach' | 'manual' | 'automatic';
+  classification?: string;
 }
 
 export interface MailInlineImage {
@@ -50,6 +60,7 @@ export interface MailReplyAttachment {
   size: number;
   contentBase64: string;
 }
+
 export interface MailDraftContent {
   replyToMessageId: string;
   bodyHtml: string;
@@ -57,10 +68,21 @@ export interface MailDraftContent {
   attachments: MailReplyAttachment[];
 }
 export interface MailReplyDraft extends MailDraftContent {
+  edited?: boolean;
+  provenance?: {
+    sources: ReplySource[];
+    sourceId?: string;
+    generator?: 'model';
+    model?: string;
+    reason?: string;
+  };
   revision: number;
   updatedAt?: string;
 }
 export interface MailReplyRecord {
+  messageId?: string;
+  origin?: string;
+  provenance?: { sources: ReplySource[] };
   id: string;
   status: 'accepted' | 'failed' | 'unknown' | 'sending';
   reason?: string;
@@ -74,6 +96,7 @@ export interface MailReplyRecord {
   idempotencyKey?: string;
 }
 export interface MailReplyContext {
+  draftModel?: string | null;
   mailboxId: string;
   from: string;
   to: string;
@@ -106,11 +129,22 @@ export interface MailboxSyncStatus {
 export interface MailConversationList {
   items: MailThread[];
   mailboxes: MailboxSyncStatus[];
-  total?: number;
+  total: number;
+  page: number;
+  pageSize: number;
   hasMore?: boolean;
 }
 
 export interface MailConversationDetail {
+  workflow?: InboxWorkflow;
+  reception?: {
+    sourceId?: string;
+    state?: string;
+    reason: string;
+    owner?: string;
+    human: boolean;
+    stopped: boolean;
+  };
   demands?: {
     id: string;
     title: string;
@@ -134,15 +168,25 @@ export const mailConversationsApi = {
       mailboxId: string;
       customerId?: string;
       q: string;
+      page: number;
+      pageSize: number;
+      folder?: InboxFolder;
       unread: boolean;
+      hasReply?: boolean;
       inboundOnly?: boolean;
     },
     signal?: AbortSignal,
   ) {
-    const params = new URLSearchParams({ mailboxId: filters.mailboxId });
+    const params = new URLSearchParams({
+      mailboxId: filters.mailboxId,
+      page: String(filters.page),
+      pageSize: String(filters.pageSize),
+    });
+    if (filters.folder) params.set('folder', filters.folder);
     if (filters.customerId) params.set('customerId', filters.customerId);
     if (filters.q.trim()) params.set('q', filters.q.trim());
     if (filters.unread) params.set('unread', '1');
+    if (filters.hasReply) params.set('hasReply', '1');
     if (filters.inboundOnly) params.set('inboundOnly', '1');
     return outreachApi<MailConversationList>(`/conversations?${params}`, { signal });
   },
@@ -160,6 +204,18 @@ export const mailConversationsApi = {
       },
     );
   },
+  workflow(id: string, state: InboxFolder, snoozeUntil?: string) {
+    return outreachApi<InboxWorkflow>(`/conversations/${encodeURIComponent(id)}/workflow`, {
+      method: 'PATCH',
+      body: JSON.stringify({ state, snoozeUntil }),
+    });
+  },
+  note(id: string, body: string, clientId: string) {
+    return outreachApi<InboxWorkflow>(`/conversations/${encodeURIComponent(id)}/notes`, {
+      method: 'POST',
+      body: JSON.stringify({ body, clientId }),
+    });
+  },
   markRead(id: string) {
     return outreachApi<{ conversation: MailThread }>(
       `/conversations/${encodeURIComponent(id)}/read`,
@@ -170,6 +226,15 @@ export const mailConversationsApi = {
     return outreachApi<{ draft: MailReplyDraft | null }>(
       `/conversations/${encodeURIComponent(id)}/draft`,
       { signal },
+    );
+  },
+  generateDraft(id: string, sourceId: string, expectedRevision: number) {
+    return outreachApi<{ draft: MailReplyDraft }>(
+      `/conversations/${encodeURIComponent(id)}/generate-draft`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ sourceId, expectedRevision }),
+      },
     );
   },
   saveDraft(id: string, draft: MailDraftContent & { revision?: number }) {

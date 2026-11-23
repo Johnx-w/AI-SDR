@@ -10,6 +10,7 @@ export interface OutreachFact {
 }
 
 export interface OutreachProduct {
+  materialOnly?: boolean;
   id: string;
   label?: string;
   name?: string;
@@ -19,6 +20,8 @@ export interface OutreachProduct {
   version?: number;
   englishName?: string;
   outreachFacts?: OutreachFact[];
+  brands?: string[];
+  sourceUrl?: string;
 }
 
 export interface OutreachMailbox {
@@ -30,6 +33,10 @@ export interface OutreachMailbox {
   signature: string;
   signatureDesign?: MailSignatureDesign | null;
   productIds: string[];
+  businessNote?: string;
+  knowledgeProductIds?: string[];
+  owner?: string;
+  replyMode?: 'manual' | 'review' | 'auto';
   priority: number;
   dailyLimit: number;
   intervalSeconds: number;
@@ -127,7 +134,18 @@ export interface OutreachDelivery {
   productFacts?: OutreachFact[];
 }
 
+export interface MailboxTag {
+  id: string;
+  name: string;
+}
+
+export interface MailboxTagState {
+  tags: MailboxTag[];
+  assignments: { mailboxId: string; tagId: string }[];
+}
+
 export interface OutreachState {
+  reviewCount?: number;
   counts: { total: number; active: number };
   filtered: number;
   page: number;
@@ -142,14 +160,6 @@ export interface OutreachState {
 export interface OutreachCampaignDetail {
   campaign: OutreachCampaign;
   deliveries: OutreachDelivery[];
-}
-
-export interface OutreachDeliveryPage {
-  items: OutreachDelivery[];
-  total: number;
-  page: number;
-  pageSize: number;
-  totalPages: number;
 }
 
 export async function outreachApi<T>(path: string, init: RequestInit = {}): Promise<T> {

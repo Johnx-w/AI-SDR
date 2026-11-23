@@ -23,7 +23,9 @@ import { createAcquisitionProvider } from './acquisition-provider.mjs';
 import { ApiConnections } from './api-connections.mjs';
 import { AcquisitionSchedules } from './acquisition-schedules.mjs';
 import { ProductCatalog } from './product-catalog.mjs';
+import { workbookPage } from './product-workbooks.mjs';
 import { ProductKnowledge } from './product-knowledge.mjs';
+import { answerMailQuestion } from './mail-knowledge.mjs';
 import { MAX_PRODUCT_DOCUMENT_BYTES } from './product-documents.mjs';
 import { ProductKnowledgeFeishu } from './product-knowledge-feishu.mjs';
 import { CustomerBusinessApi } from './customer-business-api.mjs';
@@ -31,6 +33,8 @@ import { searchPlan } from './search-plan.mjs';
 import { OutreachMailboxes } from './outreach-mailboxes.mjs';
 import { OutreachService } from './outreach-service.mjs';
 import { handleOutreach } from './outreach-api.mjs';
+import { mailDraftModel } from './mail-draft-model.mjs';
+import { handleMaterials } from './materials-api.mjs';
 import { recordOutreachInBusiness } from './outreach-business.mjs';
 import { recordMailConversation } from './mail-conversation-business.mjs';
 import { validateContactEdit } from './lead-contacts.mjs';
@@ -110,6 +114,7 @@ export function createApp({
   nativeImpl,
   outreachServiceFactory,
   brandingOptions,
+  localMailInspection,
 } = {}) {
   const publicOrigin = env.PUBLIC_ORIGIN;
   if (publicOrigin) {
@@ -238,6 +243,10 @@ export function createApp({
     saveCustomerFields: (id, fields) => provider.saveCustomerFields(id, fields),
   });
   let outbound;
+  const getDraftModel = () =>
+    localMailInspection
+      ? localMailInspection.draftModel
+      : mailDraftModel(connections.environment(), fetchImpl);
   const outreach = () =>
     (outbound ??= outreachServiceFactory
       ? outreachServiceFactory({ env })
@@ -250,10 +259,31 @@ export function createApp({
               isDevelopmentCustomer,
             ),
           products: () => knowledge().list(),
+          answerQuestion: (mailbox, question, now) =>
+            answerMailQuestion(knowledge(), mailbox, question, now),
+          getDraftModel,
           getEnv: () => connections.environment(),
           getScope: acquisitionScope,
           acquisitionSources: () => acquisitionOutreachSources(jobs(), plans()),
           businessState: () => business.state().store.view(),
+          customerMailState: (id) => {
+            const store = business.state().store;
+            return {
+              context: store.context(id),
+              conversations: store.all('conversations', id),
+              demands: store.all('demands', id),
+            };
+          },
+          setMailOwnership: async (detail, ownership, owner) => {
+            const store = business.state().store;
+            const mapped = await recordMailConversation({ store, ...detail });
+            if (!mapped.conversationId) throw new ApiError(409, '请先关联客户再更改接待归属');
+            const conversation = store.get('conversations', mapped.conversationId);
+            await store.saveConversation(
+              { ...conversation, ownership, owner },
+              { expectedVersion: conversation.version },
+            );
+          },
           customers: () => library().mailContacts(),
           recordFollowUp: (action, first) =>
             recordFollowUpTask(business.state().store, action, first),
@@ -436,6 +466,37 @@ export function createApp({
         }
         apiRequests++;
         admitted = true;
+        if (localMailInspection && !['GET', 'HEAD'].includes(request.method)) {
+          if (request.method === 'POST' && url.pathname === '/api/v1/outreach/conversations/sync') {
+            const input = await readJson(request);
+            if (input?.mailboxId !== undefined && typeof input.mailboxId !== 'string')
+              throw new ApiError(400, '请选择有效邮箱');
+            const accounts = outreach().conversations.selected(input?.mailboxId || 'all');
+            const result = await localMailInspection.sync(accounts);
+            return json(response, 200, {
+              imported: result.reduce((n, item) => n + item.imported, 0),
+              mailboxes: outreach()
+                .mailboxes.list()
+                .map((box) => outreach().conversations.syncState(box)),
+            });
+          }
+          const localEdit =
+            (request.method === 'PUT' && url.pathname === '/api/v1/outreach/sequence-policy') ||
+            (request.method === 'PATCH' &&
+              /^\/api\/v1\/outreach\/mailboxes\/[\w-]+\/note$/.test(url.pathname)) ||
+            (request.method === 'PATCH' &&
+              /^\/api\/v1\/outreach\/conversations\/[\w-]+\/workflow$/.test(url.pathname)) ||
+            (request.method === 'POST' &&
+              /^\/api\/v1\/outreach\/conversations\/[\w-]+\/(?:notes|generate-draft)$/.test(
+                url.pathname,
+              )) ||
+            (['PUT', 'DELETE'].includes(request.method) &&
+              /^\/api\/v1\/outreach\/conversations\/[\w-]+\/draft$/.test(url.pathname)) ||
+            /^\/api\/v1\/(?:materials(?:\/|$)|outreach\/(?:mailbox-tags(?:\/|$)|conversations\/[\w-]+\/read$|mailboxes\/[\w-]+\/preview$))/.test(
+              url.pathname,
+            );
+          if (!localEdit) throw new ApiError(403, '本地验收工作区已关闭此业务操作。');
+        }
         if (url.pathname === '/api/v1/overview') {
           if (request.method !== 'GET') throw new ApiError(405, '总览仅支持读取');
           if (url.searchParams.get('summary') === 'reminders') {
@@ -464,7 +525,9 @@ export function createApp({
         if (url.pathname.startsWith('/api/v1/outreach/')) {
           const reply =
             request.method === 'GET' &&
-            ['/api/v1/outreach/state', '/api/v1/outreach/deliveries'].includes(url.pathname)
+            /^\/api\/v1\/outreach\/(?:state|reply-history|sequences(?:\/[\w-]+)?)$/.test(
+              url.pathname,
+            )
               ? pageJson
               : json;
           return await reply(
@@ -474,6 +537,8 @@ export function createApp({
               request,
               url,
               service: outreach(),
+              draftModel: getDraftModel(),
+              localMailInspection: !!localMailInspection,
               readJson: (input) =>
                 readJson(
                   input,
@@ -530,6 +595,19 @@ export function createApp({
           }
           throw new ApiError(405, '不支持的配置操作');
         }
+        if (url.pathname === '/api/v1/materials' || url.pathname.startsWith('/api/v1/materials/'))
+          return await handleMaterials({
+            request,
+            response,
+            url,
+            knowledge: knowledge(),
+            env: connections.environment(),
+            fetchImpl,
+            readJson,
+            json,
+            onChange: () => outbound?.refreshProductMaterials?.(),
+            sites: () => outreach().mailboxes.list(),
+          });
         if (url.pathname === '/api/v1/products/knowledge') {
           if (request.method === 'GET')
             return json(response, 200, {
@@ -559,6 +637,20 @@ export function createApp({
           }
           throw new ApiError(405, '不支持的产品资料操作');
         }
+        const workbookRows = url.pathname.match(
+          /^\/api\/v1\/products\/knowledge\/(pk_[a-f0-9]{32})\/documents\/(pd_[a-f0-9]{64})\/rows$/,
+        );
+        if (workbookRows && request.method === 'GET')
+          return json(
+            response,
+            200,
+            workbookPage(
+              knowledge().db,
+              workbookRows[1],
+              workbookRows[2],
+              Object.fromEntries(url.searchParams),
+            ),
+          );
         const productDocuments = url.pathname.match(
           /^\/api\/v1\/products\/knowledge\/(pk_[a-f0-9]{32})\/documents(?:\/(pd_[a-f0-9]{64})\/(file|extract))?$/,
         );
@@ -1009,7 +1101,7 @@ export function createApp({
       const initialRoute =
         pathname === '/leads' ||
         (pathname === '/inbox' &&
-          ['campaigns', 'deliveries'].includes(url.searchParams.get('tab') || 'campaigns'));
+          ['campaigns', 'mailboxes'].includes(url.searchParams.get('tab') || 'mailboxes'));
       if (initialRoute) response.setHeader('Cache-Control', 'private, no-store');
       let rendered = false;
       if (
@@ -1043,19 +1135,15 @@ export function createApp({
               initial.detail = { ...detail, version, lead };
             }
           } else {
-            const records = url.searchParams.get('tab') === 'deliveries';
-            const viewKey = records
-              ? 'view=deliveries'
-              : 'view=current&status=all&q=&page=1&pageSize=20';
+            const tab = url.searchParams.get('tab') || 'mailboxes';
+            const viewKey =
+              tab === 'mailboxes'
+                ? 'view=mailboxes'
+                : 'view=current&status=all&q=&page=1&pageSize=20';
             initial.outreach = {
               ...(await outreach().state(new URLSearchParams(viewKey))),
               viewKey,
             };
-            if (records)
-              initial.records = {
-                key: 'page=1&pageSize=20&group=all&q=',
-                data: outreach().listDeliveries(),
-              };
           }
           content = Buffer.from(
             await renderPage(url.pathname + url.search, initial, request.headers.cookie),
@@ -1133,6 +1221,7 @@ export function createApp({
     if (env.OUTREACH_DB_PATH || jobs().outreachJobs().length) outreach().start();
   };
   server.on('listening', () => {
+    if (localMailInspection) return;
     startBackground();
     maintenanceTimer = setInterval(startBackground, 1000);
     maintenanceTimer.unref();
