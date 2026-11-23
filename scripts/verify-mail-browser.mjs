@@ -787,7 +787,22 @@ try {
   await apiNav.getByRole('button', { name: '大语言模型 API' }).click();
   await page.reload();
   await page.getByRole('heading', { name: '大语言模型 API', exact: true }).waitFor();
-  console.log('PASS 一级导航悬停提示、API 连接三栏切换与跨栏编辑保留。');
+  await page.getByRole('heading', { name: '素材库 · 文档解析', exact: true }).waitFor();
+  const parsingKey = page.getByLabel('文档解析 API Key', { exact: true });
+  const clearParsingKey = page.getByLabel('清除 文档解析 API Key', { exact: true });
+  await parsingKey.fill('synthetic-material-key');
+  await button('保存全部修改').click();
+  await clearParsingKey.waitFor();
+  await page.reload();
+  await clearParsingKey.waitFor();
+  assert.equal(await parsingKey.inputValue(), 'synt********-key');
+  await clearParsingKey.check();
+  await button('保存全部修改').click();
+  await clearParsingKey.waitFor({ state: 'detached' });
+  await page.reload();
+  await parsingKey.waitFor();
+  assert.equal(await parsingKey.inputValue(), '');
+  console.log('PASS 一级导航悬停提示、API 连接跨栏编辑、文档解析密钥保存与清除后刷新回读。');
 } catch (e) {
   console.error(
     '测试收件处理',

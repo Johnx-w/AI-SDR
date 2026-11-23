@@ -104,7 +104,7 @@ export async function handleMaterials({
   response,
   url,
   knowledge,
-  env = {},
+  getEnv,
   fetchImpl,
   readJson,
   json,
@@ -163,7 +163,7 @@ export async function handleMaterials({
         id,
         bytes: upload.bytes,
         key,
-        env,
+        env: getEnv(),
         fetchImpl,
         onPage,
       });
@@ -201,7 +201,7 @@ export async function handleMaterials({
     }
     const extract = async (onPage) => {
       await knowledge.documents.extract(id, docId, {
-        env,
+        env: getEnv(),
         fetchImpl,
         material: true,
         onPage,

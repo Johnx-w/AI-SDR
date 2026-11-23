@@ -567,12 +567,17 @@ export function createApp({
               ...Object.keys(body?.values || {}),
               ...(Array.isArray(body?.clear) ? body.clear : []),
             ];
-            const documentOnly =
+            // Material parsing keeps one key for the entire request, including remote file cleanup.
+            // Product-document settings retain their existing in-flight extraction guard.
+            const independent =
               keys.length > 0 &&
-              keys.every((key) => /^DOCUMENT_MODEL_(BASE_URL|API_KEY|MODEL)$/.test(key));
-            // Document extraction reads these settings per request.
-            if (documentOnly && !productKnowledge?.documents.running.size)
-              return json(response, 200, connections.update(body));
+              keys.every(
+                (key) =>
+                  key === 'MATERIAL_DEEPSEEK_API_KEY' ||
+                  (!productKnowledge?.documents.running.size &&
+                    /^DOCUMENT_MODEL_(BASE_URL|API_KEY|MODEL)$/.test(key)),
+              );
+            if (independent) return json(response, 200, connections.update(body));
             if (
               running ||
               business.active ||
@@ -616,7 +621,7 @@ export function createApp({
             response,
             url,
             knowledge: knowledge(),
-            env: connections.environment(),
+            getEnv: () => connections.environment(),
             fetchImpl,
             readJson,
             json,

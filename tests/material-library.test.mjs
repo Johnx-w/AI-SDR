@@ -1,4 +1,6 @@
 import test from 'node:test';
+import { once } from 'node:events';
+import { PassThrough } from 'node:stream';
 import { materialService } from './fixtures/deepseek-material-service.mjs';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -236,6 +238,95 @@ test('旧 PDF 空提取从素材接口后台补齐，同一原件重试保留审
   assert.equal((await fetch(extract, { method: 'POST' })).status, 200);
   assert.deepEqual(await detail(), after);
 });
+
+test(
+  '上传完成时取素材库密钥，在途图文解析沿用同一密钥，失败重试和清除后重读',
+  { timeout: 15000 },
+  async (t) => {
+    const gates = [0, 1].map(() => ({
+      entered: Promise.withResolvers(),
+      resume: Promise.withResolvers(),
+    }));
+    const calls = [];
+    let attempt = 0;
+    const app = createApp({
+      env: { MATERIAL_DEEPSEEK_API_KEY: 'before-upload', DEEPSEEK_API_KEY: 'fallback' },
+      outreachServiceFactory: () => ({ mailboxes: { list: () => [] }, close() {} }),
+      fetchImpl: async (url, init) => {
+        const path = new URL(url).pathname;
+        if (path.endsWith('/ocr')) attempt++;
+        calls.push([path, init.headers.Authorization]);
+        const gate = path.endsWith('/ocr') && gates[attempt - 1];
+        if (gate) {
+          gate.entered.resolve();
+          await gate.resume.promise;
+        }
+        if (attempt === 1 && path === '/chat/completions')
+          return Response.json({ error: { code: 'expired' } }, { status: 401 });
+        return materialService(url, init);
+      },
+    });
+    await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
+    t.after(async () => {
+      for (const gate of gates) gate.resume.resolve();
+      app.closeAllConnections();
+      await new Promise((resolve) => app.close(resolve));
+    });
+    const root = 'http://127.0.0.1:' + app.address().port + '/api/v1';
+    const field = 'MATERIAL_DEEPSEEK_API_KEY';
+    async function setKey(value) {
+      const result = await fetch(root + '/connections', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          value ? { values: { [field]: value } } : { values: {}, clear: [field] },
+        ),
+      });
+      assert.equal(result.status, 200);
+    }
+    const bytes = readFileSync(new URL('./fixtures/material-slats.docx', import.meta.url));
+    const accepting = once(app, 'request');
+    const stream = new PassThrough();
+    const upload = fetch(root + '/materials?name=rotation.docx', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': randomUUID(), 'Content-Length': String(bytes.length) },
+      body: stream,
+      duplex: 'half',
+    });
+    stream.write(bytes.subarray(0, 4));
+    await accepting;
+    await setKey('first');
+    stream.end(bytes.subarray(4));
+    await gates[0].entered.promise;
+    await setKey('second');
+    gates[0].resume.resolve();
+    const saved = await (await upload).json();
+    assert.match(saved.warning, /密钥无效/);
+    const extract = root + '/materials/' + saved.id + '/extract/' + saved.documentId;
+    const retry = fetch(extract, { method: 'POST' });
+    await gates[1].entered.promise;
+    await setKey('');
+    gates[1].resume.resolve();
+    assert.equal((await retry).status, 200);
+    assert.equal((await fetch(extract + '?reparse=1', { method: 'POST' })).status, 200);
+    assert.deepEqual(
+      calls,
+      ['first', 'second', 'fallback'].flatMap((key) =>
+        [
+          '/v1/tools/ocr',
+          '/files',
+          '/chat/completions',
+          ...(key === 'first' ? [] : ['/chat/completions']),
+          '/files/file-api-synthetic',
+        ].map((path) => [path, 'Bearer ' + key]),
+      ),
+    );
+    const detail = await (await fetch(root + '/materials/' + saved.id)).json();
+    assert.equal(detail.documents.length, 1);
+    assert.equal(detail.documents[0].id, saved.documentId);
+    assert.equal(detail.documents[0].extraction.pageCount, 2);
+  },
+);
 
 test('升级已有工作簿不重复保存文件或变为推品；纯产品不混入素材列表与品类', async (t) => {
   const k = new ProductKnowledge();
