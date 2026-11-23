@@ -22,10 +22,12 @@ import {
   UploadCloud,
   X,
 } from 'lucide-react';
+import { MaterialParseMode } from '../components/MaterialParseMode';
 import { MaterialDocument } from '../components/MaterialDetail';
 import { MaterialSearchTest } from '../components/MaterialSearchTest';
 import { documentLimitMiB, videoLimitMiB } from '../domain/material-upload.mjs';
 import {
+  type ParseMode,
   acceptMaterials,
   fileSize,
   materialFormats,
@@ -44,7 +46,7 @@ const statuses: Record<Material['extractionStatus'], string> = {
   pending: '等待提取',
   processing: '解析中',
   failed: '解析异常',
-  manual: '人工核对',
+  manual: '附件素材',
 };
 const statusOptions = [
   ['active', '在用资料'],
@@ -87,6 +89,7 @@ export function ProductKnowledgePage() {
     [error, setError] = useState(''),
     [loading, setLoading] = useState(true),
     [tick, setTick] = useState(0);
+  const [parseMode, setParseMode] = useState<ParseMode>('rich_layout_recognition');
   const [importing, setImporting] = useState(false),
     [busy, setBusy] = useState(false),
     [drag, setDrag] = useState(false),
@@ -166,7 +169,7 @@ export function ProductKnowledgePage() {
       try {
         const r = await uploadMaterial(
           f,
-          { site: site === 'unassigned' ? '' : site },
+          { site: site === 'unassigned' ? '' : site, mode: parseMode },
           crypto.randomUUID(),
           (n, total) => setProgress(label + ' · 正在解析第 ' + n + ' / ' + total + ' 页'),
         );
@@ -647,7 +650,7 @@ export function ProductKnowledgePage() {
             <dt>来源</dt>
             <dd>本地上传</dd>
             <dt>文件解析</dt>
-            <dd>本机文字提取与 OCR</dd>
+            <dd>DeepSeek 文档解析</dd>
           </dl>
         </div>
         <div className="kb-side-section">
@@ -697,6 +700,7 @@ export function ProductKnowledgePage() {
               <X size={18} />
             </button>
           </header>
+          <MaterialParseMode value={parseMode} onChange={setParseMode} />
           <button
             className="kb-picker"
             aria-label="选择文件上传"
@@ -716,8 +720,8 @@ export function ProductKnowledgePage() {
             onChange={(e) => void upload(Array.from(e.target.files || []))}
           />
           <p>
-            文档和图片每份最多 {documentLimitMiB} MiB，视频 {videoLimitMiB}{' '}
-            MiB。选好文件后自动解析。
+            文档和图片每份最多 {documentLimitMiB} MiB，视频 {videoLimitMiB} MiB。PDF、DOCX、PPTX 由
+            DeepSeek 解析。独立图片和视频保存为附件素材。
           </p>
         </dialog>
       )}

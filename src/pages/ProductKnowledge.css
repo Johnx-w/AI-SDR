@@ -1043,3 +1043,20 @@
     gap: 4px;
   }
 }
+
+.kb-parse-mode {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 12px;
+  font-size: 13px;
+}
+.kb-parse-mode select {
+  width: 100%;
+  min-width: 0;
+  background: white;
+  color: inherit;
+  border: 1px solid #d6dbe3;
+  border-radius: 6px;
+  padding: 7px 9px;
+  font: inherit;
+}

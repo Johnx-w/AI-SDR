@@ -1,8 +1,18 @@
+export type ParseMode = 'rich_layout_recognition' | 'text_recognition';
 import { checkMaterialSize, materialPartBytes } from '../domain/material-upload.mjs';
 
-export const materialFormats = ['PDF', 'Word', 'Markdown', 'TXT', 'Excel', '图片', '视频'];
+export const materialFormats = [
+  'PDF',
+  'Word',
+  'PowerPoint',
+  'Markdown',
+  'TXT',
+  'Excel',
+  '图片',
+  '视频',
+];
 export const acceptMaterials =
-  '.pdf,.docx,.xlsx,.md,.markdown,.txt,.jpg,.jpeg,.png,.gif,.webp,.mp4,.webm,.mov';
+  '.pdf,.docx,.pptx,.xlsx,.md,.markdown,.txt,.jpg,.jpeg,.png,.gif,.webp,.mp4,.webm,.mov';
 export type Site = { site: string; brand: string };
 export type Reference = { documentId: string; location: string; text: string };
 export type Correction = { documentId: string; sheet: string; ref: string; value: string };
@@ -36,6 +46,7 @@ export type StoredDocument = {
   size: number;
   contentType: string;
   sha256: string;
+  parseMode?: ParseMode;
   createdAt: string;
   extraction: null | {
     facts: { text: string; page: number; location: string }[];
@@ -43,6 +54,7 @@ export type StoredDocument = {
     sheets?: { name: string; rows: number }[];
     model: string;
     pageCount?: number;
+    mode?: ParseMode;
     extractedAt?: string;
   };
 };
@@ -105,12 +117,14 @@ export const sendJson = <T>(path: string, method: string, body: unknown) =>
   });
 export async function uploadMaterial(
   file: File,
-  options: { site?: string; category?: string; id?: string; version?: number },
+  options: { site?: string; category?: string; id?: string; version?: number; mode?: ParseMode },
   key: string,
   onPage?: ExtractionProgress,
 ) {
   checkMaterialSize(file.name, file.size);
   const q = new URLSearchParams({ name: file.name });
+  const paged = /\.(?:pdf|docx|pptx)$/iu.test(file.name);
+  if (paged && options.mode) q.set('mode', options.mode);
   if (options.site) q.set('site', options.site);
   if (options.category) q.set('category', options.category);
   if (options.version) q.set('version', String(options.version));
@@ -118,7 +132,7 @@ export async function uploadMaterial(
   const headers = {
     'Content-Type': 'application/octet-stream',
     'Idempotency-Key': key,
-    ...(/\.(?:pdf|png|jpe?g|webp|gif)$/iu.test(file.name) ? { Prefer: 'respond-async' } : {}),
+    ...(paged ? { Prefer: 'respond-async' } : {}),
   };
   type Result = { id: string; documentId: string; warning: string; reused: boolean };
   if (file.size <= materialPartBytes)

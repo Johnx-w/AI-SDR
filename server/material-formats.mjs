@@ -1,16 +1,19 @@
 import { Open } from 'unzipper-esm';
 import { Parser } from 'saxen';
 import { splitMaterialText } from './material-chunks.mjs';
-import { checkMaterialSize, videoTypes } from '../src/domain/material-upload.mjs';
+import {
+  checkMaterialSize,
+  pagedMaterialTypes,
+  videoTypes,
+} from '../src/domain/material-upload.mjs';
 import { workbookType, checkOfficeArchive } from './product-workbooks.mjs';
 
 export const types = {
   xlsx: workbookType,
-  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  ...pagedMaterialTypes,
   md: 'text/markdown',
   markdown: 'text/markdown',
   txt: 'text/plain',
-  pdf: 'application/pdf',
   png: 'image/png',
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
@@ -27,7 +30,7 @@ export function validateFile(name, type, bytes) {
   if (!name || name.length > 200 || /[\\/\x00-\x1f\x7f]/u.test(name) || !bytes.length)
     throw fail('文件名或文件内容无效');
   if (!type || type !== materialType(name))
-    throw fail('仅支持 PDF、DOCX、XLSX、Markdown、TXT、图片和视频');
+    throw fail('仅支持 PDF、DOCX、PPTX、XLSX、Markdown、TXT、图片和视频');
   checkMaterialSize(name, bytes.length);
   const head = bytes.subarray(0, 16).toString('latin1');
   let valid = false;
@@ -35,7 +38,8 @@ export function validateFile(name, type, bytes) {
     try {
       valid = !new TextDecoder('utf-8', { fatal: true }).decode(bytes).includes('\0');
     } catch {}
-  } else if (type === types.xlsx || type === types.docx) valid = head.startsWith('PK\x03\x04');
+  } else if (type === types.xlsx || type === types.docx || type === types.pptx)
+    valid = head.startsWith('PK\x03\x04');
   else if (type === types.pdf) valid = head.startsWith('%PDF-');
   else if (type === types.png) valid = head.startsWith('\x89PNG\r\n\x1a\n');
   else if (type === types.jpg) valid = head.startsWith('\xff\xd8\xff');

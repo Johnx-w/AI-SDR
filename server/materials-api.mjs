@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { MaterialLibrary } from './materials.mjs';
 import { materialType } from './material-formats.mjs';
 import {
+  isPagedMaterial,
   checkMaterialSize,
   materialPartBytes,
   videoLimitMiB,
@@ -155,6 +156,7 @@ export async function handleMaterials({
     const save = async (onPage) => {
       const data = await library.upload({
         name,
+        mode: q.mode,
         site: q.site || '',
         category: q.category || '',
         version: q.version === undefined ? undefined : Number(q.version),
@@ -168,7 +170,7 @@ export async function handleMaterials({
       onChange?.();
       return data;
     };
-    if ((type === 'application/pdf' || type.startsWith('image/')) && respondAsync)
+    if (isPagedMaterial(type) && respondAsync)
       return json(response, 202, processMaterial(jobs, save));
     return json(response, 201, await save());
   }
@@ -192,8 +194,20 @@ export async function handleMaterials({
     return json(response, 200, { id, version: product.version });
   }
   if (id && op === 'extract' && docId && method === 'POST') {
+    if (q.reparse === '1') {
+      const { product, documents } = library.detail(id);
+      if (product.status === 'archived' || !documents.some((d) => d.id === docId))
+        throw fail(409, '只能重新解析当前在用版本。');
+    }
     const extract = async (onPage) => {
-      await knowledge.documents.extract(id, docId, { env, fetchImpl, material: true, onPage });
+      await knowledge.documents.extract(id, docId, {
+        env,
+        fetchImpl,
+        material: true,
+        onPage,
+        mode: q.mode,
+        reparse: q.reparse === '1',
+      });
       return { ok: true };
     };
     if (respondAsync) return json(response, 202, processMaterial(jobs, extract));

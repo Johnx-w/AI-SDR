@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mailSite, siteAllowsProduct } from '../src/domain/mail-site.mjs';
+import { isPagedMaterial, pagedMaterialTypes } from '../src/domain/material-upload.mjs';
+import { materialMode } from './deepseek-materials.mjs';
 import { materialType, validateFile } from './material-formats.mjs';
 
 const fail = (status, msg) => Object.assign(new Error(msg), { status });
@@ -11,6 +13,7 @@ const collectionOrders = new Map([
 ]);
 const formats = {
   'application/pdf': 'PDF',
+  [pagedMaterialTypes.pptx]: 'PowerPoint',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'Word',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'Excel',
   'text/markdown': 'Markdown',
@@ -208,16 +211,27 @@ export class MaterialLibrary {
     env = {},
     fetchImpl,
     onPage,
+    mode,
   }) {
     if (typeof key !== 'string' || !/^[\w-]{8,128}$/.test(key))
       throw fail(400, '缺少有效的上传操作编号');
     const contentType = materialType(name);
     validateFile(name, contentType, bytes);
+    const chosen = isPagedMaterial(contentType) ? materialMode(mode) : undefined;
     const fingerprint = createHash('sha256')
-      .update(JSON.stringify([id, version, name, site, category]))
+      .update(
+        JSON.stringify([
+          id,
+          version,
+          name,
+          site,
+          category,
+          ...(chosen === 'text_recognition' ? [chosen] : []),
+        ]),
+      )
       .update(bytes)
       .digest('hex');
-    const file = { name, contentType, bytes };
+    const file = { name, contentType, bytes, mode: chosen };
     const findRequest = this.db.prepare(
       'SELECT * FROM material_upload_requests WHERE request_key=?',
     );
@@ -231,7 +245,13 @@ export class MaterialLibrary {
     let prepared;
     if (id && !findRequest.get(key)) {
       currentVersion();
-      prepared = await this.k.documents.prepareReplacement(file, onPage);
+      prepared = await this.k.documents.prepareReplacement(file, {
+        material: true,
+        env,
+        fetchImpl,
+        onPage,
+        mode: chosen,
+      });
     }
     const record = transaction(this.db, () => {
       const prior = findRequest.get(key);
@@ -275,10 +295,9 @@ export class MaterialLibrary {
         prepared &&
         (!document.extraction ||
           document.extraction.model === 'failed' ||
-          ((contentType === 'application/pdf' || contentType.startsWith('image/')) &&
-            !document.extraction.facts.length))
+          (isPagedMaterial(contentType) && !document.extraction.facts.length))
       )
-        this.k.documents.saveLocalExtraction(document.id, prepared);
+        this.k.documents.saveExtraction(document.id, prepared);
       const ids = product.documentIds || [];
       // Historical products may link several independent files. Replace only the primary file.
       const documentIds = [...new Set([document.id, ...ids.slice(1)])];
@@ -308,6 +327,7 @@ export class MaterialLibrary {
           env,
           fetchImpl,
           material: true,
+          mode: chosen,
           onPage,
         });
     } catch (e) {

@@ -28,6 +28,13 @@ const groups = [
     detail: '依据证据生成企业画像并执行准入判断。模型服务独立配置，可替换。',
   },
   {
+    title: '素材库 · DeepSeek 文档解析',
+    icon: Sparkles,
+    prefix: 'MATERIAL_DEEPSEEK_',
+    detail:
+      'PDF、Word 和 PowerPoint 发送至 DeepSeek 官方接口。可使用专用密钥，留空时复用已配置的官方 DeepSeek 密钥。',
+  },
+  {
     title: '产品资料 · 图纸与规格识别',
     icon: Sparkles,
     prefix: 'DOCUMENT_MODEL_',

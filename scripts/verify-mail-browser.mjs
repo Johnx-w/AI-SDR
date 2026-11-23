@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, existsSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { materialService } from '../tests/fixtures/deepseek-material-service.mjs';
 import { chromium } from 'playwright-core';
 import { createApp } from '../server/app.mjs';
 import { OutreachMailboxes } from '../server/outreach-mailboxes.mjs';
@@ -109,6 +110,12 @@ const app = createApp({
   env,
   outreachServiceFactory: () => service,
   fetchImpl: async (url, init) => {
+    if (
+      String(url).endsWith('/tools/ocr') ||
+      (String(url).endsWith('/chat/completions') &&
+        Array.isArray(JSON.parse(init.body).messages?.[1]?.content))
+    )
+      return materialService(url, init);
     assert.equal(
       String(url),
       'https://api.deepseek.com/chat/completions',

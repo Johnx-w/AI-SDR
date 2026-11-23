@@ -1,3 +1,9 @@
+export const pagedMaterialTypes = {
+  pdf: 'application/pdf',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+};
+export const isPagedMaterial = (type) => Object.values(pagedMaterialTypes).includes(type);
 export const documentLimitMiB = 50;
 export const videoLimitMiB = 80;
 export const materialPartBytes = 8 * 1024 ** 2;

@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
-import { Worker } from 'node:worker_threads';
+import { isPagedMaterial } from '../src/domain/material-upload.mjs';
+import { readDeepSeekMaterial, materialMode } from './deepseek-materials.mjs';
+import sharp from 'sharp';
 import { materialType, types, validateFile, extractText } from './material-formats.mjs';
 import { platformJson, providerBaseUrl } from './acquisition-config.mjs';
 import { parseWorkbook, workbookType } from './product-workbooks.mjs';
@@ -58,6 +60,7 @@ function fileInput(value) {
   if (bytes.toString('base64') !== base64 || bytes.length > MAX_PRODUCT_DOCUMENT_BYTES)
     throw fail(400, '文件内容无效或过大');
   const type = materialType(value.name);
+  if (type === types.pptx) throw fail(400, '请从素材库导入 PowerPoint。');
   validateFile(value.name, value.contentType, bytes);
   return { name: value.name.trim(), contentType: type, bytes };
 }
@@ -102,44 +105,26 @@ function extracted(data, contentType) {
   }
 }
 
-function extractWithOcr(file, onPage) {
-  return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL('./material-ocr-worker.mjs', import.meta.url), {
-      workerData: { bytes: file.bytes, contentType: file.contentType },
-      execArgv: [],
-    });
-    const timer = setTimeout(
-      () => {
-        reject(fail(422, '原件识别时间过长，请拆分后重试。'));
-        void worker.terminate();
-      },
-      20 * 60 * 1000,
-    ).unref();
-    worker.on('message', (message) => {
-      if (message.page) onPage?.(message.page, message.total);
-      else if (message.error) reject(fail(422, message.error));
-      else resolve({ extraction: message.extraction });
-    });
-    worker.once('error', () => reject(fail(500, '原件识别未完成，请重试。')));
-    worker.once('exit', () => {
-      clearTimeout(timer);
-      reject(fail(500, '原件识别进程提前结束，请重试。'));
-    });
-  });
-}
-
-async function localExtraction(file, onPage) {
-  if (file.contentType === types.pdf || file.contentType.startsWith('image/'))
-    return extractWithOcr(file, onPage);
+async function documentExtraction(file, options) {
+  if (options.material && isPagedMaterial(file.contentType))
+    return readDeepSeekMaterial(file, options);
+  if (file.contentType.startsWith('image/')) {
+    try {
+      await sharp(file.bytes, { limitInputPixels: 64 * 1024 * 1024 }).metadata();
+    } catch {
+      throw fail(422, '无法读取图片，请检查原件。');
+    }
+  }
   if (file.contentType === workbookType) return parseWorkbook(file.bytes);
-  const extraction = file.contentType.startsWith('video/')
-    ? {
-        facts: [],
-        warnings: ['预览视频后按时间点填写核对片段。'],
-        model: 'manual',
-        extractedAt: new Date().toISOString(),
-      }
-    : await extractText(file);
+  const extraction =
+    file.contentType.startsWith('video/') || file.contentType.startsWith('image/')
+      ? {
+          facts: [],
+          warnings: [],
+          model: 'manual',
+          extractedAt: new Date().toISOString(),
+        }
+      : await extractText(file);
   return { extraction };
 }
 
@@ -147,6 +132,7 @@ export class ProductDocuments {
   constructor(db) {
     this.db = db;
     this.running = new Map();
+    this.runningModes = new Map();
     db.exec(`CREATE TABLE IF NOT EXISTS product_documents(
       id TEXT PRIMARY KEY, product_id TEXT NOT NULL, metadata TEXT NOT NULL,
       content BLOB NOT NULL, extraction TEXT
@@ -202,6 +188,7 @@ export class ProductDocuments {
       id,
       productId,
       name: file.name,
+      ...(file.mode ? { parseMode: file.mode } : {}),
       contentType: file.contentType,
       size: file.bytes.length,
       sha256,
@@ -223,10 +210,10 @@ export class ProductDocuments {
       this.running.delete(key);
     }
   }
-  prepareReplacement(file, onPage) {
-    return this.runExtraction(file, () => localExtraction(file, onPage));
+  prepareReplacement(file, options) {
+    return this.runExtraction(file, () => documentExtraction(file, options));
   }
-  saveLocalExtraction(id, { extraction, rows }) {
+  saveExtraction(id, { extraction, rows }, replace = false) {
     // Also used inside the transaction that switches the active version.
     this.db.exec('SAVEPOINT material_extraction');
     try {
@@ -239,31 +226,44 @@ export class ProductDocuments {
       this.db
         .prepare(
           `UPDATE product_documents SET extraction=? WHERE id=? AND
-        (extraction IS NULL OR json_extract(extraction,'$.model')='failed' OR
-        (? IN ('local-pdf','local-image','local-text') AND json_array_length(extraction,'$.facts')=0))`,
+        (? OR extraction IS NULL OR json_extract(extraction,'$.model')='failed' OR
+        (json_array_length(extraction,'$.facts')=0 AND json_type(extraction,'$.sheets') IS NULL AND json_extract(extraction,'$.model')!='manual'))`,
         )
-        .run(JSON.stringify(extraction), id, extraction.model);
+        .run(JSON.stringify(extraction), id, Number(replace));
       this.db.exec('RELEASE material_extraction');
     } catch (error) {
       this.db.exec('ROLLBACK TO material_extraction; RELEASE material_extraction');
       throw error;
     }
   }
-  saveExtractionFailure(id, message) {
+  saveExtractionFailure(id, message, mode) {
     const extraction = {
       facts: [],
       warnings: [message || '原件提取失败，请重试。'],
       model: 'failed',
+      ...(mode ? { mode } : {}),
       extractedAt: new Date().toISOString(),
     };
     this.db
       .prepare('UPDATE product_documents SET extraction=? WHERE id=?')
       .run(JSON.stringify(extraction), id);
   }
-  async extract(productId, id, { env, fetchImpl = fetch, material = false, onPage }) {
+  async extract(
+    productId,
+    id,
+    { env, fetchImpl = fetch, material = false, onPage, mode, reparse = false },
+  ) {
     const file = this.get(productId, id);
+    const paged = material && isPagedMaterial(file.contentType);
+    const chosen = paged
+      ? materialMode(mode ?? file.extraction?.mode ?? file.parseMode)
+      : undefined;
+    if (reparse && !paged) throw fail(400, '此原件无需选择文档解析方式。');
+    if (paged && this.runningModes.has(id) && this.runningModes.get(id) !== chosen)
+      throw fail(409, '该原件正在使用另一种方式解析，请稍后重试。');
     const visual = file.contentType === types.pdf || file.contentType.startsWith('image/');
     if (
+      !reparse &&
       file.extraction &&
       file.extraction.model !== 'failed' &&
       !(
@@ -275,9 +275,29 @@ export class ProductDocuments {
     )
       return this.list(productId).find((item) => item.id === id);
     return this.runExtraction(id, async () => {
+      if (paged) this.runningModes.set(id, chosen);
       try {
         if (material || !visual) {
-          this.saveLocalExtraction(id, await localExtraction(file, onPage));
+          const result = await documentExtraction(file, {
+            material,
+            env,
+            fetchImpl,
+            onPage,
+            mode: chosen,
+          });
+          if (reparse) {
+            const row = this.db
+              .prepare('SELECT data FROM product_knowledge WHERE id=?')
+              .get(productId);
+            const product = row && JSON.parse(row.data);
+            if (
+              !product ||
+              product.status === 'archived' ||
+              (product.materialOnly && !product.documentIds?.includes(id))
+            )
+              throw fail(409, '资料版本已变化，请重新打开当前原件。');
+          }
+          this.saveExtraction(id, result, reparse);
           return this.list(productId).find((item) => item.id === id);
         }
         const config = documentModelConfig(env);
@@ -331,11 +351,15 @@ export class ProductDocuments {
           .run(JSON.stringify(extraction), id);
         return this.list(productId).find((item) => item.id === id);
       } catch (error) {
-        this.saveExtractionFailure(
-          id,
-          error instanceof Error ? error.message : '原件提取失败，请重试。',
-        );
+        if (!reparse || !file.extraction?.facts.length)
+          this.saveExtractionFailure(
+            id,
+            error instanceof Error ? error.message : '原件提取失败，请重试。',
+            chosen,
+          );
         throw error;
+      } finally {
+        if (paged) this.runningModes.delete(id);
       }
     });
   }
