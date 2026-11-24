@@ -26,7 +26,13 @@ const modes: [Mode, string][] = [
   ['auto', '自动回复已核实的产品问题'],
   ['business', '自动回复常规业务与已核实的产品问题'],
 ];
-type Result = { body: string; reason: string; decision: string; sources: ReplySource[] };
+type Result = {
+  body: string;
+  reason: string;
+  decision: string;
+  sources: ReplySource[];
+  attachments?: { name: string; contentType: string; contentBase64: string }[];
+};
 export function MailReplySettings({
   box,
   boxes,
@@ -334,6 +340,19 @@ export function MailReplySettings({
                     {result.decision}
                   </p>
                   <p className="studio-mail">{result.body}</p>
+                  {result.attachments?.length ? (
+                    <div className="studio-product-photos" aria-label="草稿图片附件">
+                      {result.attachments.map((photo) => (
+                        <figure key={photo.name}>
+                          <img
+                            src={'data:image/jpeg;base64,' + photo.contentBase64}
+                            alt={photo.name}
+                          />
+                          <figcaption>图片附件 · {photo.name}</figcaption>
+                        </figure>
+                      ))}
+                    </div>
+                  ) : null}
                   <p>{result.reason}</p>
                   <ReplySources sources={result.sources} />
                 </>

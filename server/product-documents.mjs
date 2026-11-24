@@ -144,10 +144,39 @@ export class ProductDocuments {
     ); CREATE INDEX IF NOT EXISTS product_documents_product ON product_documents(product_id);
     CREATE INDEX IF NOT EXISTS product_documents_sha ON product_documents(json_extract(metadata,'$.sha256'));
     CREATE TABLE IF NOT EXISTS product_parameter_sets(id TEXT PRIMARY KEY, document_id TEXT NOT NULL, data TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS product_workbook_rows(
+      CREATE TABLE IF NOT EXISTS product_workbook_photos(
+        document_id TEXT NOT NULL, sheet TEXT NOT NULL, item TEXT NOT NULL, source_cell TEXT NOT NULL,
+        jpeg BLOB NOT NULL CHECK(length(jpeg) BETWEEN 1 AND 524288),
+        PRIMARY KEY(document_id,sheet,item)
+      ) WITHOUT ROWID;
+      CREATE TABLE IF NOT EXISTS product_workbook_rows(
       document_id TEXT NOT NULL, sheet TEXT NOT NULL, row_number INTEGER NOT NULL, label TEXT NOT NULL,
       data TEXT NOT NULL, PRIMARY KEY(document_id,sheet,row_number)
     ) WITHOUT ROWID;`);
+  }
+  draftPhotos(sources, question) {
+    const attachments = [];
+    const seen = new Set();
+    const find = this.db.prepare(
+      'SELECT jpeg FROM product_workbook_photos WHERE document_id=? AND sheet=? AND item=?',
+    );
+    for (const { documentId, sheet, item } of sources) {
+      if (!documentId || !sheet || !item || !mentionsModel(question, item)) continue;
+      const key = JSON.stringify([documentId, sheet, item]);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const row = find.get(documentId, sheet, item);
+      if (!row) continue;
+      const bytes = Buffer.from(row.jpeg);
+      attachments.push({
+        name: item + '.jpg',
+        contentType: 'image/jpeg',
+        contentBase64: bytes.toString('base64'),
+        size: bytes.length,
+      });
+      if (attachments.length === 5) break;
+    }
+    return attachments;
   }
   parameterRecords(id) {
     const row = this.db.prepare('SELECT data FROM product_parameter_sets WHERE id=?').get(id);

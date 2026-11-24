@@ -262,6 +262,7 @@ export function createApp({
             ),
           products: () => knowledge().list(),
           answerQuestion: (...args) => answerMailQuestion(knowledge(), ...args),
+          draftPhotos: (sources, query) => knowledge().documents.draftPhotos(sources, query),
           getDraftModel,
           getEnv: () => connections.environment(),
           getScope: acquisitionScope,

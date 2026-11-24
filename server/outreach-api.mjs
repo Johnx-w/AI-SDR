@@ -258,6 +258,7 @@ export async function handleOutreach({
           !box.paused &&
           !!signature.text &&
           !result.needsManager &&
+          !result.attachments?.length &&
           (answer.automatic || businessCorrespondence) &&
           result.sources.every((s) => answer.sources.includes(s)) &&
           (await verifyGrounding(draftModel, basis, result));
@@ -279,6 +280,7 @@ export async function handleOutreach({
           reason,
           body: signedMailDraft(result.body, signature).bodyText,
           sources: result.sources,
+          ...(result.attachments?.length ? { attachments: result.attachments } : {}),
         };
       }
       return service.answerQuestion(service.mailboxes.get(id), question, service.now());

@@ -482,6 +482,7 @@ export class MailReception {
         !box.paused &&
         basis.eligible &&
         !result.needsManager &&
+        !result.attachments?.length &&
         result.sources.every((source) => basis.answer.sources?.includes(source)) &&
         (await verifyGrounding(model, basis, result));
       if (!stillCurrent()) return;
@@ -489,6 +490,7 @@ export class MailReception {
         row.thread_id,
         {
           ...signedMailDraft(result.body, basis.signature),
+          attachments: result.attachments || [],
           replyToMessageId: m.id,
           expectedRevision: draft?.revision || 0,
         },

@@ -37,6 +37,13 @@ test('邮箱试问只引用现行的已选审核资料，核对、撤回及切�
   const box = { website: 'https://honeybadgerblinds.com', knowledgeProductIds: [p.id] };
   const ask = (m = box, q = 'What material is ZX-01 made of?') => answerMailQuestion(k, m, q);
   assert.equal(ask().automatic, true);
+  const sample = ask().sources[0];
+  k.db
+    .prepare('INSERT INTO product_workbook_photos VALUES(?,?,?,?,?)')
+    .run(file.id, sample.sheet, 'ZX-01', 'B2', Buffer.from([255, 216, 255, 217]));
+  assert.equal(k.documents.draftPhotos(ask().sources, 'Please quote ZX-01')[0].name, 'ZX-01.jpg');
+  assert.equal(k.documents.draftPhotos(ask().sources, 'Please quote ZX-01-H').length, 0);
+  assert.equal(k.documents.draftPhotos([], 'Please quote ZX-01').length, 0);
   const subjectOnly = answerMailQuestion(k, box, 'What material is it made of?', Date.now(), {
     subject: 'ZX-01',
     forDraft: true,

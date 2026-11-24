@@ -523,7 +523,17 @@ export function MailReplyComposer({
             <div className="mail-reply-attachments">
               {content.attachments.map((attachment) => (
                 <span key={attachment.id}>
-                  <Paperclip size={14} />
+                  {attachment.contentType === 'image/jpeg' ? (
+                    <img
+                      width={64}
+                      height={48}
+                      style={{ objectFit: 'contain' }}
+                      src={'data:image/jpeg;base64,' + attachment.contentBase64}
+                      alt={attachment.name}
+                    />
+                  ) : (
+                    <Paperclip size={14} />
+                  )}
                   <span>
                     {attachment.name}
                     <small>{sizeLabel(attachment.size)}</small>
