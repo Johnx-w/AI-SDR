@@ -1,3 +1,7 @@
+import {
+  BUSINESS_REPLY_LABELS,
+  POSITIVE_REQUEST_LABELS as requestLabels,
+} from '../domain/reply-classification.mjs';
 import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -85,20 +89,7 @@ const classLabels: Record<string, string> = {
   unsubscribe: '退订',
   complaint: '投诉',
 };
-const businessLabels: Record<string, string> = {
-  positive: '积极回复',
-  refusal: '明确拒绝',
-  referral: '渠道转介',
-  notification: '客服通知',
-  bounce: '退信',
-  unverified: '待核实',
-  other: '其他真人回复',
-};
-const requestLabels: Record<string, string> = {
-  quote: '索价',
-  catalog: '索目录',
-  meeting: '约见',
-};
+const businessLabels: Record<string, string> = BUSINESS_REPLY_LABELS;
 export function MailConversationTimeline({
   conversation,
   messages,

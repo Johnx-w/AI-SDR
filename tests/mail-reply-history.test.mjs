@@ -484,3 +484,11 @@ test('1,203 封含正文邮件的回信首屏、筛选、深页均使用小表�
     .all(key);
   assert.match(plan.map((r) => r.detail).join(' '), /mailbox_reply_scope/);
 });
+test('首次使用尚无邮箱时返回完整零计数', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  const store = new MailConversations({ db, mailboxes: { list: () => [] } });
+  const r = await historyApi(store);
+  assert.deepEqual(Object.values(r.businessCounts), [0, 0, 0, 0, 0, 0, 0]);
+  assert.equal(r.total, 0);
+});

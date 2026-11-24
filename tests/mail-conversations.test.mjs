@@ -61,7 +61,7 @@ test('format upgrade rescans old cached mail once and enriches HTML without clea
   await h.inbox.sync({ mailboxId: 'one' });
 });
 
-test('rich-body rescan corrects an old empty reply business classification without replacing cached text', (t) => {
+test('rich-body rescan corrects an old empty reply business classification and retains the recovered body', (t) => {
   const h = harness(t);
   const first = received('business-rescan', {
     bodyText: '',
@@ -82,7 +82,7 @@ test('rich-body rescan corrects an old empty reply business classification witho
     }),
   );
   message = h.inbox.detail(message.id).messages[0];
-  assert.equal(message.bodyText, '');
+  assert.equal(message.bodyText, 'Please send your quotation.');
   assert.equal(message.businessKind, 'positive');
   assert.equal(message.requestType, 'quote');
 });

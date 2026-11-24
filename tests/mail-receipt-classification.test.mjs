@@ -209,3 +209,49 @@ test('克隆库重分类预演无写入，回填同步索引且重复执行无�
     db.close();
   }
 });
+test('客户本次原文决定态度与请求，忽略引文和分析摘要', () => {
+  for (const [input, kind, request] of [
+    [{ bodyText: 'Please do not send a catalog.' }, 'refusal', null],
+    [{ bodyText: 'Yes, happy to meet next week.' }, 'positive', 'meeting'],
+    [{ bodyText: 'I have already received your catalogue.' }, 'other', null],
+    [
+      {
+        bodyText: 'Thank you.\nPlease send your price list.',
+        bodyHtml: '<p>Thank you.</p><blockquote>Please send your price list.</blockquote>',
+      },
+      'other',
+      null,
+    ],
+    [
+      { bodyText: 'Please send a quote.', replyAnalysis: { demandSummary: 'not interested' } },
+      'positive',
+      'quote',
+    ],
+    [{ bodyHtml: '<p>Please send a quote.</p>' }, 'positive', 'quote'],
+  ])
+    assert.deepEqual(classifyInboundReply({ ...base, ...input }), { kind, requestType: request });
+});
+test('空正文补录后使用隔离库重跑保持索价与零变更', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'rescan-reply-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = join(dir, 'clone.sqlite'),
+    db = new DatabaseSync(file),
+    box = { id: 'demo', email: base.to };
+  try {
+    const store = new MailConversations({ db, mailboxes: { list: () => [box] } });
+    const input = {
+      ...base,
+      direction: 'inbound',
+      source: 'imap',
+      occurredAt: '2026-01-01T12:00:00Z',
+      messageId: '<updated@buyer.example>',
+      bodyText: '',
+    };
+    store.putMessage(box, input);
+    store.putMessage(box, { ...input, bodyText: 'Please send a quotation.', bodyFormatVersion: 2 });
+    assert.equal(store.replyHistory({ kind: 'all' }).businessCounts.positive, 1);
+  } finally {
+    db.close();
+  }
+  assert.equal(reclassifyMailCache(file, true).changes, 0);
+});

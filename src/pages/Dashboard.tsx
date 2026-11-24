@@ -22,7 +22,7 @@ import type { OverviewData, OverviewSource } from '../services/overview';
 import './Dashboard.css';
 
 const countText = (value: number | null) => (value === null ? '—' : value.toLocaleString('zh-CN'));
-const requestTypeText = { quote: '索价', catalog: '索目录', meeting: '约见' };
+import { POSITIVE_REQUEST_LABELS as requestTypeText } from '../domain/reply-classification.mjs';
 const waitingText = (hours: number) =>
   hours >= 24 ? `${Math.floor(hours / 24)} 天 ${hours % 24} 小时` : `${hours} 小时`;
 const isVisible = () => document.visibilityState !== 'hidden';

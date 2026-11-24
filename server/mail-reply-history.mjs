@@ -1,3 +1,4 @@
+import { BUSINESS_REPLY_LABELS, emptyBusinessCounts } from '../src/domain/reply-classification.mjs';
 const columns =
   'id,account_key,thread_id,direction,source,origin,sender,recipients,subject,stamp,external_id,parent_id,classification,business_kind,request_type';
 function values(alias) {
@@ -131,23 +132,22 @@ export function listReplyHistory(
     page > 1000000 ||
     !kinds.has(kind) ||
     !['all', 'answered', 'unanswered'].includes(handling) ||
-    ![
-      'all',
-      'positive',
-      'refusal',
-      'referral',
-      'notification',
-      'bounce',
-      'unverified',
-      'other',
-    ].includes(businessKind)
+    (businessKind !== 'all' && !Object.hasOwn(BUSINESS_REPLY_LABELS, businessKind))
   )
     throw Object.assign(new Error('来信类型或页码无效'), { status: 400 });
   const accounts = store.mailboxes.list(),
     selected = store.selected(mailboxId);
   const mailboxes = accounts.map(({ id, email }) => ({ id, email })),
     keys = selected.map(keyFor);
-  if (!keys.length) return { items: [], total: 0, page, pageSize, mailboxes };
+  if (!keys.length)
+    return {
+      items: [],
+      total: 0,
+      page,
+      pageSize,
+      mailboxes,
+      businessCounts: emptyBusinessCounts(),
+    };
   const byKey = new Map(selected.map((box) => [keyFor(box), box]));
   const known = accounts.map((box) => box.email.toLowerCase());
   const classify = replyHeaderKindSql(known);
@@ -170,11 +170,8 @@ export function listReplyHistory(
        FROM mailbox_reply_headers h WHERE ${where} GROUP BY coalesce(h.business_kind,'other')`,
     )
     .all(...args);
-  const businessCounts = Object.fromEntries(
-    ['positive', 'refusal', 'referral', 'notification', 'bounce', 'unverified', 'other'].map(
-      (value) => [value, countRows.find((row) => row.kind === value)?.count || 0],
-    ),
-  );
+  const businessCounts = emptyBusinessCounts();
+  for (const { kind, count } of countRows) businessCounts[kind] = count;
   if (businessKind !== 'all') {
     where += ` AND coalesce(h.business_kind,'other')=?`;
     args.push(businessKind);

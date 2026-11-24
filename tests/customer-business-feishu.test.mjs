@@ -289,7 +289,7 @@ function originalMessageTable(f) {
     },
     {
       field_name: '回信分类',
-      type: 3,
+      type: 4,
       property: options([
         '积极回复',
         '明确拒绝',
@@ -300,7 +300,10 @@ function originalMessageTable(f) {
         '其他真人回复',
       ]),
     },
-    { field_name: '客户请求', type: 3, property: options(['索价', '索目录', '约见']) },
+    ...['积极回复', '明确拒绝', '渠道转介', '客服通知', '退信', '待核实', '其他真人回复'].map(
+      (label) => ({ field_name: label + '封数', type: 2 }),
+    ),
+    { field_name: '客户请求', type: 4, property: options(['索价', '索目录', '约见']) },
     { field_name: '本次动作指令', type: 3, property: options(['继续跟进找关键人']) },
     { field_name: '关联模板', type: 18, property: { table_id: 't10', multiple: true } },
   ]);
@@ -799,8 +802,8 @@ test('原T3接续已有副本，收发同轮映射共享记录，重启后追加
     assert.equal(result.counts.messages, 1);
     assert(original.fields['收到回复内容'].includes(incoming.body));
     assert.equal(original.fields['回复类型'], '真人客户回复');
-    assert.equal(original.fields['回信分类'], '其他真人回复');
-    assert.equal(original.fields['客户请求'], null);
+    assert.deepEqual(original.fields['回信分类'], ['其他真人回复']);
+    assert.deepEqual(original.fields['客户请求'], []);
     assert.equal(original.fields['提取客户信息'], '联系人：Buyer');
     for (const row of f.records.get('t1')) assert.deepEqual(row.fields.来源沟通, ['copied-row']);
     assert.deepEqual(f.records.get('t4')[0].fields.关联沟通, ['copied-row']);

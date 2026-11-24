@@ -45,7 +45,11 @@ export function reclassifyMailCache(path, apply = false) {
       ORDER BY rowid`);
     for (const row of rows.iterate()) {
       report.considered++;
-      const next = incomingClassification({ ...row, from: row.sender });
+      const next = incomingClassification({
+        ...row,
+        from: row.sender,
+        classification: row.previous,
+      });
       const business = classifyInboundReply({
         ...row,
         from: row.sender,

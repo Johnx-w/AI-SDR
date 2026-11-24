@@ -12,13 +12,15 @@ import {
 import { BUSINESS_TABLE_ID_ENV, mapBusinessFeishuClient } from './feishu-business-client.mjs';
 import {
   classifyInboundReply,
-  BUSINESS_REPLY_LABELS,
   communicationRounds,
   communicationRoundFields,
-  POSITIVE_REQUEST_LABELS,
   REPLY_TYPES,
 } from './communication-rounds.mjs';
 
+import {
+  BUSINESS_REPLY_LABELS,
+  POSITIVE_REQUEST_LABELS,
+} from '../src/domain/reply-classification.mjs';
 const categories = {
   ventilation: '透气窗',
   shutters: '百叶窗',
@@ -147,15 +149,7 @@ export function buildBusinessTableFields(
       scalar('发生时间', 5),
       select('发送结果', messageStatuses),
       select('消息分类', messageKinds),
-      select('回信分类', [
-        '积极回复',
-        '明确拒绝',
-        '渠道转介',
-        '客服通知',
-        '退信',
-        '待核实',
-        '其他真人回复',
-      ]),
+      select('回信分类', BUSINESS_REPLY_LABELS),
       scalar('客户请求'),
       scalar('渠道消息编号'),
       scalar('附件链接'),
@@ -250,8 +244,9 @@ export function buildBusinessTableFields(
         '回复类型',
         REPLY_TYPES.filter((type) => type !== '待核实回执'),
       ),
-      select('回信分类', BUSINESS_REPLY_LABELS),
-      select('客户请求', POSITIVE_REQUEST_LABELS),
+      { ...select('回信分类', BUSINESS_REPLY_LABELS), type: 4 },
+      { ...select('客户请求', POSITIVE_REQUEST_LABELS), type: 4 },
+      ...Object.values(BUSINESS_REPLY_LABELS).map((label) => scalar(label + '封数', 2)),
       scalar('提取客户信息'),
       scalar('客户需求摘要'),
       scalar('业务员纪要'),
@@ -298,8 +293,12 @@ export function sameFields(record, expected, definitions) {
       return (
         businessSchemaDigest(unique(actual).sort()) === businessSchemaDigest(unique(value).sort())
       );
+    if (definition.type === 4) {
+      const options = (values) => (values || []).map(text).sort();
+      return businessSchemaDigest(options(actual)) === businessSchemaDigest(options(value));
+    }
     if ([2, 5].includes(definition.type))
-      return value == null ? !text(actual) : Number(actual) === Number(value);
+      return value == null ? !text(actual) : actual != null && Number(actual) === Number(value);
     return text(actual) === text(value);
   });
 }

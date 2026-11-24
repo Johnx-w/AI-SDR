@@ -128,10 +128,10 @@ export class MailConversations {
         UPDATE mailbox_threads AS t SET data=json_set(t.data,'$.participantName',trim(names.name))
           FROM names WHERE names.ordinal=1 AND names.thread_id=t.id`);
       });
-    if (!this.db.prepare('SELECT 1 FROM mailbox_summary_migrations WHERE version=2').get())
+    if (!this.db.prepare('SELECT 1 FROM mailbox_summary_migrations WHERE version=3').get())
       this.transaction(() => {
         if (
-          !this.db.prepare('INSERT OR IGNORE INTO mailbox_summary_migrations VALUES(2)').run()
+          !this.db.prepare('INSERT OR IGNORE INTO mailbox_summary_migrations VALUES(3)').run()
             .changes
         )
           return;
@@ -434,6 +434,8 @@ export class MailConversations {
         enriched = {
           ...enriched,
           ...richFields,
+          bodyText: old.bodyText || text(input.bodyText, 1024 * 1024),
+          bodyHtml: richFields.bodyHtml || old.bodyHtml,
           inReplyTo: richFields.inReplyTo || old.inReplyTo,
           references: richFields.references.length ? richFields.references : old.references || [],
           classification:
@@ -441,7 +443,7 @@ export class MailConversations {
             (!old.classification || ['normal', 'unverified'].includes(old.classification))
               ? incomingClassification({
                   ...input,
-                  bodyText: input.bodyText || old.bodyText,
+                  bodyText: old.bodyText || input.bodyText,
                   bodyHtml: input.bodyHtml || old.bodyHtml,
                 })
               : old.classification,
@@ -450,8 +452,6 @@ export class MailConversations {
         if (input.direction === 'inbound') {
           const business = classifyInboundReply({
             ...enriched,
-            bodyText: input.bodyText || old.bodyText,
-            bodyHtml: input.bodyHtml || old.bodyHtml,
             businessKind: undefined,
             requestType: undefined,
           });

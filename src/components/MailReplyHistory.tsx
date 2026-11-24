@@ -1,3 +1,7 @@
+import {
+  BUSINESS_REPLY_LABELS,
+  POSITIVE_REQUEST_LABELS as requestTypes,
+} from '../domain/reply-classification.mjs';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { formatBeijingTime } from '../domain/date-time.mjs';
@@ -22,15 +26,8 @@ const handling = {
 };
 const businessKinds = {
   all: '全部业务分类',
-  positive: '积极回复',
-  refusal: '明确拒绝',
-  referral: '渠道转介',
-  notification: '客服通知',
-  bounce: '退信',
-  unverified: '待核实',
-  other: '其他真人回复',
+  ...BUSINESS_REPLY_LABELS,
 };
-const requestTypes = { quote: '索价', catalog: '索目录', meeting: '约见' };
 interface Row {
   id: string;
   threadId: string;
@@ -65,7 +62,9 @@ export function MailReplyHistory({
     ? (initialBusinessKind as keyof typeof businessKinds)
     : 'all';
   const [mailbox, setMailbox] = useState('all'),
-    [kind, setKind] = useState<keyof typeof kinds>('reply'),
+    [kind, setKind] = useState<keyof typeof kinds>(
+      selectedBusinessKind === 'all' ? 'reply' : 'all',
+    ),
     [businessKind, setBusinessKind] = useState<keyof typeof businessKinds>(selectedBusinessKind),
     [replyState, setReplyState] = useState('all'),
     [page, setPage] = useState(1);
