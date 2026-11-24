@@ -1,10 +1,19 @@
 import { initializeThreadSearch, listThreadPage } from './mail-thread-page.mjs';
-import { initializeThreadWorkflow, mergeThreadWorkflow } from './mail-thread-workflow.mjs';
+import {
+  backfillOfflineCompletions,
+  initializeThreadWorkflow,
+  mergeThreadWorkflow,
+} from './mail-thread-workflow.mjs';
 import { createHash } from 'node:crypto';
 import { setImmediate as yieldToRequests } from 'node:timers/promises';
 import { mailSyncFailure } from './mail-sync-errors.mjs';
-import { incomingClassification } from './communication-rounds.mjs';
-import { initializeReplyHistory, listReplyHistory } from './mail-reply-history.mjs';
+import { classifyInboundReply, incomingClassification } from './communication-rounds.mjs';
+import {
+  initializeReplyHistory,
+  listReplyHistory,
+  internalSenderSql,
+  replyToInboundSql,
+} from './mail-reply-history.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -19,6 +28,7 @@ const messageId = (value) => {
 };
 const keyFor = (mailbox) => hash([mailbox.id, address(mailbox.email)]);
 export { keyFor as mailboxAccountKey };
+const accountParameters = (boxes) => boxes.flatMap((box) => [keyFor(box), box.email.toLowerCase()]);
 const iso = (value) => new Date(value).toISOString();
 const attachmentMetadata = (value) =>
   Array.isArray(value)
@@ -28,6 +38,22 @@ const attachmentMetadata = (value) =>
         size: Number.isSafeInteger(entry.size) && entry.size >= 0 ? entry.size : null,
       }))
     : [];
+
+const positivePageSize = 25;
+export function positiveReplyTaskSql(accountCount, countOnly = false) {
+  const accountRows = Array.from({ length: accountCount }, () => '(?,?)').join(',');
+  const columns = countOnly
+    ? 'count(*) AS total'
+    : 'h.id,h.account_key,h.thread_id,h.sender,h.subject,h.stamp,h.external_id,h.request_type';
+  return `WITH account_email(account_key,email) AS (VALUES ${accountRows})
+    SELECT ${columns} FROM mailbox_reply_headers h
+    JOIN account_email a ON a.account_key=h.account_key
+    WHERE h.direction='inbound' AND h.source='imap' AND h.business_kind='positive'
+      AND NOT (${internalSenderSql('SELECT email FROM account_email')})
+      AND NOT EXISTS(SELECT 1 FROM mail_offline_handled done WHERE done.message_id=h.id)
+      AND NOT EXISTS(SELECT 1 FROM mailbox_reply_headers o WHERE ${replyToInboundSql('a.email')})
+    ${countOnly ? '' : 'ORDER BY h.stamp,h.id LIMIT ? OFFSET ?'}`;
+}
 
 /** Local read model. Reading this model never opens an IMAP or SMTP connection. */
 export class MailConversations {
@@ -83,11 +109,18 @@ export class MailConversations {
     this.db
       .exec(`CREATE INDEX IF NOT EXISTS mailbox_thread_order ON mailbox_threads(account_key,json_extract(data,'$.updatedAt') DESC,id);
       CREATE INDEX IF NOT EXISTS mailbox_inbound_thread ON mailbox_reply_headers(thread_id) WHERE direction='inbound';
+      CREATE INDEX IF NOT EXISTS mailbox_positive_tasks ON mailbox_reply_headers(account_key,stamp,id)
+        WHERE direction='inbound' AND source='imap' AND business_kind='positive';
       CREATE INDEX IF NOT EXISTS mailbox_reply_evidence ON mailbox_reply_headers(account_key,thread_id)
         WHERE direction='inbound' AND source='imap' AND parent_id IS NOT NULL;`);
     this.db.exec(
       'CREATE TABLE IF NOT EXISTS mailbox_summary_migrations (version INTEGER PRIMARY KEY)',
     );
+    if (!db.prepare('SELECT 1 FROM mailbox_summary_migrations WHERE version=4').get())
+      this.transaction(() => {
+        if (db.prepare('INSERT OR IGNORE INTO mailbox_summary_migrations VALUES(4)').run().changes)
+          backfillOfflineCompletions(db);
+      });
     if (!this.db.prepare('SELECT 1 FROM mailbox_summary_migrations WHERE version=1').get())
       this.transaction(() => {
         if (
@@ -106,15 +139,117 @@ export class MailConversations {
         UPDATE mailbox_threads AS t SET data=json_set(t.data,'$.participantName',trim(names.name))
           FROM names WHERE names.ordinal=1 AND names.thread_id=t.id`);
       });
+    if (!this.db.prepare('SELECT 1 FROM mailbox_summary_migrations WHERE version=3').get())
+      this.transaction(() => {
+        if (
+          !this.db.prepare('INSERT OR IGNORE INTO mailbox_summary_migrations VALUES(3)').run()
+            .changes
+        )
+          return;
+        const update = this.db.prepare('UPDATE mailbox_thread_messages SET data=? WHERE id=?');
+        const rows = this.db
+          .prepare(
+            `SELECT id,data FROM mailbox_thread_messages
+             WHERE json_extract(data,'$.direction')='inbound'
+             AND json_extract(data,'$.source')='imap'`,
+          )
+          .all();
+        for (const row of rows) {
+          const message = JSON.parse(row.data);
+          const business = classifyInboundReply({
+            ...message,
+            businessKind: undefined,
+            requestType: undefined,
+          });
+          if (
+            message.businessKind === business.kind &&
+            (message.requestType || null) === (business.requestType || null)
+          )
+            continue;
+          message.businessKind = business.kind;
+          if (business.requestType) message.requestType = business.requestType;
+          else delete message.requestType;
+          update.run(JSON.stringify(message), row.id);
+        }
+      });
   }
 
   replyHistory(filters) {
     return listReplyHistory(this, filters, keyFor);
   }
 
-  transaction(work) {
+  positiveReplyCount(accounts = this.mailboxes.list()) {
+    if (!accounts.length) return 0;
+    return this.db
+      .prepare(positiveReplyTaskSql(accounts.length, true))
+      .get(...accountParameters(accounts)).total;
+  }
+
+  positiveReplyPage(requestedPage = 1) {
+    // Counts and rows share one snapshot even when a second process is syncing mail.
+    return this.transaction(
+      () => {
+        const accounts = this.mailboxes.list();
+        const positiveReplyTotal = this.positiveReplyCount(accounts);
+        const positiveReplyPage = Math.min(
+          requestedPage,
+          Math.max(1, Math.ceil(positiveReplyTotal / positivePageSize)),
+        );
+        return {
+          positiveReplyTotal,
+          positiveReplyPage,
+          positiveReplyPageSize: positivePageSize,
+          positiveReplies: positiveReplyTotal
+            ? this.positiveReplyTasks(positiveReplyPage, accounts)
+            : [],
+        };
+      },
+      { readOnly: true },
+    );
+  }
+
+  positiveReplyTasks(page = 1, accounts = this.mailboxes.list()) {
+    if (!accounts.length) return [];
+    const byKey = new Map(accounts.map((box) => [keyFor(box), box]));
+    const rows = this.db
+      .prepare(positiveReplyTaskSql(accounts.length))
+      .all(...accountParameters(accounts), positivePageSize, (page - 1) * positivePageSize);
+    const lookup = this.customerLookup();
+    return rows.flatMap((row) => {
+      const box = byKey.get(row.account_key);
+      if (!box) return [];
+      const customer = this.localCustomer({ participant: row.sender }, lookup);
+      const waitingHours = Math.max(0, Math.floor((this.now() - Date.parse(row.stamp)) / 3600000));
+      return [
+        {
+          id: row.id,
+          messageId: row.id,
+          externalId: row.external_id,
+          threadId: row.thread_id,
+          mailboxId: box.id,
+          account: box.email,
+          from: row.sender,
+          customerId: customer.customerId || null,
+          customer: customer.companyName || row.sender,
+          subject: row.subject,
+          receivedAt: row.stamp,
+          requestType: row.request_type,
+          waitingHours,
+          to:
+            '/inbox?' +
+            new URLSearchParams({
+              tab: 'inbox',
+              thread: row.thread_id,
+              mailboxId: box.id,
+            }),
+        },
+      ];
+    });
+  }
+
+  transaction(work, { readOnly = false } = {}) {
     if (this.db.isTransaction) return work();
-    this.db.exec('BEGIN IMMEDIATE');
+    this.db.exec(readOnly ? 'BEGIN' : 'BEGIN IMMEDIATE');
     try {
       const value = work();
       this.db.exec('COMMIT');
@@ -338,6 +473,8 @@ export class MailConversations {
         enriched = {
           ...enriched,
           ...richFields,
+          bodyText: old.bodyText || text(input.bodyText, 1024 * 1024),
+          bodyHtml: richFields.bodyHtml || old.bodyHtml,
           inReplyTo: richFields.inReplyTo || old.inReplyTo,
           references: richFields.references.length ? richFields.references : old.references || [],
           classification:
@@ -345,12 +482,24 @@ export class MailConversations {
             (!old.classification || ['normal', 'unverified'].includes(old.classification))
               ? incomingClassification({
                   ...input,
-                  bodyText: input.bodyText || old.bodyText,
+                  bodyText: old.bodyText || input.bodyText,
                   bodyHtml: input.bodyHtml || old.bodyHtml,
                 })
               : old.classification,
           attachments: input.attachments ? attachmentMetadata(input.attachments) : old.attachments,
         };
+        if (input.direction === 'inbound') {
+          const business = classifyInboundReply({
+            ...enriched,
+            businessKind: undefined,
+            requestType: undefined,
+          });
+          enriched = {
+            ...enriched,
+            businessKind: business.kind,
+            requestType: business.requestType || undefined,
+          };
+        }
       }
       if (
         ['outreach', 'manual', 'automatic'].includes(old.source) &&
@@ -398,6 +547,11 @@ export class MailConversations {
       source: input.source,
       unread: input.direction === 'inbound' && input.unread !== false,
     };
+    if (data.direction === 'inbound') {
+      const business = classifyInboundReply(data);
+      data.businessKind = business.kind;
+      data.requestType = business.requestType || undefined;
+    }
     this.db
       .prepare('INSERT INTO mailbox_thread_messages VALUES(?,?,?,?)')
       .run(id, accountKey, threadId, JSON.stringify(data));

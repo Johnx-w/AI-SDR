@@ -366,7 +366,10 @@ export function createApp({
       decorateLeadDevelopment(await library().list(), business.state().store.view()),
     customerSnapshot: () =>
       decorateLeadDevelopment(library().snapshot(), business.state().store.view()),
-    business: () => business.state().store.view(),
+    business: (page) => ({
+      ...business.state().store.view(),
+      ...outreach().conversations.positiveReplyPage(page),
+    }),
     acquisition: () => ({ ...jobs().overview(), schedules: plans().list() }),
     products: () => knowledge().list(),
     scope: () =>
@@ -534,7 +537,8 @@ export function createApp({
                 "SELECT count(*) AS count FROM product_knowledge WHERE json_extract(data,'$.status')='draft'",
               )
               .get();
-            return json(response, 200, { count: due.count + draft.count });
+            const positiveReplies = outreach().conversations.positiveReplyCount();
+            return json(response, 200, { count: due.count + draft.count + positiveReplies });
           }
           return json(
             response,
@@ -542,6 +546,7 @@ export function createApp({
             await overview.read({
               period: url.searchParams.get('period') || '7d',
               asOf: url.searchParams.get('asOf') || undefined,
+              positivePage: url.searchParams.get('positivePage') ?? 1,
             }),
           );
         }

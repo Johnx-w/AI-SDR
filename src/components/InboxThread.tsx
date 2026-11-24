@@ -1,3 +1,7 @@
+import {
+  BUSINESS_REPLY_LABELS,
+  POSITIVE_REQUEST_LABELS as requestLabels,
+} from '../domain/reply-classification.mjs';
 import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -85,6 +89,7 @@ const classLabels: Record<string, string> = {
   unsubscribe: '退订',
   complaint: '投诉',
 };
+const businessLabels: Record<string, string> = BUSINESS_REPLY_LABELS;
 export function MailConversationTimeline({
   conversation,
   messages,
@@ -163,9 +168,10 @@ export function MailConversationTimeline({
                       <b title={mail.from}>{author}</b>
                       <small>发给 {mail.to}</small>
                     </span>
-                    {mail.direction === 'inbound' && classLabels[mail.classification || ''] && (
+                    {mail.direction === 'inbound' && businessLabels[mail.businessKind || ''] && (
                       <span className="inbox-mail-kind">
-                        {classLabels[mail.classification || '']}
+                        {businessLabels[mail.businessKind || '']}
+                        {mail.requestType ? ` · ${requestLabels[mail.requestType]}` : ''}
                       </span>
                     )}
                     <span className="inbox-snippet">{mail.subject || '（无主题）'}</span>
@@ -195,7 +201,9 @@ export function MailConversationTimeline({
                         <dt>分类</dt>
                         <dd>
                           {mail.direction === 'inbound'
-                            ? classLabels[mail.classification || ''] || '客户来信'
+                            ? businessLabels[mail.businessKind || ''] ||
+                              classLabels[mail.classification || ''] ||
+                              '客户来信'
                             : operation?.origin === 'automatic' || mail.source === 'automatic'
                               ? '自动回复'
                               : '发出'}

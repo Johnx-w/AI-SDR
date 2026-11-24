@@ -19,9 +19,12 @@ import { Badge } from '../components/ui';
 import type { OverviewPeriod } from '../domain/overview-rules.mjs';
 import { overviewApi } from '../services/overview';
 import type { OverviewData, OverviewSource } from '../services/overview';
+import { POSITIVE_REQUEST_LABELS as requestTypeText } from '../domain/reply-classification.mjs';
 import './Dashboard.css';
 
 const countText = (value: number | null) => (value === null ? '—' : value.toLocaleString('zh-CN'));
+const waitingText = (hours: number) =>
+  hours >= 24 ? `${Math.floor(hours / 24)} 天 ${hours % 24} 小时` : `${hours} 小时`;
 const isVisible = () => document.visibilityState !== 'hidden';
 const dateText = (value?: string | null) =>
   value && Number.isFinite(Date.parse(value))
@@ -259,6 +262,7 @@ export function Dashboard() {
   );
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
+  const [positivePage, setPositivePage] = useState(1);
   const [revision, setRevision] = useState(0);
   const cache = useRef<Partial<Record<OverviewPeriod, OverviewData>>>({});
   const data = dataByPeriod[period];
@@ -278,9 +282,13 @@ export function Dashboard() {
         const result = await overviewApi.get(
           period,
           AbortSignal.any([controller.signal, AbortSignal.timeout(30000)]),
+          undefined,
+          positivePage,
         );
         if (!alive || controller.signal.aborted) return;
         if (result.range.period !== period) throw new Error('返回的统计期间不一致，请重新读取');
+        if (result.sources.business.state === 'ready' && result.positiveReplyPage !== positivePage)
+          setPositivePage(result.positiveReplyPage);
         cache.current[period] = result;
         setDataByPeriod((current) => ({ ...current, [period]: result }));
         setError('');
@@ -320,7 +328,7 @@ export function Dashboard() {
       if (timer) clearTimeout(timer);
       document.removeEventListener('visibilitychange', visible);
     };
-  }, [period, revision]);
+  }, [period, revision, positivePage]);
 
   const header = (
     <PageHeading
@@ -456,6 +464,67 @@ export function Dashboard() {
             );
           })}
         </div>
+      </section>
+      <section className="panel ov-priority-panel">
+        <PanelHeading
+          title="积极回复待办"
+          detail="客户索价、索目录或约见后，直到实际回复或确认线下处理"
+          to="/business?view=replies&businessKind=positive"
+          link="全部积极回复"
+        />
+        <SourceNotice source={data.sources.business} />
+        {data.positiveReplies.length ? (
+          <div className="ov-priority-list">
+            {data.positiveReplies.map((reply) => (
+              <Link className="ov-priority-row ov-clickable" to={reply.to} key={reply.id}>
+                <span className="ov-rank">{requestTypeText[reply.requestType]}</span>
+                <div className="ov-priority-content">
+                  <div className="ov-company-title">
+                    <strong>{reply.customer}</strong>
+                    <Badge>{requestTypeText[reply.requestType]}</Badge>
+                  </div>
+                  <p className="ov-priority-reason">{reply.subject || '（无主题）'}</p>
+                  <span className="ov-customer-meta">
+                    收到于 {dateText(reply.receivedAt)} · 已等待 {waitingText(reply.waitingHours)}
+                  </span>
+                </div>
+                <ChevronRight size={16} aria-hidden="true" />
+              </Link>
+            ))}
+          </div>
+        ) : data.sources.business.state === 'ready' ? (
+          <EmptyState
+            title="暂无未处理积极回复"
+            detail="新的索价、索目录或约见会在这里形成待办。"
+          />
+        ) : null}
+        {data.positiveReplyPageSize && data.positiveReplyTotal > data.positiveReplyPageSize && (
+          <nav className="ov-reply-pages" aria-label="积极回复待办分页">
+            <button
+              type="button"
+              className="btn secondary small"
+              disabled={refreshing || data.positiveReplyPage <= 1}
+              onClick={() => setPositivePage(data.positiveReplyPage - 1)}
+            >
+              上一页
+            </button>
+            <span>
+              共 {data.positiveReplyTotal} 项，第 {data.positiveReplyPage}/
+              {Math.ceil(data.positiveReplyTotal / data.positiveReplyPageSize)} 页
+            </span>
+            <button
+              type="button"
+              className="btn secondary small"
+              disabled={
+                refreshing ||
+                data.positiveReplyPage * data.positiveReplyPageSize >= data.positiveReplyTotal
+              }
+              onClick={() => setPositivePage(data.positiveReplyPage + 1)}
+            >
+              下一页
+            </button>
+          </nav>
+        )}
       </section>
       <div className="ov-metrics">
         <Metric

@@ -1,3 +1,4 @@
+import { classifyInboundReply } from './communication-rounds.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { leadDevelopment } from './lead-development.mjs';
 import { mkdirSync } from 'node:fs';
@@ -120,6 +121,25 @@ export class CustomerBusiness {
         PRIMARY KEY(scope,customer_id));
       CREATE TABLE IF NOT EXISTS customer_business_sync(
         scope TEXT PRIMARY KEY, hash TEXT NOT NULL, error TEXT NOT NULL);`);
+    this.db.exec('CREATE TABLE IF NOT EXISTS business_reply_migrations(scope TEXT PRIMARY KEY)');
+    if (!this.db.prepare('SELECT 1 FROM business_reply_migrations WHERE scope=?').get(this.scope)) {
+      this.db.exec('BEGIN IMMEDIATE');
+      try {
+        if (
+          this.db
+            .prepare('INSERT OR IGNORE INTO business_reply_migrations VALUES(?)')
+            .run(this.scope).changes
+        ) {
+          for (const message of this.all('messages')) {
+            if (message.direction === 'inbound') this.put('messages', message);
+          }
+        }
+        this.db.exec('COMMIT');
+      } catch (error) {
+        this.db.exec('ROLLBACK');
+        throw error;
+      }
+    }
   }
   timestamp() {
     const now = this.now();
@@ -194,6 +214,10 @@ export class CustomerBusiness {
       .run(this.scope, context.customerId, JSON.stringify({ ...current, ...context }));
   }
   put(kind, record) {
+    if (kind === 'messages' && record.direction === 'inbound') {
+      const decision = classifyInboundReply(record);
+      record = { ...record, businessKind: decision.kind, requestType: decision.requestType };
+    }
     this.db
       .prepare(
         'INSERT INTO customer_business_entities VALUES(?,?,?,?) ON CONFLICT(scope,kind,id) DO UPDATE SET data=excluded.data',

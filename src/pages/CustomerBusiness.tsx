@@ -114,7 +114,11 @@ export function CustomerBusiness() {
         </PageHeading>
 
         {showReplies ? (
-          <MailReplyHistory revision={revision} />
+          <MailReplyHistory
+            key={params.get('businessKind') || 'all'}
+            revision={revision}
+            initialBusinessKind={params.get('businessKind') || 'all'}
+          />
         ) : (
           <>
             {error && <p role="alert">{error}</p>}

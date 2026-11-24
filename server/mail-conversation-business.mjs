@@ -1,3 +1,4 @@
+import { classifyInboundReply } from './communication-rounds.mjs';
 import { createHash } from 'node:crypto';
 
 const digest = (value) =>
@@ -85,12 +86,20 @@ export async function recordMailConversation({ store, conversation, messages }) 
       const duplicate = priorFor(message);
       if (duplicate.length > 1) throw fail('邮件消息编号重复，请核对业务记录');
       const prior = duplicate[0];
+      const decision = message.direction === 'inbound' ? classifyInboundReply(message) : null;
+      const businessFields = decision
+        ? { businessKind: decision.kind, requestType: decision.requestType }
+        : {};
       if (prior) {
+        const filledBody =
+          prior.body === '（邮件正文为空）' &&
+          message.bodyText &&
+          prior.mailboxMessageId === message.id;
         if (
           prior.customerId !== customerId ||
           prior.conversationId !== target.id ||
           prior.from.toLowerCase() !== message.from.toLowerCase() ||
-          prior.body !== (message.bodyText || '（邮件正文为空）')
+          (!filledBody && prior.body !== (message.bodyText || '（邮件正文为空）'))
         )
           throw fail('相同邮件编号的原文或客户归属不同，未覆盖原记录');
         const confirmedSent =
@@ -102,10 +111,15 @@ export async function recordMailConversation({ store, conversation, messages }) 
         const enriched =
           (headers.inReplyTo && !prior.inReplyTo) ||
           (headers.references.length && !prior.references?.length);
-        if (confirmedSent || enriched) {
+        const changedDecision =
+          decision &&
+          (prior.businessKind !== decision.kind || prior.requestType !== decision.requestType);
+        if (confirmedSent || enriched || changedDecision || filledBody) {
           store.put('messages', {
             ...prior,
             ...headers,
+            ...businessFields,
+            ...(filledBody ? { body: message.bodyText } : {}),
             ...(confirmedSent
               ? {
                   deliveryStatus: 'sent',
@@ -117,7 +131,11 @@ export async function recordMailConversation({ store, conversation, messages }) 
             audit: [
               ...(prior.audit || []),
               {
-                action: confirmedSent ? 'mailbox_sent_confirmed' : 'mailbox_reply_headers',
+                action: confirmedSent
+                  ? 'mailbox_sent_confirmed'
+                  : changedDecision || filledBody
+                    ? 'mailbox_reply_classified'
+                    : 'mailbox_reply_headers',
                 at: timestamp,
               },
             ],
@@ -130,6 +148,7 @@ export async function recordMailConversation({ store, conversation, messages }) 
         customerId,
         conversationId: target.id,
         mailboxMessageId: message.id,
+        ...businessFields,
         channel: 'email',
         direction: message.direction,
         subject: message.subject,
