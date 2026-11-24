@@ -36,6 +36,7 @@ test('customer timeline reads actual sent messages, pending and historical work 
   svc.putDelivery(first);
   const read = (id = 'buyer', page = 1) => readCustomerTimeline(store, svc, id, page);
   assert.equal(read().items[0].source, 'delivery');
+  assert.equal(read().items[0].state, 'sent');
   assert.equal(timelineOriginal(store, svc, 'buyer', 'delivery', 'first').bodyText, first.bodyText);
   assert.throws(() => timelineOriginal(store, svc, 'other', 'delivery', 'first'), { status: 404 });
   svc.conversations.importDeliveries();

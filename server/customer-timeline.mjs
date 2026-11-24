@@ -95,7 +95,7 @@ export function readCustomerTimeline(store, service, customerId, requestedPage =
         coalesce(nullif(data->>'externalId',''),data->>'mailboxMessageId',data->>'id')||':'||lower(coalesce(data->>'account','')),3 FROM crm WHERE data->>'kind'='messages'
       UNION ALL SELECT CASE state WHEN 'accepted' THEN 'mail' ELSE 'first' END,id,
         CASE state WHEN 'accepted' THEN data->>'subject' ELSE '首封开发信' END,
-        CASE WHEN state='failed' AND data->>'$.resolution.outcome'='failed' THEN 'verifiedFailed'
+        CASE WHEN state='accepted' THEN 'sent' WHEN state='failed' AND data->>'$.resolution.outcome'='failed' THEN 'verifiedFailed'
              WHEN state='draft' AND coalesce(data->>'subject','')='' THEN 'generating' ELSE state END,
         CASE WHEN state='accepted' THEN data->>'sentAt' WHEN state IN ('draft','queued','sending','blocked') THEN data->>'scheduledAt'
              ELSE coalesce(data->>'skippedAt',data->>'cancelledAt',data->>'attemptedAt',data->>'createdAt') END,
