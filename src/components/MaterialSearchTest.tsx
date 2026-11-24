@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { FileSearch, Play, Search } from 'lucide-react';
 import { outreachApi, type OutreachMailbox } from '../outreachApi';
 import { sourceUrl, messageOf } from '../services/materials';
-import type { ReplySource } from './ReplyPreview';
+import { parameterLocation, ParameterCitation, type ReplySource } from './ReplyPreview';
 
 export function MaterialSearchTest() {
   const [boxes, setBoxes] = useState<Pick<OutreachMailbox, 'id' | 'email'>[]>([]),
@@ -111,8 +111,9 @@ export function MaterialSearchTest() {
                 {s.documentId && s.productId ? (
                   <a
                     href={
+                      parameterLocation(s) ||
                       sourceUrl(encodeURIComponent(s.productId), encodeURIComponent(s.documentId)) +
-                      (page ? '#page=' + page : '')
+                        (page ? '#page=' + page : '')
                     }
                     target="_blank"
                     rel="noreferrer"
@@ -126,7 +127,10 @@ export function MaterialSearchTest() {
                   v{s.version} · {s.sheet ? s.sheet + '!' : ''}
                   {s.ref}
                 </small>
-                <p>{s.value}</p>
+                <p>
+                  {s.value}
+                  <ParameterCitation source={s} />
+                </p>
               </article>
             );
           })}

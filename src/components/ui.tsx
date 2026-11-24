@@ -40,6 +40,7 @@ export function Modal({
       open={initiallyVisible || undefined}
       className={`modal ${wide ? 'wide' : ''}`}
       onCancel={(event) => {
+        if (event.target !== event.currentTarget) return;
         event.preventDefault();
         onClose();
       }}

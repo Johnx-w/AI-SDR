@@ -21,7 +21,7 @@ test('三个正式站点的开发范围需要官网或品牌依据，外站无�
   assert.equal(siteAllowsProduct({ brands: ['Honey Badger Blinds'] }, own), true);
 });
 
-test('邮箱试问只引用本站现行的已选审核资料，核对、撤回及切换即时生效', async (t) => {
+test('邮箱试问只引用现行的已选审核资料，核对、撤回及切换即时生效', async (t) => {
   const k = new ProductKnowledge();
   t.after(() => k.close());
   let p = k.save({ name: '轨道', direction: 'materials', brands: ['Honey Badger Blinds'] });
@@ -37,6 +37,23 @@ test('邮箱试问只引用本站现行的已选审核资料，核对、撤回�
   const box = { website: 'https://honeybadgerblinds.com', knowledgeProductIds: [p.id] };
   const ask = (m = box, q = 'What material is ZX-01 made of?') => answerMailQuestion(k, m, q);
   assert.equal(ask().automatic, true);
+  const sample = ask().sources[0];
+  const jpeg = await (
+    await import('sharp')
+  )
+    .default({ create: { width: 4, height: 4, channels: 3, background: 'blue' } })
+    .jpeg()
+    .toBuffer();
+  await k.documents.photos.change(p.id, file.id, {
+    sheet: sample.sheet,
+    item: 'ZX-01',
+    slot: '主图',
+    expectedId: null,
+    contentBase64: jpeg.toString('base64'),
+  });
+  assert.equal(k.documents.draftPhotos(ask().sources, 'Please quote ZX-01')[0].name, 'ZX-01.jpg');
+  assert.equal(k.documents.draftPhotos(ask().sources, 'Please quote ZX-01-H').length, 0);
+  assert.equal(k.documents.draftPhotos([], 'Please quote ZX-01').length, 0);
   const subjectOnly = answerMailQuestion(k, box, 'What material is it made of?', Date.now(), {
     subject: 'ZX-01',
     forDraft: true,
@@ -53,7 +70,14 @@ test('邮箱试问只引用本站现行的已选审核资料，核对、撤回�
   assert.equal(ask().sources.at(-1).ref, 'B2');
   assert.match(ask().body, /Aluminium/);
   for (const other of ['shuangshengshutter.com', 'shutterblindssolutions.com'])
-    assert.deepEqual(ask({ ...box, website: 'https://' + other }).sources, []);
+    assert.equal(ask({ ...box, website: 'https://' + other }).sources.at(-1).ref, 'B2');
+  assert.equal(
+    ask(
+      { ...box, website: 'https://shuangshengshutter.com' },
+      'What material is Honey Badger Blinds ZX-01 made of?',
+    ).sources.at(-1).ref,
+    'B2',
+  );
   assert.equal(ask({ ...box, knowledgeProductIds: [] }).sources.length, 0);
   assert.equal(ask(box, 'What material is ZX-01333?').sources.length, 0);
   for (const q of ['What material is Shuangsheng ZX-01 made of?', 'SBS 的 ZX-01 材质是什么？'])

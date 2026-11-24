@@ -1,0 +1,4597 @@
+{
+  "categories": [
+    {
+      "name": "卷帘",
+      "terms": "1）EXW ；2）不足一平方按照一平方计算；3）收单后18-36小时出货",
+      "shared": [
+        {
+          "file": "ec9d532bb61c2189.webp",
+          "models": ["0-22", "0-23"]
+        }
+      ]
+    },
+    {
+      "name": "阳光面料",
+      "terms": "1）EXW ；2）不足一平方按照一平方计算；3）收单后18-36小时出货",
+      "shared": []
+    },
+    {
+      "name": "斑马帘",
+      "terms": "1）EXW；2）不足一平方按照一平方计算；3）收单后18-36小时出货",
+      "shared": [
+        {
+          "file": "02eabab5a226db0a.webp",
+          "models": ["2-23", "2-24"]
+        }
+      ]
+    },
+    {
+      "name": "香格里拉帘",
+      "terms": "1）EXW ；2）不足一平方按照一平方计算；3）收单后18-36小时出货",
+      "shared": []
+    },
+    {
+      "name": "罗马帘",
+      "terms": "1）EXW ；2）不足一平方按照一平方计算；3）收单后18-36小时出货",
+      "shared": []
+    },
+    {
+      "name": "蜂巢帘",
+      "terms": "1）EXW ；2）不足一平方按照一平方计算；3）收单后18-36小时出货",
+      "shared": []
+    },
+    {
+      "name": "木百叶",
+      "terms": "1）EXW ；2）不足一平方按照一平方计算；3）收单后18-36小时出货",
+      "shared": [
+        {
+          "file": "a30f145d673d4bcf.webp",
+          "models": [
+            "6-3",
+            "6-4",
+            "6-5",
+            "6-6",
+            "6-7",
+            "6-8",
+            "6-9",
+            "6-10",
+            "6-11",
+            "6-12",
+            "6-13"
+          ]
+        },
+        {
+          "file": "4ae233fd6fbb27fb.webp",
+          "models": ["6-21", "6-22", "6-23", "6-24", "6-25", "6-26"]
+        },
+        {
+          "file": "2ebbd9edb88d8192.webp",
+          "models": ["6-26", "6-27", "6-28", "6-29", "6-30"]
+        }
+      ]
+    },
+    {
+      "name": "垂直帘",
+      "terms": "1）EXW ；2）不足一平方按照一平方计算；3）收单后18-36小时出货",
+      "shared": []
+    },
+    {
+      "name": "梦幻帘",
+      "terms": "1）EXW ；2）不足一平方按照一平方计算；3）收单后18-36小时出货",
+      "shared": []
+    },
+    {
+      "name": "屏风帘",
+      "terms": "1）EXW ；2）不足一平方按照一平方计算；",
+      "shared": []
+    },
+    {
+      "name": "纱帘+布帘",
+      "terms": "1、此价格不含运费，不含税。\n    2、不足1㎡按1㎡计算。\n    3、交期7-10天",
+      "shared": []
+    }
+  ],
+  "products": [
+    {
+      "id": "0-3",
+      "sheet": "卷帘",
+      "model": "A211",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["材质", "100%Polyster"],
+        ["成品幅宽", "200/250cm"],
+        ["克重", "217g/m²±5%"],
+        ["厚度", "0.27mm±5%"],
+        ["抗紫外线", "ABS"],
+        ["标准包装", "50M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "9.595"],
+        ["无拉绳系统", "15.992"],
+        ["包布罩壳", "13.86"]
+      ],
+      "photos": ["A211.jpg"],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "A211",
+        "ref": "C2",
+        "original": "拉珠/拉绳 (chain/rope) 9.595 USD/m² / 无拉绳 (cordless) 15.992 USD/m² / 包布罩壳 (wrapped cassette) 13.86 USD/m²"
+      }
+    },
+    {
+      "id": "0-4",
+      "sheet": "卷帘",
+      "model": "AYM",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["材质", "100%Polyster"],
+        ["成品幅宽", "200/250/300cm"],
+        ["克重", "170g/m²±5%"],
+        ["厚度", "0.35mm±5%"],
+        ["抗紫外线", "ABS"],
+        ["标准包装", "50M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "9.595"],
+        ["无拉绳系统", "15.992"],
+        ["包布罩壳", "13.86"]
+      ],
+      "photos": ["AYM.jpg"],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "AYM",
+        "ref": "C3",
+        "original": "拉珠/拉绳 (chain/rope) 9.595 USD/m² / 无拉绳 (cordless) 15.992 USD/m² / 包布罩壳 (wrapped cassette) 13.86 USD/m²"
+      }
+    },
+    {
+      "id": "0-5",
+      "sheet": "卷帘",
+      "model": "AYM652",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "100%Polyster"],
+        ["成品幅宽", "200/250cm"],
+        ["克重", "335g/m²±5%"],
+        ["厚度", "0.35mm±5%"],
+        ["抗紫外线", "ABS"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "11.728"],
+        ["无拉绳系统", "18.124"],
+        ["包布罩壳", "15.992"]
+      ],
+      "photos": ["73fc9a217443cfc4.webp"],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "AYM652",
+        "ref": "C4",
+        "original": "拉珠/拉绳 (chain/rope) 11.728 USD/m² / 无拉绳 (cordless) 18.124 USD/m² / 包布罩壳 (wrapped cassette) 15.992 USD/m²"
+      }
+    },
+    {
+      "id": "0-6",
+      "sheet": "卷帘",
+      "model": "AYM61",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "100%Polyster"],
+        ["成品幅宽", "200/250/300cm"],
+        ["克重", "340g/m²±5%"],
+        ["厚度", "0.34mm±5%"],
+        ["抗紫外线", "ABS"],
+        ["标准包装", "30M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "11.301"],
+        ["无拉绳系统", "17.698"],
+        ["包布罩壳", "15.566"]
+      ],
+      "photos": ["cd33eb9fdf78c64e.webp"],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "AYM61",
+        "ref": "C5",
+        "original": "拉珠/拉绳 (chain/rope) 11.301 USD/m² / 无拉绳 (cordless) 17.698 USD/m² / 包布罩壳 (wrapped cassette) 15.566 USD/m²"
+      }
+    },
+    {
+      "id": "0-7",
+      "sheet": "卷帘",
+      "model": "APTJ-00",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["材质", "Line&Polyster"],
+        ["成品幅宽", "200/250cm"],
+        ["克重", "190g/m²±5%"],
+        ["厚度", "0.35mm±5%"],
+        ["抗紫外线", "ABS"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "11.728"],
+        ["无拉绳系统", "18.124"],
+        ["包布罩壳", "15.992"]
+      ],
+      "photos": ["4e50f7ff0a481a67.webp"],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "APTJ-00",
+        "ref": "C6",
+        "original": "拉珠/拉绳 (chain/rope) 11.728 USD/m² / 无拉绳 (cordless) 18.124 USD/m² / 包布罩壳 (wrapped cassette) 15.992 USD/m²"
+      }
+    },
+    {
+      "id": "0-8",
+      "sheet": "卷帘",
+      "model": "APTJ-9",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "Line&Polyster"],
+        ["成品幅宽", "200/250cm"],
+        ["克重", "280g/m²±5%"],
+        ["厚度", "0.35mm±5%"],
+        ["抗紫外线", "ABS"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "13.86"],
+        ["无拉绳系统", "20.256"],
+        ["包布罩壳", "18.124"]
+      ],
+      "photos": ["c3ed278d0120e2ec.webp"],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "APTJ-9",
+        "ref": "C7",
+        "original": "拉珠/拉绳 (chain/rope) 13.86 USD/m² / 无拉绳 (cordless) 20.256 USD/m² / 包布罩壳 (wrapped cassette) 18.124 USD/m²"
+      }
+    },
+    {
+      "id": "0-9",
+      "sheet": "卷帘",
+      "model": "AYM53",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "100%Polyster"],
+        ["成品幅宽", "200/260/300cm"],
+        ["克重", "360g/m²±5%"],
+        ["厚度", "0.55mm±5%"],
+        ["抗紫外线", "ABS"],
+        ["标准包装", "30M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "11.728"],
+        ["无拉绳系统", "18.124"],
+        ["包布罩壳", "15.992"]
+      ],
+      "photos": ["4cc8d02059e17229.webp"],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "AYM53",
+        "ref": "C8",
+        "original": "拉珠/拉绳 (chain/rope) 11.728 USD/m² / 无拉绳 (cordless) 18.124 USD/m² / 包布罩壳 (wrapped cassette) 15.992 USD/m²"
+      }
+    },
+    {
+      "id": "0-10",
+      "sheet": "卷帘",
+      "model": "AArizona11",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["材质", "100%Polyster"],
+        ["成品幅宽", "300cm"],
+        ["克重", "155g/m²±5%"],
+        ["厚度", "0.50mm±5%"],
+        ["抗紫外线", "ABS"],
+        ["标准包装", "30M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "12.794"],
+        ["无拉绳系统", "19.19"],
+        ["包布罩壳", "17.058"]
+      ],
+      "photos": ["4cb29f6710e0af7d.webp"],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "AArizona11",
+        "ref": "C9",
+        "original": "拉珠/拉绳 (chain/rope) 12.794 USD/m² / 无拉绳 (cordless) 19.19 USD/m² / 包布罩壳 (wrapped cassette) 17.058 USD/m²"
+      }
+    },
+    {
+      "id": "0-11",
+      "sheet": "卷帘",
+      "model": "AArizona19",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "100%Polyster"],
+        ["成品幅宽", "300cm"],
+        ["克重", "370g/m²±5%"],
+        ["厚度", "0.65mm±5%"],
+        ["抗紫外线", "ABS"],
+        ["标准包装", "30M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "13.86"],
+        ["无拉绳系统", "20.256"],
+        ["包布罩壳", "18.124"]
+      ],
+      "photos": ["9688a68f1724669a.webp"],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "AArizona19",
+        "ref": "C10",
+        "original": "拉珠/拉绳 (chain/rope) 13.86 USD/m² / 无拉绳 (cordless) 20.256 USD/m² / 包布罩壳 (wrapped cassette) 18.124 USD/m²"
+      }
+    },
+    {
+      "id": "0-12",
+      "sheet": "卷帘",
+      "model": "AShantung11",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["材质", "100%Polyster"],
+        ["成品幅宽", "300cm"],
+        ["克重", "220g/m²±5%"],
+        ["厚度", "0.40mm±5%"],
+        ["抗紫外线", "ABS"],
+        ["标准包装", "30M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "12.794"],
+        ["无拉绳系统", "19.19"],
+        ["包布罩壳", "17.058"]
+      ],
+      "photos": ["661864d0fbb510cc.webp"],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "AShantung11",
+        "ref": "C11",
+        "original": "拉珠/拉绳 (chain/rope) 12.794 USD/m² / 无拉绳 (cordless) 19.19 USD/m² / 包布罩壳 (wrapped cassette) 17.058 USD/m²"
+      }
+    },
+    {
+      "id": "0-13",
+      "sheet": "卷帘",
+      "model": "AShantung19",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "100%Polyster"],
+        ["成品幅宽", "300cm"],
+        ["克重", "330g/m²±5%"],
+        ["厚度", "0.50mm±5%"],
+        ["抗紫外线", "ABS"],
+        ["标准包装", "30M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "13.86"],
+        ["无拉绳系统", "20.256"],
+        ["包布罩壳", "18.124"]
+      ],
+      "photos": ["18d6ff5cba644c8a.webp"],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "AShantung19",
+        "ref": "C12",
+        "original": "拉珠/拉绳 (chain/rope) 13.86 USD/m² / 无拉绳 (cordless) 20.256 USD/m² / 包布罩壳 (wrapped cassette) 18.124 USD/m²"
+      }
+    },
+    {
+      "id": "0-14",
+      "sheet": "卷帘",
+      "model": "AUluru11",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["材质", "100%Polyster"],
+        ["成品幅宽", "300cm"],
+        ["克重", "235g/m²±5%"],
+        ["厚度", "0.50mm±5%"],
+        ["抗紫外线", "ABS"],
+        ["标准包装", "30M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "12.794"],
+        ["无拉绳系统", "19.19"],
+        ["包布罩壳", "17.058"]
+      ],
+      "photos": ["00b5fafa7d458998.webp"],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "AUluru11",
+        "ref": "C13",
+        "original": "拉珠/拉绳 (chain/rope) 12.794 USD/m² / 无拉绳 (cordless) 19.19 USD/m² / 包布罩壳 (wrapped cassette) 17.058 USD/m²"
+      }
+    },
+    {
+      "id": "0-15",
+      "sheet": "卷帘",
+      "model": "AUluru19",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "100%Polyster"],
+        ["成品幅宽", "300cm"],
+        ["克重", "425g/m²±5%"],
+        ["厚度", "0.65mm±5%"],
+        ["抗紫外线", "ABS"],
+        ["标准包装", "30M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "13.86"],
+        ["无拉绳系统", "20.256"],
+        ["包布罩壳", "18.124"]
+      ],
+      "photos": ["c60fab80fa871d22.webp"],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "AUluru19",
+        "ref": "C14",
+        "original": "拉珠/拉绳 (chain/rope) 13.86 USD/m² / 无拉绳 (cordless) 20.256 USD/m² / 包布罩壳 (wrapped cassette) 18.124 USD/m²"
+      }
+    },
+    {
+      "id": "0-16",
+      "sheet": "卷帘",
+      "model": "ADoris19",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "100%Polyster"],
+        ["成品幅宽", "300cm"],
+        ["克重", "370g/m²±5%"],
+        ["厚度", "0.55mm±5%"],
+        ["抗紫外线", "ABS"],
+        ["标准包装", "30M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "13.86"],
+        ["无拉绳系统", "20.256"],
+        ["包布罩壳", "18.124"]
+      ],
+      "photos": ["1253ec494a669394.webp"],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "ADoris19",
+        "ref": "C15",
+        "original": "拉珠/拉绳 (chain/rope) 13.86 USD/m² / 无拉绳 (cordless) 20.256 USD/m² / 包布罩壳 (wrapped cassette) 18.124 USD/m²"
+      }
+    },
+    {
+      "id": "0-17",
+      "sheet": "卷帘",
+      "model": "AIguazu19",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "100%Polyster"],
+        ["成品幅宽", "300cm"],
+        ["克重", "360g/m²±5%"],
+        ["厚度", "0.65mm±5%"],
+        ["抗紫外线", "ABS"],
+        ["标准包装", "30M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "13.86"],
+        ["无拉绳系统", "20.256"],
+        ["包布罩壳", "18.124"]
+      ],
+      "photos": ["e8555e22ffaceb66.webp"],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "AIguazu19",
+        "ref": "C16",
+        "original": "拉珠/拉绳 (chain/rope) 13.86 USD/m² / 无拉绳 (cordless) 20.256 USD/m² / 包布罩壳 (wrapped cassette) 18.124 USD/m²"
+      }
+    },
+    {
+      "id": "0-18",
+      "sheet": "卷帘",
+      "model": "AIguazu - plus19",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "100%Polyster"],
+        ["成品幅宽", "300cm"],
+        ["克重", "360g/m²±5%"],
+        ["厚度", "0.65mm±5%"],
+        ["抗紫外线", "ABS"],
+        ["标准包装", "30M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "13.86"],
+        ["无拉绳系统", "20.256"],
+        ["包布罩壳", "18.124"]
+      ],
+      "photos": ["3c75f37219dbbae6.webp"],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "AIguazu - plus19",
+        "ref": "C17",
+        "original": "拉珠/拉绳 (chain/rope) 13.86 USD/m² / 无拉绳 (cordless) 20.256 USD/m² / 包布罩壳 (wrapped cassette) 18.124 USD/m²"
+      }
+    },
+    {
+      "id": "0-19",
+      "sheet": "卷帘",
+      "model": "ALiess19",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "100%Polyster"],
+        ["成品幅宽", "300cm"],
+        ["克重", "400g/m²±5%"],
+        ["厚度", "0.6mm±5%"],
+        ["抗紫外线", "ABS"],
+        ["标准包装", "30M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "13.86"],
+        ["无拉绳系统", "20.256"],
+        ["包布罩壳", "18.124"]
+      ],
+      "photos": ["041be4d69878666b.webp"],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "ALiess19",
+        "ref": "C18",
+        "original": "拉珠/拉绳 (chain/rope) 13.86 USD/m² / 无拉绳 (cordless) 20.256 USD/m² / 包布罩壳 (wrapped cassette) 18.124 USD/m²"
+      }
+    },
+    {
+      "id": "0-20",
+      "sheet": "卷帘",
+      "model": "APrime19",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "100%Polyster"],
+        ["成品幅宽", "300cm"],
+        ["克重", "370g/m²±5%"],
+        ["厚度", "0.5mm±5%"],
+        ["抗紫外线", "ABS"],
+        ["标准包装", "30M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "13.86"],
+        ["无拉绳系统", "20.256"],
+        ["包布罩壳", "18.124"]
+      ],
+      "photos": ["4d3a71ac4b690f10.webp"],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "APrime19",
+        "ref": "C19",
+        "original": "拉珠/拉绳 (chain/rope) 13.86 USD/m² / 无拉绳 (cordless) 20.256 USD/m² / 包布罩壳 (wrapped cassette) 18.124 USD/m²"
+      }
+    },
+    {
+      "id": "0-21",
+      "sheet": "卷帘",
+      "model": "AMoma19",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "100%Polyster"],
+        ["成品幅宽", "300cm"],
+        ["克重", "320g/m²±5%"],
+        ["厚度", "0.5mm±5%"],
+        ["抗紫外线", "ABS"],
+        ["标准包装", "30M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "14.926"],
+        ["无拉绳系统", "21.322"],
+        ["包布罩壳", "19.19"]
+      ],
+      "photos": ["f52f3a8e1349e8bf.webp"],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "AMoma19",
+        "ref": "C20",
+        "original": "拉珠/拉绳 (chain/rope) 14.926 USD/m² / 无拉绳 (cordless) 21.322 USD/m² / 包布罩壳 (wrapped cassette) 19.19 USD/m²"
+      }
+    },
+    {
+      "id": "0-22",
+      "sheet": "卷帘",
+      "model": "ADallas -11",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["材质", "100%Polyster"],
+        ["成品幅宽", "300cm"],
+        ["克重", "220g/m²±5%"],
+        ["厚度", "0.40mm±5%"],
+        ["抗紫外线", "ABS"],
+        ["标准包装", "30M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "13.86"],
+        ["无拉绳系统", "20.256"],
+        ["包布罩壳", "18.124"]
+      ],
+      "photos": [],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "ADallas -11",
+        "ref": "C21",
+        "original": "拉珠/拉绳 (chain/rope) 13.86 USD/m² / 无拉绳 (cordless) 20.256 USD/m² / 包布罩壳 (wrapped cassette) 18.124 USD/m²"
+      }
+    },
+    {
+      "id": "0-23",
+      "sheet": "卷帘",
+      "model": "ADallas -19",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "100%Polyster"],
+        ["成品幅宽", "300cm"],
+        ["克重", "330g/m²±5%"],
+        ["厚度", "0.5mm±5%"],
+        ["抗紫外线", "ABS"],
+        ["标准包装", "30M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "14.926"],
+        ["无拉绳系统", "21.322"],
+        ["包布罩壳", "19.19"]
+      ],
+      "photos": [],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "ADallas -19",
+        "ref": "C22",
+        "original": "拉珠/拉绳 (chain/rope) 14.926 USD/m² / 无拉绳 (cordless) 21.322 USD/m² / 包布罩壳 (wrapped cassette) 19.19 USD/m²"
+      }
+    },
+    {
+      "id": "0-24",
+      "sheet": "卷帘",
+      "model": "AYM42(玻纤面料)",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["规格", "100%Blackout"],
+        ["材质", "Fiberglass+PVC"],
+        ["成品幅宽", "200/250/300cm"],
+        ["克重", "510g/m²±5%"],
+        ["厚度", "0.38mm±5%"],
+        ["抗紫外线", "ABS"],
+        ["标准包装", "30M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "13.86"],
+        ["无拉绳系统", "20.256"],
+        ["包布罩壳", "18.124"]
+      ],
+      "photos": ["76b07f0dd36a4b1e.webp"],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "AYM42",
+        "ref": "C23",
+        "original": "拉珠/拉绳 (chain/rope) 13.86 USD/m² / 无拉绳 (cordless) 20.256 USD/m² / 包布罩壳 (wrapped cassette) 18.124 USD/m²"
+      }
+    },
+    {
+      "id": "0-26",
+      "sheet": "卷帘",
+      "model": "25-插电电机",
+      "unit": "台",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"]
+      ],
+      "prices": [["单价", "41.418"]],
+      "photos": [],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "25-插电电机",
+        "ref": "C24",
+        "original": "25-插电电机 41.418 USD/台"
+      }
+    },
+    {
+      "id": "0-27",
+      "sheet": "卷帘",
+      "model": "25-插电电机带涂鸦",
+      "unit": "台",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"],
+        ["备注", "可连接Amazon Alexa，谷歌google assistant,SamrtThings,IFTTT"]
+      ],
+      "prices": [["单价", "43.657"]],
+      "photos": [],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "25-插电电机带涂鸦",
+        "ref": "C25",
+        "original": "25-插电电机带涂鸦 43.657 USD/台"
+      }
+    },
+    {
+      "id": "0-28",
+      "sheet": "卷帘",
+      "model": "25matter 锂电池电机",
+      "unit": "台",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"],
+        ["备注", "可连接Amazon Alexa，谷歌google assistant,SamrtThings,IFTTT；苹果系统"]
+      ],
+      "prices": [["单价", "53.732"]],
+      "photos": [],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "25matter 锂电池电机",
+        "ref": "C26",
+        "original": "25matter 锂电池电机 53.732 USD/台"
+      }
+    },
+    {
+      "id": "0-29",
+      "sheet": "卷帘",
+      "model": "25-锂电池电机",
+      "unit": "台",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"],
+        ["备注", "此组合：可连接Amazon Alexa，谷歌google assistant,SamrtThings,IFTTT"]
+      ],
+      "prices": [["单价", "45.896"]],
+      "photos": [],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "25-锂电池电机",
+        "ref": "C27",
+        "original": "25-锂电池电机 45.896 USD/台"
+      }
+    },
+    {
+      "id": "0-30",
+      "sheet": "卷帘",
+      "model": "Hub(Wifi)网关",
+      "unit": "台",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"],
+        ["备注", "此组合：可连接Amazon Alexa，谷歌google assistant,SamrtThings,IFTTT"]
+      ],
+      "prices": [["单价", "20.15"]],
+      "photos": [],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "Hub(Wifi)网关",
+        "ref": "C28",
+        "original": "Hub(Wifi)网关 20.15 USD/台"
+      }
+    },
+    {
+      "id": "0-31",
+      "sheet": "卷帘",
+      "model": "25-zigbee锂电池电机",
+      "unit": "台",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"],
+        ["备注", "此组合：可连接Amazon Alexa，谷歌google assistant,SamrtThings,IFTTT"]
+      ],
+      "prices": [["单价", "51.493"]],
+      "photos": [],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "25-zigbee锂电池电机",
+        "ref": "C29",
+        "original": "25-zigbee锂电池电机 51.493 USD/台"
+      }
+    },
+    {
+      "id": "0-32",
+      "sheet": "卷帘",
+      "model": "Hub(zigbee)网关",
+      "unit": "台",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"],
+        ["备注", "此组合：可连接Amazon Alexa，谷歌google assistant,SamrtThings,IFTTT"]
+      ],
+      "prices": [["单价", "22.389"]],
+      "photos": [],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "Hub(zigbee)网关",
+        "ref": "C30",
+        "original": "Hub(zigbee)网关 22.389 USD/台"
+      }
+    },
+    {
+      "id": "0-33",
+      "sheet": "卷帘",
+      "model": "单频/双频 遥控器",
+      "unit": "个",
+      "fields": [["类别", "电动系统"]],
+      "prices": [["单价", "5.598"]],
+      "photos": [],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "单频/双频 遥控器",
+        "ref": "C31",
+        "original": "单频/双频 遥控器 5.598 USD/pc"
+      }
+    },
+    {
+      "id": "0-34",
+      "sheet": "卷帘",
+      "model": "6频/15频遥控器",
+      "unit": "个",
+      "fields": [["类别", "电动系统"]],
+      "prices": [["单价", "7.836"]],
+      "photos": [],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "6频/15频遥控器",
+        "ref": "C32",
+        "original": "6频/15频遥控器 7.836 USD/pc"
+      }
+    },
+    {
+      "id": "0-35",
+      "sheet": "卷帘",
+      "model": "单频/双频墙控开关",
+      "unit": "个",
+      "fields": [["类别", "电动系统"]],
+      "prices": [["单价", "7.836"]],
+      "photos": [],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "单频/双频墙控开关",
+        "ref": "C33",
+        "original": "单频/双频墙控开关 7.836 USD/pc"
+      }
+    },
+    {
+      "id": "0-36",
+      "sheet": "卷帘",
+      "model": "太阳能板",
+      "unit": "个",
+      "fields": [["类别", "电动系统"]],
+      "prices": [["单价", "25.747"]],
+      "photos": [],
+      "binding": {
+        "sheet": "卷帘",
+        "item": "太阳能板",
+        "ref": "C34",
+        "original": "太阳能板 25.747 USD/pc"
+      }
+    },
+    {
+      "id": "1-3",
+      "sheet": "阳光面料",
+      "model": "SC-A9-5",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["规格", "100%Blackout"],
+        ["规格", "White Coating"],
+        ["规格", "Polyester30%+PVC70%"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "14.926"],
+        ["无拉绳系统", "21.322"],
+        ["包布罩壳", "19.19"]
+      ],
+      "photos": ["4c3828295969bdc0.webp"],
+      "binding": {
+        "sheet": "阳光面料",
+        "item": "SC-A9-5",
+        "ref": "C2",
+        "original": "拉珠/拉绳 (chain/rope) 14.926 USD/m² / 无拉绳 (cordless) 21.322 USD/m² / 包布罩壳 (wrapped cassette) 19.19 USD/m²"
+      }
+    },
+    {
+      "id": "1-4",
+      "sheet": "阳光面料",
+      "model": "SC-A7-1",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["规格", "1%开孔率阳光面料"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "14.926"],
+        ["无拉绳系统", "20.256"],
+        ["包布罩壳", "19.19"]
+      ],
+      "photos": ["ad1375da199d2277.webp"],
+      "binding": {
+        "sheet": "阳光面料",
+        "item": "SC-A7-1",
+        "ref": "C3",
+        "original": "拉珠/拉绳 (chain/rope) 14.926 USD/m² / 无拉绳 (cordless) 20.256 USD/m² / 包布罩壳 (wrapped cassette) 19.19 USD/m²"
+      }
+    },
+    {
+      "id": "1-5",
+      "sheet": "阳光面料",
+      "model": "SC-A6-1",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["规格", "1%开孔率阳光面料"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "14.926"],
+        ["无拉绳系统", "20.256"],
+        ["包布罩壳", "19.19"]
+      ],
+      "photos": ["9019ca824c833d44.webp"],
+      "binding": {
+        "sheet": "阳光面料",
+        "item": "SC-A6-1",
+        "ref": "C4",
+        "original": "拉珠/拉绳 (chain/rope) 14.926 USD/m² / 无拉绳 (cordless) 20.256 USD/m² / 包布罩壳 (wrapped cassette) 19.19 USD/m²"
+      }
+    },
+    {
+      "id": "1-6",
+      "sheet": "阳光面料",
+      "model": "SC-A2-1",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["规格", "1%开孔率阳光面料"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "13.86"],
+        ["无拉绳系统", "19.19"],
+        ["包布罩壳", "18.124"]
+      ],
+      "photos": ["9a2c60448e0c87a4.webp"],
+      "binding": {
+        "sheet": "阳光面料",
+        "item": "SC-A2-1",
+        "ref": "C5",
+        "original": "拉珠/拉绳 (chain/rope) 13.86 USD/m² / 无拉绳 (cordless) 19.19 USD/m² / 包布罩壳 (wrapped cassette) 18.124 USD/m²"
+      }
+    },
+    {
+      "id": "1-7",
+      "sheet": "阳光面料",
+      "model": "SC-A2-3",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["规格", "3%开孔率阳光面料"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "12.794"],
+        ["无拉绳系统", "19.19"],
+        ["包布罩壳", "17.058"]
+      ],
+      "photos": ["14acf28c703f312b.webp"],
+      "binding": {
+        "sheet": "阳光面料",
+        "item": "SC-A2-3",
+        "ref": "C6",
+        "original": "拉珠/拉绳 (chain/rope) 12.794 USD/m² / 无拉绳 (cordless) 19.19 USD/m² / 包布罩壳 (wrapped cassette) 17.058 USD/m²"
+      }
+    },
+    {
+      "id": "1-8",
+      "sheet": "阳光面料",
+      "model": "SC-A3-3",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["规格", "3%开孔率阳光面料"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "12.794"],
+        ["无拉绳系统", "19.19"],
+        ["包布罩壳", "17.058"]
+      ],
+      "photos": ["3809e8d5c6a486e1.webp"],
+      "binding": {
+        "sheet": "阳光面料",
+        "item": "SC-A3-3",
+        "ref": "C7",
+        "original": "拉珠/拉绳 (chain/rope) 12.794 USD/m² / 无拉绳 (cordless) 19.19 USD/m² / 包布罩壳 (wrapped cassette) 17.058 USD/m²"
+      }
+    },
+    {
+      "id": "1-9",
+      "sheet": "阳光面料",
+      "model": "SC-D1-4",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["规格", "4%开孔率阳光面料"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "15.992"],
+        ["无拉绳系统", "21.322"],
+        ["包布罩壳", "20.256"]
+      ],
+      "photos": ["340c75cd1bd204e8.webp"],
+      "binding": {
+        "sheet": "阳光面料",
+        "item": "SC-D1-4",
+        "ref": "C8",
+        "original": "拉珠/拉绳 (chain/rope) 15.992 USD/m² / 无拉绳 (cordless) 21.322 USD/m² / 包布罩壳 (wrapped cassette) 20.256 USD/m²"
+      }
+    },
+    {
+      "id": "1-10",
+      "sheet": "阳光面料",
+      "model": "SC-A2-5",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["规格", "5%开孔率阳光面料"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "11.301"],
+        ["无拉绳系统", "18.124"],
+        ["包布罩壳", "15.566"]
+      ],
+      "photos": ["c71cb9ffcda53309.webp"],
+      "binding": {
+        "sheet": "阳光面料",
+        "item": "SC-A2-5",
+        "ref": "C9",
+        "original": "拉珠/拉绳 (chain/rope) 11.301 USD/m² / 无拉绳 (cordless) 18.124 USD/m² / 包布罩壳 (wrapped cassette) 15.566 USD/m²"
+      }
+    },
+    {
+      "id": "1-11",
+      "sheet": "阳光面料",
+      "model": "SC-A1-5",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["规格", "5%开孔率阳光面料"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "11.728"],
+        ["无拉绳系统", "18.124"],
+        ["包布罩壳", "15.992"]
+      ],
+      "photos": ["54382a4d98b9d3eb.webp"],
+      "binding": {
+        "sheet": "阳光面料",
+        "item": "SC-A1-5",
+        "ref": "C10",
+        "original": "拉珠/拉绳 (chain/rope) 11.728 USD/m² / 无拉绳 (cordless) 18.124 USD/m² / 包布罩壳 (wrapped cassette) 15.992 USD/m²"
+      }
+    },
+    {
+      "id": "1-12",
+      "sheet": "阳光面料",
+      "model": "SC-L1-5",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["规格", "5%开孔率 双色阳光面料"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "14.926"],
+        ["无拉绳系统", "21.322"],
+        ["包布罩壳", "19.19"]
+      ],
+      "photos": ["db0a17a5c9fd14e8.webp"],
+      "binding": {
+        "sheet": "阳光面料",
+        "item": "SC-L1-5",
+        "ref": "C11",
+        "original": "拉珠/拉绳 (chain/rope) 14.926 USD/m² / 无拉绳 (cordless) 21.322 USD/m² / 包布罩壳 (wrapped cassette) 19.19 USD/m²"
+      }
+    },
+    {
+      "id": "1-13",
+      "sheet": "阳光面料",
+      "model": "25-插电电机",
+      "unit": "套",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"]
+      ],
+      "prices": [["单价", "41.418"]],
+      "photos": [],
+      "binding": {
+        "sheet": "阳光面料",
+        "item": "25-插电电机",
+        "ref": "C12",
+        "original": "25-插电电机 41.418 USD/set"
+      }
+    },
+    {
+      "id": "1-14",
+      "sheet": "阳光面料",
+      "model": "25-插电电机带涂鸦",
+      "unit": "套",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"],
+        ["备注", "可连接Amazon Alexa，谷歌google assistant,SamrtThings,IFTTT"]
+      ],
+      "prices": [["单价", "43.657"]],
+      "photos": [],
+      "binding": {
+        "sheet": "阳光面料",
+        "item": "25-插电电机带涂鸦",
+        "ref": "C13",
+        "original": "25-插电电机带涂鸦 43.657 USD/set"
+      }
+    },
+    {
+      "id": "1-15",
+      "sheet": "阳光面料",
+      "model": "25matter 锂电池电机",
+      "unit": "套",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"],
+        ["备注", "可连接Amazon Alexa，谷歌google assistant,SamrtThings,IFTTT；苹果系统"]
+      ],
+      "prices": [["单价", "53.732"]],
+      "photos": [],
+      "binding": {
+        "sheet": "阳光面料",
+        "item": "25matter 锂电池电机",
+        "ref": "C14",
+        "original": "25matter 锂电池电机 53.732 USD/set"
+      }
+    },
+    {
+      "id": "1-16",
+      "sheet": "阳光面料",
+      "model": "25-锂电池电机",
+      "unit": "套",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"],
+        ["备注", "此组合：可连接Amazon Alexa，谷歌google assistant,SamrtThings,IFTTT"]
+      ],
+      "prices": [["单价", "45.896"]],
+      "photos": [],
+      "binding": {
+        "sheet": "阳光面料",
+        "item": "25-锂电池电机",
+        "ref": "C15",
+        "original": "25-锂电池电机 45.896 USD/set"
+      }
+    },
+    {
+      "id": "1-17",
+      "sheet": "阳光面料",
+      "model": "Hub(Wifi)网关",
+      "unit": "套",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"],
+        ["备注", "此组合：可连接Amazon Alexa，谷歌google assistant,SamrtThings,IFTTT"]
+      ],
+      "prices": [["单价", "20.15"]],
+      "photos": [],
+      "binding": {
+        "sheet": "阳光面料",
+        "item": "Hub(Wifi)网关",
+        "ref": "C16",
+        "original": "Hub(Wifi)网关 20.15 USD/set"
+      }
+    },
+    {
+      "id": "1-18",
+      "sheet": "阳光面料",
+      "model": "25-zigbee锂电池电机",
+      "unit": "套",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"],
+        ["备注", "此组合：可连接Amazon Alexa，谷歌google assistant,SamrtThings,IFTTT"]
+      ],
+      "prices": [["单价", "51.493"]],
+      "photos": [],
+      "binding": {
+        "sheet": "阳光面料",
+        "item": "25-zigbee锂电池电机",
+        "ref": "C17",
+        "original": "25-zigbee锂电池电机 51.493 USD/set"
+      }
+    },
+    {
+      "id": "1-19",
+      "sheet": "阳光面料",
+      "model": "Hub(zigbee)网关",
+      "unit": "套",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"],
+        ["备注", "此组合：可连接Amazon Alexa，谷歌google assistant,SamrtThings,IFTTT"]
+      ],
+      "prices": [["单价", "22.389"]],
+      "photos": [],
+      "binding": {
+        "sheet": "阳光面料",
+        "item": "Hub(zigbee)网关",
+        "ref": "C18",
+        "original": "Hub(zigbee)网关 22.389 USD/set"
+      }
+    },
+    {
+      "id": "1-20",
+      "sheet": "阳光面料",
+      "model": "单频/双频 遥控器",
+      "unit": "个",
+      "fields": [["类别", "电动系统"]],
+      "prices": [["单价", "5.598"]],
+      "photos": [],
+      "binding": {
+        "sheet": "阳光面料",
+        "item": "单频/双频 遥控器",
+        "ref": "C19",
+        "original": "单频/双频 遥控器 5.598 USD/pc"
+      }
+    },
+    {
+      "id": "1-21",
+      "sheet": "阳光面料",
+      "model": "6频/15频遥控器",
+      "unit": "个",
+      "fields": [["类别", "电动系统"]],
+      "prices": [["单价", "7.836"]],
+      "photos": [],
+      "binding": {
+        "sheet": "阳光面料",
+        "item": "6频/15频遥控器",
+        "ref": "C20",
+        "original": "6频/15频遥控器 7.836 USD/pc"
+      }
+    },
+    {
+      "id": "1-22",
+      "sheet": "阳光面料",
+      "model": "单频/双频墙控开关",
+      "unit": "个",
+      "fields": [["类别", "电动系统"]],
+      "prices": [["单价", "7.836"]],
+      "photos": [],
+      "binding": {
+        "sheet": "阳光面料",
+        "item": "单频/双频墙控开关",
+        "ref": "C21",
+        "original": "单频/双频墙控开关 7.836 USD/pc"
+      }
+    },
+    {
+      "id": "1-23",
+      "sheet": "阳光面料",
+      "model": "太阳能板",
+      "unit": "个",
+      "fields": [],
+      "prices": [["单价", "25.747"]],
+      "photos": [],
+      "binding": {
+        "sheet": "阳光面料",
+        "item": "太阳能板",
+        "ref": "C22",
+        "original": "太阳能板 25.747 USD/pc"
+      }
+    },
+    {
+      "id": "2-3",
+      "sheet": "斑马帘",
+      "model": "AB1",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "215/260cm"],
+        ["克重", "120g/m²±5%"],
+        ["色牢度", "6 to 7 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "75x50mm"],
+        ["标准包装", "50M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "10.661"],
+        ["无拉绳系统", "17.058"],
+        ["包布罩壳", "14.926"]
+      ],
+      "photos": ["AB1.jpg"],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "AB1",
+        "ref": "C2",
+        "original": "拉珠/拉绳 (chain/rope) 10.661 USD/m² / 无拉绳 (cordless) 17.058 USD/m² / 包布罩壳 (wrapped cassette) 14.926 USD/m²"
+      }
+    },
+    {
+      "id": "2-4",
+      "sheet": "斑马帘",
+      "model": "AB5",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "215/260cm"],
+        ["克重", "140g/m²±5%"],
+        ["色牢度", "7 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "75x50mm"],
+        ["标准包装", "50M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "15.992"],
+        ["无拉绳系统", "22.389"],
+        ["包布罩壳", "20.256"]
+      ],
+      "photos": ["AB5.jpg"],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "AB5",
+        "ref": "C3",
+        "original": "拉珠/拉绳 (chain/rope) 15.992 USD/m² / 无拉绳 (cordless) 22.389 USD/m² / 包布罩壳 (wrapped cassette) 20.256 USD/m²"
+      }
+    },
+    {
+      "id": "2-5",
+      "sheet": "斑马帘",
+      "model": "AB15",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "300cm"],
+        ["克重", "177g/m²±5%"],
+        ["色牢度", "6 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "75x50mm"],
+        ["标准包装", "50M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "20.256"],
+        ["无拉绳系统", "26.653"],
+        ["包布罩壳", "24.521"]
+      ],
+      "photos": ["AB15.jpg"],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "AB15",
+        "ref": "C4",
+        "original": "拉珠/拉绳 (chain/rope) 20.256 USD/m² / 无拉绳 (cordless) 26.653 USD/m² / 包布罩壳 (wrapped cassette) 24.521 USD/m²"
+      }
+    },
+    {
+      "id": "2-6",
+      "sheet": "斑马帘",
+      "model": "ALV1",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "280cm"],
+        ["克重", "132g/m²±5%"],
+        ["色牢度", "7 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "80x125mm"],
+        ["标准包装", "50M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "19.19"],
+        ["无拉绳系统", "25.587"],
+        ["包布罩壳", "23.455"]
+      ],
+      "photos": ["eda3149016e199a2.webp"],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "ALV1",
+        "ref": "C5",
+        "original": "拉珠/拉绳 (chain/rope) 19.19 USD/m² / 无拉绳 (cordless) 25.587 USD/m² / 包布罩壳 (wrapped cassette) 23.455 USD/m²"
+      }
+    },
+    {
+      "id": "2-7",
+      "sheet": "斑马帘",
+      "model": "ABL2",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "300cm"],
+        ["克重", "140g/m²±5%"],
+        ["色牢度", "6 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "75x50mm"],
+        ["标准包装", "50M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "18.124"],
+        ["无拉绳系统", "24.521"],
+        ["包布罩壳", "22.389"]
+      ],
+      "photos": ["a8fcac7a4a0ec86b.webp"],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "ABL2",
+        "ref": "C6",
+        "original": "拉珠/拉绳 (chain/rope) 18.124 USD/m² / 无拉绳 (cordless) 24.521 USD/m² / 包布罩壳 (wrapped cassette) 22.389 USD/m²"
+      }
+    },
+    {
+      "id": "2-8",
+      "sheet": "斑马帘",
+      "model": "ABL7",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "280cm"],
+        ["克重", "143g/m²±5%"],
+        ["色牢度", "6 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "75x50mm"],
+        ["标准包装", "50M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "21.322"],
+        ["无拉绳系统", "27.719"],
+        ["包布罩壳", "25.587"]
+      ],
+      "photos": ["432d0a7c3e0cbb66.webp"],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "ABL7",
+        "ref": "C7",
+        "original": "拉珠/拉绳 (chain/rope) 21.322 USD/m² / 无拉绳 (cordless) 27.719 USD/m² / 包布罩壳 (wrapped cassette) 25.587 USD/m²"
+      }
+    },
+    {
+      "id": "2-9",
+      "sheet": "斑马帘",
+      "model": "ABL21",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "300cm"],
+        ["克重", "116g/m²±5%"],
+        ["色牢度", "6 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "75x50mm"],
+        ["标准包装", "50M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "19.19"],
+        ["无拉绳系统", "25.587"],
+        ["包布罩壳", "23.455"]
+      ],
+      "photos": ["c319902b26b93c92.webp"],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "ABL21",
+        "ref": "C8",
+        "original": "拉珠/拉绳 (chain/rope) 19.19 USD/m² / 无拉绳 (cordless) 25.587 USD/m² / 包布罩壳 (wrapped cassette) 23.455 USD/m²"
+      }
+    },
+    {
+      "id": "2-10",
+      "sheet": "斑马帘",
+      "model": "ABL23",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "300cm"],
+        ["克重", "171g/m²±5%"],
+        ["色牢度", "6 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "90x60mm"],
+        ["标准包装", "50M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "19.19"],
+        ["无拉绳系统", "25.587"],
+        ["包布罩壳", "23.455"]
+      ],
+      "photos": ["d6403e3f4886d786.webp"],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "ABL23",
+        "ref": "C9",
+        "original": "拉珠/拉绳 (chain/rope) 19.19 USD/m² / 无拉绳 (cordless) 25.587 USD/m² / 包布罩壳 (wrapped cassette) 23.455 USD/m²"
+      }
+    },
+    {
+      "id": "2-11",
+      "sheet": "斑马帘",
+      "model": "ABL25",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "300cm"],
+        ["克重", "157g/m²±5%"],
+        ["色牢度", "6 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "100x60mm"],
+        ["标准包装", "50M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "21.322"],
+        ["无拉绳系统", "27.719"],
+        ["包布罩壳", "25.587"]
+      ],
+      "photos": ["b6e3b575bfe6ad5e.webp"],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "ABL25",
+        "ref": "C10",
+        "original": "拉珠/拉绳 (chain/rope) 21.322 USD/m² / 无拉绳 (cordless) 27.719 USD/m² / 包布罩壳 (wrapped cassette) 25.587 USD/m²"
+      }
+    },
+    {
+      "id": "2-12",
+      "sheet": "斑马帘",
+      "model": "ABL51",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "300cm"],
+        ["克重", "137g/m²±5%"],
+        ["色牢度", "6 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "75x50mm"],
+        ["标准包装", "50M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "19.19"],
+        ["无拉绳系统", "25.587"],
+        ["包布罩壳", "23.455"]
+      ],
+      "photos": ["a3cc8ebcc1550e08.webp"],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "ABL51",
+        "ref": "C11",
+        "original": "拉珠/拉绳 (chain/rope) 19.19 USD/m² / 无拉绳 (cordless) 25.587 USD/m² / 包布罩壳 (wrapped cassette) 23.455 USD/m²"
+      }
+    },
+    {
+      "id": "2-13",
+      "sheet": "斑马帘",
+      "model": "ABL52",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "300cm"],
+        ["克重", "184g/m²±5%"],
+        ["色牢度", "6 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "75x50mm"],
+        ["标准包装", "50M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "19.19"],
+        ["无拉绳系统", "25.587"],
+        ["包布罩壳", "23.455"]
+      ],
+      "photos": ["3a92ac922a700e9f.webp"],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "ABL52",
+        "ref": "C12",
+        "original": "拉珠/拉绳 (chain/rope) 19.19 USD/m² / 无拉绳 (cordless) 25.587 USD/m² / 包布罩壳 (wrapped cassette) 23.455 USD/m²"
+      }
+    },
+    {
+      "id": "2-14",
+      "sheet": "斑马帘",
+      "model": "ASC-TB1",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout sunscreen blind"],
+        ["材质", "35% Polyester+65%PVC"],
+        ["成品幅宽", "300cm"],
+        ["克重", "267g/m²±5%"],
+        ["色牢度", "8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "75x50mm"],
+        ["标准包装", "30M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "23.455"],
+        ["无拉绳系统", "29.851"],
+        ["包布罩壳", "27.719"]
+      ],
+      "photos": ["b46a10683fae4216.webp"],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "ASC-TB1",
+        "ref": "C13",
+        "original": "拉珠/拉绳 (chain/rope) 23.455 USD/m² / 无拉绳 (cordless) 29.851 USD/m² / 包布罩壳 (wrapped cassette) 27.719 USD/m²"
+      }
+    },
+    {
+      "id": "2-15",
+      "sheet": "斑马帘",
+      "model": "ASC-TB6",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout sunscreen blind"],
+        ["材质", "35% Polyester+65%PVC"],
+        ["成品幅宽", "300cm"],
+        ["克重", "265g/m²±5%"],
+        ["色牢度", "8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "75x50mm"],
+        ["标准包装", "30M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "23.455"],
+        ["无拉绳系统", "29.851"],
+        ["包布罩壳", "27.719"]
+      ],
+      "photos": ["debb968d686112ce.webp"],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "ASC-TB6",
+        "ref": "C14",
+        "original": "拉珠/拉绳 (chain/rope) 23.455 USD/m² / 无拉绳 (cordless) 29.851 USD/m² / 包布罩壳 (wrapped cassette) 27.719 USD/m²"
+      }
+    },
+    {
+      "id": "2-17",
+      "sheet": "斑马帘",
+      "model": "ABL33",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "300cm"],
+        ["克重", "190g/m²±5%"],
+        ["色牢度", "6 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "100x60mm"],
+        ["标准包装", "50M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "21.322"],
+        ["无拉绳系统", "27.719"],
+        ["包布罩壳", "25.587"]
+      ],
+      "photos": ["9f5eb11a2a132247.webp"],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "ABL33",
+        "ref": "C15",
+        "original": "拉珠/拉绳 (chain/rope) 21.322 USD/m² / 无拉绳 (cordless) 27.719 USD/m² / 包布罩壳 (wrapped cassette) 25.587 USD/m²"
+      }
+    },
+    {
+      "id": "2-18",
+      "sheet": "斑马帘",
+      "model": "ABL46",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "300cm"],
+        ["克重", "200g/m²±5%"],
+        ["色牢度", "6 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "100x60mm"],
+        ["标准包装", "50M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "21.322"],
+        ["无拉绳系统", "27.719"],
+        ["包布罩壳", "25.587"]
+      ],
+      "photos": ["df1d0aeab530c6a5.webp"],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "ABL46",
+        "ref": "C16",
+        "original": "拉珠/拉绳 (chain/rope) 21.322 USD/m² / 无拉绳 (cordless) 27.719 USD/m² / 包布罩壳 (wrapped cassette) 25.587 USD/m²"
+      }
+    },
+    {
+      "id": "2-19",
+      "sheet": "斑马帘",
+      "model": "ABL30",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "300cm"],
+        ["克重", "193g/m²±5%"],
+        ["色牢度", "6 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "90x60mm"],
+        ["标准包装", "50M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "21.322"],
+        ["无拉绳系统", "27.719"],
+        ["包布罩壳", "25.587"]
+      ],
+      "photos": ["200d19c7d129d747.webp"],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "ABL30",
+        "ref": "C17",
+        "original": "拉珠/拉绳 (chain/rope) 21.322 USD/m² / 无拉绳 (cordless) 27.719 USD/m² / 包布罩壳 (wrapped cassette) 25.587 USD/m²"
+      }
+    },
+    {
+      "id": "2-20",
+      "sheet": "斑马帘",
+      "model": "ABL20",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "300cm"],
+        ["克重", "172g/m²±5%"],
+        ["色牢度", "6 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "75x50mm"],
+        ["标准包装", "50M"],
+        ["备注", "可以选择H型下轨"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "21.322"],
+        ["无拉绳系统", "27.719"],
+        ["包布罩壳", "25.587"]
+      ],
+      "photos": ["9269410f48d828d8.webp"],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "ABL20",
+        "ref": "C18",
+        "original": "拉珠/拉绳 (chain/rope) 21.322 USD/m² / 无拉绳 (cordless) 27.719 USD/m² / 包布罩壳 (wrapped cassette) 25.587 USD/m²"
+      }
+    },
+    {
+      "id": "2-21",
+      "sheet": "斑马帘",
+      "model": "ABL8",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "300cm"],
+        ["克重", "201g/m²±5%"],
+        ["色牢度", "6 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "75x50mm"],
+        ["标准包装", "50M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "21.322"],
+        ["无拉绳系统", "27.719"],
+        ["包布罩壳", "25.587"]
+      ],
+      "photos": ["04112596e3586574.webp"],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "ABL8",
+        "ref": "C19",
+        "original": "拉珠/拉绳 (chain/rope) 21.322 USD/m² / 无拉绳 (cordless) 27.719 USD/m² / 包布罩壳 (wrapped cassette) 25.587 USD/m²"
+      }
+    },
+    {
+      "id": "2-22",
+      "sheet": "斑马帘",
+      "model": "ABL9",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "300cm"],
+        ["克重", "263g/m²±5%"],
+        ["色牢度", "7 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "133x98mm"],
+        ["标准包装", "50M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "21.322"],
+        ["无拉绳系统", "27.719"],
+        ["包布罩壳", "25.587"]
+      ],
+      "photos": ["8d9b04280f9c7c86.webp"],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "ABL9",
+        "ref": "C20",
+        "original": "拉珠/拉绳 (chain/rope) 21.322 USD/m² / 无拉绳 (cordless) 27.719 USD/m² / 包布罩壳 (wrapped cassette) 25.587 USD/m²"
+      }
+    },
+    {
+      "id": "2-23",
+      "sheet": "斑马帘",
+      "model": "ATV-BL40",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "280cm"],
+        ["克重", "156g/m²±5%"],
+        ["色牢度", "7 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "90x60mm"],
+        ["标准包装", "50M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "22.389"],
+        ["无拉绳系统", "28.785"],
+        ["包布罩壳", "26.653"]
+      ],
+      "photos": ["01117454221b9398.webp"],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "ATV-BL40",
+        "ref": "C21",
+        "original": "拉珠/拉绳 (chain/rope) 22.389 USD/m² / 无拉绳 (cordless) 28.785 USD/m² / 包布罩壳 (wrapped cassette) 26.653 USD/m²"
+      }
+    },
+    {
+      "id": "2-24",
+      "sheet": "斑马帘",
+      "model": "ABL48",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "300cm"],
+        ["克重", "173g/m²±5%"],
+        ["色牢度", "6 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "90x60mm"],
+        ["标准包装", "50M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "22.389"],
+        ["无拉绳系统", "28.785"],
+        ["包布罩壳", "26.653"]
+      ],
+      "photos": [],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "ABL48",
+        "ref": "C22",
+        "original": "拉珠/拉绳 (chain/rope) 22.389 USD/m² / 无拉绳 (cordless) 28.785 USD/m² / 包布罩壳 (wrapped cassette) 26.653 USD/m²"
+      }
+    },
+    {
+      "id": "2-25",
+      "sheet": "斑马帘",
+      "model": "ABL50",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "300cm"],
+        ["克重", "175g/m²±5%"],
+        ["色牢度", "6 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "90x60mm"],
+        ["标准包装", "50M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "22.389"],
+        ["无拉绳系统", "28.785"],
+        ["包布罩壳", "26.653"]
+      ],
+      "photos": ["de13b75ebf161cfa.webp"],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "ABL50",
+        "ref": "C23",
+        "original": "拉珠/拉绳 (chain/rope) 22.389 USD/m² / 无拉绳 (cordless) 28.785 USD/m² / 包布罩壳 (wrapped cassette) 26.653 USD/m²"
+      }
+    },
+    {
+      "id": "2-26",
+      "sheet": "斑马帘",
+      "model": "ABL58",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "300cm"],
+        ["克重", "185g/m²±5%"],
+        ["色牢度", "6 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "90x60mm"],
+        ["标准包装", "50M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "22.389"],
+        ["无拉绳系统", "28.785"],
+        ["包布罩壳", "26.653"]
+      ],
+      "photos": ["bd91720d78a4fc68.webp"],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "ABL58",
+        "ref": "C24",
+        "original": "拉珠/拉绳 (chain/rope) 22.389 USD/m² / 无拉绳 (cordless) 28.785 USD/m² / 包布罩壳 (wrapped cassette) 26.653 USD/m²"
+      }
+    },
+    {
+      "id": "2-27",
+      "sheet": "斑马帘",
+      "model": "ABK2",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "300cm"],
+        ["克重", "263g/m²±5%"],
+        ["色牢度", "6 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "100x60mm"],
+        ["标准包装", "50M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "22.389"],
+        ["无拉绳系统", "28.785"],
+        ["包布罩壳", "26.653"]
+      ],
+      "photos": ["b2bcf07e5e6417e7.webp"],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "ABK2",
+        "ref": "C25",
+        "original": "拉珠/拉绳 (chain/rope) 22.389 USD/m² / 无拉绳 (cordless) 28.785 USD/m² / 包布罩壳 (wrapped cassette) 26.653 USD/m²"
+      }
+    },
+    {
+      "id": "2-28",
+      "sheet": "斑马帘",
+      "model": "ABK5",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "300cm"],
+        ["克重", "220g/m²±5%"],
+        ["色牢度", "6 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "100x60mm"],
+        ["标准包装", "50M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "22.389"],
+        ["无拉绳系统", "28.785"],
+        ["包布罩壳", "26.653"]
+      ],
+      "photos": ["a3cae975da7342a4.webp"],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "ABK5",
+        "ref": "C26",
+        "original": "拉珠/拉绳 (chain/rope) 22.389 USD/m² / 无拉绳 (cordless) 28.785 USD/m² / 包布罩壳 (wrapped cassette) 26.653 USD/m²"
+      }
+    },
+    {
+      "id": "2-29",
+      "sheet": "斑马帘",
+      "model": "AB10",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "300cm"],
+        ["克重", "227g/m²±5%"],
+        ["色牢度", "6 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "100x60mm"],
+        ["标准包装", "50M"]
+      ],
+      "prices": [
+        ["拉珠 / 拉绳", "21.322"],
+        ["无拉绳系统", "27.719"],
+        ["包布罩壳", "25.587"]
+      ],
+      "photos": ["a93fdba14fb17038.webp"],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "AB10",
+        "ref": "C27",
+        "original": "拉珠/拉绳 (chain/rope) 21.322 USD/m² / 无拉绳 (cordless) 27.719 USD/m² / 包布罩壳 (wrapped cassette) 25.587 USD/m²"
+      }
+    },
+    {
+      "id": "2-30",
+      "sheet": "斑马帘",
+      "model": "25-插电电机",
+      "unit": "台",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"]
+      ],
+      "prices": [["单价", "41.42"]],
+      "photos": [],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "25-插电电机",
+        "ref": "C28",
+        "original": "25-插电电机 41.42 USD/台"
+      }
+    },
+    {
+      "id": "2-31",
+      "sheet": "斑马帘",
+      "model": "25-插电电机带涂鸦",
+      "unit": "台",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"],
+        ["备注", "可连接Amazon Alexa，谷歌google assistant,SamrtThings,IFTTT"]
+      ],
+      "prices": [["单价", "43.66"]],
+      "photos": [],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "25-插电电机带涂鸦",
+        "ref": "C29",
+        "original": "25-插电电机带涂鸦 43.66 USD/台"
+      }
+    },
+    {
+      "id": "2-32",
+      "sheet": "斑马帘",
+      "model": "25matter 锂电池电机",
+      "unit": "台",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"],
+        ["备注", "可连接Amazon Alexa，谷歌google assistant,SamrtThings,IFTTT；苹果系统"]
+      ],
+      "prices": [["单价", "53.74"]],
+      "photos": [],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "25matter 锂电池电机",
+        "ref": "C30",
+        "original": "25matter 锂电池电机 53.74 USD/台"
+      }
+    },
+    {
+      "id": "2-33",
+      "sheet": "斑马帘",
+      "model": "25-锂电池电机",
+      "unit": "台",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"],
+        ["备注", "此组合：可连接Amazon Alexa，谷歌google assistant,SamrtThings,IFTTT"]
+      ],
+      "prices": [["单价", "45.9"]],
+      "photos": [],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "25-锂电池电机",
+        "ref": "C31",
+        "original": "25-锂电池电机 45.9 USD/台"
+      }
+    },
+    {
+      "id": "2-34",
+      "sheet": "斑马帘",
+      "model": "Hub(Wifi)网关",
+      "unit": "台",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"],
+        ["备注", "此组合：可连接Amazon Alexa，谷歌google assistant,SamrtThings,IFTTT"]
+      ],
+      "prices": [["单价", "20.15"]],
+      "photos": [],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "Hub(Wifi)网关",
+        "ref": "C32",
+        "original": "Hub(Wifi)网关 20.15 USD/台"
+      }
+    },
+    {
+      "id": "2-35",
+      "sheet": "斑马帘",
+      "model": "25-zigbee锂电池电机",
+      "unit": "台",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"],
+        ["备注", "此组合：可连接Amazon Alexa，谷歌google assistant,SamrtThings,IFTTT"]
+      ],
+      "prices": [["单价", "51.5"]],
+      "photos": [],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "25-zigbee锂电池电机",
+        "ref": "C33",
+        "original": "25-zigbee锂电池电机 51.5 USD/台"
+      }
+    },
+    {
+      "id": "2-36",
+      "sheet": "斑马帘",
+      "model": "Hub(zigbee)网关",
+      "unit": "台",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"],
+        ["备注", "此组合：可连接Amazon Alexa，谷歌google assistant,SamrtThings,IFTTT"]
+      ],
+      "prices": [["单价", "22.39"]],
+      "photos": [],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "Hub(zigbee)网关",
+        "ref": "C34",
+        "original": "Hub(zigbee)网关 22.39 USD/台"
+      }
+    },
+    {
+      "id": "2-37",
+      "sheet": "斑马帘",
+      "model": "单频/双频 遥控器",
+      "unit": "个",
+      "fields": [["类别", "电动系统"]],
+      "prices": [["单价", "5.6"]],
+      "photos": [],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "单频/双频 遥控器",
+        "ref": "C35",
+        "original": "单频/双频 遥控器 5.6 USD/pc"
+      }
+    },
+    {
+      "id": "2-38",
+      "sheet": "斑马帘",
+      "model": "6频/15频遥控器",
+      "unit": "个",
+      "fields": [["类别", "电动系统"]],
+      "prices": [["单价", "7.84"]],
+      "photos": [],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "6频/15频遥控器",
+        "ref": "C36",
+        "original": "6频/15频遥控器 7.84 USD/pc"
+      }
+    },
+    {
+      "id": "2-39",
+      "sheet": "斑马帘",
+      "model": "单频/双频墙控开关",
+      "unit": "个",
+      "fields": [["类别", "电动系统"]],
+      "prices": [["单价", "7.84"]],
+      "photos": [],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "单频/双频墙控开关",
+        "ref": "C37",
+        "original": "单频/双频墙控开关 7.84 USD/pc"
+      }
+    },
+    {
+      "id": "2-40",
+      "sheet": "斑马帘",
+      "model": "太阳能板",
+      "unit": "个",
+      "fields": [["类别", "电动系统"]],
+      "prices": [["单价", "25.75"]],
+      "photos": [],
+      "binding": {
+        "sheet": "斑马帘",
+        "item": "太阳能板",
+        "ref": "C38",
+        "original": "太阳能板 25.75 USD/pc"
+      }
+    },
+    {
+      "id": "3-3",
+      "sheet": "香格里拉帘",
+      "model": "AS6",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["材质", "70% Polyester+30%RM"],
+        ["成品幅宽", "300cm"],
+        ["克重", "207g/m²±5%"],
+        ["色牢度", "7 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "5.5cm"],
+        ["标准包装", "30M"]
+      ],
+      "prices": [["拉珠 / 拉绳", "14.499"]],
+      "photos": ["77b52ecde948d8d0.webp"],
+      "binding": {
+        "sheet": "香格里拉帘",
+        "item": "AS6",
+        "ref": "C2",
+        "original": "拉珠/拉绳 (chain/rope) 14.499 USD/m²"
+      }
+    },
+    {
+      "id": "3-4",
+      "sheet": "香格里拉帘",
+      "model": "AS8",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["材质", "70% Polyester+30%RM"],
+        ["成品幅宽", "300cm"],
+        ["克重", "207g/m²±5%"],
+        ["色牢度", "7 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "5.5cm"],
+        ["标准包装", "30M"]
+      ],
+      "prices": [["拉珠 / 拉绳", "21.322"]],
+      "photos": ["bf7fa15e3986c0db.webp"],
+      "binding": {
+        "sheet": "香格里拉帘",
+        "item": "AS8",
+        "ref": "C3",
+        "original": "拉珠/拉绳 (chain/rope) 21.322 USD/m²"
+      }
+    },
+    {
+      "id": "3-5",
+      "sheet": "香格里拉帘",
+      "model": "AS9",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["材质", "70% Polyester+30%RM"],
+        ["成品幅宽", "300cm"],
+        ["克重", "207g/m²±5%"],
+        ["色牢度", "7 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "5.5cm"],
+        ["标准包装", "30M"]
+      ],
+      "prices": [["拉珠 / 拉绳", "23.455"]],
+      "photos": ["5fa4523d1573e6b1.webp"],
+      "binding": {
+        "sheet": "香格里拉帘",
+        "item": "AS9",
+        "ref": "C4",
+        "original": "拉珠/拉绳 (chain/rope) 23.455 USD/m²"
+      }
+    },
+    {
+      "id": "3-6",
+      "sheet": "香格里拉帘",
+      "model": "ASP1",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["规格", "Full closure,dizziness prevention"],
+        ["规格", "Technical Specification"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "300cm"],
+        ["克重", "209g/m²±5%"],
+        ["色牢度", "7 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "6.5cm"],
+        ["标准包装", "30M"]
+      ],
+      "prices": [["拉珠 / 拉绳", "23.455"]],
+      "photos": ["83ed768266885bf2.webp"],
+      "binding": {
+        "sheet": "香格里拉帘",
+        "item": "ASP1",
+        "ref": "C5",
+        "original": "拉珠/拉绳 (chain/rope) 23.455 USD/m²"
+      }
+    },
+    {
+      "id": "3-7",
+      "sheet": "香格里拉帘",
+      "model": "ASP10",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Blackout"],
+        ["规格", "Full closure,dizziness prevention"],
+        ["规格", "Technical Specification"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "300cm"],
+        ["克重", "470g/m²±5%"],
+        ["色牢度", "7 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "6.5cm"],
+        ["标准包装", "30M"]
+      ],
+      "prices": [["拉珠 / 拉绳", "25.587"]],
+      "photos": ["99c8eeec2200793f.webp"],
+      "binding": {
+        "sheet": "香格里拉帘",
+        "item": "ASP10",
+        "ref": "C6",
+        "original": "拉珠/拉绳 (chain/rope) 25.587 USD/m²"
+      }
+    },
+    {
+      "id": "3-8",
+      "sheet": "香格里拉帘",
+      "model": "ASP6",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["规格", "Full closure,dizziness prevention"],
+        ["规格", "Technical Specification"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "300cm"],
+        ["克重", "202g/m²±5%"],
+        ["色牢度", "7 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "6.5cm"],
+        ["标准包装", "30M"]
+      ],
+      "prices": [["拉珠 / 拉绳", "23.455"]],
+      "photos": ["ed3b1f4f703e2e65.webp"],
+      "binding": {
+        "sheet": "香格里拉帘",
+        "item": "ASP6",
+        "ref": "C7",
+        "original": "拉珠/拉绳 (chain/rope) 23.455 USD/m²"
+      }
+    },
+    {
+      "id": "3-9",
+      "sheet": "香格里拉帘",
+      "model": "AE1",
+      "unit": "m²",
+      "fields": [
+        ["遮光性", "Semi-blackout"],
+        ["材质", "100% Polyester"],
+        ["成品幅宽", "300cm"],
+        ["克重", "199g/m²±5%"],
+        ["色牢度", "7 to 8 Grade"],
+        ["抗紫外线", "ABS"],
+        ["条带循环", "2.5cm"],
+        ["标准包装", "30M"]
+      ],
+      "prices": [["拉珠 / 拉绳", "27.719"]],
+      "photos": ["9a2ac9ae1aad31f3.webp"],
+      "binding": {
+        "sheet": "香格里拉帘",
+        "item": "AE1",
+        "ref": "C8",
+        "original": "拉珠/拉绳 (chain/rope) 27.719 USD/m²"
+      }
+    },
+    {
+      "id": "3-10",
+      "sheet": "香格里拉帘",
+      "model": "25-插电电机",
+      "unit": "台",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"]
+      ],
+      "prices": [["单价", "43.66"]],
+      "photos": [],
+      "binding": {
+        "sheet": "香格里拉帘",
+        "item": "25-插电电机",
+        "ref": "C9",
+        "original": "25-插电电机 43.66 USD/台"
+      }
+    },
+    {
+      "id": "3-11",
+      "sheet": "香格里拉帘",
+      "model": "25-插电电机带涂鸦",
+      "unit": "台",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"],
+        ["备注", "可连接Amazon Alexa，谷歌google assistant,SamrtThings,IFTTT"]
+      ],
+      "prices": [["单价", "43.66"]],
+      "photos": [],
+      "binding": {
+        "sheet": "香格里拉帘",
+        "item": "25-插电电机带涂鸦",
+        "ref": "C10",
+        "original": "25-插电电机带涂鸦 43.66 USD/台"
+      }
+    },
+    {
+      "id": "3-12",
+      "sheet": "香格里拉帘",
+      "model": "25matter 锂电池电机",
+      "unit": "台",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"],
+        ["备注", "可连接Amazon Alexa，谷歌google assistant,SamrtThings,IFTTT；苹果系统"]
+      ],
+      "prices": [["单价", "53.74"]],
+      "photos": [],
+      "binding": {
+        "sheet": "香格里拉帘",
+        "item": "25matter 锂电池电机",
+        "ref": "C11",
+        "original": "25matter 锂电池电机 53.74 USD/台"
+      }
+    },
+    {
+      "id": "3-13",
+      "sheet": "香格里拉帘",
+      "model": "25-锂电池电机",
+      "unit": "台",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"],
+        ["备注", "此组合：可连接Amazon Alexa，谷歌google assistant,SamrtThings,IFTTT"]
+      ],
+      "prices": [["单价", "45.9"]],
+      "photos": [],
+      "binding": {
+        "sheet": "香格里拉帘",
+        "item": "25-锂电池电机",
+        "ref": "C12",
+        "original": "25-锂电池电机 45.9 USD/台"
+      }
+    },
+    {
+      "id": "3-14",
+      "sheet": "香格里拉帘",
+      "model": "Hub(Wifi)网关",
+      "unit": "台",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"],
+        ["备注", "此组合：可连接Amazon Alexa，谷歌google assistant,SamrtThings,IFTTT"]
+      ],
+      "prices": [["单价", "20.15"]],
+      "photos": [],
+      "binding": {
+        "sheet": "香格里拉帘",
+        "item": "Hub(Wifi)网关",
+        "ref": "C13",
+        "original": "Hub(Wifi)网关 20.15 USD/台"
+      }
+    },
+    {
+      "id": "3-15",
+      "sheet": "香格里拉帘",
+      "model": "25-zigbee锂电池电机",
+      "unit": "台",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"],
+        ["备注", "此组合：可连接Amazon Alexa，谷歌google assistant,SamrtThings,IFTTT"]
+      ],
+      "prices": [["单价", "51.5"]],
+      "photos": [],
+      "binding": {
+        "sheet": "香格里拉帘",
+        "item": "25-zigbee锂电池电机",
+        "ref": "C14",
+        "original": "25-zigbee锂电池电机 51.5 USD/台"
+      }
+    },
+    {
+      "id": "3-16",
+      "sheet": "香格里拉帘",
+      "model": "Hub(zigbee)网关",
+      "unit": "台",
+      "fields": [
+        ["类别", "电动系统"],
+        ["说明", "电机品牌：容科"],
+        ["备注", "此组合：可连接Amazon Alexa，谷歌google assistant,SamrtThings,IFTTT"]
+      ],
+      "prices": [["单价", "22.39"]],
+      "photos": [],
+      "binding": {
+        "sheet": "香格里拉帘",
+        "item": "Hub(zigbee)网关",
+        "ref": "C15",
+        "original": "Hub(zigbee)网关 22.39 USD/台"
+      }
+    },
+    {
+      "id": "3-17",
+      "sheet": "香格里拉帘",
+      "model": "单频/双频 遥控器",
+      "unit": "个",
+      "fields": [["类别", "电动系统"]],
+      "prices": [["单价", "5.6"]],
+      "photos": [],
+      "binding": {
+        "sheet": "香格里拉帘",
+        "item": "单频/双频 遥控器",
+        "ref": "C16",
+        "original": "单频/双频 遥控器 5.6 USD/pc"
+      }
+    },
+    {
+      "id": "3-18",
+      "sheet": "香格里拉帘",
+      "model": "6频/15频遥控器",
+      "unit": "个",
+      "fields": [["类别", "电动系统"]],
+      "prices": [["单价", "7.84"]],
+      "photos": [],
+      "binding": {
+        "sheet": "香格里拉帘",
+        "item": "6频/15频遥控器",
+        "ref": "C17",
+        "original": "6频/15频遥控器 7.84 USD/pc"
+      }
+    },
+    {
+      "id": "3-19",
+      "sheet": "香格里拉帘",
+      "model": "单频/双频墙控开关",
+      "unit": "个",
+      "fields": [["类别", "电动系统"]],
+      "prices": [["单价", "7.84"]],
+      "photos": [],
+      "binding": {
+        "sheet": "香格里拉帘",
+        "item": "单频/双频墙控开关",
+        "ref": "C18",
+        "original": "单频/双频墙控开关 7.84 USD/pc"
+      }
+    },
+    {
+      "id": "3-20",
+      "sheet": "香格里拉帘",
+      "model": "太阳能板",
+      "unit": "",
+      "fields": [],
+      "prices": [["单价", "25.75"]],
+      "photos": [],
+      "binding": {
+        "sheet": "香格里拉帘",
+        "item": "太阳能板",
+        "ref": "C19",
+        "original": "太阳能板 25.75（单位待确认）"
+      }
+    },
+    {
+      "id": "4-3",
+      "sheet": "罗马帘",
+      "model": "Semi-Blackout Fabric",
+      "unit": "m²",
+      "fields": [["遮光性", "Semi-Blackout"]],
+      "prices": [
+        ["拉珠 / 拉绳", "20.8955223880597"],
+        ["无拉绳款", "27.2921108742004"]
+      ],
+      "photos": [],
+      "binding": {
+        "sheet": "罗马帘",
+        "item": "Semi-Blackout Fabric",
+        "ref": "C2",
+        "original": "拉珠/拉绳 (chain/rope) 20.896 USD/m² / 无拉绳 (cordless) 27.292 USD/m²"
+      }
+    },
+    {
+      "id": "4-4",
+      "sheet": "罗马帘",
+      "model": "Blackout Fabric",
+      "unit": "m²",
+      "fields": [["遮光性", "Blackout"]],
+      "prices": [
+        ["拉珠 / 拉绳", "23.0277185501066"],
+        ["无拉绳款", "29.4243070362473"]
+      ],
+      "photos": [],
+      "binding": {
+        "sheet": "罗马帘",
+        "item": "Blackout Fabric",
+        "ref": "C3",
+        "original": "拉珠/拉绳 (chain/rope) 23.028 USD/m² / 无拉绳 (cordless) 29.424 USD/m²"
+      }
+    },
+    {
+      "id": "4-5",
+      "sheet": "罗马帘",
+      "model": "Customer supplied fabric",
+      "unit": "m²",
+      "fields": [],
+      "prices": [],
+      "photos": [],
+      "binding": {
+        "sheet": "罗马帘",
+        "item": "Customer supplied fabric",
+        "ref": "C4",
+        "original": ""
+      }
+    },
+    {
+      "id": "4-6",
+      "sheet": "罗马帘",
+      "model": "Customer supplied fabric",
+      "unit": "m²",
+      "fields": [],
+      "prices": [
+        ["拉珠 / 拉绳", "21.3219616204691"],
+        ["无拉绳款", "29.8507462686567"]
+      ],
+      "photos": [],
+      "binding": {
+        "sheet": "罗马帘",
+        "item": "Customer supplied fabric",
+        "ref": "C5",
+        "original": "拉珠/拉绳 (chain/rope) 21.322 USD/m² / 无拉绳 (cordless) 29.851 USD/m²"
+      }
+    },
+    {
+      "id": "4-7",
+      "sheet": "罗马帘",
+      "model": "Plug-in motor",
+      "unit": "台",
+      "fields": [["遮光性", "Dooya 24 Motor"]],
+      "prices": [["单价", "40.2985074626866"]],
+      "photos": [],
+      "binding": {
+        "sheet": "罗马帘",
+        "item": "Plug-in motor",
+        "ref": "C6",
+        "original": "Plug-in motor 40.299 USD/set"
+      }
+    },
+    {
+      "id": "4-8",
+      "sheet": "罗马帘",
+      "model": "Motor+battery wand",
+      "unit": "台",
+      "fields": [["遮光性", "Dooya 24 Motor"]],
+      "prices": [["单价", "71.6417910447761"]],
+      "photos": [],
+      "binding": {
+        "sheet": "罗马帘",
+        "item": "Motor+battery wand",
+        "ref": "C7",
+        "original": "Motor+battery wand 71.642 USD/set"
+      }
+    },
+    {
+      "id": "4-9",
+      "sheet": "罗马帘",
+      "model": "Remote Control",
+      "unit": "个",
+      "fields": [],
+      "prices": [["单价", "7.83582089552239"]],
+      "photos": [],
+      "binding": {
+        "sheet": "罗马帘",
+        "item": "Remote Control",
+        "ref": "C8",
+        "original": "Remote Control 7.836 USD/pc"
+      }
+    },
+    {
+      "id": "5-3",
+      "sheet": "蜂巢帘",
+      "model": "Chain day and night honeycomb blinds(拉珠日夜蜂巢帘）",
+      "unit": "m²",
+      "fields": [
+        ["面料", "26mm width fabric"],
+        ["遮光性", "Semi-Blacout&Blackout"]
+      ],
+      "prices": [["单价", "27.719"]],
+      "photos": ["928a5af180a0e82e.webp", "dfe47ea383c43a8f.webp"],
+      "binding": {
+        "sheet": "蜂巢帘",
+        "item": "Chain day and night honeycomb blinds(拉珠日夜蜂巢帘）",
+        "ref": "C2",
+        "original": "Chain day and night honeycomb blinds(拉珠日夜蜂巢帘） 27.719 USD/m²"
+      }
+    },
+    {
+      "id": "5-4",
+      "sheet": "蜂巢帘",
+      "model": "Cordless day and night honeycomb blinds（无绳日夜蜂巢帘）",
+      "unit": "m²",
+      "fields": [
+        ["面料", "26mm width fabric"],
+        ["遮光性", "Semi-Blacout&Blackout"]
+      ],
+      "prices": [["单价", "38.38"]],
+      "photos": ["dc2a5dbe4fcadf94.webp"],
+      "binding": {
+        "sheet": "蜂巢帘",
+        "item": "Cordless day and night honeycomb blinds（无绳日夜蜂巢帘）",
+        "ref": "C3",
+        "original": "Cordless day and night honeycomb blinds（无绳日夜蜂巢帘） 38.38 USD/m²"
+      }
+    },
+    {
+      "id": "5-8",
+      "sheet": "蜂巢帘",
+      "model": "Single-Chain honeycomb blinds（单拉珠蜂巢帘）",
+      "unit": "m²",
+      "fields": [
+        ["面料", "26mm width fabric"],
+        ["遮光性", "Semi-Blacout&Blackout"]
+      ],
+      "prices": [["单价", "17.058"]],
+      "photos": ["3d9508e67d41907b.webp"],
+      "binding": {
+        "sheet": "蜂巢帘",
+        "item": "Single-Chain honeycomb blinds（单拉珠蜂巢帘）",
+        "ref": "C4",
+        "original": "Single-Chain honeycomb blinds（单拉珠蜂巢帘） 17.058 USD/m²"
+      }
+    },
+    {
+      "id": "5-9",
+      "sheet": "蜂巢帘",
+      "model": "Cordless honeycomb blinds无拉绳蜂巢帘(上部不能打开）",
+      "unit": "m²",
+      "fields": [
+        ["面料", "26mm width fabric"],
+        ["遮光性", "Semi-Blacout&Blackout"]
+      ],
+      "prices": [["单价", "23.455"]],
+      "photos": ["45e336488a5dadb5.webp"],
+      "binding": {
+        "sheet": "蜂巢帘",
+        "item": "Cordless honeycomb blinds无拉绳蜂巢帘(上部不能打开）",
+        "ref": "C5",
+        "original": "Cordless honeycomb blinds无拉绳蜂巢帘(上部不能打开） 23.455 USD/m²"
+      }
+    },
+    {
+      "id": "5-10",
+      "sheet": "蜂巢帘",
+      "model": "top down and bottom up single chain honeycomb blinds （单拉珠升旗式蜂巢帘）",
+      "unit": "m²",
+      "fields": [
+        ["面料", "26mm width fabric"],
+        ["遮光性", "Semi-Blacout&Blackout"]
+      ],
+      "prices": [["单价", "23.455"]],
+      "photos": ["4bb118c283a032c0.webp"],
+      "binding": {
+        "sheet": "蜂巢帘",
+        "item": "top down and bottom up single chain honeycomb blinds （单拉珠升旗式蜂巢帘）",
+        "ref": "C6",
+        "original": "top down and bottom up single chain honeycomb blinds （单拉珠升旗式蜂巢帘） 23.455 USD/m²"
+      }
+    },
+    {
+      "id": "5-11",
+      "sheet": "蜂巢帘",
+      "model": "Top down and bottom up  Dual- chain honeycomb blinds (双拉珠升旗式蜂巢帘）",
+      "unit": "m²",
+      "fields": [
+        ["面料", "26mm width fabric"],
+        ["遮光性", "Semi-Blacout&Blackout"]
+      ],
+      "prices": [["单价", "23.455"]],
+      "photos": ["6e133d66f4dbf291.webp"],
+      "binding": {
+        "sheet": "蜂巢帘",
+        "item": "Top down and bottom up Dual- chain honeycomb blinds (双拉珠升旗式蜂巢帘）",
+        "ref": "C7",
+        "original": "Top down and bottom up Dual- chain honeycomb blinds (双拉珠升旗式蜂巢帘） 23.455 USD/m²"
+      }
+    },
+    {
+      "id": "5-12",
+      "sheet": "蜂巢帘",
+      "model": "Top down and bottom up cordless hoenycomb blinds无拉绳升旗式蜂巢帘（上下都可开）",
+      "unit": "m²",
+      "fields": [
+        ["面料", "26mm width fabric"],
+        ["遮光性", "Semi-Blacout&Blackout"]
+      ],
+      "prices": [["单价", "34.116"]],
+      "photos": ["b503ebb5adbdfad2.webp"],
+      "binding": {
+        "sheet": "蜂巢帘",
+        "item": "Top down and bottom up cordless hoenycomb blinds无拉绳升旗式蜂巢帘（上下都可开）",
+        "ref": "C8",
+        "original": "Top down and bottom up cordless hoenycomb blinds无拉绳升旗式蜂巢帘（上下都可开） 34.116 USD/m²"
+      }
+    },
+    {
+      "id": "6-3",
+      "sheet": "木百叶",
+      "model": "B01",
+      "unit": "m²",
+      "fields": [
+        ["品名", "50mm Basswood Venetian Blinds"],
+        ["备注", "椴木百叶5cm"]
+      ],
+      "prices": [["梯带款手动", "25.587"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "B01",
+        "ref": "C2",
+        "original": "梯带款手动 (manual ladder tape) 25.587 USD/m²"
+      }
+    },
+    {
+      "id": "6-4",
+      "sheet": "木百叶",
+      "model": "B02",
+      "unit": "m²",
+      "fields": [
+        ["品名", "50mm Basswood Venetian Blinds"],
+        ["备注", "椴木百叶5cm"]
+      ],
+      "prices": [["梯带款手动", "25.587"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "B02",
+        "ref": "C3",
+        "original": "梯带款手动 (manual ladder tape) 25.587 USD/m²"
+      }
+    },
+    {
+      "id": "6-5",
+      "sheet": "木百叶",
+      "model": "B03",
+      "unit": "m²",
+      "fields": [
+        ["品名", "50mm Basswood Venetian Blinds"],
+        ["备注", "椴木百叶5cm"]
+      ],
+      "prices": [["梯带款手动", "25.587"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "B03",
+        "ref": "C4",
+        "original": "梯带款手动 (manual ladder tape) 25.587 USD/m²"
+      }
+    },
+    {
+      "id": "6-6",
+      "sheet": "木百叶",
+      "model": "B04",
+      "unit": "m²",
+      "fields": [
+        ["品名", "50mm Basswood Venetian Blinds"],
+        ["备注", "椴木百叶5cm"]
+      ],
+      "prices": [["梯带款手动", "25.587"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "B04",
+        "ref": "C5",
+        "original": "梯带款手动 (manual ladder tape) 25.587 USD/m²"
+      }
+    },
+    {
+      "id": "6-7",
+      "sheet": "木百叶",
+      "model": "B05",
+      "unit": "m²",
+      "fields": [
+        ["品名", "50mm Basswood Venetian Blinds"],
+        ["备注", "椴木百叶5cm"]
+      ],
+      "prices": [["梯带款手动", "25.587"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "B05",
+        "ref": "C6",
+        "original": "梯带款手动 (manual ladder tape) 25.587 USD/m²"
+      }
+    },
+    {
+      "id": "6-8",
+      "sheet": "木百叶",
+      "model": "B06",
+      "unit": "m²",
+      "fields": [
+        ["品名", "50mm Basswood Venetian Blinds"],
+        ["备注", "椴木百叶5cm"]
+      ],
+      "prices": [["梯带款手动", "25.587"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "B06",
+        "ref": "C7",
+        "original": "梯带款手动 (manual ladder tape) 25.587 USD/m²"
+      }
+    },
+    {
+      "id": "6-9",
+      "sheet": "木百叶",
+      "model": "B07",
+      "unit": "m²",
+      "fields": [
+        ["品名", "50mm Basswood Venetian Blinds"],
+        ["备注", "椴木百叶5cm"]
+      ],
+      "prices": [["梯带款手动", "25.587"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "B07",
+        "ref": "C8",
+        "original": "梯带款手动 (manual ladder tape) 25.587 USD/m²"
+      }
+    },
+    {
+      "id": "6-10",
+      "sheet": "木百叶",
+      "model": "B08",
+      "unit": "m²",
+      "fields": [
+        ["品名", "50mm Basswood Venetian Blinds"],
+        ["备注", "椴木百叶5cm"]
+      ],
+      "prices": [["梯带款手动", "25.587"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "B08",
+        "ref": "C9",
+        "original": "梯带款手动 (manual ladder tape) 25.587 USD/m²"
+      }
+    },
+    {
+      "id": "6-11",
+      "sheet": "木百叶",
+      "model": "B09",
+      "unit": "m²",
+      "fields": [
+        ["品名", "50mm Basswood Venetian Blinds"],
+        ["备注", "椴木百叶5cm"]
+      ],
+      "prices": [["梯带款手动", "25.587"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "B09",
+        "ref": "C10",
+        "original": "梯带款手动 (manual ladder tape) 25.587 USD/m²"
+      }
+    },
+    {
+      "id": "6-12",
+      "sheet": "木百叶",
+      "model": "B10",
+      "unit": "m²",
+      "fields": [
+        ["品名", "50mm Basswood Venetian Blinds"],
+        ["备注", "椴木百叶5cm"]
+      ],
+      "prices": [["梯带款手动", "25.587"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "B10",
+        "ref": "C11",
+        "original": "梯带款手动 (manual ladder tape) 25.587 USD/m²"
+      }
+    },
+    {
+      "id": "6-13",
+      "sheet": "木百叶",
+      "model": "B11",
+      "unit": "m²",
+      "fields": [
+        ["品名", "50mm Basswood Venetian Blinds"],
+        ["备注", "椴木百叶5cm"]
+      ],
+      "prices": [["梯带款手动", "25.587"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "B11",
+        "ref": "C12",
+        "original": "梯带款手动 (manual ladder tape) 25.587 USD/m²"
+      }
+    },
+    {
+      "id": "6-14",
+      "sheet": "木百叶",
+      "model": "B12",
+      "unit": "m²",
+      "fields": [
+        ["品名", "50mm Basswood Venetian Blinds"],
+        ["备注", "椴木百叶5cm"]
+      ],
+      "prices": [["梯带款手动", "25.587"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "B12",
+        "ref": "C13",
+        "original": "梯带款手动 (manual ladder tape) 25.587 USD/m²"
+      }
+    },
+    {
+      "id": "6-15",
+      "sheet": "木百叶",
+      "model": "B13",
+      "unit": "m²",
+      "fields": [
+        ["品名", "50mm Basswood Venetian Blinds"],
+        ["备注", "椴木百叶5cm"]
+      ],
+      "prices": [["梯带款手动", "25.587"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "B13",
+        "ref": "C14",
+        "original": "梯带款手动 (manual ladder tape) 25.587 USD/m²"
+      }
+    },
+    {
+      "id": "6-16",
+      "sheet": "木百叶",
+      "model": "B14",
+      "unit": "m²",
+      "fields": [
+        ["品名", "50mm Basswood Venetian Blinds"],
+        ["备注", "PS百叶5cm"]
+      ],
+      "prices": [["梯带款手动", "25.587"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "B14",
+        "ref": "C15",
+        "original": "梯带款手动 (manual ladder tape) 25.587 USD/m²"
+      }
+    },
+    {
+      "id": "6-17",
+      "sheet": "木百叶",
+      "model": "PS",
+      "unit": "m²",
+      "fields": [
+        ["品名", "50mm PS Venetian Blinds"],
+        ["备注", "PS百叶5cm"]
+      ],
+      "prices": [["梯带款手动", "20.256"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "PS",
+        "ref": "C16",
+        "original": "梯带款手动 (manual ladder tape) 20.256 USD/m²"
+      }
+    },
+    {
+      "id": "6-18",
+      "sheet": "木百叶",
+      "model": "PS",
+      "unit": "m²",
+      "fields": [
+        ["品名", "50mm PS Venetian Blinds"],
+        ["备注", "PS百叶5cm"]
+      ],
+      "prices": [["梯带款手动", "20.256"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "PS",
+        "ref": "C17",
+        "original": "梯带款手动 (manual ladder tape) 20.256 USD/m²"
+      }
+    },
+    {
+      "id": "6-19",
+      "sheet": "木百叶",
+      "model": "PS",
+      "unit": "m²",
+      "fields": [
+        ["品名", "50mm PS Venetian Blinds"],
+        ["备注", "PS百叶5cm"]
+      ],
+      "prices": [["梯带款手动", "20.256"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "PS",
+        "ref": "C18",
+        "original": "梯带款手动 (manual ladder tape) 20.256 USD/m²"
+      }
+    },
+    {
+      "id": "6-20",
+      "sheet": "木百叶",
+      "model": "PS",
+      "unit": "m²",
+      "fields": [
+        ["品名", "50mm PS Venetian Blinds"],
+        ["备注", "铝百叶2.5cm"]
+      ],
+      "prices": [["梯带款手动", "20.256"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "PS",
+        "ref": "C19",
+        "original": "梯带款手动 (manual ladder tape) 20.256 USD/m²"
+      }
+    },
+    {
+      "id": "6-21",
+      "sheet": "木百叶",
+      "model": "YX-001",
+      "unit": "m²",
+      "fields": [
+        ["品名", "25mm Aluminum Venetian Blinds"],
+        ["备注", "铝百叶2.5cm"]
+      ],
+      "prices": [["梯带款手动", "9.595"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "YX-001",
+        "ref": "C20",
+        "original": "梯带款手动 (manual ladder tape) 9.595 USD/m²"
+      }
+    },
+    {
+      "id": "6-22",
+      "sheet": "木百叶",
+      "model": "YX-002",
+      "unit": "m²",
+      "fields": [
+        ["品名", "25mm Aluminum Venetian Blinds"],
+        ["备注", "铝百叶2.5cm"]
+      ],
+      "prices": [["梯带款手动", "9.595"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "YX-002",
+        "ref": "C21",
+        "original": "梯带款手动 (manual ladder tape) 9.595 USD/m²"
+      }
+    },
+    {
+      "id": "6-23",
+      "sheet": "木百叶",
+      "model": "YX-003",
+      "unit": "m²",
+      "fields": [
+        ["品名", "25mm Aluminum Venetian Blinds"],
+        ["备注", "铝百叶2.5cm"]
+      ],
+      "prices": [["梯带款手动", "9.595"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "YX-003",
+        "ref": "C22",
+        "original": "梯带款手动 (manual ladder tape) 9.595 USD/m²"
+      }
+    },
+    {
+      "id": "6-24",
+      "sheet": "木百叶",
+      "model": "YX-004",
+      "unit": "m²",
+      "fields": [
+        ["品名", "25mm Aluminum Venetian Blinds"],
+        ["备注", "铝百叶2.5cm"]
+      ],
+      "prices": [["梯带款手动", "9.595"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "YX-004",
+        "ref": "C23",
+        "original": "梯带款手动 (manual ladder tape) 9.595 USD/m²"
+      }
+    },
+    {
+      "id": "6-25",
+      "sheet": "木百叶",
+      "model": "YX-005",
+      "unit": "m²",
+      "fields": [
+        ["品名", "25mm Aluminum Venetian Blinds"],
+        ["备注", "铝百叶2.5cm"]
+      ],
+      "prices": [["梯带款手动", "9.595"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "YX-005",
+        "ref": "C24",
+        "original": "梯带款手动 (manual ladder tape) 9.595 USD/m²"
+      }
+    },
+    {
+      "id": "6-26",
+      "sheet": "木百叶",
+      "model": "PT-101",
+      "unit": "m²",
+      "fields": [
+        ["品名", "25mm Aluminum Venetian Blinds"],
+        ["备注", "铝百叶2.5cm"]
+      ],
+      "prices": [["梯带款手动", "9.595"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "PT-101",
+        "ref": "C25",
+        "original": "梯带款手动 (manual ladder tape) 9.595 USD/m²"
+      }
+    },
+    {
+      "id": "6-27",
+      "sheet": "木百叶",
+      "model": "PT-103",
+      "unit": "m²",
+      "fields": [
+        ["品名", "25mm Aluminum Venetian Blinds"],
+        ["备注", "铝百叶2.5cm"]
+      ],
+      "prices": [["梯带款手动", "9.595"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "PT-103",
+        "ref": "C26",
+        "original": "梯带款手动 (manual ladder tape) 9.595 USD/m²"
+      }
+    },
+    {
+      "id": "6-28",
+      "sheet": "木百叶",
+      "model": "PT-104",
+      "unit": "m²",
+      "fields": [
+        ["品名", "25mm Aluminum Venetian Blinds"],
+        ["备注", "铝百叶2.5cm"]
+      ],
+      "prices": [["梯带款手动", "9.595"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "PT-104",
+        "ref": "C27",
+        "original": "梯带款手动 (manual ladder tape) 9.595 USD/m²"
+      }
+    },
+    {
+      "id": "6-29",
+      "sheet": "木百叶",
+      "model": "PT-105",
+      "unit": "m²",
+      "fields": [
+        ["品名", "25mm Aluminum Venetian Blinds"],
+        ["备注", "铝百叶2.5cm"]
+      ],
+      "prices": [["梯带款手动", "9.595"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "PT-105",
+        "ref": "C28",
+        "original": "梯带款手动 (manual ladder tape) 9.595 USD/m²"
+      }
+    },
+    {
+      "id": "6-30",
+      "sheet": "木百叶",
+      "model": "PT-106",
+      "unit": "m²",
+      "fields": [["品名", "25mm Aluminum Venetian Blinds"]],
+      "prices": [["梯带款手动", "9.595"]],
+      "photos": [],
+      "binding": {
+        "sheet": "木百叶",
+        "item": "PT-106",
+        "ref": "C29",
+        "original": "梯带款手动 (manual ladder tape) 9.595 USD/m²"
+      }
+    },
+    {
+      "id": "7-3",
+      "sheet": "垂直帘",
+      "model": "半遮光面料",
+      "unit": "m²",
+      "fields": [["遮光性", "半遮光"]],
+      "prices": [["单价", "14.926"]],
+      "photos": [],
+      "binding": {
+        "sheet": "垂直帘",
+        "item": "半遮光面料",
+        "ref": "C2",
+        "original": "拉珠/拉绳 (chain/rope) 14.926 USD/m²"
+      }
+    },
+    {
+      "id": "7-4",
+      "sheet": "垂直帘",
+      "model": "全遮光面料",
+      "unit": "m²",
+      "fields": [["遮光性", "全遮光"]],
+      "prices": [["单价", "17.058"]],
+      "photos": [],
+      "binding": {
+        "sheet": "垂直帘",
+        "item": "全遮光面料",
+        "ref": "C3",
+        "original": "拉珠/拉绳 (chain/rope) 17.058 USD/m²"
+      }
+    },
+    {
+      "id": "7-5",
+      "sheet": "垂直帘",
+      "model": "阳光面料（3%，5%）",
+      "unit": "m²",
+      "fields": [["遮光性", "半遮光"]],
+      "prices": [["单价", "15.566"]],
+      "photos": [],
+      "binding": {
+        "sheet": "垂直帘",
+        "item": "阳光面料（3%，5%）",
+        "ref": "C4",
+        "original": "拉珠/拉绳 (chain/rope) 15.566 USD/m²"
+      }
+    },
+    {
+      "id": "7-6",
+      "sheet": "垂直帘",
+      "model": "阳光面料（0%，1%）",
+      "unit": "m²",
+      "fields": [["遮光性", "半遮光"]],
+      "prices": [["单价", "18.124"]],
+      "photos": [],
+      "binding": {
+        "sheet": "垂直帘",
+        "item": "阳光面料（0%，1%）",
+        "ref": "C5",
+        "original": "拉珠/拉绳 (chain/rope) 18.124 USD/m²"
+      }
+    },
+    {
+      "id": "7-7",
+      "sheet": "垂直帘",
+      "model": "手动垂直帘轨道",
+      "unit": "米",
+      "fields": [["备注", "面料价格已包含轨道"]],
+      "prices": [],
+      "photos": [],
+      "binding": {
+        "sheet": "垂直帘",
+        "item": "手动垂直帘轨道",
+        "ref": "C6",
+        "original": ""
+      }
+    },
+    {
+      "id": "7-8",
+      "sheet": "垂直帘",
+      "model": "电动垂直帘轨道",
+      "unit": "米",
+      "fields": [],
+      "prices": [["单价", "13.86"]],
+      "photos": [],
+      "binding": {
+        "sheet": "垂直帘",
+        "item": "电动垂直帘轨道",
+        "ref": "C7",
+        "original": "电动垂直帘轨道 13.86 USD/m"
+      }
+    },
+    {
+      "id": "7-9",
+      "sheet": "垂直帘",
+      "model": "梦幻帘插电涂鸦电机",
+      "unit": "台",
+      "fields": [],
+      "prices": [["单价", "59.702"]],
+      "photos": [],
+      "binding": {
+        "sheet": "垂直帘",
+        "item": "梦幻帘插电涂鸦电机",
+        "ref": "C8",
+        "original": "梦幻帘插电涂鸦电机 59.702 USD/set"
+      }
+    },
+    {
+      "id": "7-10",
+      "sheet": "垂直帘",
+      "model": "梦幻帘锂电电机",
+      "unit": "台",
+      "fields": [],
+      "prices": [["单价", "81.024"]],
+      "photos": [],
+      "binding": {
+        "sheet": "垂直帘",
+        "item": "梦幻帘锂电电机",
+        "ref": "C9",
+        "original": "梦幻帘锂电电机 81.024 USD/set"
+      }
+    },
+    {
+      "id": "7-11",
+      "sheet": "垂直帘",
+      "model": "遥控器",
+      "unit": "个",
+      "fields": [],
+      "prices": [["单价", "7.463"]],
+      "photos": [],
+      "binding": {
+        "sheet": "垂直帘",
+        "item": "遥控器",
+        "ref": "C10",
+        "original": "遥控器 7.463 USD/pc"
+      }
+    },
+    {
+      "id": "8-3",
+      "sheet": "梦幻帘",
+      "model": "DD1",
+      "unit": "m²",
+      "fields": [["遮光性", "半遮光"]],
+      "prices": [["拉珠 / 拉绳", "11.728"]],
+      "photos": [],
+      "binding": {
+        "sheet": "梦幻帘价格表",
+        "item": "DD1",
+        "ref": "C2",
+        "original": "拉珠/拉绳 (chain/rope) 11.728 USD/m²"
+      }
+    },
+    {
+      "id": "8-4",
+      "sheet": "梦幻帘",
+      "model": "DD2",
+      "unit": "m²",
+      "fields": [["遮光性", "半遮光"]],
+      "prices": [["拉珠 / 拉绳", "11.728"]],
+      "photos": [],
+      "binding": {
+        "sheet": "梦幻帘价格表",
+        "item": "DD2",
+        "ref": "C3",
+        "original": "拉珠/拉绳 (chain/rope) 11.728 USD/m²"
+      }
+    },
+    {
+      "id": "8-5",
+      "sheet": "梦幻帘",
+      "model": "DD4",
+      "unit": "m²",
+      "fields": [["遮光性", "半遮光"]],
+      "prices": [["拉珠 / 拉绳", "11.728"]],
+      "photos": [],
+      "binding": {
+        "sheet": "梦幻帘价格表",
+        "item": "DD4",
+        "ref": "C4",
+        "original": "拉珠/拉绳 (chain/rope) 11.728 USD/m²"
+      }
+    },
+    {
+      "id": "8-6",
+      "sheet": "梦幻帘",
+      "model": "DD6",
+      "unit": "m²",
+      "fields": [["遮光性", "半遮光"]],
+      "prices": [["拉珠 / 拉绳", "11.728"]],
+      "photos": [],
+      "binding": {
+        "sheet": "梦幻帘价格表",
+        "item": "DD6",
+        "ref": "C5",
+        "original": "拉珠/拉绳 (chain/rope) 11.728 USD/m²"
+      }
+    },
+    {
+      "id": "8-7",
+      "sheet": "梦幻帘",
+      "model": "DD8",
+      "unit": "m²",
+      "fields": [["遮光性", "半遮光"]],
+      "prices": [["拉珠 / 拉绳", "11.728"]],
+      "photos": [],
+      "binding": {
+        "sheet": "梦幻帘价格表",
+        "item": "DD8",
+        "ref": "C6",
+        "original": "拉珠/拉绳 (chain/rope) 11.728 USD/m²"
+      }
+    },
+    {
+      "id": "8-8",
+      "sheet": "梦幻帘",
+      "model": "DDS1",
+      "unit": "m²",
+      "fields": [["遮光性", "半遮光"]],
+      "prices": [["拉珠 / 拉绳", "18.124"]],
+      "photos": [],
+      "binding": {
+        "sheet": "梦幻帘价格表",
+        "item": "DDS1",
+        "ref": "C7",
+        "original": "拉珠/拉绳 (chain/rope) 18.124 USD/m²"
+      }
+    },
+    {
+      "id": "8-9",
+      "sheet": "梦幻帘",
+      "model": "DDB1",
+      "unit": "m²",
+      "fields": [["遮光性", "全遮光"]],
+      "prices": [["拉珠 / 拉绳", "18.124"]],
+      "photos": [],
+      "binding": {
+        "sheet": "梦幻帘价格表",
+        "item": "DDB1",
+        "ref": "C8",
+        "original": "拉珠/拉绳 (chain/rope) 18.124 USD/m²"
+      }
+    },
+    {
+      "id": "8-10",
+      "sheet": "梦幻帘",
+      "model": "DD5",
+      "unit": "m²",
+      "fields": [["遮光性", "半遮光"]],
+      "prices": [["拉珠 / 拉绳", "18.124"]],
+      "photos": [],
+      "binding": {
+        "sheet": "梦幻帘价格表",
+        "item": "DD5",
+        "ref": "C9",
+        "original": "拉珠/拉绳 (chain/rope) 18.124 USD/m²"
+      }
+    },
+    {
+      "id": "8-11",
+      "sheet": "梦幻帘",
+      "model": "DD11",
+      "unit": "m²",
+      "fields": [["遮光性", "半遮光"]],
+      "prices": [["拉珠 / 拉绳", "18.124"]],
+      "photos": [],
+      "binding": {
+        "sheet": "梦幻帘价格表",
+        "item": "DD11",
+        "ref": "C10",
+        "original": "拉珠/拉绳 (chain/rope) 18.124 USD/m²"
+      }
+    },
+    {
+      "id": "8-12",
+      "sheet": "梦幻帘",
+      "model": "DD12",
+      "unit": "m²",
+      "fields": [["遮光性", "半遮光"]],
+      "prices": [["拉珠 / 拉绳", "18.124"]],
+      "photos": [],
+      "binding": {
+        "sheet": "梦幻帘价格表",
+        "item": "DD12",
+        "ref": "C11",
+        "original": "拉珠/拉绳 (chain/rope) 18.124 USD/m²"
+      }
+    },
+    {
+      "id": "8-13",
+      "sheet": "梦幻帘",
+      "model": "DD15",
+      "unit": "m²",
+      "fields": [["遮光性", "半遮光"]],
+      "prices": [["拉珠 / 拉绳", "18.124"]],
+      "photos": [],
+      "binding": {
+        "sheet": "梦幻帘价格表",
+        "item": "DD15",
+        "ref": "C12",
+        "original": "拉珠/拉绳 (chain/rope) 18.124 USD/m²"
+      }
+    },
+    {
+      "id": "8-14",
+      "sheet": "梦幻帘",
+      "model": "DD14",
+      "unit": "m²",
+      "fields": [["遮光性", "半遮光"]],
+      "prices": [["拉珠 / 拉绳", "18.124"]],
+      "photos": [],
+      "binding": {
+        "sheet": "梦幻帘价格表",
+        "item": "DD14",
+        "ref": "C13",
+        "original": "拉珠/拉绳 (chain/rope) 18.124 USD/m²"
+      }
+    },
+    {
+      "id": "8-15",
+      "sheet": "梦幻帘",
+      "model": "FR-DD1",
+      "unit": "m²",
+      "fields": [["遮光性", "半遮光"]],
+      "prices": [["拉珠 / 拉绳", "13.86"]],
+      "photos": [],
+      "binding": {
+        "sheet": "梦幻帘价格表",
+        "item": "FR-DD1",
+        "ref": "C14",
+        "original": "拉珠/拉绳 (chain/rope) 13.86 USD/m²"
+      }
+    },
+    {
+      "id": "8-16",
+      "sheet": "梦幻帘",
+      "model": "FR-DD6",
+      "unit": "m²",
+      "fields": [["遮光性", "半遮光"]],
+      "prices": [["拉珠 / 拉绳", "13.86"]],
+      "photos": [],
+      "binding": {
+        "sheet": "梦幻帘价格表",
+        "item": "FR-DD6",
+        "ref": "C15",
+        "original": "拉珠/拉绳 (chain/rope) 13.86 USD/m²"
+      }
+    },
+    {
+      "id": "8-17",
+      "sheet": "梦幻帘",
+      "model": "AST-DD102",
+      "unit": "m²",
+      "fields": [["遮光性", "半遮光"]],
+      "prices": [["拉珠 / 拉绳", "13.86"]],
+      "photos": [],
+      "binding": {
+        "sheet": "梦幻帘价格表",
+        "item": "AST-DD102",
+        "ref": "C16",
+        "original": "拉珠/拉绳 (chain/rope) 13.86 USD/m²"
+      }
+    },
+    {
+      "id": "8-18",
+      "sheet": "梦幻帘",
+      "model": "手动梦幻帘轨道",
+      "unit": "米",
+      "fields": [],
+      "prices": [["拉珠 / 拉绳", "8.529"]],
+      "photos": [],
+      "binding": {
+        "sheet": "梦幻帘价格表",
+        "item": "手动梦幻帘轨道",
+        "ref": "C17",
+        "original": "手动梦幻帘轨道 8.529 USD/m"
+      }
+    },
+    {
+      "id": "8-19",
+      "sheet": "梦幻帘",
+      "model": "电动梦幻帘轨道",
+      "unit": "米",
+      "fields": [],
+      "prices": [["拉珠 / 拉绳", "13.86"]],
+      "photos": [],
+      "binding": {
+        "sheet": "梦幻帘价格表",
+        "item": "电动梦幻帘轨道",
+        "ref": "C18",
+        "original": "电动梦幻帘轨道 13.86 USD/m"
+      }
+    },
+    {
+      "id": "8-20",
+      "sheet": "梦幻帘",
+      "model": "梦幻帘插电涂鸦电机",
+      "unit": "台",
+      "fields": [],
+      "prices": [["拉珠 / 拉绳", "59.702"]],
+      "photos": [],
+      "binding": {
+        "sheet": "梦幻帘价格表",
+        "item": "梦幻帘插电涂鸦电机",
+        "ref": "C19",
+        "original": "梦幻帘插电涂鸦电机 59.702 USD/set"
+      }
+    },
+    {
+      "id": "8-21",
+      "sheet": "梦幻帘",
+      "model": "梦幻帘锂电电机",
+      "unit": "台",
+      "fields": [],
+      "prices": [["拉珠 / 拉绳", "81.024"]],
+      "photos": [],
+      "binding": {
+        "sheet": "梦幻帘价格表",
+        "item": "梦幻帘锂电电机",
+        "ref": "C20",
+        "original": "梦幻帘锂电电机 81.024 USD/set"
+      }
+    },
+    {
+      "id": "8-22",
+      "sheet": "梦幻帘",
+      "model": "遥控器",
+      "unit": "个",
+      "fields": [],
+      "prices": [["拉珠 / 拉绳", "7.463"]],
+      "photos": [],
+      "binding": {
+        "sheet": "梦幻帘价格表",
+        "item": "遥控器",
+        "ref": "C21",
+        "original": "遥控器 7.463 USD/pc"
+      }
+    },
+    {
+      "id": "9-3",
+      "sheet": "屏风帘",
+      "model": "AYM652",
+      "unit": "m²",
+      "fields": [["遮光性", "Blackout"]],
+      "prices": [["单价", "14.926"]],
+      "photos": ["73fc9a217443cfc4.webp"],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "AYM652",
+        "ref": "C2",
+        "original": "拉珠/拉绳 (chain/rope) 14.926 USD/m²"
+      }
+    },
+    {
+      "id": "9-4",
+      "sheet": "屏风帘",
+      "model": "AYM61",
+      "unit": "m²",
+      "fields": [["遮光性", "Blackout"]],
+      "prices": [["单价", "14.499"]],
+      "photos": ["cd33eb9fdf78c64e.webp"],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "AYM61",
+        "ref": "C3",
+        "original": "拉珠/拉绳 (chain/rope) 14.499 USD/m²"
+      }
+    },
+    {
+      "id": "9-5",
+      "sheet": "屏风帘",
+      "model": "APTJ-00",
+      "unit": "m²",
+      "fields": [["遮光性", "Semi-blackout"]],
+      "prices": [["单价", "14.926"]],
+      "photos": ["4e50f7ff0a481a67.webp"],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "APTJ-00",
+        "ref": "C4",
+        "original": "拉珠/拉绳 (chain/rope) 14.926 USD/m²"
+      }
+    },
+    {
+      "id": "9-6",
+      "sheet": "屏风帘",
+      "model": "APTJ-9",
+      "unit": "m²",
+      "fields": [["遮光性", "Blackout"]],
+      "prices": [["单价", "17.058"]],
+      "photos": ["c3ed278d0120e2ec.webp"],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "APTJ-9",
+        "ref": "C5",
+        "original": "拉珠/拉绳 (chain/rope) 17.058 USD/m²"
+      }
+    },
+    {
+      "id": "9-7",
+      "sheet": "屏风帘",
+      "model": "AYM53",
+      "unit": "m²",
+      "fields": [["遮光性", "Blackout"]],
+      "prices": [["单价", "14.926"]],
+      "photos": ["4cc8d02059e17229.webp"],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "AYM53",
+        "ref": "C6",
+        "original": "拉珠/拉绳 (chain/rope) 14.926 USD/m²"
+      }
+    },
+    {
+      "id": "9-8",
+      "sheet": "屏风帘",
+      "model": "AArizona11",
+      "unit": "m²",
+      "fields": [["遮光性", "Semi-blackout"]],
+      "prices": [["单价", "15.992"]],
+      "photos": ["4cb29f6710e0af7d.webp"],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "AArizona11",
+        "ref": "C7",
+        "original": "拉珠/拉绳 (chain/rope) 15.992 USD/m²"
+      }
+    },
+    {
+      "id": "9-9",
+      "sheet": "屏风帘",
+      "model": "AArizona19",
+      "unit": "m²",
+      "fields": [["遮光性", "Blackout"]],
+      "prices": [["单价", "17.058"]],
+      "photos": ["9688a68f1724669a.webp"],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "AArizona19",
+        "ref": "C8",
+        "original": "拉珠/拉绳 (chain/rope) 17.058 USD/m²"
+      }
+    },
+    {
+      "id": "9-10",
+      "sheet": "屏风帘",
+      "model": "AShantung11",
+      "unit": "m²",
+      "fields": [["遮光性", "Semi-blackout"]],
+      "prices": [["单价", "15.992"]],
+      "photos": ["661864d0fbb510cc.webp"],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "AShantung11",
+        "ref": "C9",
+        "original": "拉珠/拉绳 (chain/rope) 15.992 USD/m²"
+      }
+    },
+    {
+      "id": "9-11",
+      "sheet": "屏风帘",
+      "model": "AShantung19",
+      "unit": "m²",
+      "fields": [["遮光性", "Blackout"]],
+      "prices": [["单价", "17.058"]],
+      "photos": ["18d6ff5cba644c8a.webp"],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "AShantung19",
+        "ref": "C10",
+        "original": "拉珠/拉绳 (chain/rope) 17.058 USD/m²"
+      }
+    },
+    {
+      "id": "9-12",
+      "sheet": "屏风帘",
+      "model": "AUluru11",
+      "unit": "m²",
+      "fields": [["遮光性", "Semi-blackout"]],
+      "prices": [["单价", "15.992"]],
+      "photos": ["00b5fafa7d458998.webp"],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "AUluru11",
+        "ref": "C11",
+        "original": "拉珠/拉绳 (chain/rope) 15.992 USD/m²"
+      }
+    },
+    {
+      "id": "9-13",
+      "sheet": "屏风帘",
+      "model": "AUluru19",
+      "unit": "m²",
+      "fields": [["遮光性", "Blackout"]],
+      "prices": [["单价", "17.058"]],
+      "photos": ["c60fab80fa871d22.webp"],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "AUluru19",
+        "ref": "C12",
+        "original": "拉珠/拉绳 (chain/rope) 17.058 USD/m²"
+      }
+    },
+    {
+      "id": "9-14",
+      "sheet": "屏风帘",
+      "model": "ADoris19",
+      "unit": "m²",
+      "fields": [["遮光性", "Blackout"]],
+      "prices": [["单价", "17.058"]],
+      "photos": ["1253ec494a669394.webp"],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "ADoris19",
+        "ref": "C13",
+        "original": "拉珠/拉绳 (chain/rope) 17.058 USD/m²"
+      }
+    },
+    {
+      "id": "9-15",
+      "sheet": "屏风帘",
+      "model": "AIguazu19",
+      "unit": "m²",
+      "fields": [["遮光性", "Blackout"]],
+      "prices": [["单价", "17.058"]],
+      "photos": ["e8555e22ffaceb66.webp"],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "AIguazu19",
+        "ref": "C14",
+        "original": "拉珠/拉绳 (chain/rope) 17.058 USD/m²"
+      }
+    },
+    {
+      "id": "9-16",
+      "sheet": "屏风帘",
+      "model": "AIguazu - plus19",
+      "unit": "m²",
+      "fields": [["遮光性", "Blackout"]],
+      "prices": [["单价", "17.058"]],
+      "photos": ["3c75f37219dbbae6.webp"],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "AIguazu - plus19",
+        "ref": "C15",
+        "original": "拉珠/拉绳 (chain/rope) 17.058 USD/m²"
+      }
+    },
+    {
+      "id": "9-17",
+      "sheet": "屏风帘",
+      "model": "ALiess19",
+      "unit": "m²",
+      "fields": [["遮光性", "Blackout"]],
+      "prices": [["单价", "17.058"]],
+      "photos": ["041be4d69878666b.webp"],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "ALiess19",
+        "ref": "C16",
+        "original": "拉珠/拉绳 (chain/rope) 17.058 USD/m²"
+      }
+    },
+    {
+      "id": "9-18",
+      "sheet": "屏风帘",
+      "model": "APrime19",
+      "unit": "m²",
+      "fields": [["遮光性", "Blackout"]],
+      "prices": [["单价", "17.058"]],
+      "photos": ["4d3a71ac4b690f10.webp"],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "APrime19",
+        "ref": "C17",
+        "original": "拉珠/拉绳 (chain/rope) 17.058 USD/m²"
+      }
+    },
+    {
+      "id": "9-19",
+      "sheet": "屏风帘",
+      "model": "AYM42(玻纤面料)",
+      "unit": "m²",
+      "fields": [["遮光性", "Blackout"]],
+      "prices": [["单价", "17.058"]],
+      "photos": ["76b07f0dd36a4b1e.webp"],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "AYM42",
+        "ref": "C18",
+        "original": "拉珠/拉绳 (chain/rope) 17.058 USD/m²"
+      }
+    },
+    {
+      "id": "9-20",
+      "sheet": "屏风帘",
+      "model": "SC-A9-5",
+      "unit": "m²",
+      "fields": [["遮光性", "100%Blackout;White Coating;Polyester30%+PVC70%"]],
+      "prices": [["单价", "18.124"]],
+      "photos": ["4c3828295969bdc0.webp"],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "SC-A9-5",
+        "ref": "C19",
+        "original": "拉珠/拉绳 (chain/rope) 18.124 USD/m²"
+      }
+    },
+    {
+      "id": "9-21",
+      "sheet": "屏风帘",
+      "model": "SC-A7-1",
+      "unit": "m²",
+      "fields": [["遮光性", "1%开孔率阳光面料"]],
+      "prices": [["单价", "18.124"]],
+      "photos": ["ad1375da199d2277.webp"],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "SC-A7-1",
+        "ref": "C20",
+        "original": "拉珠/拉绳 (chain/rope) 18.124 USD/m²"
+      }
+    },
+    {
+      "id": "9-22",
+      "sheet": "屏风帘",
+      "model": "SC-P9",
+      "unit": "m²",
+      "fields": [["遮光性", "0% 开孔率阳光面料"]],
+      "prices": [["单价", "19.19"]],
+      "photos": [],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "SC-P9",
+        "ref": "C21",
+        "original": "拉珠/拉绳 (chain/rope) 19.19 USD/m²"
+      }
+    },
+    {
+      "id": "9-23",
+      "sheet": "屏风帘",
+      "model": "SC-A2-1",
+      "unit": "m²",
+      "fields": [["遮光性", "1%开孔率阳光面料"]],
+      "prices": [["单价", "17.058"]],
+      "photos": ["9a2c60448e0c87a4.webp"],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "SC-A2-1",
+        "ref": "C22",
+        "original": "拉珠/拉绳 (chain/rope) 17.058 USD/m²"
+      }
+    },
+    {
+      "id": "9-24",
+      "sheet": "屏风帘",
+      "model": "SC-A2-3",
+      "unit": "m²",
+      "fields": [["遮光性", "3%开孔率阳光面料"]],
+      "prices": [["单价", "15.992"]],
+      "photos": ["14acf28c703f312b.webp"],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "SC-A2-3",
+        "ref": "C23",
+        "original": "拉珠/拉绳 (chain/rope) 15.992 USD/m²"
+      }
+    },
+    {
+      "id": "9-25",
+      "sheet": "屏风帘",
+      "model": "SC-A3-3",
+      "unit": "m²",
+      "fields": [["遮光性", "3%开孔率阳光面料"]],
+      "prices": [["单价", "15.992"]],
+      "photos": ["3809e8d5c6a486e1.webp"],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "SC-A3-3",
+        "ref": "C24",
+        "original": "拉珠/拉绳 (chain/rope) 15.992 USD/m²"
+      }
+    },
+    {
+      "id": "9-26",
+      "sheet": "屏风帘",
+      "model": "SC-D1-4",
+      "unit": "m²",
+      "fields": [["遮光性", "4%开孔率阳光面料"]],
+      "prices": [["单价", "19.19"]],
+      "photos": ["340c75cd1bd204e8.webp"],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "SC-D1-4",
+        "ref": "C25",
+        "original": "拉珠/拉绳 (chain/rope) 19.19 USD/m²"
+      }
+    },
+    {
+      "id": "9-27",
+      "sheet": "屏风帘",
+      "model": "SC-A2-5",
+      "unit": "m²",
+      "fields": [["遮光性", "5%开孔率阳光面料"]],
+      "prices": [["单价", "14.499"]],
+      "photos": ["c71cb9ffcda53309.webp"],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "SC-A2-5",
+        "ref": "C26",
+        "original": "拉珠/拉绳 (chain/rope) 14.499 USD/m²"
+      }
+    },
+    {
+      "id": "9-28",
+      "sheet": "屏风帘",
+      "model": "SC-A1-5",
+      "unit": "m²",
+      "fields": [["遮光性", "5%开孔率阳光面料"]],
+      "prices": [["单价", "14.926"]],
+      "photos": ["54382a4d98b9d3eb.webp"],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "SC-A1-5",
+        "ref": "C27",
+        "original": "拉珠/拉绳 (chain/rope) 14.926 USD/m²"
+      }
+    },
+    {
+      "id": "9-29",
+      "sheet": "屏风帘",
+      "model": "SC-L1-5",
+      "unit": "m²",
+      "fields": [["遮光性", "5%开孔率 双色阳光面料"]],
+      "prices": [["单价", "18.124"]],
+      "photos": ["db0a17a5c9fd14e8.webp"],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "SC-L1-5",
+        "ref": "C28",
+        "original": "拉珠/拉绳 (chain/rope) 18.124 USD/m²"
+      }
+    },
+    {
+      "id": "9-30",
+      "sheet": "屏风帘",
+      "model": "手动屏风帘轨道（3槽）",
+      "unit": "米",
+      "fields": [],
+      "prices": [["单价", "29.425"]],
+      "photos": [],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "手动屏风帘轨道（3槽）",
+        "ref": "C29",
+        "original": "手动屏风帘轨道（3槽） 29.425 USD/m"
+      }
+    },
+    {
+      "id": "9-31",
+      "sheet": "屏风帘",
+      "model": "手动屏风帘轨道（4槽）",
+      "unit": "米",
+      "fields": [],
+      "prices": [["单价", "31.557"]],
+      "photos": [],
+      "binding": {
+        "sheet": "屏风帘",
+        "item": "手动屏风帘轨道（4槽）",
+        "ref": "C30",
+        "original": "手动屏风帘轨道（4槽） 31.557 USD/m"
+      }
+    },
+    {
+      "id": "10-3",
+      "sheet": "纱帘+布帘",
+      "model": ".2089-1",
+      "unit": "米",
+      "fields": [],
+      "prices": [["单价", "13.357"]],
+      "photos": [],
+      "binding": {
+        "sheet": "纱帘+布帘",
+        "item": ".2089-1",
+        "ref": "C2",
+        "original": ".2089-1 13.357 USD/m"
+      }
+    },
+    {
+      "id": "10-4",
+      "sheet": "纱帘+布帘",
+      "model": ".2089-2",
+      "unit": "米",
+      "fields": [],
+      "prices": [["单价", "13.357"]],
+      "photos": [],
+      "binding": {
+        "sheet": "纱帘+布帘",
+        "item": ".2089-2",
+        "ref": "C3",
+        "original": ".2089-2 13.357 USD/m"
+      }
+    },
+    {
+      "id": "10-5",
+      "sheet": "纱帘+布帘",
+      "model": ".2089-3",
+      "unit": "米",
+      "fields": [],
+      "prices": [["单价", "13.357"]],
+      "photos": [],
+      "binding": {
+        "sheet": "纱帘+布帘",
+        "item": ".2089-3",
+        "ref": "C4",
+        "original": ".2089-3 13.357 USD/m"
+      }
+    },
+    {
+      "id": "10-6",
+      "sheet": "纱帘+布帘",
+      "model": ".2089-4",
+      "unit": "米",
+      "fields": [],
+      "prices": [["单价", "13.357"]],
+      "photos": [],
+      "binding": {
+        "sheet": "纱帘+布帘",
+        "item": ".2089-4",
+        "ref": "C5",
+        "original": ".2089-4 13.357 USD/m"
+      }
+    },
+    {
+      "id": "10-7",
+      "sheet": "纱帘+布帘",
+      "model": ".2089-5",
+      "unit": "米",
+      "fields": [],
+      "prices": [["单价", "13.357"]],
+      "photos": [],
+      "binding": {
+        "sheet": "纱帘+布帘",
+        "item": ".2089-5",
+        "ref": "C6",
+        "original": ".2089-5 13.357 USD/m"
+      }
+    },
+    {
+      "id": "10-8",
+      "sheet": "纱帘+布帘",
+      "model": ".2089-6",
+      "unit": "米",
+      "fields": [],
+      "prices": [["单价", "13.357"]],
+      "photos": [],
+      "binding": {
+        "sheet": "纱帘+布帘",
+        "item": ".2089-6",
+        "ref": "C7",
+        "original": ".2089-6 13.357 USD/m"
+      }
+    },
+    {
+      "id": "10-9",
+      "sheet": "纱帘+布帘",
+      "model": ".2089-7",
+      "unit": "米",
+      "fields": [],
+      "prices": [["单价", "13.357"]],
+      "photos": [],
+      "binding": {
+        "sheet": "纱帘+布帘",
+        "item": ".2089-7",
+        "ref": "C8",
+        "original": ".2089-7 13.357 USD/m"
+      }
+    },
+    {
+      "id": "10-10",
+      "sheet": "纱帘+布帘",
+      "model": ".2089-8",
+      "unit": "米",
+      "fields": [],
+      "prices": [["单价", "13.357"]],
+      "photos": [],
+      "binding": {
+        "sheet": "纱帘+布帘",
+        "item": ".2089-8",
+        "ref": "C9",
+        "original": ".2089-8 13.357 USD/m"
+      }
+    },
+    {
+      "id": "10-11",
+      "sheet": "纱帘+布帘",
+      "model": ".2089-9",
+      "unit": "米",
+      "fields": [],
+      "prices": [["单价", "13.357"]],
+      "photos": [],
+      "binding": {
+        "sheet": "纱帘+布帘",
+        "item": ".2089-9",
+        "ref": "C10",
+        "original": ".2089-9 13.357 USD/m"
+      }
+    },
+    {
+      "id": "10-12",
+      "sheet": "纱帘+布帘",
+      "model": ".2089-10",
+      "unit": "米",
+      "fields": [],
+      "prices": [["单价", "13.357"]],
+      "photos": [],
+      "binding": {
+        "sheet": "纱帘+布帘",
+        "item": ".2089-10",
+        "ref": "C11",
+        "original": ".2089-10 13.357 USD/m"
+      }
+    },
+    {
+      "id": "10-13",
+      "sheet": "纱帘+布帘",
+      "model": ".2089-11",
+      "unit": "米",
+      "fields": [],
+      "prices": [["单价", "13.357"]],
+      "photos": [],
+      "binding": {
+        "sheet": "纱帘+布帘",
+        "item": ".2089-11",
+        "ref": "C12",
+        "original": ".2089-11 13.357 USD/m"
+      }
+    },
+    {
+      "id": "10-14",
+      "sheet": "纱帘+布帘",
+      "model": ".2089-12",
+      "unit": "米",
+      "fields": [],
+      "prices": [["单价", "13.357"]],
+      "photos": [],
+      "binding": {
+        "sheet": "纱帘+布帘",
+        "item": ".2089-12",
+        "ref": "C13",
+        "original": ".2089-12 13.357 USD/m"
+      }
+    },
+    {
+      "id": "10-15",
+      "sheet": "纱帘+布帘",
+      "model": ".2089-13",
+      "unit": "米",
+      "fields": [],
+      "prices": [["单价", "13.357"]],
+      "photos": [],
+      "binding": {
+        "sheet": "纱帘+布帘",
+        "item": ".2089-13",
+        "ref": "C14",
+        "original": ".2089-13 13.357 USD/m"
+      }
+    },
+    {
+      "id": "10-16",
+      "sheet": "纱帘+布帘",
+      "model": ".2089-14",
+      "unit": "米",
+      "fields": [],
+      "prices": [["单价", "13.357"]],
+      "photos": [],
+      "binding": {
+        "sheet": "纱帘+布帘",
+        "item": ".2089-14",
+        "ref": "C15",
+        "original": ".2089-14 13.357 USD/m"
+      }
+    },
+    {
+      "id": "10-17",
+      "sheet": "纱帘+布帘",
+      "model": ".2089-15",
+      "unit": "米",
+      "fields": [],
+      "prices": [["单价", "13.357"]],
+      "photos": [],
+      "binding": {
+        "sheet": "纱帘+布帘",
+        "item": ".2089-15",
+        "ref": "C16",
+        "original": ".2089-15 13.357 USD/m"
+      }
+    },
+    {
+      "id": "10-18",
+      "sheet": "纱帘+布帘",
+      "model": ".2089-16",
+      "unit": "米",
+      "fields": [],
+      "prices": [["单价", "13.357"]],
+      "photos": [],
+      "binding": {
+        "sheet": "纱帘+布帘",
+        "item": ".2089-16",
+        "ref": "C17",
+        "original": ".2089-16 13.357 USD/m"
+      }
+    },
+    {
+      "id": "10-19",
+      "sheet": "纱帘+布帘",
+      "model": ".2089-17",
+      "unit": "米",
+      "fields": [],
+      "prices": [["单价", "13.357"]],
+      "photos": [],
+      "binding": {
+        "sheet": "纱帘+布帘",
+        "item": ".2089-17",
+        "ref": "C18",
+        "original": ".2089-17 13.357 USD/m"
+      }
+    },
+    {
+      "id": "10-20",
+      "sheet": "纱帘+布帘",
+      "model": ".2089-18",
+      "unit": "米",
+      "fields": [],
+      "prices": [["单价", "13.357"]],
+      "photos": [],
+      "binding": {
+        "sheet": "纱帘+布帘",
+        "item": ".2089-18",
+        "ref": "C19",
+        "original": ".2089-18 13.357 USD/m"
+      }
+    },
+    {
+      "id": "10-21",
+      "sheet": "纱帘+布帘",
+      "model": "GKA151-10199229-1",
+      "unit": "米",
+      "fields": [],
+      "prices": [["单价", "9.212"]],
+      "photos": [],
+      "binding": {
+        "sheet": "纱帘+布帘",
+        "item": "GKA151-10199229-1",
+        "ref": "C20",
+        "original": "GKA151-10199229-1 9.212 USD/m"
+      }
+    },
+    {
+      "id": "10-22",
+      "sheet": "纱帘+布帘",
+      "model": "GKA151-10199229-2",
+      "unit": "米",
+      "fields": [],
+      "prices": [["单价", "9.212"]],
+      "photos": [],
+      "binding": {
+        "sheet": "纱帘+布帘",
+        "item": "GKA151-10199229-2",
+        "ref": "C21",
+        "original": "GKA151-10199229-2 9.212 USD/m"
+      }
+    },
+    {
+      "id": "10-23",
+      "sheet": "纱帘+布帘",
+      "model": "GKA151-10199229-3",
+      "unit": "米",
+      "fields": [],
+      "prices": [["单价", "9.212"]],
+      "photos": [],
+      "binding": {
+        "sheet": "纱帘+布帘",
+        "item": "GKA151-10199229-3",
+        "ref": "C22",
+        "original": "GKA151-10199229-3 9.212 USD/m"
+      }
+    },
+    {
+      "id": "10-24",
+      "sheet": "纱帘+布帘",
+      "model": "GKA151-10199229-4",
+      "unit": "米",
+      "fields": [],
+      "prices": [["单价", "9.212"]],
+      "photos": [],
+      "binding": {
+        "sheet": "纱帘+布帘",
+        "item": "GKA151-10199229-4",
+        "ref": "C23",
+        "original": "GKA151-10199229-4 9.212 USD/m"
+      }
+    },
+    {
+      "id": "10-25",
+      "sheet": "纱帘+布帘",
+      "model": "手动轨道",
+      "unit": "台",
+      "fields": [],
+      "prices": [["单价", "9.212"]],
+      "photos": [],
+      "binding": {
+        "sheet": "纱帘+布帘",
+        "item": "手动轨道",
+        "ref": "C24",
+        "original": "手动轨道 9.212 USD/set"
+      }
+    },
+    {
+      "id": "10-26",
+      "sheet": "纱帘+布帘",
+      "model": "电动轨道",
+      "unit": "台",
+      "fields": [],
+      "prices": [["单价", "14.969"]],
+      "photos": [],
+      "binding": {
+        "sheet": "纱帘+布帘",
+        "item": "电动轨道",
+        "ref": "C25",
+        "original": "电动轨道 14.969 USD/set"
+      }
+    },
+    {
+      "id": "10-27",
+      "sheet": "纱帘+布帘",
+      "model": "插电电机",
+      "unit": "台",
+      "fields": [],
+      "prices": [["单价", "64.478"]],
+      "photos": [],
+      "binding": {
+        "sheet": "纱帘+布帘",
+        "item": "插电电机",
+        "ref": "C26",
+        "original": "插电电机 64.478 USD/set"
+      }
+    },
+    {
+      "id": "10-28",
+      "sheet": "纱帘+布帘",
+      "model": "锂电池电机",
+      "unit": "台",
+      "fields": [],
+      "prices": [["单价", "87.506"]],
+      "photos": [],
+      "binding": {
+        "sheet": "纱帘+布帘",
+        "item": "锂电池电机",
+        "ref": "C27",
+        "original": "锂电池电机 87.506 USD/set"
+      }
+    },
+    {
+      "id": "10-29",
+      "sheet": "纱帘+布帘",
+      "model": "遥控器",
+      "unit": "个",
+      "fields": [],
+      "prices": [["单价", "8.06"]],
+      "photos": [],
+      "binding": {
+        "sheet": "纱帘+布帘",
+        "item": "遥控器",
+        "ref": "C28",
+        "original": "遥控器 8.06 USD/pc"
+      }
+    }
+  ]
+}

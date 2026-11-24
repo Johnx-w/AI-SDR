@@ -24,7 +24,8 @@
     "verify:mail:internal": "node scripts/verify-mail-internal.mjs --live-internal",
     "benchmark:reply-reads": "node scripts/benchmark-reply-reads.mjs",
     "format": "prettier --write src server scripts tests docs README.md *.json *.ts",
-    "format:check": "prettier --check src server scripts tests docs README.md *.json *.ts"
+    "format:check": "prettier --check src server scripts tests docs README.md *.json *.ts",
+    "import:price-catalog": "node --env-file-if-exists=.env scripts/import-price-catalog.mjs"
   },
   "dependencies": {
     "@hyzyla/pdfium": "3.0.0",

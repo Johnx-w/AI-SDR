@@ -1,0 +1,101 @@
+.model-photos,
+.photo-review,
+.reply-photo-picker {
+  display: grid;
+  gap: 12px;
+}
+.mail-reply-attachments button.reply-photo-thumb {
+  width: auto;
+  height: auto;
+  padding: 0;
+  cursor: zoom-in;
+}
+.reply-photo-dialog {
+  border: 1px solid #ced7e5;
+  border-radius: 10px;
+  padding: 16px;
+  text-align: center;
+}
+.reply-photo-dialog::backdrop {
+  background: #15223699;
+}
+.reply-photo-dialog img {
+  display: block;
+  max-width: 80vw;
+  max-height: 70vh;
+  object-fit: contain;
+}
+.photo-controls [aria-pressed='true'] {
+  font-weight: 650;
+  color: #3447a4;
+  background: #edf0fb;
+}
+
+.photo-controls,
+.photo-candidate,
+.photo-compare {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.model-photos input:not([type='checkbox']),
+.model-photos select,
+.model-photos button,
+.reply-photo-picker button,
+.photo-open {
+  font: inherit;
+  color: inherit;
+  border: 1px solid #ced7e5;
+  background: white;
+  border-radius: 6px;
+  padding: 5px 9px;
+}
+.model-photos button,
+.photo-open,
+.reply-photo-picker button {
+  cursor: pointer;
+}
+.model-photos button:disabled,
+.reply-photo-picker button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.photo-models article {
+  border-top: 1px solid #dbe1eb;
+  display: grid;
+  grid-template-columns: minmax(80px, 25%) 1fr;
+  gap: 12px;
+  padding: 10px 0;
+}
+.model-photos small,
+.reply-photo-picker small {
+  display: block;
+  color: #57657c;
+}
+.photo-candidate img,
+.photo-compare img {
+  display: block;
+  object-fit: contain;
+  width: 80px;
+  height: 60px;
+  border-radius: 4px;
+  background: #f4f6fa;
+}
+.photo-compare img {
+  width: 140px;
+  height: 100px;
+}
+.photo-review,
+.reply-photo-picker {
+  background: #f5f7fb;
+  border: 1px solid #d5deeb;
+  border-radius: 8px;
+  padding: 12px;
+}
+.photo-review figure {
+  margin: 0;
+}
+.photo-candidate {
+  margin: 4px 0 8px;
+}

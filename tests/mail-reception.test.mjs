@@ -456,6 +456,9 @@ test('手动或历史来信按当前邮箱匹配资料起草，保存来源及�
     box = h.s.mailboxes.get('own');
   box.paused = true;
   box.knowledgeProductIds = ['selected'];
+  h.s.draftPhotos = () => [
+    { name: 'ZX-01.jpg', contentType: 'image/jpeg', contentBase64: '/9j/2Q==' },
+  ];
   h.s.answerQuestion = (sender, question) => {
     assert.equal(sender.email, box.email);
     assert.deepEqual(sender.knowledgeProductIds, ['selected']);
@@ -509,6 +512,7 @@ test('手动或历史来信按当前邮箱匹配资料起草，保存来源及�
   );
   const { draft } = await generateMailDraft(h.s, id, { sourceId, expectedRevision: 0 }, model);
   assert.equal(draft.provenance.model, 'deepseek-flash');
+  assert.equal(h.s.replies.draft(id).attachments[0].name, 'ZX-01.jpg');
   assert.equal(draft.provenance.automatic, false);
   assert.equal(draft.provenance.sources[0].ref, 'C8');
   assert.match(draft.bodyText, /aluminium.*Sales office/s);
@@ -519,6 +523,14 @@ test('手动或历史来信按当前邮箱匹配资料起草，保存来源及�
     { status: 409 },
   );
   box.paused = false;
+  h.s.guardPhotos = (_sender, saved) => {
+    assert.equal(saved.attachments[0].name, 'ZX-01.jpg');
+    throw Object.assign(new Error('产品图片已更换'), { status: 409, code: 'REPLY_POLICY_CHANGED' });
+  };
+  await assert.rejects(async () => h.approve(draft), /图片已更换/);
+  assert.equal(h.sends.length, 0);
+  assert.equal(h.s.replies.draft(id).revision, draft.revision);
+  h.s.guardPhotos = undefined;
   h.version++;
   await assert.rejects(async () => h.approve(draft), { status: 409 });
   assert.equal(h.sends.length, 0);

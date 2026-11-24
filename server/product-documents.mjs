@@ -1,7 +1,10 @@
+import { WorkbookPhotos } from './workbook-photos.mjs';
 import { createHash } from 'node:crypto';
 import { isPagedMaterial } from '../src/domain/material-upload.mjs';
 import { readDeepSeekMaterial, materialMode } from './deepseek-materials.mjs';
 import sharp from 'sharp';
+import { extractParameters } from './parameter-extraction.mjs';
+import { parameterMode, mentionsModel } from './model-parameters.mjs';
 import { materialType, types, validateFile, extractText } from './material-formats.mjs';
 import { platformJson, providerBaseUrl } from './acquisition-config.mjs';
 import { parseWorkbook, workbookType } from './product-workbooks.mjs';
@@ -106,6 +109,7 @@ function extracted(data, contentType) {
 }
 
 async function documentExtraction(file, options) {
+  if (options.material && options.mode === parameterMode) return extractParameters(file, options);
   if (options.material && isPagedMaterial(file.contentType))
     return readDeepSeekMaterial(file, options);
   if (file.contentType.startsWith('image/')) {
@@ -132,16 +136,77 @@ export class ProductDocuments {
   constructor(db) {
     this.db = db;
     this.running = new Map();
+    // Confirmed sets are immutable. Bound the in-memory index used for repeated mailbox lookups.
+    this.parameterIndexes = new Map();
     this.runningModes = new Map();
     db.exec(`CREATE TABLE IF NOT EXISTS product_documents(
       id TEXT PRIMARY KEY, product_id TEXT NOT NULL, metadata TEXT NOT NULL,
       content BLOB NOT NULL, extraction TEXT
     ); CREATE INDEX IF NOT EXISTS product_documents_product ON product_documents(product_id);
     CREATE INDEX IF NOT EXISTS product_documents_sha ON product_documents(json_extract(metadata,'$.sha256'));
-    CREATE TABLE IF NOT EXISTS product_workbook_rows(
+    CREATE TABLE IF NOT EXISTS product_parameter_sets(id TEXT PRIMARY KEY, document_id TEXT NOT NULL, data TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS product_workbook_photos(
+        document_id TEXT NOT NULL, sheet TEXT NOT NULL, item TEXT NOT NULL, source_cell TEXT NOT NULL,
+        jpeg BLOB NOT NULL CHECK(length(jpeg) BETWEEN 1 AND 524288),
+        PRIMARY KEY(document_id,sheet,item)
+      ) WITHOUT ROWID;
+      CREATE TABLE IF NOT EXISTS product_workbook_rows(
       document_id TEXT NOT NULL, sheet TEXT NOT NULL, row_number INTEGER NOT NULL, label TEXT NOT NULL,
       data TEXT NOT NULL, PRIMARY KEY(document_id,sheet,row_number)
     ) WITHOUT ROWID;`);
+    this.photos = new WorkbookPhotos(db);
+  }
+  draftPhotos(
+    sources,
+    question,
+    docs = [...new Set(sources.map((s) => s.documentId).filter(Boolean))],
+  ) {
+    return this.photos.automatically(
+      this.photos.options(
+        docs,
+        question,
+        sources.map((s) => s.item),
+      ),
+      question,
+    );
+  }
+  parameterRecords(id) {
+    const row = this.db.prepare('SELECT data FROM product_parameter_sets WHERE id=?').get(id);
+    return row ? JSON.parse(row.data) : [];
+  }
+  matchParameters(id, question) {
+    let index = this.parameterIndexes.get(id);
+    if (!index) {
+      index = { tokens: new Map(), phrases: new Map() };
+      for (const record of this.parameterRecords(id)) {
+        for (const name of new Set([record.item, ...(record.aliases || [])])) {
+          const label = name.toLowerCase(),
+            map = /^[a-z0-9_‐‑–-]+$/u.test(label) ? index.tokens : index.phrases;
+          if (!map.has(label)) map.set(label, []);
+          map.get(label).push(record);
+        }
+      }
+      if (this.parameterIndexes.size >= 16)
+        this.parameterIndexes.delete(this.parameterIndexes.keys().next().value);
+      this.parameterIndexes.set(id, index);
+    }
+    const hits = new Set();
+    for (const token of question.toLowerCase().match(/[a-z0-9_‐‑–-]+/gu) || []) {
+      for (const r of index.tokens.get(token) || []) hits.add(r);
+    }
+    for (const [name, records] of index.phrases)
+      if (mentionsModel(question, name)) for (const r of records) hits.add(r);
+    return [...hits];
+  }
+  sealParameters(docId, records) {
+    const json = JSON.stringify(records);
+    const id = createHash('sha256')
+      .update(docId + json)
+      .digest('hex');
+    this.db
+      .prepare('INSERT OR IGNORE INTO product_parameter_sets VALUES(?,?,?)')
+      .run(id, docId, json);
+    return id;
   }
   list(productId) {
     return this.db
@@ -190,6 +255,7 @@ export class ProductDocuments {
       name: file.name,
       ...(file.mode ? { parseMode: file.mode } : {}),
       contentType: file.contentType,
+      ...(file.referencePages ? { referencePages: file.referencePages } : {}),
       size: file.bytes.length,
       sha256,
       createdAt: new Date().toISOString(),
@@ -227,7 +293,7 @@ export class ProductDocuments {
         .prepare(
           `UPDATE product_documents SET extraction=? WHERE id=? AND
         (? OR extraction IS NULL OR json_extract(extraction,'$.model')='failed' OR
-        (json_array_length(extraction,'$.facts')=0 AND json_type(extraction,'$.sheets') IS NULL AND json_extract(extraction,'$.model')!='manual'))`,
+        (json_array_length(extraction,'$.facts')=0 AND json_type(extraction,'$.sheets') IS NULL AND json_type(extraction,'$.parameters') IS NULL AND json_extract(extraction,'$.model')!='manual'))`,
         )
         .run(JSON.stringify(extraction), id, Number(replace));
       this.db.exec('RELEASE material_extraction');
@@ -254,10 +320,16 @@ export class ProductDocuments {
     { env, fetchImpl = fetch, material = false, onPage, mode, reparse = false },
   ) {
     const file = this.get(productId, id);
-    const paged = material && isPagedMaterial(file.contentType);
-    const chosen = paged
-      ? materialMode(mode ?? file.extraction?.mode ?? file.parseMode)
-      : undefined;
+    if (file.referencePages) throw fail(400, '这是用于核对的来源 PDF，可独立导入以提取参数');
+    const structured = material && file.parseMode === parameterMode;
+    if (material && mode && (mode === parameterMode) !== structured)
+      throw fail(400, '请以对应解析方式重新导入文件');
+    const paged = material && (structured || isPagedMaterial(file.contentType));
+    const chosen = structured
+      ? parameterMode
+      : paged
+        ? materialMode(mode ?? file.extraction?.mode ?? file.parseMode)
+        : undefined;
     if (reparse && !paged) throw fail(400, '此原件无需选择文档解析方式。');
     if (paged && this.runningModes.has(id) && this.runningModes.get(id) !== chosen)
       throw fail(409, '该原件正在使用另一种方式解析，请稍后重试。');
@@ -269,6 +341,7 @@ export class ProductDocuments {
       !(
         material &&
         !file.extraction.facts.length &&
+        !file.extraction.parameters &&
         !file.extraction.sheets &&
         file.extraction.model !== 'manual'
       )
@@ -351,7 +424,7 @@ export class ProductDocuments {
           .run(JSON.stringify(extraction), id);
         return this.list(productId).find((item) => item.id === id);
       } catch (error) {
-        if (!reparse || !file.extraction?.facts.length)
+        if (!reparse || (!file.extraction?.facts.length && !file.extraction?.parameters))
           this.saveExtractionFailure(
             id,
             error instanceof Error ? error.message : '原件提取失败，请重试。',

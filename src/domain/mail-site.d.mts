@@ -6,3 +6,5 @@ export function siteAllowsProduct(
   requireSite?: boolean,
 ): boolean;
 export function mentionsOtherSite(question: string, mailbox: { website: string }): boolean;
+
+export function otherSitesInText(question: string, mailbox: { website: string }): string[];

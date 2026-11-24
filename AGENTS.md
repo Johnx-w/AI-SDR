@@ -4,6 +4,10 @@
 
 评审功能时，既要走通首次使用，也要检查日常操作、交接和异常恢复。修改已投入使用的流程或数据结构时，明确已有记录和进行中任务如何继续使用。按实际业务需要取舍复杂度。
 
+## Maintainability
+
+- Design for long-term operation. Reuse existing components and shared logic when they meet the requirement. When a maintained library or ready-made component already fits, use it before writing a custom implementation.
+
 ## Git 提交规范
 
 - 每次提交并推送项目代码时，提交说明都使用“英文类型前缀 + 中文说明”的格式。
@@ -12,18 +16,16 @@
 - 示例：`feat: 增加客户线索筛选`、`fix: 修复飞书分页读取`。
 - 冒号后的说明使用中文，清楚概括本次变更。
 
-## 功能替换
+## Feature replacement
 
-- 新功能取代旧功能时，在同一次改动中把所有调用方切到新实现，直接删除被取代的代码、页面入口、旧接口及其专用配置。禁止保留兼容层、旧版入口、双轨运行或切回旧实现的开关。
-- 交付前搜索旧路由、接口名和配置键，清除残留引用，更新受影响的测试和现行文档。删除范围限于本次被替代的功能；用户要求保留的功能、其他页面和已有业务数据继续保留。
+- The project is still pre-launch. When rewriting a feature, switch every caller to the replacement in the same change. Delete the superseded implementation, entry points, APIs, and dedicated configuration. Backward compatibility with the replaced feature is unnecessary.
+- Delete documentation that describes the removed behavior, including obsolete passages in otherwise current documents. Use Git history for the old description. Update affected tests and search for old routes, API names, and configuration keys to catch stale references. Keep the removal scoped to the feature and preserve existing business data.
 
-## 改动之间的本地回退节点
+## Local Git checkpoints
 
-- 用户在同一对话中提出下一份独立改动，且未指出上一份已完成改动存在问题时，开始新改动前自动为上一份改动创建一次本地 Git 提交，无需再次确认。
-- 用户反馈上一份改动有问题，或仍在补充、修正同一份改动时，先继续处理该改动，不触发上述提交。
-- 提交前检查工作区差异，只纳入上一份改动涉及的文件或代码块；保留用户或其他任务的未提交改动，避免混入回退节点。
-- 本地提交沿用上述提交说明格式，并向用户报告提交短哈希和对应改动；此规则只授权本地提交，推送按用户另行指示执行。
-- 上一份改动已有对应提交时，复用该节点；没有待提交差异时跳过。若应创建的提交失败，先说明原因并解决，再开始下一份改动。
+- Before starting any new feature, including the first one in a new conversation, save the current project progress in a local Git commit so it can be restored. Also checkpoint completed work before moving to another independent request in the same conversation. Corrections and follow-up edits belong to the work already in progress.
+- Review staged and unstaged changes. Include only files or hunks that belong to the progress being saved. If that work is already committed, use the existing commit as the checkpoint.
+- Follow the commit message convention above and report the short hash and what it covers. Resolve any checkpoint failure before starting the next change. Push only when the user requests it.
 
 ## 云端发布与运维
 
@@ -48,7 +50,7 @@
 
 - **随功能更新。** 新增、修改或删除功能时，在同一任务中更新 `docs/README.md` 指向的相关主题；涉及术语、架构取舍、接口、配置或运行步骤时同步其对应说明。代码与必要文档一起交付、一起提交；无文档影响的内部改动在交付说明中注明即可。
 - **区分实现状态。** 当前主题只描述现行规则，已确认但未实现的设计明确标注；本地实现、GitHub 已提交版本与云端实际部署分别说明，不能由文档或测试通过推断云端已上线。
-- **撤销即归档。** 已撤销或整体被替代的说明及时移入 `docs/archive/YYYY-MM-DD/`，标注日期、撤销原因和当前替代入口；仍有效的文档只更新被替代部分，保留有效决定。同步更新 `docs/README.md`、归档索引及所有受影响引用，移除当前正文中的旧操作指令；历史验收次数、业务数量和一次性执行记录留在归档。
+- **Archiving.** For feature rewrites, follow the deletion rules under “Feature replacement.” For other retired documents, move them to `docs/archive/YYYY-MM-DD/` with the date, reason, and current reference. In documents that still apply, update only the affected passages. Update `docs/README.md`, the archive index, and affected links. Keep historical counts and one-off execution records in the archive.
 - **完成前核对。** 对照相关代码、接口及测试检查文档，搜索受影响的旧名称和旧规则时排除归档，核对导航、链接、状态及生成资产一致性。运行代码读取的 Markdown 提示词和模板按运行资产核对，不能因文档整理改变其业务含义。只暂存本次相关文件或代码块，不混入其他任务的修改。
 - **发布只带现行文档。** 云端发布的非归档文档与本次已验证提交一起打包，发布前检查 `docs/archive/**` 已由 `.gitattributes` 排除，并保留运行所需的现行模板。归档保留在 GitHub，默认不参与后续设计；更新项目规则本身不自动授权推送、部署或清理云端文件。
 - **仅同步文档时。** 用户明确要求后，从已提交且与云端代码兼容的版本同步到核实过的当前运行目录；保留已提交的较新说明，不上传本机未提交功能文档，不覆盖历史发布目录。按文件核对同步结果及归档排除情况；保持业务代码、数据、备份、运行版本和服务进程不变，不借此部署或重启。

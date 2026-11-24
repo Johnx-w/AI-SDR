@@ -286,15 +286,6 @@ export class CustomerBusinessApi {
     this.active++;
     try {
       const suffix = url.pathname.slice('/api/v1/business'.length).split('/').filter(Boolean);
-      if (suffix.length === 2 && suffix[0] === 'summary' && request.method === 'GET') {
-        const id = suffix[1];
-        if (!/^[\w-]{1,100}$/.test(id)) throw fail(400, '客户编号无效');
-        const store = this.state().store;
-        return {
-          status: 200,
-          body: { customerContexts: [store.context(id)], tasks: store.nextTasks(id) },
-        };
-      }
       if (!suffix.length && request.method === 'GET')
         return { status: 200, body: await this.workspace(url) };
       if (suffix.length === 1 && suffix[0] === 'schema' && request.method === 'GET')

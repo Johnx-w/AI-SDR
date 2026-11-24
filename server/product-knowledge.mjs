@@ -32,6 +32,7 @@ const factKeys = [
   'materialCategory',
   'keywords',
   'sourceFacts',
+  'parameterSet',
 ];
 const allowedKeys = new Set([
   ...factKeys,
@@ -228,6 +229,9 @@ function normalize(value) {
     ...(value.materialOnly ? { materialOnly: true } : {}),
     ...(materialCategory ? { materialCategory } : {}),
     ...(keywords.length ? { keywords } : {}),
+    ...(value.parameterSet
+      ? { parameterSet: text(value.parameterSet, '参数审核记录', 64, true) }
+      : {}),
     ...(checked.length ? { sourceFacts: checked } : {}),
     ...(documentIds.length ? { documentIds } : {}),
     ...(cellEdits.length ? { cellEdits } : {}),
@@ -260,6 +264,18 @@ export class ProductKnowledge {
   get(id) {
     const row = this.db.prepare('SELECT data FROM product_knowledge WHERE id=?').get(id);
     return row ? storedProduct(row) : null;
+  }
+  replyProducts(mailbox, day) {
+    const ids = mailbox.knowledgeProductIds;
+    if (!ids?.length) return [];
+    return this.db
+      .prepare(
+        `SELECT p.data FROM json_each(?) selection JOIN product_knowledge p ON p.id=selection.value
+      WHERE json_extract(p.data,'$.status')='approved' AND COALESCE(json_extract(p.data,'$.effectiveDate'),'')<=?
+      AND json_array_length(json_extract(p.data,'$.documentIds'))>0 ORDER BY selection.key`,
+      )
+      .all(JSON.stringify(ids), day)
+      .map(storedProduct);
   }
   list({ status, usableOnly = false } = {}) {
     if (status !== undefined && !statuses.includes(status)) throw fail(400, '产品审核状态不正确');
@@ -319,6 +335,13 @@ export class ProductKnowledge {
           .get(id);
         if (!document || document.product_id !== prior?.id)
           throw fail(400, '原文件必须属于当前产品，请刷新资料后重试');
+      }
+      if (normalized.parameterSet) {
+        const set = this.db
+          .prepare('SELECT document_id FROM product_parameter_sets WHERE id=?')
+          .get(normalized.parameterSet);
+        if (!set || !normalized.documentIds?.includes(set.document_id))
+          throw fail(400, '参数确认记录不属于关联的原件');
       }
       for (const edit of normalized.cellEdits || []) {
         const row = this.db

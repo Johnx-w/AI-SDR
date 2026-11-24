@@ -177,14 +177,6 @@ export class CustomerBusiness {
       .all(this.scope)
       .map(({ data }) => JSON.parse(data));
   }
-  nextTasks(id) {
-    return this.db
-      .prepare(
-        `SELECT data FROM customer_business_entities WHERE scope=? AND kind='tasks' AND json_extract(data,'$.customerId')=? AND json_extract(data,'$.origin')='automatic-followup' AND json_extract(data,'$.status')='pending' ORDER BY json_extract(data,'$.dueAt'),id LIMIT 3`,
-      )
-      .all(this.scope, id)
-      .map(({ data }) => JSON.parse(data));
-  }
   development(customerId) {
     const { revision } = this.db
       .prepare("SELECT total_changes() || ':' || data_version AS revision FROM pragma_data_version")

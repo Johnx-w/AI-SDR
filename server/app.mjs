@@ -1,3 +1,4 @@
+import { scopedPhotoDocs } from './workbook-photos.mjs';
 import { recordFollowUpTask } from './outreach-follow-ups.mjs';
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
@@ -29,6 +30,7 @@ import { answerMailQuestion } from './mail-knowledge.mjs';
 import { MAX_PRODUCT_DOCUMENT_BYTES } from './product-documents.mjs';
 import { ProductKnowledgeFeishu } from './product-knowledge-feishu.mjs';
 import { CustomerBusinessApi } from './customer-business-api.mjs';
+import { readCustomerTimeline, timelineOriginal } from './customer-timeline.mjs';
 import { searchPlan } from './search-plan.mjs';
 import { OutreachMailboxes } from './outreach-mailboxes.mjs';
 import { OutreachService } from './outreach-service.mjs';
@@ -263,6 +265,25 @@ export function createApp({
             ),
           products: () => knowledge().list(),
           answerQuestion: (...args) => answerMailQuestion(knowledge(), ...args),
+          photoOptions: (basis, id, automatic = false) => {
+            const { box, mail, question, sources } = basis,
+              query = mail.subject + ' ' + question;
+            const k = knowledge(),
+              photos = k.documents.photos,
+              docs = scopedPhotoDocs(k, box, Date.now(), query);
+            const groups = photos.options(
+              docs,
+              query,
+              sources.map((s) => s.item),
+            );
+            if (automatic) return photos.automaticMatch(groups, query);
+            if (!id) return groups;
+            if (!groups.some((g) => g.photos.some((p) => p.id === id)))
+              throw new ApiError(409, '图片或邮箱引用范围已变化，请重新选图');
+            return photos.attachment(id);
+          },
+          guardPhotos: (box, draft, now) =>
+            knowledge().documents.photos.guard(scopedPhotoDocs(knowledge(), box, now), draft),
           getDraftModel,
           getEnv: () => connections.environment(),
           getScope: acquisitionScope,
@@ -562,6 +583,21 @@ export function createApp({
               idempotencyKey: requireIdempotencyKey,
             }),
           );
+        }
+        const timeline = url.pathname.match(
+          /^\/api\/v1\/business\/timeline\/([\w-]{1,100})(?:\/(message|delivery|followup)\/([\w-]+))?$/,
+        );
+        if (timeline && request.method === 'GET') {
+          const store = business.state().store;
+          const result = timeline[2]
+            ? timelineOriginal(store, outreach(), timeline[1], timeline[2], timeline[3])
+            : readCustomerTimeline(
+                store,
+                outreach(),
+                timeline[1],
+                url.searchParams.get('page') || 1,
+              );
+          return json(response, 200, result);
         }
         if (url.pathname === '/api/v1/business' || url.pathname.startsWith('/api/v1/business/')) {
           const result = await business.handle(request, url, readJson);

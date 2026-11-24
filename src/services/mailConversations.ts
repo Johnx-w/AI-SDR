@@ -82,6 +82,7 @@ export interface MailReplyDraft extends MailDraftContent {
     sources: ReplySource[];
     sourceId?: string;
     generator?: 'model';
+    photoNote?: string;
     model?: string;
     reason?: string;
   };

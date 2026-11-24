@@ -11,7 +11,7 @@ export function materialMode(value = 'rich_layout_recognition') {
   return value;
 }
 
-function officialKey(env) {
+export function officialKey(env) {
   if (env.MATERIAL_DEEPSEEK_API_KEY?.trim()) return env.MATERIAL_DEEPSEEK_API_KEY.trim();
   const config = researchProviderConfig(env).model;
   if (
@@ -23,7 +23,7 @@ function officialKey(env) {
   if (env.DEEPSEEK_API_KEY?.trim()) return env.DEEPSEEK_API_KEY.trim();
   throw fail(503, '请在 API 连接中配置素材库的 DeepSeek API Key，再重试解析。');
 }
-async function request(fetchImpl, key, path, options) {
+export async function request(fetchImpl, key, path, options) {
   let res, body;
   try {
     res = await fetchImpl(origin + path, {
@@ -49,7 +49,7 @@ async function request(fetchImpl, key, path, options) {
   }
   return body;
 }
-function uploadBody(file, purpose, expires = false) {
+export function uploadBody(file, purpose, expires = false) {
   const body = new FormData();
   body.append('purpose', purpose);
   if (expires) {

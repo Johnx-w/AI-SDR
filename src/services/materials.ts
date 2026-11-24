@@ -1,4 +1,4 @@
-export type ParseMode = 'rich_layout_recognition' | 'text_recognition';
+export type ParseMode = 'rich_layout_recognition' | 'text_recognition' | 'model_parameters';
 import { checkMaterialSize, materialPartBytes } from '../domain/material-upload.mjs';
 
 export const materialFormats = [
@@ -29,6 +29,7 @@ export type Material = {
   contentType: string | null;
   size: number;
   format: string;
+  parseMode?: ParseMode;
   extractionStatus: 'pending' | 'processing' | 'ready' | 'failed' | 'manual';
   extractionCount: number;
 };
@@ -40,7 +41,23 @@ export type MaterialList = {
   sites: Site[];
   categories: string[];
 };
+export type ModelParameter = {
+  key: string;
+  item: string;
+  field: string;
+  value: string;
+  conditions?: string;
+  quote: string;
+  issue?: string;
+  origin?: string;
+  page?: number;
+  sheet?: string;
+  ref: string;
+  box?: number[];
+  upstream?: { documentId: string; file: string; page: number };
+};
 export type StoredDocument = {
+  referencePages?: number;
   id: string;
   name: string;
   size: number;
@@ -49,6 +66,7 @@ export type StoredDocument = {
   parseMode?: ParseMode;
   createdAt: string;
   extraction: null | {
+    parameters?: ModelParameter[];
     facts: { text: string; page: number; location: string }[];
     warnings: string[];
     sheets?: { name: string; rows: number }[];
@@ -59,6 +77,8 @@ export type StoredDocument = {
   };
 };
 export type Product = {
+  parameterSet?: string;
+  materialOnly?: boolean;
   id: string;
   version: number;
   status: string;
@@ -75,6 +95,7 @@ export type Product = {
 };
 export type MaterialDetail = {
   product: Product;
+  confirmedParameters?: ModelParameter[];
   documents: StoredDocument[];
   history: number[];
   sites: string[];
@@ -124,17 +145,29 @@ export async function uploadMaterial(
   checkMaterialSize(file.name, file.size);
   const q = new URLSearchParams({ name: file.name });
   const paged = /\.(?:pdf|docx|pptx)$/iu.test(file.name);
-  if (paged && options.mode) q.set('mode', options.mode);
+  const structured =
+    options.mode === 'model_parameters' && !/\.(?:webm|mp4|mov)$/iu.test(file.name);
+  if ((paged || structured) && options.mode) q.set('mode', options.mode);
   if (options.site) q.set('site', options.site);
   if (options.category) q.set('category', options.category);
   if (options.version) q.set('version', String(options.version));
   const path = options.id ? '/' + options.id + '/versions' : '';
+  type Result = { id: string; documentId: string; warning: string; reused: boolean };
+  return uploadBytes<Result>(file, path, q, key, paged || structured, onPage);
+}
+async function uploadBytes<Result>(
+  file: File,
+  path: string,
+  q: URLSearchParams,
+  key: string,
+  asyncJob = false,
+  onPage?: ExtractionProgress,
+) {
   const headers = {
     'Content-Type': 'application/octet-stream',
     'Idempotency-Key': key,
-    ...(paged ? { Prefer: 'respond-async' } : {}),
+    ...(asyncJob ? { Prefer: 'respond-async' } : {}),
   };
-  type Result = { id: string; documentId: string; warning: string; reused: boolean };
   if (file.size <= materialPartBytes)
     return materialsRequest<Result>(
       path + '?' + q,
@@ -156,6 +189,15 @@ export async function uploadMaterial(
     const { received } = await materialsRequest<{ received: number }>(parts, init);
     if (received !== end) throw new Error('素材分段未完整接收，请重新上传');
   }
+}
+export async function attachParameterSource(id: string, version: number, file: File) {
+  checkMaterialSize(file.name, file.size);
+  return uploadBytes<{ version: number }>(
+    file,
+    '/' + id + '/evidence',
+    new URLSearchParams({ name: file.name, version: String(version) }),
+    crypto.randomUUID(),
+  );
 }
 export const fileSize = (n: number) =>
   n >= 1048576

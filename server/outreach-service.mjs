@@ -93,6 +93,9 @@ export class OutreachService {
     }),
     getEnv = () => ({}),
     fetchImpl,
+    draftPhotos = () => [],
+    photoOptions,
+    guardPhotos,
     getDraftModel = () => null,
     getScope = () => 'local',
     businessState = () => ({}),
@@ -139,6 +142,9 @@ export class OutreachService {
       loadLeads,
       products,
       answerQuestion,
+      draftPhotos,
+      photoOptions,
+      guardPhotos,
       getDraftModel,
       getEnv,
       getScope,
@@ -207,6 +213,7 @@ export class OutreachService {
       },
       now,
     });
+    initializeCustomerTimeline(this.db);
     this.transaction(() => initializeOutreachBounces(this.db));
     this.replies = new MailReplies({
       db: this.db,
@@ -443,8 +450,21 @@ export class OutreachService {
       const page = ['current', 'history', 'tests'].includes(params.get('view'))
         ? this.campaignPage(params)
         : { campaigns: [], filtered: 0, page: 1 };
-      const products = this.products().map(
-        ({ id, name, label, category, approved, status, brands, sourceUrl, materialOnly }) => ({
+      const products = (params.get('view') === 'mailboxes' ? [] : this.products()).map(
+        ({
+          id,
+          name,
+          label,
+          category,
+          approved,
+          status,
+          brands,
+          sourceUrl,
+          materialOnly,
+          materialCategory,
+          version,
+          effectiveDate,
+        }) => ({
           id,
           name,
           label,
@@ -453,6 +473,9 @@ export class OutreachService {
           brands,
           sourceUrl,
           materialOnly,
+          materialCategory,
+          version,
+          effectiveDate,
           status,
         }),
       );
@@ -1911,3 +1934,4 @@ export class OutreachService {
     this.db.close();
   }
 }
+import { initializeCustomerTimeline } from './customer-timeline.mjs';
