@@ -146,10 +146,42 @@ async function request<T>(path = '', options: RequestInit = {}): Promise<T> {
   if (!body) throw new Error('服务未返回有效结果，请刷新核对');
   return body as T;
 }
+export interface TimelineItem {
+  id: string;
+  kind: 'mail' | 'first' | 'auto' | 'manual' | 'reply';
+  title: string | null;
+  state: string;
+  stamp: string | null;
+  clock: string;
+  note: string | null;
+  thread: string | null;
+  campaign: string | null;
+  source: 'thread' | 'message' | 'delivery' | 'followup' | 'task';
+}
+export interface CustomerTimeline {
+  items: TimelineItem[];
+  total: number;
+  sentCount: number;
+  firstCount: number;
+  page: number;
+  pageSize: number;
+  fixedEmail: string;
+  doNotContact: boolean;
+}
+export interface TimelineOriginal {
+  subject: string;
+  from: string;
+  to: string;
+  bodyText: string;
+  bodyHtml: string;
+  sentAt: string;
+}
 export const customerBusinessApi = {
-  summary: (id: string, signal?: AbortSignal) =>
-    request<Pick<BusinessWorkspace, 'customerContexts' | 'tasks'>>(
-      '/summary/' + encodeURIComponent(id),
+  timeline: (id: string, page: number, signal: AbortSignal) =>
+    request<CustomerTimeline>('/timeline/' + encodeURIComponent(id) + '?page=' + page, { signal }),
+  original: (id: string, row: TimelineItem, signal: AbortSignal) =>
+    request<TimelineOriginal>(
+      '/timeline/' + encodeURIComponent(id) + '/' + row.source + '/' + encodeURIComponent(row.id),
       { signal },
     ),
   workspace: (filter: { customerId?: string; productId?: string } = {}, signal?: AbortSignal) => {

@@ -213,6 +213,7 @@ export class OutreachService {
       },
       now,
     });
+    initializeCustomerTimeline(this.db);
     this.transaction(() => initializeOutreachBounces(this.db));
     this.replies = new MailReplies({
       db: this.db,
@@ -1933,3 +1934,4 @@ export class OutreachService {
     this.db.close();
   }
 }
+import { initializeCustomerTimeline } from './customer-timeline.mjs';

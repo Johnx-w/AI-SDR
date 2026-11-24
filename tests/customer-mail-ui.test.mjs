@@ -10,14 +10,14 @@ const { CustomerBusinessSummary } = loadModule(
   new URL('../src/components/CustomerBusinessSummary.tsx', import.meta.url),
 );
 
-test('客户邮件按钮进入实际沟通中心并保留客户编号及来信筛选', () => {
+test('客户邮件入口保留客户编号并包括只有发信的会话', () => {
   const html = render(React.createElement(CustomerBusinessSummary, { customerId: 'buyer/a b' }));
   const href = html.match(/<a\b[^>]*href="([^"]+)"[^>]*>客户邮件/)[1].replaceAll('&amp;', '&');
   const url = new URL(href, 'http://example.test');
   assert.equal(url.pathname, '/inbox');
   assert.equal(url.searchParams.get('tab'), 'inbox');
   assert.equal(url.searchParams.get('customerId'), 'buyer/a b');
-  assert.equal(url.searchParams.get('inboundOnly'), '1');
+  assert.equal(url.searchParams.has('inboundOnly'), false);
 });
 
 function inbox(list, { error = '', loading = false } = {}) {
