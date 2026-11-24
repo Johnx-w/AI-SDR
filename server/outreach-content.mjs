@@ -13,7 +13,9 @@ const text = (value) => (typeof value === 'string' ? value.trim() : '');
 const array = (value) => (Array.isArray(value) ? value : []);
 const compact = (value) => text(value).replace(/\s+/gu, ' ');
 const writerRoot = new URL('../agents/first-touch-writer/', import.meta.url);
-const writerPrompt = readFileSync(new URL('system.md', writerRoot), 'utf8');
+const writerPolicy = readFileSync(new URL('system.md', writerRoot), 'utf8');
+// Keep the original default prompt in the material fingerprint used by existing queues.
+const [writerPrompt] = writerPolicy.split(/\r?\n## Workspace template overrides\r?\n/u);
 const confirmedSupply = JSON.parse(
   readFileSync(new URL('confirmed-supply.json', writerRoot), 'utf8'),
 );
@@ -674,7 +676,15 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
   return {
     configured,
     configurationError: configured ? null : configurationError || '请先在连接设置中配置研究模型',
-    async generate({ candidate, mailbox, product, campaign, now = new Date() }) {
+    async generate({
+      candidate,
+      mailbox,
+      product,
+      campaign,
+      firstInstruction = '',
+      firstBodyInstruction = '',
+      now = new Date(),
+    }) {
       if (!configured)
         throw fail(503, '请先在连接设置中配置开发信使用的研究模型', 'outreach_model_unconfigured');
       const facts = eligibleOutreachFacts(product, campaign, now);
@@ -722,12 +732,14 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
           body_text: {
             type: 'string',
             description:
-              '55–85 English words in exactly three paragraphs separated by two newline characters: customer observation, sender brand and product supply introduction, then one easy question about a brief overview or introduction. No greeting or signature.',
+              '55–85 English words in exactly three paragraphs separated by two newline characters: customer observation, sender brand and product supply introduction, then one easy question following the closing instruction or the default brief introduction. No greeting or signature.',
           },
           source_ids: { type: 'array', items: { type: 'string' } },
         },
       };
       const input = {
+        ...(firstBodyInstruction ? { body_instruction: firstBodyInstruction } : {}),
+        ...(firstInstruction ? { closing_instruction: firstInstruction } : {}),
         customer: {
           name: candidate.companyName,
           country: candidate.leadSnapshot?.market,
@@ -751,7 +763,7 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
       const messages = [
         {
           role: 'system',
-          content: writerPrompt,
+          content: firstInstruction || firstBodyInstruction ? writerPolicy : writerPrompt,
         },
         { role: 'user', content: JSON.stringify(input) },
       ];
@@ -822,7 +834,7 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
               { role: 'assistant', content: JSON.stringify(draft) },
               {
                 role: 'user',
-                content: `Revise the draft's writing format only, using the same supplied facts and focus_product. It currently has ${wordCount} words and ${paragraphs.length} paragraphs. Return 60–75 English words in exactly three paragraphs separated by two newlines: paragraph 1 describes the customer's matching product as an offer or activity, without naming a terms, privacy or legal page; paragraph 2 names the sender brand, states its approved product supply and explains the contact purpose plainly; paragraph 3 is one easy question about a brief overview or introduction, optionally for the sourcing colleague if this is a general inbox. Add no filler, invented customer facts or counts inferred from a bare number in a source excerpt. No greeting, signature, generic well-wishes or internal phrases such as confirmed range/types. Keep customer source IDs valid and supplier claims grounded. Return the same JSON fields.`,
+                content: `Revise the draft's writing format only, using the same supplied facts and focus_product. It currently has ${wordCount} words and ${paragraphs.length} paragraphs. Return 60–75 English words in exactly three paragraphs separated by two newlines: paragraph 1 describes the customer's matching product as an offer or activity, without naming a terms, privacy or legal page; paragraph 2 names the sender brand, states its approved product supply and explains the contact purpose plainly; paragraph 3 is one easy question following closing_instruction when supplied, otherwise about a brief overview or introduction. Add no filler, invented customer facts or counts inferred from a bare number in a source excerpt. No greeting, signature, generic well-wishes or internal phrases such as confirmed range/types. Keep customer source IDs valid and supplier claims grounded. Return the same JSON fields.`,
               },
             );
             continue;
