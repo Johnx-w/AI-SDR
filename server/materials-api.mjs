@@ -145,12 +145,24 @@ export async function handleMaterials({
     return json(response, 200, result);
   }
   const photoPath =
-    /^\/(pk_[a-f0-9]{32})\/document\/(pd_[a-f0-9]{64})\/photos(?:\/(carry|kbphoto_[\w-]+))?$/.exec(
+    /^\/(pk_[a-f0-9]{32})\/document\/(pd_[a-f0-9]{64})\/photos(?:\/(catalog|carry|kbphoto_[\w-]+))?$/.exec(
       path,
     );
   if (photoPath) {
     const [, product, doc, action] = photoPath,
       store = knowledge.documents.photos;
+    if (action === 'catalog' && method === 'GET') {
+      store.owned(product, doc);
+      return json(
+        response,
+        200,
+        knowledge.db
+          .prepare(
+            "SELECT sheet,item,slot,id,active FROM workbook_image_assets WHERE document_id=? ORDER BY active DESC,slot!='主图',slot",
+          )
+          .all(doc),
+      );
+    }
     if (!action && method === 'GET') return json(response, 200, store.list(product, doc, q));
     if (!action && method === 'POST')
       return json(

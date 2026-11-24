@@ -17,6 +17,7 @@ import { isPagedMaterial } from '../domain/material-upload.mjs';
 import { MaterialOriginal } from './MaterialOriginal';
 import { MaterialPassages } from './MaterialPassages';
 import { ParameterReview } from './ParameterReview';
+import { lazy, Suspense } from 'react';
 import { WorkbookPhotos } from './WorkbookPhotos';
 import { WorkbookPreview } from './WorkbookPreview';
 import {
@@ -35,6 +36,9 @@ import {
   type MaterialDetail as Detail,
 } from '../services/materials';
 
+const PriceCatalog = lazy(() =>
+  import('./price-catalog/PriceCatalog').then((m) => ({ default: m.PriceCatalog })),
+);
 type MaterialView = 'preview' | 'edit' | 'history';
 export function MaterialDocument({
   id,
@@ -508,6 +512,25 @@ export function MaterialDocument({
                     ) : doc.extraction?.model === 'manual' &&
                       !facts.some((f) => f.documentId === doc.id) ? (
                       <MaterialOriginal doc={doc} url={original} page={1} />
+                    ) : doc.sha256 ===
+                      '3e487b6ab273320260798410732d49749898c04b696b0f733ad932a2c4a8eac4' ? (
+                      <Suspense fallback={<p>正在读取价格清单…</p>}>
+                        <PriceCatalog
+                          key={doc.id + revision}
+                          product={id}
+                          doc={doc.id}
+                          edits={edits}
+                          writable={!!writable && p.documentIds?.[0] === doc.id}
+                          saveCell={(sheet, ref, value, original) => {
+                            const cellEdits = edits.filter(
+                              (e) => e.documentId !== doc.id || e.sheet !== sheet || e.ref !== ref,
+                            );
+                            if (value !== original)
+                              cellEdits.push({ documentId: doc.id, sheet, ref, value });
+                            return save({ ...reviewFields, cellEdits }, '报价已保存');
+                          }}
+                        />
+                      </Suspense>
                     ) : doc.extraction?.sheets ? (
                       <>
                         <div className="photo-controls" aria-label="工作簿视图">
