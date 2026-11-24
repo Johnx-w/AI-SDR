@@ -83,3 +83,7 @@
 ## 如何更新这份交接
 
 按 Cursor 团队公开的开发实践，把任务目标和可验证的完成条件写入 Git，用新的对话承接单一任务。接手时先核对基线，交付时将对应工作项更新为实际结果，注明验证环境、命令或页面入口、提交及剩余问题。长期项目规则集中在仓库根目录。[Cursor 团队的 Agent 开发实践](https://cursor.com/blog/agent-best-practices) · [Cursor 项目规则](https://cursor.com/docs/rules) · [本项目协作约定](../../AGENTS.md)
+
+## 首封地址与退信核验（2026-11-24，本地）
+
+隔离 SQLite 和模拟发送验收中，监管投诉、第三方客服跳过，官网明确的跨域联系方式与合格备选地址入队。只读本机邮件缓存包含 385 封 IMAP 发件和 15 份可关联退信。仅将脱敏匹配字段和诊断用于内存回放，按原编号匹配 2 份，按地址和主题匹配 13 份。六类分别为地址无效 4、DNS 3、连接 1、临时 2、5.4.1 拒收 4、策略 1。其余 27 份及正式计划归属仍待完整快照核验。回归见 tests/outreach-service.test.mjs 和 tests/outreach-delivery-pagination.test.mjs。

@@ -11,7 +11,11 @@ import {
 } from './outreach-content.mjs';
 import { OutreachFollowUps } from './outreach-follow-ups.mjs';
 import { MailboxTags } from './mailbox-tags.mjs';
-import { initializeOutreachBounces, recordOutreachBounces } from './outreach-bounces.mjs';
+import {
+  initializeOutreachBounces,
+  invalidAddressReason,
+  recordOutreachBounces,
+} from './outreach-bounces.mjs';
 import { MailConversations, mailboxAccountKey } from './mail-conversations.mjs';
 import { MailReplies } from './mail-replies.mjs';
 import { MailReception } from './mail-reception.mjs';
@@ -302,9 +306,15 @@ export class OutreachService {
     const bounce =
       delivery.status === 'accepted' &&
       this.db
-        .prepare('SELECT received_at FROM outreach_delivery_bounces WHERE delivery_id=?')
+        .prepare('SELECT received_at, diagnosis FROM outreach_delivery_bounces WHERE delivery_id=?')
         .get(id);
-    return bounce ? { ...delivery, bouncedAt: bounce.received_at } : delivery;
+    return bounce
+      ? {
+          ...delivery,
+          bouncedAt: bounce.received_at,
+          bounce: JSON.parse(bounce.diagnosis || 'null'),
+        }
+      : delivery;
   }
   putDelivery(d) {
     if (d.status === 'unknown' && !d.reconciliation) {
@@ -889,6 +899,10 @@ export class OutreachService {
                 mailboxId: delivery.mailboxId,
               })),
           },
+      invalidAddresses: this.db
+        .prepare('SELECT identity FROM outreach_suppression WHERE reason=?')
+        .all(invalidAddressReason)
+        .map((row) => row.identity.slice(6)),
       suppressed: identityValues(stopped),
       contacted: identityValues(identities),
       now: new Date(this.now()),

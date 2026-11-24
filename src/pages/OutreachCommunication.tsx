@@ -971,6 +971,11 @@ function MessagePreview({
         {delivery.status === 'accepted' && !delivery.bouncedAt && '；尚未确认客户收件或阅读。'}
         {delivery.status === 'unknown' && '；请先核对原邮箱，系统不会自动重发。'}
       </p>
+      {delivery.bounce && (
+        <p className="outreach-hint">
+          {delivery.bounce.action} · {delivery.bounce.diagnostic}
+        </p>
+      )}
       {delivery.status === 'unknown' && (
         <p className="outreach-hint">结果待核实期间不会重复首发；请依据原邮箱或服务商记录确认。</p>
       )}

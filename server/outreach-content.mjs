@@ -386,6 +386,7 @@ export function selectOutreachCandidates({
   products = [],
   campaign = {},
   suppressed = [],
+  invalidAddresses = [],
   contacted = [],
   now = new Date(),
 } = {}) {
@@ -393,6 +394,7 @@ export function selectOutreachCandidates({
     blocked = [];
   const suppressedKeys = identitySet(suppressed),
     contactedKeys = identitySet(contacted);
+  const invalidEmails = new Set(invalidAddresses);
   const selectedDomains = new Set(),
     selectedIds = new Set(),
     selectedRecipients = new Set();
@@ -459,7 +461,7 @@ export function selectOutreachCandidates({
       continue;
     }
     if (
-      identities.some((value) => suppressedKeys.has(value)) ||
+      identities.some((value) => suppressedKeys.has(value) && !invalidEmails.has(value)) ||
       Object.entries(lead.suppression).some(([key, value]) => key !== 'reason' && value === true)
     ) {
       reject('suppressed', '该企业或联系地址已标记为勿再联系');
@@ -478,7 +480,12 @@ export function selectOutreachCandidates({
       reject('business_unverified', '缺少有来源的企业经营主体依据');
       continue;
     }
-    const contactResult = recipient(lead.contacts);
+    const contacts = lead.contacts.filter((contact) => !invalidEmails.has(contact.email));
+    if (!contacts.length && lead.contacts.some((contact) => invalidEmails.has(contact.email))) {
+      reject('suppressed', '可用联系地址已有明确无效退信，需重新核实');
+      continue;
+    }
+    const contactResult = recipient(contacts);
     if (contactResult.error) {
       reject(
         contactResult.error,

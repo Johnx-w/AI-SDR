@@ -33,3 +33,5 @@ node scripts/sync-mail-readonly.mjs --data-dir D:\mail-review\outreach --mailbox
 `node --test tests/mail-reply-history.test.mjs tests/mailbox-reader.test.mjs tests/mail-conversations.test.mjs` 覆盖真实回复头、无首封历史、跨账号/收件人误关联、内部与机器邮件、分类分页、只读 IMAP、游标重试和并发。测试的性能用例用 1,203 封合成邮件（其中 1,202 封包含 16 KiB 正文）测量首屏、通知筛选和深页，输出重复读取耗时和 JSON 字节数，并核对 SQLite 查询计划；运行测试不接触真实账号。
 
 读取接口为 `GET /api/v1/outreach/reply-history?mailboxId=all&kind=reply&handling=all&page=1`。来信类型支持 `reply`、`inquiry`、`notification`、`unverified`、`bounce`、`unsubscribe`、`complaint`、`internal`、`test`、`all`。处理情况支持 `all`、`answered`、`unanswered`。列表返回元数据，原文和附件在收件箱详情中查看。
+
+已唯一关联的退信在首发详情保留诊断及处置。明确无效的地址进入确切地址抑制，其他合格地址继续参与筛选。DNS、连接、临时限制、5.4.1、策略拒收分别提示核查方向。相同投递重复同步仍展示一次，旧库升级时用已缓存通知补充诊断。
