@@ -33,7 +33,8 @@ import { MailReplySettings } from '../components/MailReplySettings';
 import { MailMessageBody } from '../components/MailMessageBody';
 import { MailSignatureFields, defaultSignatureDesign } from '../components/MailSignatureFields';
 import { renderMailboxSignature } from '../domain/mail-signature.mjs';
-import { siteAllowsProduct, siteBrand } from '../domain/mail-site.mjs';
+import { MailKnowledgeScope } from '../components/MailKnowledgeScope';
+import { siteBrand } from '../domain/mail-site.mjs';
 import { deliveryGroup, deliveryGroupLabels } from '../domain/outreach-status.mjs';
 import type { MailSignatureDesign } from '../domain/mail-signature.mjs';
 import { Badge, Empty, Modal } from '../components/ui';
@@ -217,18 +218,16 @@ function ProductOptions({
 
 function MailboxEditor({
   mailbox,
-  products,
   onClose,
   onSave,
 }: {
   mailbox: OutreachMailbox | null;
-  products: OutreachProduct[];
   onClose: () => void;
   onSave: (input: Partial<MailboxInput> | null, businessNote?: string) => Promise<void>;
 }) {
   const [businessNote, setBusinessNote] = useState(mailbox?.businessNote || '');
   const initialSettings = useRef<MailboxInput | null>(null);
-  const [knowledge, setKnowledge] = useState(mailbox?.knowledgeProductIds || []);
+  const [fileIds, setFileIds] = useState<string[]>(mailbox?.knowledgeProductIds ?? []);
   const [site, setSite] = useState(mailbox?.website || '');
   const [brand, setBrand] = useState(mailbox?.brandName || '');
   const [replyMode, setReplyMode] = useState<
@@ -238,9 +237,6 @@ function MailboxEditor({
   const domain = email.split('@')[1] || '';
   const website = site || (domain ? 'https://' + domain : '');
   const identity = { website, email, brandName: brand || siteBrand(website) || domain };
-  const allowedKnowledge = products.filter(
-    (p) => (productApproved(p) || knowledge.includes(p.id)) && siteAllowsProduct(p, identity, true),
-  );
   const [displayName, setDisplayName] = useState(mailbox?.displayName || '');
   const [signature, setSignature] = useState(mailbox?.signature || '');
   const [signatureDesign, setSignatureDesign] = useState<MailSignatureDesign | null>(
@@ -263,7 +259,7 @@ function MailboxEditor({
       replyMode: replyMode === 'business' ? 'auto' : replyMode,
       autoBusinessReplies: replyMode === 'business',
       draftPersona: String(form.get('draftPersona') || '').trim(),
-      knowledgeProductIds: knowledge.filter((id) => allowedKnowledge.some((p) => p.id === id)),
+      knowledgeProductIds: fileIds,
       displayName,
       ...(signatureDesign ? { signatureDesign } : { signature }),
       priority: mailbox?.priority ?? 100,
@@ -433,14 +429,7 @@ function MailboxEditor({
                 <small>留空时按本品牌外贸业务员的身份撰写正式邮件。</small>
               </label>
               <h4>回复可用资料</h4>
-              <ProductOptions
-                products={allowedKnowledge}
-                selected={knowledge}
-                onChange={setKnowledge}
-                approvedOnly
-                emptyText="请先在产品资料中审核并填写此官网或适用品牌。"
-              />
-              <Link to="/materials">管理产品资料</Link>
+              <MailKnowledgeScope ids={fileIds} onChange={setFileIds} />
             </>
           ) : (
             <Link to={'/inbox?tab=mailboxes&replySettings=' + mailbox.id} onClick={onClose}>
@@ -982,6 +971,11 @@ function MessagePreview({
         {delivery.status === 'accepted' && !delivery.bouncedAt && '；尚未确认客户收件或阅读。'}
         {delivery.status === 'unknown' && '；请先核对原邮箱，系统不会自动重发。'}
       </p>
+      {delivery.bounce && (
+        <p className="outreach-hint">
+          {delivery.bounce.action} · {delivery.bounce.diagnostic}
+        </p>
+      )}
       {delivery.status === 'unknown' && (
         <p className="outreach-hint">结果待核实期间不会重复首发；请依据原邮箱或服务商记录确认。</p>
       )}
@@ -1606,7 +1600,6 @@ export function OutreachCommunication({
               key={settingsBox.id}
               box={settingsBox}
               boxes={mailboxes}
-              products={products}
               onSaved={() => refresh()}
             />
           ) : (
@@ -2154,8 +2147,15 @@ export function OutreachCommunication({
                                   </>
                                 )}
                                 {mailbox.replyMode && mailbox.replyMode !== 'manual' && (
-                                  <Link to="/materials">
-                                    回复资料 · 已选 {mailbox.knowledgeProductIds?.length || 0} 项
+                                  <Link
+                                    to={
+                                      '/inbox?tab=mailboxes&replySettings=' +
+                                      mailbox.id +
+                                      '&section=knowledge'
+                                    }
+                                  >
+                                    回复资料 · 已选 {mailbox.knowledgeProductIds?.length || 0}{' '}
+                                    份文件
                                   </Link>
                                 )}
                               </div>
@@ -2296,7 +2296,6 @@ export function OutreachCommunication({
             {mailboxEditor && (
               <MailboxEditor
                 mailbox={mailboxEditor.value}
-                products={products}
                 onClose={() => {
                   setMailboxEditor(null);
                   if (requestedBox) setTab('mailboxes');

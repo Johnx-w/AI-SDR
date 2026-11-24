@@ -186,6 +186,35 @@ test('相同研究正文和条件跨操作复用模型响应，仍新抓官网�
   }
 });
 
+test('待核实企业在重启和普通缓存过期后复用已核验证据，新产品原文可触发收录', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'review-continuation-'));
+  const path = join(dir, 'operations.sqlite');
+  let f = fixture({ path });
+  try {
+    assert.equal((await f.research('review-day-one')).outcome, 'review');
+    assert.equal(f.state.calls, 1);
+    f.store.db.exec('UPDATE research_model_responses SET created_at=0');
+    f.service.close();
+    f = fixture({ path });
+    const repeated = await f.research('review-day-eight', { ...input, target_count: 35 });
+    assert.equal(repeated.outcome, 'review');
+    assert.equal(repeated.research_usage.model_calls, 0);
+    assert.equal(f.state.calls, 0);
+    assert.equal(f.state.reads, 1);
+    const quote = 'We manufacture and sell zip screens for outdoor shading.';
+    f.state.text += ' ' + quote;
+    f.raw.products = [{ value: 'zip screens', quote, source_url: source }];
+    const changed = await f.research('review-new-products');
+    assert.equal(changed.新增, 1);
+    assert.equal(changed.research_usage.model_calls, 1);
+    assert.equal(changed.research_usage.repeat_model_calls, 1);
+    assert.equal(f.state.writes, 1);
+  } finally {
+    f.service.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('明确不匹配跨操作跳过官网和模型，操作只保留判定摘要', async () => {
   const f = fixture();
   try {

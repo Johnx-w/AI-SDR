@@ -6,18 +6,119 @@ const normalize = (value) =>
 const email = (value) =>
   value?.match(/[a-z0-9.!#$%&'*+/=?^_{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}/iu)?.[0].toLowerCase();
 
-function bounceNotice(message) {
+export const invalidAddressReason = 'bounce_invalid_recipient';
+const actions = {
+  sender: '核对发件地址及发件域配置',
+  invalid: '抑制该确切地址，重新核实公开联系方式',
+  dns: '核对收件域拼写和 MX 解析',
+  connection: '核对收件服务器连接及事件时段',
+  temporary: '临时限制，核实最终投递结果',
+  access: '核对 5.4.1 拒收原因及发件身份',
+  policy: '核对网关、组或中继策略，确认允许收信后再联系',
+  unknown: '人工核对原退信',
+};
+
+const noticeBody = (message) => String(message.bodyText || '').slice(0, 16_384);
+
+export function bounceDiagnosis(message, body = noticeBody(message)) {
+  const lines = body.split(/\r?\n/u);
+  const aliyun = normalize(message.from) === aliyunSender;
+  const response = aliyun
+    ? lines.find((line) => /^\s*系统应答\s*[:：]/u.test(line))
+    : lines.find((line) => /^\s*Diagnostic-Code:/iu.test(line)) ||
+      lines.find((line) => /^\s*[45]\d\d[ -]/u.test(line)) ||
+      body.match(
+        /^(?:the (?:response|reply)(?: from the remote server)? was):[ \t]*\r?\n\s*([^\r\n]+)/imu,
+      )?.[1];
+  const explanation = aliyun
+    ? lines.find((line) => /^\s*退信原因\s*[:：]/u.test(line))
+    : lines.find((line) =>
+        /^(?:\*\* )?(?:Address not found|Message blocked)(?: \*\*)?$/iu.test(line.trim()),
+      );
+  const status = aliyun
+    ? undefined
+    : lines.find((line) => /^Status:\s*[245]\.\d{1,3}\.\d{1,3}\b/iu.test(line));
+  const action = aliyun ? undefined : lines.find((line) => /^Action:\s*\w+/iu.test(line));
+  const diagnostic = [action, status, response, explanation]
+    .filter(Boolean)
+    .map((line) => line.trim())
+    .join('\n')
+    .slice(0, 2000);
+  const primary = classifyResponse(response || '', status, action);
+  const category =
+    primary === 'unknown' && !/\b[45]\.\d{1,3}\.\d{1,3}\b/u.test(response || status || '')
+      ? classifyResponse(explanation || '', status, action)
+      : primary;
+  return { category, diagnostic, action: actions[category] };
+}
+
+function classifyResponse(diagnostic, status, action) {
+  // Gate decisions on the outer response. Keep the entire original line for the detail view.
+  const primary = diagnostic.split(
+    /\b(?:upstream|nested|inner)\s*[:=]?\s*(?=[45]\d{2}\b|[45]\.\d)/iu,
+    1,
+  )[0];
+  const reply = primary.replace(/<[^>\r\n]*>/gu, '');
+  // Relays may insert their host, RCPT command or explanatory text before the status.
+  const codes =
+    /(?<![\w.@-])(?:([45]\d{2})(?![\w.])(?:[ -]+([45]\.\d{1,3}\.\d{1,3}))?|([45]\.\d{1,3}\.\d{1,3}))(?![\w.])/u.exec(
+      reply,
+    );
+  const smtp = codes?.[1] || '';
+  const enhanced = codes?.[2] || codes?.[3] || '';
+  const reported = status?.split(':')[1]?.trim().split(/\s/u)[0] || '';
+  const states = [enhanced, reported];
+  if (
+    /resolving by dns failed|domain not found|nxdomain|dns (?:lookup )?fail|域名不存在/iu.test(
+      primary,
+    )
+  )
+    return 'dns';
+  if (/connect(?:ion)? (?:to .*failed|refused|timed out)|连接收件方邮件系统失败/iu.test(primary))
+    return 'connection';
+  if (
+    smtp.startsWith('4') ||
+    states.some((code) => code.startsWith('4.')) ||
+    /^Action:\s*delayed\b/iu.test(action || '') ||
+    /临时性错误/iu.test(primary)
+  )
+    return 'temporary';
+  if (
+    states.some((code) => /^5\.1\.[78]$/u.test(code)) ||
+    /(?:sender|from) (?:email )?address (?:not found|rejected|invalid)|invalid sender/iu.test(
+      primary,
+    )
+  )
+    return 'sender';
+  if (states.includes('5.4.1')) return 'access';
+  if (states.some((code) => code.startsWith('5.7.'))) return 'policy';
+  if (states.includes('5.1.1')) return 'invalid';
+  // Only generic failures and mailbox-specific codes can use free-text evidence of an invalid recipient.
+  if (states.some((code) => code && !['5.0.0', '5.1.0', '5.2.0', '5.2.1'].includes(code)))
+    return 'unknown';
+  if (/message blocked|relay.*denied|blocklist|blacklist|policy|group.*reject/iu.test(primary))
+    return 'policy';
+  if (
+    /no such (?:user|recipient)|user unknown|(?:account|user|mailbox).*does not exist|address not found|mailbox (?:disabled|unavailable permanently)|收件人不存在|接收地址不存在/iu.test(
+      primary,
+    )
+  )
+    return 'invalid';
+  return 'unknown';
+}
+
+function bounceNotice(message, body) {
   if (message.direction !== 'inbound') return null;
   const sender = normalize(message.from);
   const subject = String(message.subject || '').trim();
   if (sender === aliyunSender && subject.includes('退信')) {
-    const body = String(message.bodyText || '').slice(0, 16_384);
     if (!body.includes('邮件被退回') || !body.includes('退信原因')) return null;
     const header = body.split('退信原因', 1)[0];
     const originalSender = email(header.match(/^[^\S\r\n]*发件人[ \t]*[:：]([^\r\n]+)/mu)?.[1]);
     const originalSubject = header.match(/^[^\S\r\n]*主题[ \t]*[:：]([^\r\n]+)/mu)?.[1].trim();
     const recipients = [...header.matchAll(/^[^\S\r\n]*无法发送到[ \t]*[:：]?([^\r\n]+)/gmu)];
     const recipient = recipients.length === 1 ? email(recipients[0][1]) : '';
+    if (recipients.length && recipients[0][1].split('@').length !== 2) return null;
     if (originalSender === normalize(message.account) && recipient && originalSubject)
       return { recipient, subject: originalSubject };
     return null;
@@ -35,12 +136,17 @@ function bounceNotice(message) {
 
 export function recordOutreachBounces(db, messages) {
   const notices = messages.flatMap((message) => {
-    const evidence = bounceNotice(message);
+    const body = noticeBody(message);
+    const evidence = bounceNotice(message, body);
     const receivedAt = Date.parse(message.occurredAt);
     return evidence && Number.isFinite(receivedAt)
       ? [
           {
             ...evidence,
+            diagnosis: bounceDiagnosis(message, body),
+            finalRecipients: [...body.matchAll(/^Final-Recipient:[^;\r\n]*;([^\r\n]*)/gimu)].map(
+              (match) => email(match[1]),
+            ),
             mailboxId: message.mailboxId,
             account: normalize(message.account),
             receivedAt,
@@ -62,8 +168,8 @@ export function recordOutreachBounces(db, messages) {
     )
     .all(JSON.stringify([...new Set(notices.map((notice) => notice.mailboxId))]));
   const save = db.prepare(
-    `INSERT INTO outreach_delivery_bounces(delivery_id,received_at) VALUES(?,?)
-    ON CONFLICT(delivery_id) DO UPDATE SET received_at=max(received_at, excluded.received_at)`,
+    `INSERT INTO outreach_delivery_bounces(delivery_id,received_at,diagnosis) VALUES(?,?,?)
+    ON CONFLICT(delivery_id) DO UPDATE SET received_at=excluded.received_at, diagnosis=excluded.diagnosis WHERE excluded.received_at >= received_at`,
   );
   const confirmed = [];
   for (const notice of notices) {
@@ -78,7 +184,22 @@ export function recordOutreachBounces(db, messages) {
     );
     if (matches.length === 1) {
       const receivedAt = new Date(notice.receivedAt).toISOString();
-      save.run(matches[0].id, receivedAt);
+      if (
+        notice.diagnosis.category === 'invalid' &&
+        notice.finalRecipients.some((address) => address !== matches[0].recipient)
+      ) {
+        notice.diagnosis = {
+          ...notice.diagnosis,
+          category: 'unknown',
+          action: '回执中的最终收件地址与原信不一致，人工核对',
+        };
+      }
+      save.run(matches[0].id, receivedAt, JSON.stringify(notice.diagnosis));
+      if (notice.diagnosis.category === 'invalid' && matches[0].recipient)
+        db.prepare('INSERT OR IGNORE INTO outreach_suppression(identity,reason) VALUES(?,?)').run(
+          'email:' + matches[0].recipient,
+          invalidAddressReason,
+        );
       confirmed.push({ id: matches[0].id, receivedAt });
     }
   }
@@ -86,11 +207,13 @@ export function recordOutreachBounces(db, messages) {
 }
 
 export function initializeOutreachBounces(db) {
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE name='outreach_delivery_bounces'").get())
-    return;
-  db.exec(`CREATE TABLE outreach_delivery_bounces (
-    delivery_id TEXT PRIMARY KEY, received_at TEXT NOT NULL
-  )`);
+  const columns = db.prepare('PRAGMA table_info(outreach_delivery_bounces)').all();
+  if (columns.some((column) => column.name === 'diagnosis')) return;
+  if (columns.length) db.exec('ALTER TABLE outreach_delivery_bounces ADD COLUMN diagnosis TEXT');
+  else
+    db.exec(
+      'CREATE TABLE outreach_delivery_bounces(delivery_id TEXT PRIMARY KEY, received_at TEXT NOT NULL, diagnosis TEXT)',
+    );
   const messages = db
     .prepare(
       `SELECT m.data, json_extract(t.data, '$.mailboxId') AS mailboxId,

@@ -14,8 +14,8 @@ import {
   Workflow,
   SlidersHorizontal,
 } from 'lucide-react';
-import { outreachApi, type OutreachMailbox, type OutreachProduct } from '../outreachApi';
-import { siteAllowsProduct } from '../domain/mail-site.mjs';
+import { outreachApi, type OutreachMailbox } from '../outreachApi';
+import { MailKnowledgeScope } from './MailKnowledgeScope';
 import { ReplySources, type ReplySource } from './ReplyPreview';
 import { mailConversationsApi, type MailThread } from '../services/mailConversations';
 
@@ -26,16 +26,20 @@ const modes: [Mode, string][] = [
   ['auto', '自动回复已核实的产品问题'],
   ['business', '自动回复常规业务与已核实的产品问题'],
 ];
-type Result = { body: string; reason: string; decision: string; sources: ReplySource[] };
+type Result = {
+  body: string;
+  reason: string;
+  decision: string;
+  sources: ReplySource[];
+  attachments?: { name: string; contentType: string; contentBase64: string }[];
+};
 export function MailReplySettings({
   box,
   boxes,
-  products,
   onSaved,
 }: {
   box: OutreachMailbox;
   boxes: OutreachMailbox[];
-  products: OutreachProduct[];
   onSaved: () => Promise<unknown>;
 }) {
   const [query, setQuery] = useSearchParams();
@@ -50,7 +54,7 @@ export function MailReplySettings({
     box.autoBusinessReplies ? 'business' : box.replyMode || 'manual',
   );
   const [persona, setPersona] = useState(box.draftPersona || ''),
-    [ids, setIds] = useState(box.knowledgeProductIds || []);
+    [fileIds, setFileIds] = useState<string[]>(box.knowledgeProductIds ?? []);
   const [subject, setSubject] = useState(''),
     [body, setBody] = useState(''),
     [result, setResult] = useState<Result | null>(null);
@@ -97,16 +101,13 @@ export function MailReplySettings({
   const [pending, setPending] = useState(''),
     [error, setError] = useState(''),
     [note, setNote] = useState('');
-  const available = products.filter(
-    (p) => (p.status === 'approved' || p.approved) && siteAllowsProduct(p, box, true),
-  );
-  const unavailable = ids.filter((id) => !available.some((p) => p.id === id));
+  const summary = '已选 ' + fileIds.length + ' 份文件';
   const active = useRef<AbortController | null>(null);
   const settings = {
     replyMode: mode === 'business' ? 'auto' : mode,
     autoBusinessReplies: mode === 'business',
     draftPersona: persona,
-    knowledgeProductIds: ids,
+    knowledgeProductIds: fileIds,
   };
   const stateKey = JSON.stringify([settings, subject, body]);
   useEffect(() => {
@@ -198,7 +199,7 @@ export function MailReplySettings({
         )}
         {!testing ? (
           <section className="studio-config" inert={pending === 'save'}>
-            <details className="fin-rule" open>
+            <details className="fin-rule" open={query.get('section') !== 'knowledge'}>
               <summary>
                 <Workflow />
                 <strong>接待范围</strong>
@@ -239,49 +240,15 @@ export function MailReplySettings({
                 </label>
               </div>
             </details>
-            <details className="fin-rule">
+            <details className="fin-rule" open={query.get('section') === 'knowledge' || undefined}>
               <summary>
                 <BookOpen />
                 <strong>引用资料</strong>
-                <small>{ids.length - unavailable.length} 项可引用</small>
+                <small>{summary}</small>
                 <ChevronRight />
               </summary>
-              <div className="fin-rule-body studio-materials">
-                {available.length ? (
-                  available.map((p) => (
-                    <label key={p.id}>
-                      <input
-                        type="checkbox"
-                        checked={ids.includes(p.id)}
-                        onChange={(e) =>
-                          setIds(e.target.checked ? [...ids, p.id] : ids.filter((v) => v !== p.id))
-                        }
-                      />
-                      <span>{p.label || p.name}</span>
-                    </label>
-                  ))
-                ) : (
-                  <p>此邮箱官网暂无已审核资料。</p>
-                )}
-                {unavailable.length > 0 && (
-                  <details className="studio-unavailable">
-                    <summary>已关联但暂不可引用 · {unavailable.length}</summary>
-                    {unavailable.map((id) => {
-                      const p = products.find(
-                        (p) => p.id === id && siteAllowsProduct(p, box, true),
-                      );
-                      return (
-                        <p key={id}>
-                          {p?.label || p?.name || '资料已移除或不在当前官网范围'}{' '}
-                          <small>{p ? '待审核' : ''}</small>
-                        </p>
-                      );
-                    })}
-                  </details>
-                )}
-                <Link to="/materials">
-                  打开素材库 <ChevronRight size={14} />
-                </Link>
+              <div className="fin-rule-body">
+                <MailKnowledgeScope ids={fileIds} onChange={setFileIds} />
               </div>
             </details>
             <details className="fin-rule">
@@ -305,6 +272,11 @@ export function MailReplySettings({
                 模拟客户来信
               </h2>
               <span>仅预览</span>
+            </div>
+            <div className="mail-preview-scope">
+              <BookOpen size={15} />
+              <span>当前引用范围</span>
+              <strong>{summary}</strong>
             </div>
             <button
               type="button"
@@ -368,6 +340,19 @@ export function MailReplySettings({
                     {result.decision}
                   </p>
                   <p className="studio-mail">{result.body}</p>
+                  {result.attachments?.length ? (
+                    <div className="studio-product-photos" aria-label="草稿图片附件">
+                      {result.attachments.map((photo) => (
+                        <figure key={photo.name}>
+                          <img
+                            src={'data:image/jpeg;base64,' + photo.contentBase64}
+                            alt={photo.name}
+                          />
+                          <figcaption>图片附件 · {photo.name}</figcaption>
+                        </figure>
+                      ))}
+                    </div>
+                  ) : null}
                   <p>{result.reason}</p>
                   <ReplySources sources={result.sources} />
                 </>

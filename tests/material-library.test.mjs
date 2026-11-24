@@ -1,3 +1,4 @@
+import { listReplyFiles } from '../server/reply-files.mjs';
 import test from 'node:test';
 import { once } from 'node:events';
 import { PassThrough } from 'node:stream';
@@ -28,6 +29,32 @@ const data = (name, body, site = '') => ({
   key: randomUUID(),
   env: { MATERIAL_DEEPSEEK_API_KEY: 'fixture' },
   fetchImpl: materialService,
+});
+
+test('两个邮箱独立勾选同一文件，审核、换版和归档即时生效', async (t) => {
+  const k = new ProductKnowledge();
+  t.after(() => k.close());
+  const lib = new MaterialLibrary(k, boxes);
+  const { id, documentId } = await lib.upload(
+    data('安装手册.txt', 'Motor R72 is 72 mm wide.', honey),
+  );
+  const ask = (index, ids) =>
+    answerMailQuestion(k, { ...boxes[index], knowledgeProductIds: ids }, 'How wide is Motor R72?')
+      .sources;
+  assert.deepEqual(ask(1, [id]), []);
+  const updated = lib.edit(id, {
+    version: lib.get(id).version,
+    sourceFacts: [{ documentId, text: 'Motor R72 is 72 mm wide.', location: '第 1 段' }],
+  });
+  const live = lib.edit(id, { version: updated.version, status: 'approved', approvedBy: 'QA' });
+  assert.equal(ask(1, [id])[0].version, live.version);
+  assert.deepEqual(ask(0, []), []);
+  const changed = lib.edit(id, { version: live.version, category: '保养' });
+  assert.deepEqual(ask(1, [id]), []);
+  const approved = lib.edit(id, { version: changed.version, status: 'approved', approvedBy: 'QA' });
+  assert.equal(ask(1, [id])[0].version, approved.version);
+  lib.edit(id, { version: approved.version, status: 'archived' });
+  assert.deepEqual(ask(1, [id]), []);
 });
 test('素材直接上传、重试幂等、站点隔离、换版撤回及跨重启回读', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'materials-')),
@@ -70,7 +97,7 @@ test('素材直接上传、重试幂等、站点隔离、换版撤回及跨重�
   const ask = (website) =>
     answerMailQuestion(k, { website, knowledgeProductIds: [id] }, 'How wide is Motor R72?');
   assert.equal(ask(boxes[0].website).sources[0].ref, '第 2 段');
-  assert.equal(ask(boxes[1].website).sources.length, 0);
+  assert.equal(ask(boxes[1].website).sources[0].productId, id);
   assert.equal(
     (await lib.upload({ ...input, name: '别名.txt', key: randomUUID(), site: honey })).reused,
     true,
@@ -608,4 +635,43 @@ test('视频额度为 80 MiB，邮件附件按 10 个、解码合计 10 MiB 校�
   assert.equal(normalizeAttachments([full])[0].size, 10485760);
   assert.throws(() => normalizeAttachments([full, small]), /10 MB/);
   assert.throws(() => normalizeAttachments(Array(11).fill(small)), /10 个/);
+});
+
+test('邮箱文件选择按实际导入文件分页，跨页查找原文件名，过滤未保存的选择', (t) => {
+  const k = new ProductKnowledge();
+  t.after(() => k.close());
+  const insert = k.db.prepare('INSERT INTO product_knowledge VALUES(?,?)');
+  const file = k.db.prepare('INSERT INTO product_documents VALUES(?,?,?,?,?)');
+  for (let i = 0; i < 46; i++) {
+    const id = 'sample-' + i,
+      doc = 'doc-' + i;
+    insert.run(
+      id,
+      JSON.stringify({
+        name: '文件 ' + i,
+        version: 1,
+        updatedAt: String(i).padStart(3, '0'),
+        status: i % 2 ? 'approved' : 'draft',
+        documentIds: i === 45 ? [] : [doc],
+      }),
+    );
+    if (i < 45)
+      file.run(doc, id, JSON.stringify({ name: '目录-' + i + '.pdf' }), Buffer.alloc(0), '{}');
+  }
+  const first = listReplyFiles(k.db, {});
+  assert.equal(first.total, 45);
+  assert.equal(first.items.length, 20);
+  assert.equal(listReplyFiles(k.db, { page: 2 }).items[0].id, 'sample-24');
+  assert.equal(listReplyFiles(k.db, { q: '目录-4.pdf' }).items[0].status, 'draft');
+  const picked = listReplyFiles(k.db, { ids: ['sample-1', 'sample-44'], page: 10 });
+  assert.equal(picked.page, 1);
+  assert.deepEqual(
+    picked.items.map((it) => it.id),
+    ['sample-44', 'sample-1'],
+  );
+  assert.equal(listReplyFiles(k.db, { ids: [] }).total, 0);
+  assert.throws(
+    () => listReplyFiles(k.db, null),
+    (e) => e.status === 400,
+  );
 });

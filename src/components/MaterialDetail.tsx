@@ -16,10 +16,14 @@ import { MaterialParseMode, modeLabel } from './MaterialParseMode';
 import { isPagedMaterial } from '../domain/material-upload.mjs';
 import { MaterialOriginal } from './MaterialOriginal';
 import { MaterialPassages } from './MaterialPassages';
+import { ParameterReview } from './ParameterReview';
+import { lazy, Suspense } from 'react';
+import { WorkbookPhotos } from './WorkbookPhotos';
 import { WorkbookPreview } from './WorkbookPreview';
 import {
   type ParseMode,
   acceptMaterials,
+  attachParameterSource,
   fileSize,
   materialsRequest,
   sendJson,
@@ -32,30 +36,43 @@ import {
   type MaterialDetail as Detail,
 } from '../services/materials';
 
+const PriceCatalog = lazy(() =>
+  import('./price-catalog/PriceCatalog').then((m) => ({ default: m.PriceCatalog })),
+);
 type MaterialView = 'preview' | 'edit' | 'history';
 export function MaterialDocument({
   id,
   initialPage,
+  initialRevision = '',
+  initialParameter = '',
+  showPhotos = false,
   openSource,
   onClose,
   onChanged,
 }: {
   id: string;
   initialPage: number;
+  initialRevision?: string;
+  initialParameter?: string;
+  showPhotos?: boolean;
   openSource: boolean;
   onClose: () => void;
   onChanged: () => void;
 }) {
+  const [workbookView, setWorkbookView] = useState<'rows' | 'photos'>(
+    showPhotos ? 'photos' : 'rows',
+  );
   const upload = useRef<HTMLInputElement>(null);
   const [side, setSide] = useState<'info' | 'original'>(openSource ? 'original' : 'info');
   const [mobileSide, setMobileSide] = useState(openSource);
   const [view, setView] = useState<MaterialView>('preview'),
-    [revision, setRevision] = useState(''),
+    [revision, setRevision] = useState(initialRevision),
     [data, setData] = useState<Detail | null>(null),
     [docId, setDocId] = useState(''),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [notice, setNotice] = useState('');
+  const [parameterKeys, setParameterKeys] = useState<string[]>([]);
   const [edits, setEdits] = useState<Correction[]>([]);
   const [editingChunk, setEditingChunk] = useState(false);
   const [ocrProgress, setOcrProgress] = useState(''),
@@ -80,11 +97,19 @@ export function MaterialDocument({
     setData(d);
     setDocId((old) => (d.documents.some((doc) => doc.id === old) ? old : d.documents[0]?.id || ''));
     setEdits(d.product.cellEdits || []);
+    const candidates = d.documents[0]?.extraction?.parameters || [];
+    const confirmed = new Set(d.confirmedParameters?.map((p) => p.key));
+    setParameterKeys(
+      (initialParameter && d.confirmedParameters?.length ? d.confirmedParameters : candidates)
+        .filter((p) => (confirmed.size ? confirmed.has(p.key) : !p.issue))
+        .map((p) => p.key),
+    );
   }
   const p = data?.product,
     doc = data?.documents.find((d) => d.id === docId),
     active = p?.version === data?.currentVersion;
-  const visual = isPagedMaterial(doc?.contentType);
+  const structured = doc?.parseMode === 'model_parameters';
+  const visual = !doc?.referencePages && (structured || isPagedMaterial(doc?.contentType));
   const storedMode = doc?.extraction?.mode ?? doc?.parseMode ?? 'rich_layout_recognition';
   const parseMode = modeOverride ?? storedMode;
   useEffect(() => setModeOverride(null), [docId, revision]);
@@ -95,6 +120,7 @@ export function MaterialDocument({
     doc &&
     visual &&
     !doc.extraction?.facts.length &&
+    !doc.extraction?.parameters &&
     doc.extraction?.model !== 'failed'
       ? doc.id
       : '';
@@ -323,6 +349,7 @@ export function MaterialDocument({
                   e.preventDefault();
                   const f = new FormData(e.currentTarget);
                   const site = String(f.get('site') || '');
+                  const sites = f.getAll('sites').map(String).sort();
                   void save(
                     {
                       name: f.get('name'),
@@ -331,7 +358,13 @@ export function MaterialDocument({
                         .split(/[,，、]/u)
                         .map((x) => x.trim())
                         .filter(Boolean),
-                      ...(site === '__keep__' ? {} : { site }),
+                      ...(p.materialOnly
+                        ? JSON.stringify(sites) === JSON.stringify([...data.sites].sort())
+                          ? {}
+                          : { sites }
+                        : site === '__keep__'
+                          ? {}
+                          : { site }),
                     },
                     '资料已保存',
                   );
@@ -347,25 +380,42 @@ export function MaterialDocument({
                     disabled={!writable}
                   />
                 </label>
-                <label>
-                  所属官网
-                  <select
-                    aria-label="所属官网"
-                    name="site"
-                    defaultValue="__keep__"
-                    disabled={!writable}
-                  >
-                    <option value="__keep__">
-                      {data.sites.join('、') || '未分配'} · 保持原设置
-                    </option>
-                    <option value="">未分配</option>
+                {p.materialOnly ? (
+                  <fieldset className="kb-brand-scope" disabled={!writable}>
+                    <legend>适用品牌</legend>
                     {data.siteOptions.map((s) => (
-                      <option key={s.site} value={s.site}>
+                      <label key={s.site}>
+                        <input
+                          name="sites"
+                          type="checkbox"
+                          value={s.site}
+                          defaultChecked={data.sites.includes(s.site)}
+                        />
                         {s.brand} · {s.site}
-                      </option>
+                      </label>
                     ))}
-                  </select>
-                </label>
+                  </fieldset>
+                ) : (
+                  <label>
+                    所属官网
+                    <select
+                      aria-label="所属官网"
+                      name="site"
+                      defaultValue="__keep__"
+                      disabled={!writable}
+                    >
+                      <option value="__keep__">
+                        {data.sites.join('、') || '未分配'} · 保持原设置
+                      </option>
+                      <option value="">未分配</option>
+                      {data.siteOptions.map((s) => (
+                        <option key={s.site} value={s.site}>
+                          {s.brand} · {s.site}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <label>
                   品类
                   <input
@@ -435,28 +485,99 @@ export function MaterialDocument({
                         </button>
                       )
                     )}
-                    {doc.extraction?.model === 'manual' &&
-                    !facts.some((f) => f.documentId === doc.id) ? (
+                    {doc.referencePages ? (
+                      <MaterialOriginal doc={doc} url={original} page={sourcePage} />
+                    ) : structured && doc.extraction?.parameters ? (
+                      <ParameterReview
+                        key={doc.id + revision}
+                        initialKey={initialParameter}
+                        parameterSet={p.parameterSet}
+                        parameters={
+                          (!active || !!initialParameter) && data.confirmedParameters?.length
+                            ? data.confirmedParameters
+                            : doc.extraction.parameters
+                        }
+                        selected={parameterKeys}
+                        disabled={!writable || !!initialParameter}
+                        onSelect={setParameterKeys}
+                        original={original}
+                        documents={data.documents}
+                        onAttach={(file) =>
+                          void perform(
+                            () => attachParameterSource(id, p.version, file),
+                            '已关联来源原件',
+                          )
+                        }
+                      />
+                    ) : doc.extraction?.model === 'manual' &&
+                      !facts.some((f) => f.documentId === doc.id) ? (
                       <MaterialOriginal doc={doc} url={original} page={1} />
+                    ) : doc.sha256 ===
+                      '3e487b6ab273320260798410732d49749898c04b696b0f733ad932a2c4a8eac4' ? (
+                      <Suspense fallback={<p>正在读取价格清单…</p>}>
+                        <PriceCatalog
+                          key={doc.id + revision}
+                          product={id}
+                          doc={doc.id}
+                          edits={edits}
+                          writable={!!writable && p.documentIds?.[0] === doc.id}
+                          saveCell={(sheet, ref, value, original) => {
+                            const cellEdits = edits.filter(
+                              (e) => e.documentId !== doc.id || e.sheet !== sheet || e.ref !== ref,
+                            );
+                            if (value !== original)
+                              cellEdits.push({ documentId: doc.id, sheet, ref, value });
+                            return save({ ...reviewFields, cellEdits }, '报价已保存');
+                          }}
+                        />
+                      </Suspense>
                     ) : doc.extraction?.sheets ? (
                       <>
-                        <WorkbookPreview
-                          key={doc.id}
-                          url={original}
-                          id={doc.id}
-                          sheets={doc.extraction.sheets}
-                          edits={edits}
-                          onEdit={changeCell}
-                          linked={!!writable}
-                        />
-                        {writable && (
+                        <div className="photo-controls" aria-label="工作簿视图">
                           <button
-                            className="kb-primary"
-                            onClick={() => void save(reviewFields, '校对已保存')}
-                            disabled={incompleteFact}
+                            className="kb-text"
+                            aria-pressed={workbookView === 'rows'}
+                            onClick={() => setWorkbookView('rows')}
                           >
-                            保存校对
+                            价格表数据
                           </button>
+                          <button
+                            className="kb-text"
+                            aria-pressed={workbookView === 'photos'}
+                            onClick={() => setWorkbookView('photos')}
+                          >
+                            产品图片
+                          </button>
+                        </div>
+                        {workbookView === 'photos' ? (
+                          <WorkbookPhotos
+                            key={doc.id + revision}
+                            product={id}
+                            doc={doc.id}
+                            sheets={doc.extraction.sheets}
+                            writable={!!writable && p.documentIds?.[0] === doc.id}
+                          />
+                        ) : (
+                          <>
+                            <WorkbookPreview
+                              key={doc.id}
+                              url={original}
+                              id={doc.id}
+                              sheets={doc.extraction.sheets}
+                              edits={edits}
+                              onEdit={changeCell}
+                              linked={!!writable}
+                            />
+                            {writable && (
+                              <button
+                                className="kb-primary"
+                                onClick={() => void save(reviewFields, '校对已保存')}
+                                disabled={incompleteFact}
+                              >
+                                保存校对
+                              </button>
+                            )}
+                          </>
                         )}
                       </>
                     ) : (
@@ -558,8 +679,8 @@ export function MaterialDocument({
                 </dl>
                 {doc?.extraction?.mode && (
                   <p>
-                    {doc.extraction.model === 'failed' ? '上次尝试' : '最近解析'} · DeepSeek ·{' '}
-                    {modeLabel(doc.extraction.mode)}
+                    {doc.extraction.model === 'failed' ? '上次尝试' : '最近解析'} ·{' '}
+                    {doc.extraction.model} · {modeLabel(doc.extraction.mode)}
                   </p>
                 )}
                 {doc && (
@@ -596,15 +717,18 @@ export function MaterialDocument({
                   <History size={15} />
                   历史版本
                 </button>
-                {active && (
+                {active && !doc?.referencePages && (
                   <footer className="kb-manage" inert={editingChunk}>
                     {p.status !== 'archived' && visual && (
                       <>
-                        <MaterialParseMode
-                          value={parseMode}
-                          onChange={setModeOverride}
-                          disabled={busy || !!ocrDocument}
-                        />
+                        {!structured && (
+                          <MaterialParseMode
+                            generalOnly
+                            value={parseMode}
+                            onChange={setModeOverride}
+                            disabled={busy || !!ocrDocument}
+                          />
+                        )}
                         {visual && doc && (
                           <button
                             type="button"
@@ -665,7 +789,7 @@ export function MaterialDocument({
                               {
                                 status: 'approved',
                                 approvedBy: reviewer,
-                                ...(doc ? reviewFields : {}),
+                                ...(structured ? { parameterKeys } : doc ? reviewFields : {}),
                               },
                               '已审核通过',
                             );
@@ -682,6 +806,8 @@ export function MaterialDocument({
                           disabled={
                             busy ||
                             editingChunk ||
+                            (data.documents[0]?.parseMode === 'model_parameters' &&
+                              (!structured || !parameterKeys.length)) ||
                             incompleteFact ||
                             (!doc && !p.sourceUrl && !p.attachments.length)
                           }
@@ -689,6 +815,19 @@ export function MaterialDocument({
                           审核通过
                         </button>
                       </form>
+                    )}
+                    {structured && p.status === 'approved' && (
+                      <button
+                        disabled={busy || !parameterKeys.length}
+                        onClick={() =>
+                          void save(
+                            { parameterKeys, status: 'draft' },
+                            '所选参数已保存，请重新审核',
+                          )
+                        }
+                      >
+                        修改已采用参数
+                      </button>
                     )}
                     {p.status === 'approved' && <small>审核人 {p.approvedBy}</small>}
                     <button

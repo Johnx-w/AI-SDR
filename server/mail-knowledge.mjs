@@ -1,4 +1,9 @@
-import { siteAllowsProduct, mentionsOtherSite } from '../src/domain/mail-site.mjs';
+import { mentionsModel, parameterAnswer } from './model-parameters.mjs';
+import {
+  mentionsOtherSite,
+  otherSitesInText,
+  siteAllowsProduct,
+} from '../src/domain/mail-site.mjs';
 
 const attributes = [
   {
@@ -49,6 +54,8 @@ const needsReview = /待核对|核对事项|warning|unverified/iu;
 export function requiresProductOrCommercialReview(text, mailbox) {
   return (
     mentionsOtherSite(text, mailbox) ||
+    /\b(?:[a-z]+[-_]\d+|\d+[-_][a-z])[a-z0-9_-]*\b/iu.test(text) ||
+    /\b(?:sku|model)\s*[:#-]?\s*[a-z\d_-]*\d|型号\s*[a-z\d_-]+/iu.test(text) ||
     commercial.test(text) ||
     attributes.some((a) => a.query.test(text))
   );
@@ -58,6 +65,7 @@ const escape = (s) => s.replace(/[.*+?^`{}()|[\]\\$]/gu, '\\$&');
 function named(question, label) {
   const key = normal(label);
   if (!key || key.length < 2) return false;
+  if (/^[a-z\d_-]+$/iu.test(key) && /\d/u.test(key)) return mentionsModel(question, key);
   return new RegExp(
     (/^[a-z0-9]/u.test(key) ? '(?<![a-z0-9])' : '') +
       escape(key) +
@@ -144,17 +152,24 @@ export function answerMailQuestion(
     .replace(/\s+/gu, ' ');
   const zh = /[\u3400-\u9fff]/u.test(question);
   const lookup = [subject.slice(0, 500), question].join(' ').trim();
-  if (!question || mentionsOtherSite(lookup, mailbox))
-    return fallback(zh, '问题超出当前官网资料范围');
+  if (!question) return fallback(zh, '请输入客户问题');
   const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date(now));
-  const products = (mailbox.knowledgeProductIds || [])
-    .map((id) => knowledge.get(id))
-    .filter(
-      (product) =>
-        product?.status === 'approved' &&
-        (!product.effectiveDate || product.effectiveDate <= day) &&
-        siteAllowsProduct(product, mailbox, true),
-    );
+  const selected = knowledge.replyProducts(mailbox, day);
+  const namedSites = otherSitesInText(lookup, mailbox);
+  const products = namedSites.length
+    ? selected.filter((p) => namedSites.some((website) => siteAllowsProduct(p, { website }, true)))
+    : selected;
+  if (namedSites.length && !products.length) return fallback(zh, '已选文件无法核实来信所指品牌');
+  const structured = parameterAnswer(
+    products,
+    knowledge,
+    question,
+    lookup,
+    zh,
+    forDraft,
+    searchWords,
+  );
+  if (structured && !structured.sources.length) return structured;
   const asks = attributes.filter((a) => a.query.test(question));
   const hits = [];
   const candidates = [];
@@ -162,8 +177,11 @@ export function answerMailQuestion(
   const models = lookup.match(/\b[a-z]+(?:[-_]?[a-z]+)*[-_]?\d+[a-z0-9_-]*\b/giu) || [];
   const vocabulary = searchTerms([lookup, ...searchWords].join(' '), models);
   for (const product of products) {
+    if (product.parameterSet) continue;
     const priorHits = hits.length;
-    const documents = knowledge.documents.list(product.id);
+    const documents = knowledge.documents
+      .list(product.id)
+      .filter((d) => d.parseMode !== 'model_parameters' && !d.referencePages);
     // Human-reviewed passages keep their source document and original locator.
     for (const fact of product.sourceFacts || []) {
       const doc = documents.find(
@@ -332,6 +350,21 @@ export function answerMailQuestion(
           ],
         });
     }
+  }
+  if (structured) {
+    const record = structured.sources[0];
+    const conflicting = hits.some(
+      (hit) =>
+        mentionsModel(hit.label, record.item) &&
+        !hit.sources.some((s) => s.field && normal(s.value) === normal(record.value)),
+    );
+    if (conflicting)
+      return {
+        ...fallback(zh, '已审核资料对该型号的参数有不同记录，请核对原件'),
+        parameterQuery: true,
+        ...(forDraft ? { draftSources: [] } : {}),
+      };
+    return structured;
   }
   const draft = {};
   if (forDraft) {

@@ -210,6 +210,43 @@ test('客户业务HTTP只读，全部旧手工维护入口返回405且不创建�
     rmSync(folder, { recursive: true, force: true });
   }
 });
+test('历史 CRM 入站消息经 HTTP 列表与详情按封返回分类，统计尊重客户筛选', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'reply-ledger-'));
+  const store = new CustomerBusiness({
+    path: join(folder, 'business.sqlite'),
+    scope: 'fixture-base/t2',
+  });
+  const ins = store.db.prepare("INSERT INTO customer_business_entities VALUES(?,'messages',?,?)");
+  store.db.prepare('DELETE FROM business_reply_migrations WHERE scope=?').run(store.scope);
+  for (const [id, customerId, body] of [
+    ['a', 'c1', 'Please send a catalog.'],
+    ['b', 'c2', 'Please do not send a catalog.'],
+  ]) {
+    ins.run(
+      store.scope,
+      id,
+      JSON.stringify({ id, customerId, body, direction: 'inbound', classification: 'normal' }),
+    );
+  }
+  store.close();
+  const app = await serve(folder, remoteFixture());
+  try {
+    const all = await app.call('/api/v1/business/messages');
+    assert.equal(all.status, 200);
+    assert.equal(all.body.businessCounts.positive, 1);
+    assert.equal(all.body.businessCounts.refusal, 1);
+    const filtered = await app.call('/api/v1/business/messages?customerId=c1');
+    assert.equal(filtered.body.records[0].requestType, 'catalog');
+    assert.equal(filtered.body.businessCounts.refusal, 0);
+    assert.equal(
+      (await app.call('/api/v1/business/messages/b')).body.record.businessKind,
+      'refusal',
+    );
+  } finally {
+    await app.close();
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
 test('只读任务列表过滤旧人工和MOCK，底层真实历史仍保留', async () => {
   const folder = mkdtempSync(join(tmpdir(), 'business-history-'));
   const store = new CustomerBusiness({

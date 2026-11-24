@@ -1,9 +1,11 @@
+import { validReplyFileIds } from './reply-files.mjs';
 import { listSequences, sequenceDetail } from './outreach-sequences.mjs';
 import { verifyGrounding } from './mail-reception.mjs';
 import { requiresProductOrCommercialReview } from './mail-knowledge.mjs';
 import { renderMailboxSignature } from '../src/domain/mail-signature.mjs';
 import { composeMailDraft, signedMailDraft, generateMailDraft } from './mail-assisted-draft.mjs';
 import { addInternalNote, threadWorkflow, updateThreadWorkflow } from './mail-thread-workflow.mjs';
+import { previewOutreachTemplate } from './outreach-template-preview.mjs';
 import { sequencePolicy, saveSequencePolicy } from './outreach-sequence-policy.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -15,9 +17,7 @@ function replySettings(value) {
     typeof value.autoBusinessReplies !== 'boolean' ||
     typeof value.draftPersona !== 'string' ||
     value.draftPersona.length > 2000 ||
-    !Array.isArray(value.knowledgeProductIds) ||
-    value.knowledgeProductIds.length > 500 ||
-    value.knowledgeProductIds.some((id) => typeof id !== 'string' || id.length > 180)
+    !validReplyFileIds(value.knowledgeProductIds)
   )
     throw fail(400, '回复设置无效');
   return {
@@ -39,6 +39,8 @@ export async function handleOutreach({
 }) {
   const path = url.pathname.slice('/api/v1/outreach'.length),
     method = request.method;
+  if (path === '/sequence-policy/preview' && method === 'POST')
+    return previewOutreachTemplate(service, await readJson(request));
   if (path === '/sequence-policy' && method === 'GET') return sequencePolicy(service.db);
   if (path === '/sequence-policy' && method === 'PUT')
     return saveSequencePolicy(service, await readJson(request));
@@ -98,7 +100,7 @@ export async function handleOutreach({
   if (path === '/reception' && method === 'GET')
     return service.reception.list(Object.fromEntries(url.searchParams));
   const conversation = path.match(
-    /^\/conversations\/([\w-]+)(?:\/(read|draft|reply|ownership|regenerate|generate-draft|workflow|notes))?$/,
+    /^\/conversations\/([\w-]+)(?:\/(read|draft|reply|ownership|regenerate|generate-draft|workflow|notes|photo-check))?$/,
   );
   if (conversation) {
     const [, id, action] = conversation;
@@ -151,6 +153,16 @@ export async function handleOutreach({
     }
     if (action === 'read' && method === 'POST')
       return service.conversations.markRead(id, (await readJson(request)).unread);
+    if (action === 'photo-check' && method === 'GET') {
+      const draft = service.replies.draft(id);
+      if (draft?.attachments?.length)
+        service.guardPhotos?.(
+          service.replies.boundMailbox(service.conversations.detail(id).conversation),
+          draft,
+          service.now(),
+        );
+      return { ok: true };
+    }
     if (action === 'draft' && method === 'GET') return { draft: service.replies.draft(id) };
     if (action === 'generate-draft' && method === 'POST')
       return generateMailDraft(service, id, await readJson(request), draftModel);
@@ -241,6 +253,7 @@ export async function handleOutreach({
         const signature = renderMailboxSignature(box);
         const businessCorrespondence =
           box.autoBusinessReplies &&
+          !answer.parameterQuery &&
           !answer.sources?.length &&
           !requiresProductOrCommercialReview(subject + ' ' + question, box);
         const basis = {
@@ -258,6 +271,8 @@ export async function handleOutreach({
           !box.paused &&
           !!signature.text &&
           !result.needsManager &&
+          !result.photoNote &&
+          !result.attachments?.length &&
           (answer.automatic || businessCorrespondence) &&
           result.sources.every((s) => answer.sources.includes(s)) &&
           (await verifyGrounding(draftModel, basis, result));
@@ -276,9 +291,10 @@ export async function handleOutreach({
                   : answer.reason;
         return {
           decision,
-          reason,
+          reason: result.photoNote || reason,
           body: signedMailDraft(result.body, signature).bodyText,
           sources: result.sources,
+          ...(result.attachments?.length ? { attachments: result.attachments } : {}),
         };
       }
       return service.answerQuestion(service.mailboxes.get(id), question, service.now());

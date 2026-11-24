@@ -68,6 +68,40 @@ export class AcquisitionStore {
     ); CREATE TABLE IF NOT EXISTS acquisition_migrations (
       scope TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY(scope,name)
     )`);
+    this.db.exec(`CREATE TABLE IF NOT EXISTS acquisition_candidate_history (
+      scope TEXT NOT NULL, conditions_key TEXT NOT NULL, domain TEXT NOT NULL,
+      model_attempts INTEGER NOT NULL DEFAULT 0, request_key TEXT, operation_id TEXT,
+      PRIMARY KEY(scope,conditions_key,domain)
+    )`);
+  }
+  reviewResponse(conditionsKey, domain, requestKey) {
+    const row = this.db
+      .prepare(
+        `SELECT json_extract(op.data,'$.research_response') AS response
+      FROM acquisition_candidate_history e JOIN acquisition_operations op ON op.id=e.operation_id
+      WHERE e.scope=? AND e.conditions_key=? AND e.domain=? AND e.request_key=?`,
+      )
+      .get(this.scope, conditionsKey, domain, requestKey);
+    return row?.response ? JSON.parse(row.response) : null;
+  }
+  startModelAttempt(op, conditionsKey, domain) {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const row = this.db
+        .prepare(
+          `INSERT INTO acquisition_candidate_history
+          (scope,conditions_key,domain,model_attempts) VALUES(?,?,?,1)
+          ON CONFLICT(scope,conditions_key,domain) DO UPDATE SET model_attempts=model_attempts+1
+          RETURNING model_attempts`,
+        )
+        .get(this.scope, conditionsKey, domain);
+      op.research_usage.repeat_model_calls = row.model_attempts > 1 ? 1 : 0;
+      this.save(op);
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
   backfillExclusions() {
     const marker = 'historical-exclusions-v1';
@@ -168,6 +202,22 @@ export class AcquisitionStore {
       op.state = 'completed';
       this.complete(op, output);
       const domain = domainKey(website);
+      if (op.reviewRequestKey && output.outcome === 'review') {
+        this.db
+          .prepare(
+            `INSERT INTO acquisition_candidate_history
+            (scope,conditions_key,domain,request_key,operation_id) VALUES(?,?,?,?,?)
+            ON CONFLICT(scope,conditions_key,domain) DO UPDATE SET
+            request_key=excluded.request_key,operation_id=excluded.operation_id`,
+          )
+          .run(this.scope, key, domain, op.reviewRequestKey, op.id);
+      } else if (['completed', 'rejected', 'no_new_candidates'].includes(output.outcome)) {
+        this.db
+          .prepare(
+            'UPDATE acquisition_candidate_history SET request_key=NULL,operation_id=NULL WHERE scope=? AND conditions_key=? AND domain=? AND request_key IS NOT NULL',
+          )
+          .run(this.scope, key, domain);
+      }
       const decision = domain ? exclusionDecision(op, output) : 'ignore';
       if (decision === 'exclude') {
         this.db

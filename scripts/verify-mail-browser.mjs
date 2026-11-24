@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { materialService } from '../tests/fixtures/deepseek-material-service.mjs';
@@ -124,6 +124,19 @@ const app = createApp({
     const payload = JSON.parse(init.body);
     assert.match(payload.model, /deepseek/i);
     const data = JSON.parse(payload.messages.find((message) => message.role === 'user').content);
+    if (data.incoming?.subject === 'Preview scope') {
+      assert.ok(data.evidence.every((s) => s.value !== 'Aluminium alloy'));
+      return Response.json({
+        choices: [
+          {
+            finish_reason: 'stop',
+            message: {
+              content: JSON.stringify({ coverage: 'unanswered', body: '', sourceIndexes: [] }),
+            },
+          },
+        ],
+      });
+    }
     if (data.incoming?.subject === 'Preview only') {
       const index = data.evidence.findIndex((s) => s.value === 'Aluminium alloy');
       assert.ok(index >= 0);
@@ -226,7 +239,7 @@ try {
   await label('业务员姓名 / 发件人名称').fill('Jo');
   await label('负责人').fill('Jo');
   await page.locator('input[name=password]').fill('browser-test-only');
-  assert.equal(await page.getByRole('checkbox', { name: /QA 布艺帘轨道/ }).isChecked(), false);
+  await label('搜索文件名').waitFor();
   await label('业务备注').fill('周五交接客户');
   await button('保存邮箱').click();
   await page.getByRole('dialog').waitFor({ state: 'hidden' });
@@ -262,8 +275,55 @@ try {
   await page.getByLabel('筛选文件').click();
   await label('品牌邮箱筛选').selectOption('honeybadgerblinds.com');
   await page.getByLabel('筛选文件').click();
-  const choosing = page.waitForEvent('filechooser');
   await button('新建 / 导入').click();
+  await page.getByLabel('选择本地文件').setInputFiles([
+    {
+      name: 'clean-parameters.xlsx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      buffer: readFileSync(resolve('tests/fixtures/model-parameters.xlsx')),
+    },
+    {
+      name: 'catalog.pdf',
+      mimeType: 'application/pdf',
+      buffer: readFileSync(resolve('tests/fixtures/material-mixed-catalog.pdf')),
+    },
+  ]);
+  await button('预览 clean-parameters').click();
+  await page.getByText('已关联 · catalog.pdf（3 页）').waitFor();
+  await button('全选正常项').click();
+  await label('审核人').fill('QA');
+  await button('审核通过').click();
+  await page.getByText('审核人 QA', { exact: true }).waitFor();
+  const clean = knowledge.list().find((p) => p.name === 'clean-parameters');
+  const verified = answerMailQuestion(
+    knowledge,
+    { website: 'https://honeybadgerblinds.com', knowledgeProductIds: [clean.id] },
+    'How wide is 0128?',
+  );
+  assert.equal(verified.sources[0].upstream.page, 2);
+  assert.equal(verified.sources[0].productId, clean.id);
+  await button('返回素材库').click();
+  await page.goto(
+    base +
+      '/materials?' +
+      new URLSearchParams({
+        id: clean.id,
+        parameter: verified.sources[0].key,
+        revision: String(clean.version),
+      }),
+  );
+  await page.locator('.kb-parameters .kb-hit').first().waitFor();
+  assert.equal(await page.locator('.kb-parameters .kb-hit').count(), 1);
+  await page.locator('.kb-parameters .kb-hit').filter({ hasText: '152 mm' }).waitFor();
+  await page.locator('.kb-parameters .kb-hit a[href$="#page=2"]').waitFor();
+  await button('返回素材库').click();
+  console.log('PASS 清洗表与来源 PDF 同时导入、批量采用，按型号引用指定原页');
+  await page.getByLabel('筛选文件').click();
+  await label('品牌邮箱筛选').selectOption('honeybadgerblinds.com');
+  await page.getByLabel('筛选文件').click();
+  await button('新建 / 导入').click();
+  await label('文档解析方式').selectOption('rich_layout_recognition');
+  const choosing = page.waitForEvent('filechooser');
   await page.getByRole('button', { name: /选择文件上传/u }).click();
   await (await choosing).setFiles(resolve('tests/fixtures/mail-specimen.xlsx'));
   await button('预览 mail-specimen').click();
@@ -277,8 +337,9 @@ try {
   await material.getByText('审核人 QA', { exact: true }).waitFor();
   await button('返回素材库').click();
   console.log('PASS 按邮箱官网上传工作簿、定位原单元格、校对与审核');
-  const chooseCare = page.waitForEvent('filechooser');
   await button('新建 / 导入').click();
+  await label('文档解析方式').selectOption('rich_layout_recognition');
+  const chooseCare = page.waitForEvent('filechooser');
   await page.getByRole('button', { name: /选择文件上传/u }).click();
   await (
     await chooseCare
@@ -300,8 +361,9 @@ try {
   await page.getByLabel('筛选文件').click();
   await label('品牌邮箱筛选').selectOption('honeybadgerblinds.com');
   await page.getByLabel('筛选文件').click();
-  const choosePdf = page.waitForEvent('filechooser');
   await button('新建 / 导入').click();
+  await label('文档解析方式').selectOption('rich_layout_recognition');
+  const choosePdf = page.waitForEvent('filechooser');
   await page.getByRole('button', { name: /选择文件上传/u }).click();
   await (await choosePdf).setFiles(resolve('tests/fixtures/material-mixed-catalog.pdf'));
   await button('预览 material-mixed-catalog').click();
@@ -340,6 +402,7 @@ try {
   const mode = page.getByRole('combobox', { name: /接待方式/ });
   await page.locator('summary').filter({ hasText: '引用资料' }).click();
   await page.locator('summary').filter({ hasText: '身份与语气' }).click();
+  await label('搜索文件名').fill('mail-specimen');
   assert.equal(await page.getByRole('checkbox', { name: /mail-specimen/ }).isChecked(), false);
   await page.getByRole('textbox', { name: /AI 起草身份与语气/ }).fill(persona);
   await button('保存设置').click();
@@ -358,9 +421,25 @@ try {
   assert.equal(await mode.inputValue(), 'business');
   await mode.selectOption('review');
   await page.locator('summary').filter({ hasText: '引用资料' }).click();
-  await page.getByRole('checkbox', { name: /mail-specimen/ }).check();
+  await label('搜索文件名').fill('mail-specimen');
+  const sheetChoice = page.getByRole('checkbox', { name: /选择 mail-specimen/ });
+  await sheetChoice.check();
+  await sheetChoice.uncheck();
+  await button('试运行').click();
+  await label('主题').fill('Preview scope');
+  await label('客户来信').fill('What material is ZX-01 made of?');
+  await button('预览回复').click();
+  await page.locator('.studio-mail').waitFor();
+  assert.doesNotMatch(await page.locator('.studio-output').innerText(), /Aluminium alloy/u);
+  await button('接待设置').click();
+  await page.locator('summary').filter({ hasText: '引用资料' }).click();
+  await label('搜索文件名').fill('mail-specimen');
+  await sheetChoice.check();
+  await label('搜索文件名').fill('care-note');
   await page.getByRole('checkbox', { name: /care-note/ }).check();
+  await label('搜索文件名').fill('material-mixed-catalog');
   await page.getByRole('checkbox', { name: /material-mixed-catalog/ }).check();
+  await label('搜索文件名').fill('');
   await button('保存设置').click();
   await page.getByText('设置已保存', { exact: true }).waitFor();
   const mailbox = boxes.list()[0];
@@ -370,6 +449,17 @@ try {
     'mail-specimen',
     'material-mixed-catalog',
   ]);
+  await page.reload();
+  await page.locator('summary').filter({ hasText: '引用资料' }).click();
+  await page.getByRole('checkbox', { name: /只看已选/ }).check();
+  await sheetChoice.waitFor();
+  await page.screenshot({ path: join(root, 'mail-knowledge-scope-desktop.png') });
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  await page
+    .locator('.mail-files')
+    .screenshot({ path: join(root, 'mail-knowledge-scope-mobile.png') });
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await button('试运行').click();
   await label('主题').fill('Preview only');
   await label('客户来信').fill('What material is ZX-01 made of?');
@@ -775,6 +865,7 @@ try {
   await apiNav.getByRole('button', { name: '飞书同步' }).click();
   await page.locator('#FEISHU_APP_ID').fill('test-navigation-only');
   await apiNav.getByRole('button', { name: '大语言模型 API' }).click();
+  await page.getByRole('heading', { name: '素材库 · 文档解析', exact: true }).waitFor();
   assert.equal(await page.locator('.connection-group').count(), 3);
   assert.equal(await page.locator('#FEISHU_APP_ID').count(), 0);
   await page.goBack();

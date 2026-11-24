@@ -6,6 +6,12 @@
 
 在「客户回信」下可用「处理情况」筛出待跟进或已有回复的邮件。没有明确业务内容、只有通用收件承诺的回执单列在「待核实回执」。客服工单标记、明确的系统回执正文及标准自动回复头用于识别通知。可疑回执留给业务员核对。
 
+「业务分类」在收件箱、来信跟进和沟通台账之间共用。积极回复进一步标记索价、索目录或约见；其余分为明确拒绝、渠道转介、客服通知、退信、待核实和其他真人回复。判断只使用客户本次正文，排除回复头之后或引用块中的我方历史内容。客服工单分隔线上方若有客户新写的请求，以该请求为准；只有工单正文或自动受理证据时归客服通知。筛选上方的计数与当前邮箱、来信类型和处理状态范围一致。
+
+正式 CRM 来信列表同时返回逐封的 `businessKind`、`requestType` 和该范围的 `businessCounts`。原 T3 按轮次保留记录及关联，使用两个多选字段「回信分类」「客户请求」。数字字段「积极回复封数」「明确拒绝封数」「渠道转介封数」「客服通知封数」「退信封数」「待核实封数」「其他真人回复封数」按列合计，可与同一批 CRM 来信逐封核对。
+
+未处理的索价、索目录和约见同时出现在运营总览的「积极回复待办」。等待时间从来信收件时间起算。系统仅以同一邮箱、同一来信编号和同一客户地址的已发邮件作为实际回复证据；草稿不算。若已通过电话、WhatsApp 或线下完成，在收件箱把会话标为「已完成」即可结束；系统按来信保存结案记录。同线程再来致谢时，旧请求保持结案；新索价、索目录或约见分别形成新待办。首次读取旧库会迁移仍标为已完成的会话。若旧版曾把已完成状态覆盖为打开且没有关联已发件，该次线下处理已无记录可供恢复。工作台按等待时间从长到短每页 25 项，角标单独统计全部待办。已绑定邮箱之间的来信不生成客户待办。
+
 - 「客户回信」要求 IMAP 收到入站邮件、有有效 In-Reply-To 或 References，且排除了已识别的通知、退信、退订、投诉和内部往来。列表显示邮箱实际收到的来信，不验证发件人的法律身份。没有本地原发件时，保留真实回复头并显示“未找到本地原发件”。无回复头的来信可从单独筛选查看。
 - 客户名称仅来自已知客户地址的唯一匹配。无匹配或多个同地址客户时显示原发件地址。绑定账号之间的邮件归入内部往来，其中带内部 QA 标记的邮件归入内部测试。
 - 查看本邮箱发给该对方的后续邮件时，核对其 In-Reply-To 或最后一个 References 是否指向这封来信的 Message-ID。已有人工/自动提交记录时显示具体处理方式；只有原邮箱发件证据时显示“邮箱已回复”。没有可核对的后续邮件时，客户回信显示“待跟进”。一次新建邮件、改主题另起线程或遗漏已发件历史都可能缺少可核对的关联。
@@ -28,8 +34,10 @@ node scripts/sync-mail-readonly.mjs --data-dir D:\mail-review\outreach --mailbox
 
 2026-11-22 的本地快照含 854 段会话。三个账号的增量 IMAP 读取均成功，新增 0 封。按原文和回复头核对后，7 封外部回信都匹配本邮箱的原发件，其中 3 封已有可关联的后续回信，4 封显示待跟进。另有 1 封待核实回执、28 封自动通知和 42 封退信。这 7 封在快照的 CRM 中均无唯一客户匹配，跟进表显示原发件地址。待跟进表示当前缓存中缺少可关联的后续回信，业务员可打开原线程判断是否需要回复。
 
-对独立 SQLite 副本运行 `node scripts/reclassify-mail-cache.mjs --db <副本的绝对路径>` 可预览已有邮件的分类变化。加 `--apply` 会在同一事务中更新副本的分类与索引。此次重分类后再预演，变更数为 0。
+对独立 SQLite 副本运行 `node scripts/reclassify-mail-cache.mjs --db <副本的绝对路径>` 可预览已有邮件的邮件分类与业务分类变化。加 `--apply` 会在同一事务中更新副本的分类与索引。更新后再预演，变更数应为 0。
 
-`node --test tests/mail-reply-history.test.mjs tests/mailbox-reader.test.mjs tests/mail-conversations.test.mjs` 覆盖真实回复头、无首封历史、跨账号/收件人误关联、内部与机器邮件、分类分页、只读 IMAP、游标重试和并发。测试的性能用例用 1,203 封合成邮件（其中 1,202 封包含 16 KiB 正文）测量首屏、通知筛选和深页，输出重复读取耗时和 JSON 字节数，并核对 SQLite 查询计划；运行测试不接触真实账号。
+`node --test tests/mail-reply-history.test.mjs tests/mailbox-reader.test.mjs tests/mail-conversations.test.mjs tests/positive-reply-reminders.test.mjs` 覆盖真实回复头、无首封历史、跨账号/收件人误关联、内部与机器邮件、分类分页、只读 IMAP、游标重试、并发和积极回复结案。`npm run benchmark:reply-reads` 以 1,203 封含大正文的合成来信测量首页、积极未回复筛选、后续页、工作台待办首末页和提醒角标，通过本机 HTTP 入口输出首次、预热后中位与最慢耗时、响应正文字节数和 SQLite 查询计划；运行测试不接触真实账号。
 
-读取接口为 `GET /api/v1/outreach/reply-history?mailboxId=all&kind=reply&handling=all&page=1`。来信类型支持 `reply`、`inquiry`、`notification`、`unverified`、`bounce`、`unsubscribe`、`complaint`、`internal`、`test`、`all`。处理情况支持 `all`、`answered`、`unanswered`。列表返回元数据，原文和附件在收件箱详情中查看。
+读取接口为 `GET /api/v1/outreach/reply-history?mailboxId=all&kind=reply&businessKind=all&handling=all&page=1`。来信类型支持 `reply`、`inquiry`、`notification`、`unverified`、`bounce`、`unsubscribe`、`complaint`、`internal`、`test`、`all`；业务分类支持 `positive`、`refusal`、`referral`、`notification`、`bounce`、`unverified`、`other`、`all`。处理情况支持 `all`、`answered`、`unanswered`。列表返回分类计数和元数据，原文和附件在收件箱详情中查看。
+
+已唯一关联的退信在首发详情保留诊断及处置。明确无效的地址进入确切地址抑制，其他合格地址继续参与筛选。发件地址错误、临时失败与策略拒收按主要响应及回执的 Action、Status 字段核对，保留诊断。嵌套响应中的地址错误不足以抑制收件人。DNS、连接、临时限制、5.4.1、策略拒收分别提示核查方向。相同投递重复同步仍展示一次，旧库升级时用已缓存通知补充诊断。

@@ -58,6 +58,89 @@ function harness(extra = {}) {
   return { manager, leads };
 }
 
+test('同一计划重启后先研究剩余候选，消费完才从下一条查询接续', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'batch-continuation-'));
+  const path = join(dir, 'jobs.sqlite');
+  const queries = [];
+  const sites = [];
+  const open = () =>
+    harness({
+      path,
+      discover: async (_input, search) => {
+        queries.push(search.query);
+        return {
+          candidates: Array.from({ length: 20 }, (_, n) => ({
+            source_url: `https://candidate-${queries.length}-${n}.example.org`,
+          })),
+        };
+      },
+    }).manager;
+  let manager = open();
+  const run = async (key, target, options = { scheduleId: 'weekly' }) => {
+    const job = manager.create({ ...input, target_count: target }, key, options);
+    await manager.work(job.id);
+    const result = manager.get(job.id);
+    sites.push(...result.rows.map((r) => r.domain));
+    return result;
+  };
+  try {
+    const first = await run('carry-first', 1);
+    assert.equal(first.inserted, 1);
+    manager.close();
+    manager = open();
+    const second = await run('carry-second', 19);
+    assert.equal(second.searches, 0);
+    assert.equal(second.inserted, 19);
+    assert.equal(new Set(sites).size, 20);
+    assert.equal(
+      manager.create({ ...input, target_count: 19 }, 'carry-second', { scheduleId: 'weekly' }).id,
+      second.id,
+    );
+    assert.equal((await run('carry-third', 1)).inserted, 1);
+    assert.deepEqual(
+      queries,
+      searchPlan(input)
+        .slice(0, 2)
+        .map((entry) => entry.query),
+    );
+    const other = await run('other-plan', 1, { scheduleId: 'independent' });
+    assert.equal(other.searches, 1);
+    assert.equal(queries.at(-1), first.queryPlan[0].query);
+  } finally {
+    manager.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('升级后的首轮接续原定时计划搜索游标，不向不同产品或客户库承接', async () => {
+  const { manager } = harness();
+  const schedule = { scheduleId: 'original-plan' };
+  try {
+    const first = manager.create({ ...input, target_count: 1 }, 'upgrade-first', schedule);
+    await manager.work(first.id);
+    // Previous releases only kept the completed job and discarded its backlog.
+    manager.db.exec('DELETE FROM discovery_progress');
+    const next = manager.create(input, 'upgrade-second', schedule);
+    assert.equal(next.cursor, 1);
+    assert.equal(next.carriedCandidates, 0);
+    manager.finish(next, 'stopped');
+    const changed = manager.create(
+      { ...input, product: 'roller shades' },
+      'changed-products',
+      schedule,
+    );
+    assert.equal(changed.cursor, 0);
+    assert.equal(changed.carriedCandidates, 0);
+    manager.finish(changed, 'stopped');
+    manager.scope = 'another-library';
+    const other = manager.create(input, 'another-library', schedule);
+    assert.equal(other.cursor, 0);
+    assert.equal(other.carriedCandidates, 0);
+  } finally {
+    manager.close();
+  }
+});
+
 test('全局淘汰和证据不足的候选不占新增名额，队列继续补找', async () => {
   let count = 0;
   const { manager } = harness({
@@ -151,6 +234,7 @@ test('旧市场任务禁止重新规划或恢复，已有记录不删除', async
     assert.equal(manager.get(job.id).status, 'paused');
     assert.equal(manager.get(job.id).researched, 0);
     assert.equal(manager.get(job.id).searches, 0);
+    assert.equal(manager.stop(job.id).reason, 'stopped');
   } finally {
     manager.close();
   }

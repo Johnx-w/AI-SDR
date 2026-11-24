@@ -11,6 +11,8 @@ export interface OutreachFact {
 
 export interface OutreachProduct {
   materialOnly?: boolean;
+  materialCategory?: string;
+  effectiveDate?: string;
   id: string;
   label?: string;
   name?: string;
@@ -114,6 +116,7 @@ export interface OutreachDelivery {
   createdAt: string;
   sentAt?: string | null;
   bouncedAt?: string;
+  bounce?: { category: string; diagnostic: string; action: string } | null;
   attemptedAt?: string | null;
   skippedAt?: string;
   messageId?: string | null;

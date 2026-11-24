@@ -53,6 +53,9 @@ test('一轮保留所有回复，后发邮件不占用之前回执，按回复�
     second = communicationRoundFields(rounds[1]);
   assert.equal(first.发送内容摘要, graph[0].body);
   assert.equal(first.回复类型, '真人客户回复');
+  assert.deepEqual(first.回信分类, ['客服通知', '其他真人回复']);
+  assert.equal(first.客服通知封数, 2);
+  assert.equal(first.其他真人回复封数, 1);
   for (const m of rounds[0].replies) assert(first.收到回复内容.includes(m.body));
   assert.equal(first.提取客户信息, '联系人：Kyla');
   assert.equal(first.客户需求摘要, '暂不考虑新供应商。');
@@ -124,4 +127,17 @@ test('客户原文证据排除引用历史，完整收信正文仍不截断', ()
   assert(
     communicationRoundFields(communicationRounds([incoming]).rounds[0]).收到回复内容.includes(body),
   );
+});
+test('同轮多封来信保留每类封数和请求选项', () => {
+  const rows = [
+    message('sent', 'outbound', 0),
+    ...['Please send a quote.', 'Please send a catalog.', 'Not interested.'].map((body, i) =>
+      message('r' + i, 'inbound', i + 1, { body, replyAnalysis: { replyType: '真人客户回复' } }),
+    ),
+  ];
+  const fields = communicationRoundFields(communicationRounds(rows).rounds[0]);
+  assert.deepEqual(fields.回信分类, ['积极回复', '明确拒绝']);
+  assert.deepEqual(fields.客户请求, ['索价', '索目录']);
+  assert.equal(fields.积极回复封数, 2);
+  assert.equal(fields.明确拒绝封数, 1);
 });

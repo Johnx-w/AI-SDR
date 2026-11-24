@@ -387,7 +387,7 @@ test('编辑计划保留发送时段，只有显式 null 才清除', async (t) =
   assert.equal(recovered.sendWindow, null);
 });
 
-test('自动开发直接使用客户库无来源邮箱，带固定签名发送且总量严格停在20封', async (t) => {
+test('自动开发使用同域旧地址并跳过无依据跨域邮箱，带固定签名发送且总量严格停在20封', async (t) => {
   const h = harness();
   t.after(() => h.service.close());
   h.state.leads = Array.from({ length: 25 }, (_, i) => buyer(`automatic-${i}`));
@@ -412,7 +412,11 @@ test('自动开发直接使用客户库无来源邮箱，带固定签名发送�
   assert.equal(detail.campaign.stats.draft, 0);
   assert.equal(h.deliveries.length, 20);
   assert.equal(new Set(h.deliveries.map((d) => d.to)).size, 20);
-  assert.equal(h.deliveries[0].to, 'buyer@gmail.com');
+  assert.ok(h.deliveries.every((row) => row.to !== 'buyer@gmail.com'));
+  assert.equal(
+    h.service.deliveries(c.id).find((row) => row.customerId === 'automatic-0').reasonCode,
+    'contact_unverified',
+  );
   assert.ok(
     h.deliveries.every((d) => d.text.endsWith(h.boxes.find((b) => b.id === d.mailboxId).signature)),
   );
@@ -1787,4 +1791,70 @@ test('追信SMTP结果未知不重发也不继续第二次；生成中出现回�
   } finally {
     await g.service.close();
   }
+});
+
+test('首封计划核对监管、平台客服及官网跨域联系方式', async (t) => {
+  const h = harness();
+  t.after(() => h.service.close());
+  const cases = [
+    [
+      'dcb',
+      'enquiries@authority.example',
+      '/privacy',
+      'Lodge a complaint with the Information Commissioner at',
+    ],
+    ['crazy', 'help@radio.example', 'https://radio.example/help', 'Radio customer support:'],
+    [
+      'mastercraft',
+      'office@partner.example',
+      '/contact',
+      'Mastercraft Shutters | Phone 555 | Email:',
+    ],
+    [
+      'homepage',
+      'home@partner.example',
+      '/index.html',
+      'Mastercraft Shutters | Phone 555 | Email:',
+    ],
+    ['platform', 'support@platform.example', '/contact', 'For radio platform support | Email:'],
+    [
+      'platform-cta',
+      'account@platform.example',
+      '/contact',
+      'Third-party radio platform support | Contact us at',
+    ],
+    ['fallback', 'help@radio.example', 'https://radio.example/help', 'Radio customer support:'],
+  ];
+  h.state.leads = cases.map(([id, email, path, label]) => {
+    const lead = buyer(id);
+    if (['mastercraft', 'homepage'].includes(id)) lead.name = 'Mastercraft Shutters';
+    lead.contactEvidence = [
+      {
+        kind: 'email',
+        value: email,
+        source_url: new URL(path, lead.website).href,
+        quote: label + ' ' + email,
+      },
+    ];
+    lead.email = id === 'fallback' ? email + ' ' + lead.email : email;
+    return lead;
+  });
+  await runInternalTest(h);
+  const campaign = await prepare(h);
+  h.service.activate(campaign.id, campaign.revision);
+  const rows = h.service.deliveries(campaign.id);
+  assert.deepEqual(
+    rows
+      .filter((r) => r.status === 'queued')
+      .map((r) => r.to)
+      .sort(),
+    ['home@partner.example', 'info@fallback.example.org', 'office@partner.example'],
+  );
+  assert.deepEqual(
+    rows
+      .filter((r) => r.reasonCode === 'contact_unverified')
+      .map((r) => r.customerId)
+      .sort(),
+    ['crazy', 'dcb', 'platform', 'platform-cta'],
+  );
 });

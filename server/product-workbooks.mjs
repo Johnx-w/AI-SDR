@@ -66,6 +66,14 @@ export async function parseWorkbook(bytes) {
               },
             ],
       );
+      if (
+        cells.length &&
+        headers[0] === '型号或品名' &&
+        headers[2] === '参考价格' &&
+        !cells.some((c) => c.ref === 'C' + (index + 1))
+      ) {
+        cells.splice(2, 0, { ref: 'C' + (index + 1), field: '参考价格', value: '' });
+      }
       if (cells.length) rows.push([sheet, index + 1, cells[0].value, JSON.stringify(cells)]);
     }
     summary.push({ name: sheet, rows: rows.length - start });

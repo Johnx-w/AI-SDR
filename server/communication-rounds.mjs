@@ -1,4 +1,9 @@
 import assert from 'node:assert/strict';
+import {
+  BUSINESS_REPLY_LABELS,
+  POSITIVE_REQUEST_LABELS,
+  emptyBusinessCounts,
+} from '../src/domain/reply-classification.mjs';
 import sanitizeHtml from 'sanitize-html';
 
 export const REPLY_TYPES = ['无回复', '系统自动回复', '真人客户回复', '联系方式失效', '待核实回执'];
@@ -307,6 +312,9 @@ export function communicationRoundFields(round) {
           : anchor.direction === 'outbound'
             ? '无回复'
             : null;
+  const business = replies.map(classifyInboundReply);
+  const counts = emptyBusinessCounts();
+  for (const { kind } of business) counts[kind]++;
   return {
     发送内容摘要: anchor.direction === 'outbound' ? anchor.body || null : null,
     收到回复内容: replies.length
@@ -314,6 +322,13 @@ export function communicationRoundFields(round) {
           .map((message, i) =>
             [
               '【' + stamp(message.occurredAt) + ' 北京时间｜' + types[i] + '】',
+              business[i]
+                ? '回信分类：' +
+                  BUSINESS_REPLY_LABELS[business[i].kind] +
+                  (business[i].requestType
+                    ? '｜客户请求：' + POSITIVE_REQUEST_LABELS[business[i].requestType]
+                    : '')
+                : '',
               message.subject ? '主题：' + message.subject : '',
               message.from || message.sender ? '来信邮箱：' + (message.from || message.sender) : '',
               message.body || '',
@@ -324,6 +339,19 @@ export function communicationRoundFields(round) {
           .join('\n\n')
       : null,
     回复类型: replyType,
+    回信分类: Object.keys(counts)
+      .filter((kind) => counts[kind])
+      .map((kind) => BUSINESS_REPLY_LABELS[kind]),
+    ...Object.fromEntries(
+      Object.entries(counts).map(([kind, n]) => [BUSINESS_REPLY_LABELS[kind] + '封数', n]),
+    ),
+    客户请求: [
+      ...new Set(
+        business
+          .filter((item) => item.requestType)
+          .map((item) => POSITIVE_REQUEST_LABELS[item.requestType]),
+      ),
+    ],
     提取客户信息: join(
       replies.flatMap((message) => String(message.replyAnalysis?.customerInfo || '').split('\n')),
     ),

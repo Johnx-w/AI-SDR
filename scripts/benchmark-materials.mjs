@@ -56,6 +56,38 @@ try {
   });
   await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
   const base = 'http://127.0.0.1:' + app.address().port + '/api/v1/materials?';
+  for (const [label, filter, expected] of [
+    ['回信文件首页', {}, 2500],
+    ['回信文件第100页', { page: 100 }, 2500],
+    ['按文件名查找', { q: 'Catalogue 2499' }, 1],
+    ['只看已选', { ids: ['sample-0001', 'sample-2499'] }, 2],
+  ]) {
+    const times = [];
+    let bytes;
+    for (let i = 0; i < 22; i++) {
+      const start = performance.now();
+      const response = await fetch(base.slice(0, -1) + '/reply-files', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(filter),
+      });
+      assert.equal(response.status, 200);
+      const raw = await response.text(),
+        result = JSON.parse(raw);
+      times.push(performance.now() - start);
+      bytes = Buffer.byteLength(raw);
+      assert.equal(result.total, expected);
+      if (filter.page === 100) assert.equal(result.items[0].id, 'sample-0519');
+    }
+    const cold = times.shift();
+    times.sort((a, b) => a - b);
+    console.log(label, {
+      firstMs: Math.round(cold),
+      p50Ms: Math.round(times[10]),
+      maxMs: Math.round(times.at(-1)),
+      bytes,
+    });
+  }
   for (const [label, params, total, first] of [
     ['首页', {}, count, 2499],
     ['名称升序第2页', { sort: 'name-asc', page: '2' }, count, 1015],

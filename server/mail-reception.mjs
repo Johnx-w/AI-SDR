@@ -4,6 +4,7 @@ import {
   mailDraftBasis,
   signedMailDraft,
 } from './mail-assisted-draft.mjs';
+import { parameterClaimsMatch } from './model-parameters.mjs';
 import { createHash } from 'node:crypto';
 import { requiresProductOrCommercialReview } from './mail-knowledge.mjs';
 
@@ -24,7 +25,12 @@ export async function verifyGrounding(model, basis, { body, sources }) {
   // A number echoed from the customer's question is not a verified product fact.
   const numbers = (text) => text.match(/\d+(?:[.,]\d+)*/gu) || [];
   if (!business) {
-    const facts = new Set(sources.flatMap(({ field, value }) => numbers([field, value].join(' '))));
+    if (!parameterClaimsMatch(body, sources)) return false;
+    const facts = new Set(
+      sources.flatMap(({ item, field, value, conditions }) =>
+        numbers([item, field, value, conditions].join(' ')),
+      ),
+    );
     if (numbers(body).some((n) => !facts.has(n))) return false;
   }
   const content = await model.generate([
@@ -46,7 +52,12 @@ export async function verifyGrounding(model, basis, { body, sources }) {
         subject: basis.mail.subject,
         history: basis.history,
         body,
-        evidence: sources.map(({ field, value }) => ({ field, value })),
+        evidence: sources.map(({ item, field, value, conditions }) => ({
+          item,
+          field,
+          value,
+          conditions,
+        })),
       }),
     },
   ]);
@@ -296,6 +307,7 @@ export class MailReception {
     const businessCorrespondence =
       box.autoBusinessReplies === true &&
       timestamp(m) >= Date.parse(box.businessReplySince) &&
+      !basis.answer.parameterQuery &&
       !basis.answer.sources?.length &&
       !requiresProductOrCommercialReview(basis.mail.subject + '\n' + basis.question, box);
     return {
@@ -323,6 +335,8 @@ export class MailReception {
   }
   guardReply({ id, source, draft, origin, key }) {
     const thread = this.s.conversations.detail(id).conversation;
+    if (draft.attachments?.length)
+      this.s.guardPhotos?.(this.s.replies.boundMailbox(thread), draft, this.s.now());
     if (
       this.suppressed(thread, thread.participant) ||
       (thread.customerId && this.s.customerMailState(thread.customerId).context?.doNotContact)
@@ -470,6 +484,8 @@ export class MailReception {
         !box.paused &&
         basis.eligible &&
         !result.needsManager &&
+        !result.photoNote &&
+        !result.attachments?.length &&
         result.sources.every((source) => basis.answer.sources?.includes(source)) &&
         (await verifyGrounding(model, basis, result));
       if (!stillCurrent()) return;
@@ -477,6 +493,7 @@ export class MailReception {
         row.thread_id,
         {
           ...signedMailDraft(result.body, basis.signature),
+          attachments: result.attachments || [],
           replyToMessageId: m.id,
           expectedRevision: draft?.revision || 0,
         },
@@ -488,12 +505,15 @@ export class MailReception {
           sourceId: source,
           stamp: basis.stamp,
           sources: result.sources,
+          ...(result.photoNote ? { photoNote: result.photoNote } : {}),
           automatic,
-          reason: result.needsManager
-            ? '资料未覆盖全部问题，需与上级确认后跟进'
-            : automatic || !basis.eligible
-              ? basis.reason
-              : '请业务员审核模型草稿后发送',
+          reason:
+            result.photoNote ||
+            (result.needsManager
+              ? '资料未覆盖全部问题，需与上级确认后跟进'
+              : automatic || !basis.eligible
+                ? basis.reason
+                : '请业务员审核模型草稿后发送'),
         },
       );
     }

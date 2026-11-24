@@ -287,6 +287,23 @@ function originalMessageTable(f) {
       type: 3,
       property: options(['无回复', '系统自动回复', '真人客户回复', '联系方式失效']),
     },
+    {
+      field_name: '回信分类',
+      type: 4,
+      property: options([
+        '积极回复',
+        '明确拒绝',
+        '渠道转介',
+        '客服通知',
+        '退信',
+        '待核实',
+        '其他真人回复',
+      ]),
+    },
+    ...['积极回复', '明确拒绝', '渠道转介', '客服通知', '退信', '待核实', '其他真人回复'].map(
+      (label) => ({ field_name: label + '封数', type: 2 }),
+    ),
+    { field_name: '客户请求', type: 4, property: options(['索价', '索目录', '约见']) },
     { field_name: '本次动作指令', type: 3, property: options(['继续跟进找关键人']) },
     { field_name: '关联模板', type: 18, property: { table_id: 't10', multiple: true } },
   ]);
@@ -785,6 +802,8 @@ test('原T3接续已有副本，收发同轮映射共享记录，重启后追加
     assert.equal(result.counts.messages, 1);
     assert(original.fields['收到回复内容'].includes(incoming.body));
     assert.equal(original.fields['回复类型'], '真人客户回复');
+    assert.deepEqual(original.fields['回信分类'], ['其他真人回复']);
+    assert.deepEqual(original.fields['客户请求'], []);
     assert.equal(original.fields['提取客户信息'], '联系人：Buyer');
     for (const row of f.records.get('t1')) assert.deepEqual(row.fields.来源沟通, ['copied-row']);
     assert.deepEqual(f.records.get('t4')[0].fields.关联沟通, ['copied-row']);
@@ -1104,4 +1123,89 @@ test('原T1新增响应丢失时保留待核对，后续新版本不重复新增
   assert.match((await restarted.sync(graph, options)).error, /上次写入仍待核对/);
   assert.equal(f.writes.length, count);
   assert.equal(f.records.get('t1').length, 1);
+});
+
+test('旧T3缺新增分类列仍同步T1/T3，分批补列后更新原记录且不改云表', async () => {
+  for (const original of [false, true]) {
+    const f = fixture();
+    if (original) originalMessageTable(f);
+    const added = f.fields
+      .get('t3')
+      .filter((field) => /^(?:回信分类|客户请求|.+封数)$/u.test(field.field_name));
+    f.fields.set(
+      't3',
+      f.fields.get('t3').filter((field) => !added.includes(field)),
+    );
+    const target = { ...env, ...(original ? { FEISHU_MESSAGES_TABLE_ID: 't3' } : {}) };
+    const journal = [];
+    const bridge = () => new CustomerBusinessFeishu({ env: target, client: f.client, journal });
+    const graph = workspace();
+    Object.assign(graph.messages[0], {
+      body: 'Please send a quotation.',
+      businessKind: 'positive',
+      requestType: 'quote',
+      replyAnalysis: { replyType: '真人客户回复', customerInfo: '', demandSummary: '' },
+    });
+    const before = structuredClone(graph);
+    const options = { products: [{ id: 'product-1', version: 2 }] };
+    assert.equal((await bridge().info()).status, 'ready');
+    let result = await bridge().sync(graph, options);
+    assert.equal(result.status, 'synced', result.error);
+    assert.equal(f.records.get('t1').length, 2);
+    assert.equal(f.records.get('t3').length, 1);
+    const record = f.records.get('t3')[0];
+    assert(!Object.hasOwn(record.fields, '回信分类'));
+    assert(!Object.hasOwn(record.fields, '客户请求'));
+    const classification = added.find((field) => field.field_name === '回信分类');
+    f.fields.get('t3').push(classification);
+    result = await bridge().sync(graph, options);
+    assert.equal(result.status, 'synced', result.error);
+    assert.deepEqual(record.fields.回信分类, original ? ['积极回复'] : '积极回复');
+    assert(!Object.hasOwn(record.fields, '客户请求'));
+    f.fields.get('t3').push(...added.filter((field) => field !== classification));
+    result = await bridge().sync(graph, options);
+    assert.equal(result.status, 'synced', result.error);
+    assert.deepEqual(record.fields.客户请求, original ? ['索价'] : '索价');
+    if (original) {
+      assert.equal(record.fields.积极回复封数, 1);
+      assert.equal(record.fields.其他真人回复封数, 0);
+    }
+    const count = f.writes.length;
+    assert.equal((await bridge().sync(graph, options)).status, 'synced');
+    assert.equal(f.writes.length, count);
+    assert.equal(f.records.get('t3').length, 1);
+    assert(f.writes.every((write) => write.action && !write.path));
+    assert.deepEqual(graph, before);
+  }
+});
+
+test('已存在的分类列类型或选项错误、旧必需列缺失仍阻止写入', async () => {
+  for (const mutate of [
+    (fields) => {
+      fields.find((field) => field.field_name === '回信分类').type = 1;
+    },
+    (fields) => {
+      fields.find((field) => field.field_name === '客户请求').property.options = [];
+    },
+    (fields) => {
+      fields.find((field) => field.field_name === '积极回复封数').type = 1;
+    },
+    (fields) =>
+      fields.splice(
+        fields.findIndex((field) => field.field_name === '回复类型'),
+        1,
+      ),
+  ]) {
+    const f = fixture();
+    originalMessageTable(f);
+    mutate(f.fields.get('t3'));
+    const bridge = new CustomerBusinessFeishu({
+      env: { ...env, FEISHU_MESSAGES_TABLE_ID: 't3' },
+      client: f.client,
+    });
+    const result = await bridge.sync(workspace(), { products: [{ id: 'product-1', version: 2 }] });
+    assert.equal(result.status, 'pending');
+    assert.match(result.error, /字段缺失或类型不符|选项不完整/u);
+    assert.equal(f.writes.length, 0);
+  }
 });

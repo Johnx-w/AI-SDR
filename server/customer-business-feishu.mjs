@@ -11,11 +11,21 @@ import {
 } from './product-knowledge-feishu.mjs';
 import { BUSINESS_TABLE_ID_ENV, mapBusinessFeishuClient } from './feishu-business-client.mjs';
 import {
+  classifyInboundReply,
   communicationRounds,
   communicationRoundFields,
   REPLY_TYPES,
 } from './communication-rounds.mjs';
 
+import {
+  BUSINESS_REPLY_LABELS,
+  POSITIVE_REQUEST_LABELS,
+} from '../src/domain/reply-classification.mjs';
+const replyFieldNames = new Set([
+  '回信分类',
+  '客户请求',
+  ...Object.values(BUSINESS_REPLY_LABELS).map((label) => label + '封数'),
+]);
 const categories = {
   ventilation: '透气窗',
   shutters: '百叶窗',
@@ -144,6 +154,8 @@ export function buildBusinessTableFields(
       scalar('发生时间', 5),
       select('发送结果', messageStatuses),
       select('消息分类', messageKinds),
+      select('回信分类', BUSINESS_REPLY_LABELS),
+      scalar('客户请求'),
       scalar('渠道消息编号'),
       scalar('附件链接'),
       scalar('记录来源'),
@@ -237,6 +249,9 @@ export function buildBusinessTableFields(
         '回复类型',
         REPLY_TYPES.filter((type) => type !== '待核实回执'),
       ),
+      { ...select('回信分类', BUSINESS_REPLY_LABELS), type: 4 },
+      { ...select('客户请求', POSITIVE_REQUEST_LABELS), type: 4 },
+      ...Object.values(BUSINESS_REPLY_LABELS).map((label) => scalar(label + '封数', 2)),
       scalar('提取客户信息'),
       scalar('客户需求摘要'),
       scalar('业务员纪要'),
@@ -283,8 +298,12 @@ export function sameFields(record, expected, definitions) {
       return (
         businessSchemaDigest(unique(actual).sort()) === businessSchemaDigest(unique(value).sort())
       );
+    if (definition.type === 4) {
+      const options = (values) => (values || []).map(text).sort();
+      return businessSchemaDigest(options(actual)) === businessSchemaDigest(options(value));
+    }
     if ([2, 5].includes(definition.type))
-      return value == null ? !text(actual) : Number(actual) === Number(value);
+      return value == null ? !text(actual) : actual != null && Number(actual) === Number(value);
     return text(actual) === text(value);
   });
 }
@@ -441,15 +460,34 @@ export class CustomerBusinessFeishu {
         originalDemands: Boolean(this.env.FEISHU_DEMANDS_TABLE_ID?.trim()),
         originalMessages: Boolean(this.env.FEISHU_MESSAGES_TABLE_ID?.trim()),
       });
-      for (const key of Object.keys(BUSINESS_TABLES))
-        assertSchema(await this.client.fields(ids[key]), expected[key], {
+      let replyFields = [];
+      for (const key of Object.keys(BUSINESS_TABLES)) {
+        const fields = await this.client.fields(ids[key]);
+        if (key === 'messages') {
+          replyFields = fields
+            .map((field) => field.field_name)
+            .filter((name) => replyFieldNames.has(name));
+          // Additive reply columns may be provisioned later; present columns still require the exact schema.
+          expected[key] = expected[key].filter(
+            (field) =>
+              !replyFieldNames.has(field.field_name) || replyFields.includes(field.field_name),
+          );
+        }
+        assertSchema(fields, expected[key], {
           allowMultipleCustomer: Boolean(this.env[BUSINESS_TABLE_ID_ENV[key]]?.trim()),
         });
+      }
       assertSchema(
         await this.client.fields(ids.products),
         isOriginalT5(this.env) ? ORIGINAL_T5_FIELDS : PRODUCT_KNOWLEDGE_FEISHU_FIELDS,
       );
-      return { configured: true, status: 'ready', tables, productsTableId: ids.products };
+      return {
+        configured: true,
+        status: 'ready',
+        tables,
+        productsTableId: ids.products,
+        replyFields,
+      };
     } catch (error) {
       return { configured: false, ...pending(error.message), tables: {} };
     }
@@ -808,7 +846,8 @@ export class CustomerBusinessFeishu {
                 : {}),
             };
           }
-          if (key === 'messages')
+          if (key === 'messages') {
+            const business = entry.direction === 'inbound' ? classifyInboundReply(entry) : null;
             fields = {
               ...common,
               渠道: choice(channels, entry.channel, '沟通渠道'),
@@ -840,7 +879,12 @@ export class CustomerBusinessFeishu {
                   : entry.origin === 'mailbox' || entry.mailboxMessageId
                     ? '邮箱同步'
                     : '人工补录',
+              回信分类: business ? BUSINESS_REPLY_LABELS[business.kind] : null,
+              客户请求: business?.requestType
+                ? POSITIVE_REQUEST_LABELS[business.requestType]
+                : null,
             };
+          }
           if (key === 'messages' && originalMessages) {
             const roundFields = communicationRoundFields(roundById.get(entry.id));
             fields = {
@@ -918,6 +962,9 @@ export class CustomerBusinessFeishu {
                 : {}),
             };
           }
+          if (key === 'messages')
+            for (const name of replyFieldNames)
+              if (!config.replyFields.includes(name)) delete fields[name];
           bases[key].set(entry.id, fields);
         }
       // Validate all local references before any remote business record is written.

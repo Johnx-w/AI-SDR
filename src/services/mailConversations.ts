@@ -46,6 +46,15 @@ export interface MailMessage {
   messageId?: string;
   source: 'imap' | 'outreach' | 'manual' | 'automatic';
   classification?: string;
+  businessKind?:
+    | 'positive'
+    | 'refusal'
+    | 'referral'
+    | 'notification'
+    | 'bounce'
+    | 'unverified'
+    | 'other';
+  requestType?: 'quote' | 'catalog' | 'meeting';
 }
 
 export interface MailInlineImage {
@@ -73,6 +82,7 @@ export interface MailReplyDraft extends MailDraftContent {
     sources: ReplySource[];
     sourceId?: string;
     generator?: 'model';
+    photoNote?: string;
     model?: string;
     reason?: string;
   };

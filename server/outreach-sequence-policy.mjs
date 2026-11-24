@@ -35,7 +35,23 @@ export function sequencePolicy(db, revision) {
           .prepare('SELECT revision,data FROM outreach_sequence_policies WHERE revision=?')
           .get(revision);
   if (!row) throw fail(409, '原跟进策略版本不存在');
-  return { revision: row.revision, ...JSON.parse(row.data) };
+  return {
+    revision: row.revision,
+    firstInstruction: '',
+    firstBodyInstruction: '',
+    ...JSON.parse(row.data),
+  };
+}
+
+export function writingInstruction(value, allowEmpty = false) {
+  if (
+    typeof value !== 'string' ||
+    (!allowEmpty && !value.trim()) ||
+    value.trim().length > 1200 ||
+    /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/u.test(value)
+  )
+    throw fail(400, '写作要求最多 1200 字，跟进步骤必须填写写作要求');
+  return value.trim();
 }
 
 export function saveSequencePolicy(service, input) {
@@ -51,13 +67,7 @@ export function saveSequencePolicy(service, input) {
       const day = item?.day;
       if (!Number.isSafeInteger(day) || day < 1 || day > 365)
         throw fail(400, '跟进日必须为首封后 1 至 365 的整数天');
-      const instruction = typeof item.instruction === 'string' ? item.instruction.trim() : '';
-      if (
-        !instruction ||
-        instruction.length > 1200 ||
-        /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/u.test(instruction)
-      )
-        throw fail(400, '每个步骤需填写 1 至 1200 字的写作要求');
+      const instruction = writingInstruction(item.instruction);
       return { day, instruction };
     })
     .sort((a, b) => a.day - b.day);
@@ -65,7 +75,17 @@ export function saveSequencePolicy(service, input) {
     throw fail(400, '同一天只能安排一个跟进步骤');
   return service.transaction(() => {
     const current = sequencePolicy(service.db);
+    const firstInstruction =
+      input.firstInstruction === undefined
+        ? current.firstInstruction
+        : writingInstruction(input.firstInstruction, true);
+    const firstBodyInstruction =
+      input.firstBodyInstruction === undefined
+        ? current.firstBodyInstruction
+        : writingInstruction(input.firstBodyInstruction, true);
     if (
+      firstBodyInstruction === current.firstBodyInstruction &&
+      firstInstruction === current.firstInstruction &&
       input.revision <= current.revision &&
       name === current.name &&
       JSON.stringify(steps) === JSON.stringify(current.steps)
@@ -76,8 +96,8 @@ export function saveSequencePolicy(service, input) {
     const revision = current.revision + 1;
     service.db
       .prepare('INSERT INTO outreach_sequence_policies VALUES(?,?)')
-      .run(revision, JSON.stringify({ name, steps }));
-    return { revision, name, steps };
+      .run(revision, JSON.stringify({ name, firstInstruction, firstBodyInstruction, steps }));
+    return { revision, name, firstInstruction, firstBodyInstruction, steps };
   });
 }
 
