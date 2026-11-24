@@ -29,6 +29,7 @@ import { answerMailQuestion } from './mail-knowledge.mjs';
 import { MAX_PRODUCT_DOCUMENT_BYTES } from './product-documents.mjs';
 import { ProductKnowledgeFeishu } from './product-knowledge-feishu.mjs';
 import { CustomerBusinessApi } from './customer-business-api.mjs';
+import { readCustomerTimeline, timelineOriginal } from './customer-timeline.mjs';
 import { searchPlan } from './search-plan.mjs';
 import { OutreachMailboxes } from './outreach-mailboxes.mjs';
 import { OutreachService } from './outreach-service.mjs';
@@ -554,6 +555,21 @@ export function createApp({
               idempotencyKey: requireIdempotencyKey,
             }),
           );
+        }
+        const timeline = url.pathname.match(
+          /^\/api\/v1\/business\/timeline\/([\w-]{1,100})(?:\/(message|delivery|followup)\/([\w-]+))?$/,
+        );
+        if (timeline && request.method === 'GET') {
+          const store = business.state().store;
+          const result = timeline[2]
+            ? timelineOriginal(store, outreach(), timeline[1], timeline[2], timeline[3])
+            : readCustomerTimeline(
+                store,
+                outreach(),
+                timeline[1],
+                url.searchParams.get('page') || 1,
+              );
+          return json(response, 200, result);
         }
         if (url.pathname === '/api/v1/business' || url.pathname.startsWith('/api/v1/business/')) {
           const result = await business.handle(request, url, readJson);

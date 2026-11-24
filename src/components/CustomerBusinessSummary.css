@@ -1,28 +1,85 @@
 .customer-business-summary p {
   color: var(--color-text-secondary);
-  line-height: 1.75;
-}
-.customer-business-summary h3 {
-  margin: 24px 0 12px;
-  font-size: 15px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
 }
 .business-summary-links {
   display: flex;
   gap: 10px;
+  align-items: center;
   flex-wrap: wrap;
-  margin: 18px 0;
+  margin: 16px 0;
 }
-.business-summary-row {
-  display: grid;
-  gap: 7px;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--color-border);
+.customer-business-summary h3 {
+  margin: 22px 0 12px;
+  font-size: 15px;
 }
-.business-summary-row span {
+.customer-business-summary h3 small {
+  font-size: 12px;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-weight: 400;
+  margin-left: 6px;
 }
-.business-summary-row a {
-  color: var(--color-primary-text);
+.timeline-day {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr);
+  gap: 12px;
+  margin: 16px 0;
+}
+.timeline-day h4 {
   font-size: 12px;
+  color: var(--color-text-secondary);
+  margin: 12px 0;
+}
+.timeline-day ul {
+  margin: 0;
+  padding: 0 0 0 12px;
+  list-style: none;
+  border-left: 2px solid var(--color-border);
+}
+.timeline-day li {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: start;
+  border-bottom: 1px solid var(--color-border);
+  padding: 10px 0;
+}
+.timeline-day li > svg {
+  margin-top: 3px;
+  color: var(--color-text-muted);
+}
+.timeline-day li > div,
+.timeline-original {
+  overflow-wrap: anywhere;
+}
+.timeline-day li a,
+.timeline-day li button,
+.timeline-day li strong {
+  font-size: 13px;
+  text-align: left;
+  font-weight: 600;
+}
+.timeline-day li small {
+  display: block;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-top: 4px;
+}
+@media (max-width: 600px) {
+  .timeline-day {
+    display: block;
+  }
+  .timeline-day h4 {
+    margin: 0 0 3px;
+  }
+  .timeline-day ul {
+    padding-left: 10px;
+  }
+  .timeline-day li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .timeline-day li > svg {
+    display: none;
+  }
 }
