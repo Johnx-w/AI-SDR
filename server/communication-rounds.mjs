@@ -177,6 +177,55 @@ export function incomingClassification(message) {
   return replyType === '待核实回执' ? 'unverified' : 'normal';
 }
 
+const refusalEvidence =
+  /\b(?:not interested|no (?:current )?(?:interest|need)|not looking for|do not (?:buy|purchase|source|need|wish)|don(?:'|’)t (?:buy|purchase|source|need|wish)|not (?:adding|considering|seeking) (?:a )?(?:new )?supplier|manufactur(?:e|ed|ing) .{0,80}\bin[- ]house|remove (?:me|us) from (?:future|your) (?:sales |marketing |email )?(?:outreach|messages|list))\b|暂不(?:考虑|采购|需要)|不(?:感兴趣|考虑新供应商|外采)/iu;
+const referralEvidence =
+  /\b(?:submit|send|direct) (?:all |your |supplier |business |commercial )*(?:enquir(?:y|ies)|inquir(?:y|ies)|proposal|application)s? (?:through|to|via|using) (?:our |the )?(?:commercial |business |supplier |vendor )?(?:contact |enquiry |inquiry |registration |application )?form\b|\b(?:supplier|vendor) (?:registration|application) (?:page|portal|form)\b|请通过.{0,30}(?:商务|供应商|采购).{0,12}(?:表单|页面|入口)/iu;
+const positiveEvidence = {
+  quote:
+    /\b(?:send|share|provide|request|need|like|want|see|receive|get|have)\b.{0,80}\b(?:price(?: list| sheet| details| information|s)?|pricing|quotation|quote)\b|\b(?:price(?: list| sheet)|pricing|quotation|quote)\b.{0,80}\b(?:please|send|share|provide|request|need|like|want|see|receive|get)\b|(?:索价|报价|价目表)/iu,
+  catalog:
+    /\b(?:send|share|provide|request|need|like|want|see|receive|get|have)\b.{0,80}\b(?:catalog(?:ue)?|brochure|product (?:range|sheet|literature))\b|\b(?:catalog(?:ue)?|brochure)\b.{0,80}\b(?:please|send|share|provide|request|need|like|want|see|receive|get)\b|(?:产品)?(?:目录|型录)/iu,
+  meeting:
+    /\b(?:arrange|schedule|book|have|join|accept|agree to|happy to|available for)\b.{0,80}\b(?:meeting|call|video call|appointment)\b|\b(?:meeting|call|appointment)\b.{0,80}\b(?:next week|tomorrow|available|schedule|arrange|happy|interested)\b|(?:同意|安排|预约).{0,12}(?:会面|会议|通话)/iu,
+};
+
+/** Shared deterministic business classification for inbox, ledger and reminders. */
+export function classifyInboundReply(message) {
+  if (message.businessKind)
+    return { kind: message.businessKind, requestType: message.requestType || null };
+  const raw = customerReplyText({ body: message.bodyText || message.body || '' });
+  const divider = raw.search(helpdeskDivider);
+  const customerPart = divider > 0 ? raw.slice(0, divider).trim() : raw;
+  const classification = incomingClassification(message);
+  // A helpdesk reply typed above its divider is customer evidence even though the
+  // footer below it is an automated receipt.
+  const humanAboveTicket = divider > 0 && customerPart;
+  if (!humanAboveTicket) {
+    if (classification === 'hard_bounce') return { kind: 'bounce', requestType: null };
+    if (classification === 'auto_reply') return { kind: 'notification', requestType: null };
+    if (classification === 'unverified') return { kind: 'unverified', requestType: null };
+    if (
+      /^\s*automatic reply\b/iu.test(customerPart) ||
+      (/\bwe have received your (?:request|message|inquiry|enquiry)\b/iu.test(customerPart) &&
+        ticketNumber.test(customerPart))
+    )
+      return { kind: 'notification', requestType: null };
+  }
+  const analyzed = String(message.replyAnalysis?.demandSummary || '');
+  if (
+    refusalEvidence.test(customerPart + '\n' + analyzed) ||
+    ['unsubscribe', 'complaint'].includes(classification)
+  )
+    return { kind: 'refusal', requestType: null };
+  if (referralEvidence.test(customerPart)) return { kind: 'referral', requestType: null };
+  for (const requestType of ['quote', 'catalog', 'meeting'])
+    if (positiveEvidence[requestType].test(customerPart)) return { kind: 'positive', requestType };
+  if (!customerPart || customerPart === '（邮件正文为空）')
+    return { kind: 'unverified', requestType: null };
+  return { kind: 'other', requestType: null };
+}
+
 const externalId = (value) =>
   String(value || '')
     .trim()
@@ -258,6 +307,27 @@ export function communicationRoundFields(round) {
           : anchor.direction === 'outbound'
             ? '无回复'
             : null;
+  const business = replies.map(classifyInboundReply);
+  const businessPriority = [
+    'positive',
+    'refusal',
+    'referral',
+    'notification',
+    'bounce',
+    'unverified',
+    'other',
+  ];
+  const businessKind = businessPriority.find((kind) => business.some((item) => item.kind === kind));
+  const businessLabels = {
+    positive: '积极回复',
+    refusal: '明确拒绝',
+    referral: '渠道转介',
+    notification: '客服通知',
+    bounce: '退信',
+    unverified: '待核实',
+    other: '其他真人回复',
+  };
+  const requestLabels = { quote: '索价', catalog: '索目录', meeting: '约见' };
   return {
     发送内容摘要: anchor.direction === 'outbound' ? anchor.body || null : null,
     收到回复内容: replies.length
@@ -265,6 +335,13 @@ export function communicationRoundFields(round) {
           .map((message, i) =>
             [
               '【' + stamp(message.occurredAt) + ' 北京时间｜' + types[i] + '】',
+              business[i]
+                ? '回信分类：' +
+                  businessLabels[business[i].kind] +
+                  (business[i].requestType
+                    ? '｜客户请求：' + requestLabels[business[i].requestType]
+                    : '')
+                : '',
               message.subject ? '主题：' + message.subject : '',
               message.from || message.sender ? '来信邮箱：' + (message.from || message.sender) : '',
               message.body || '',
@@ -275,6 +352,8 @@ export function communicationRoundFields(round) {
           .join('\n\n')
       : null,
     回复类型: replyType,
+    回信分类: businessKind ? businessLabels[businessKind] : null,
+    客户请求: join(business.map((item) => requestLabels[item.requestType])),
     提取客户信息: join(
       replies.flatMap((message) => String(message.replyAnalysis?.customerInfo || '').split('\n')),
     ),

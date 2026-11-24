@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { incomingClassification } from '../server/communication-rounds.mjs';
+import { classifyInboundReply, incomingClassification } from '../server/communication-rounds.mjs';
 import { MailConversations } from '../server/mail-conversations.mjs';
 import { reclassifyMailCache } from '../scripts/reclassify-mail-cache.mjs';
 
@@ -84,6 +84,77 @@ test('客服回执须有组合证据；通用时限与无正文须核实，引�
     assert.equal(incomingClassification({ ...base, ...input }), result, JSON.stringify(input));
 });
 
+test('35 条审计口径的脱敏合成回放统一区分积极、拒绝、转介、通知、退信和待核实', () => {
+  const positive = [
+    'Please send your price list for the finished shutters.',
+    'Could you share your latest product catalogue?',
+    'We are interested and would be happy to arrange a meeting next week.',
+  ];
+  const refusal = [
+    'We are not interested in adding a new supplier.',
+    'We manufacture our curtains in house and do not buy finished curtains externally.',
+    'No thank you, please remove us from future sales outreach.',
+  ];
+  const referral = ['Please submit supplier enquiries through our commercial contact form.'];
+  const notifications = Array.from({ length: 22 }, (_, index) =>
+    index === 0
+      ? divider +
+        '\nYour request (88412) has been received and is being reviewed.\n> Please send a quote and catalogue.'
+      : index % 2
+        ? `Automatic reply: our support team has received case #${88000 + index}.`
+        : `We have received your request. Ticket number: QA-${88000 + index}. Our team is reviewing it.`,
+  );
+  const bounces = Array.from(
+    { length: 5 },
+    (_, index) => `Address not found. User ${index + 1} does not exist.`,
+  );
+  const samples = [
+    ...positive.map((bodyText) => ({ bodyText, expected: 'positive' })),
+    ...refusal.map((bodyText) => ({ bodyText, expected: 'refusal' })),
+    ...referral.map((bodyText) => ({ bodyText, expected: 'referral' })),
+    ...notifications.map((bodyText) => ({ bodyText, expected: 'notification' })),
+    ...bounces.map((bodyText) => ({
+      bodyText,
+      from: 'postmaster@buyer.example',
+      subject: 'Delivery failure',
+      expected: 'bounce',
+    })),
+    { bodyText: '', expected: 'unverified' },
+  ];
+  const counts = {};
+  for (const sample of samples) {
+    const result = classifyInboundReply({ ...base, ...sample });
+    assert.equal(result.kind, sample.expected, sample.bodyText);
+    counts[result.kind] = (counts[result.kind] || 0) + 1;
+  }
+  assert.equal(samples.length, 35);
+  assert.deepEqual(counts, {
+    positive: 3,
+    refusal: 3,
+    referral: 1,
+    notification: 22,
+    bounce: 5,
+    unverified: 1,
+  });
+  assert.deepEqual(
+    positive.map((bodyText) => classifyInboundReply({ ...base, bodyText }).requestType),
+    ['quote', 'catalog', 'meeting'],
+  );
+});
+
+test('客服工单分隔线上方的真人索价优先于下方受理通知', () => {
+  assert.deepEqual(
+    classifyInboundReply({
+      ...base,
+      bodyText:
+        'Please send your price list.\n' +
+        divider +
+        '\nYour request (88412) has been received and is being reviewed.',
+    }),
+    { kind: 'positive', requestType: 'quote' },
+  );
+});
+
 test('克隆库重分类预演无写入，回填同步索引且重复执行无变更', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'mail-receipts-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
@@ -117,6 +188,7 @@ test('克隆库重分类预演无写入，回填同步索引且重复执行无�
       considered: 4,
       changes: 3,
       transitions: { 'normal → auto_reply': 1, 'normal → unverified': 2 },
+      businessTransitions: {},
     });
     assert.equal(store.replyHistory({ kind: 'reply' }).total, 4);
     assert.equal(reclassifyMailCache(path, true).changes, 3);

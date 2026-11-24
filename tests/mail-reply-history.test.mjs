@@ -154,6 +154,54 @@ test('历史回信没有本地首封也可筛选；不以主题补造父件或 C
   await assert.rejects(historyApi(store, 'kind=fake'), { status: 400 });
 });
 
+test('回信历史按共享业务分类返回稳定计数、请求类型并支持筛选', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  const store = new MailConversations({ db, mailboxes: endpoints() });
+  const fixtures = [
+    [101, 'Please send your price list.', 'positive', 'quote'],
+    [102, 'Could you share the latest catalogue?', 'positive', 'catalog'],
+    [103, 'We are not interested in a new supplier.', 'refusal', null],
+    [
+      104,
+      'Please submit supplier enquiries through our commercial contact form.',
+      'referral',
+      null,
+    ],
+    [105, 'Automatic reply: our support team received case #88412.', 'notification', null],
+    [106, '', 'unverified', null],
+  ];
+  for (const [id, bodyText] of fixtures)
+    store.putMessage(box, incoming(id, { bodyText, inReplyTo: '<seed@company.example>' }));
+  const all = await historyApi(store, 'kind=all');
+  assert.deepEqual(all.businessCounts, {
+    positive: 2,
+    refusal: 1,
+    referral: 1,
+    notification: 1,
+    bounce: 0,
+    unverified: 1,
+    other: 0,
+  });
+  for (const [id, , businessKind, requestType] of fixtures) {
+    const item = all.items.find(
+      (row) =>
+        row.id.includes('email_') &&
+        row.subject === 'Re: Product' &&
+        row.businessKind === businessKind &&
+        row.requestType === requestType,
+    );
+    assert.ok(item, String(id));
+  }
+  const positive = await historyApi(store, 'kind=all&businessKind=positive');
+  assert.equal(positive.total, 2);
+  assert.deepEqual(
+    new Set(positive.items.map((item) => item.requestType)),
+    new Set(['quote', 'catalog']),
+  );
+  await assert.rejects(historyApi(store, 'businessKind=unknown'), { status: 400 });
+});
+
 test('有回复仅列含外部客户回信证据的会话，分页总数及所有筛选与跟进历史一致', async (t) => {
   const db = new DatabaseSync(':memory:');
   t.after(() => db.close());

@@ -53,6 +53,7 @@ test('一轮保留所有回复，后发邮件不占用之前回执，按回复�
     second = communicationRoundFields(rounds[1]);
   assert.equal(first.发送内容摘要, graph[0].body);
   assert.equal(first.回复类型, '真人客户回复');
+  assert.equal(first.回信分类, '明确拒绝');
   for (const m of rounds[0].replies) assert(first.收到回复内容.includes(m.body));
   assert.equal(first.提取客户信息, '联系人：Kyla');
   assert.equal(first.客户需求摘要, '暂不考虑新供应商。');

@@ -6,6 +6,8 @@
 
 在「客户回信」下可用「处理情况」筛出待跟进或已有回复的邮件。没有明确业务内容、只有通用收件承诺的回执单列在「待核实回执」。客服工单标记、明确的系统回执正文及标准自动回复头用于识别通知。可疑回执留给业务员核对。
 
+「业务分类」在收件箱、来信跟进和沟通台账之间共用。积极回复进一步标记索价、索目录或约见；其余分为明确拒绝、渠道转介、客服通知、退信、待核实和其他真人回复。判断只使用客户本次正文，排除回复头之后或引用块中的我方历史内容。客服工单分隔线上方若有客户新写的请求，以该请求为准；只有工单正文或自动受理证据时归客服通知。筛选上方的计数与当前邮箱、来信类型和处理状态范围一致。
+
 - 「客户回信」要求 IMAP 收到入站邮件、有有效 In-Reply-To 或 References，且排除了已识别的通知、退信、退订、投诉和内部往来。列表显示邮箱实际收到的来信，不验证发件人的法律身份。没有本地原发件时，保留真实回复头并显示“未找到本地原发件”。无回复头的来信可从单独筛选查看。
 - 客户名称仅来自已知客户地址的唯一匹配。无匹配或多个同地址客户时显示原发件地址。绑定账号之间的邮件归入内部往来，其中带内部 QA 标记的邮件归入内部测试。
 - 查看本邮箱发给该对方的后续邮件时，核对其 In-Reply-To 或最后一个 References 是否指向这封来信的 Message-ID。已有人工/自动提交记录时显示具体处理方式；只有原邮箱发件证据时显示“邮箱已回复”。没有可核对的后续邮件时，客户回信显示“待跟进”。一次新建邮件、改主题另起线程或遗漏已发件历史都可能缺少可核对的关联。
@@ -28,8 +30,8 @@ node scripts/sync-mail-readonly.mjs --data-dir D:\mail-review\outreach --mailbox
 
 2026-11-22 的本地快照含 854 段会话。三个账号的增量 IMAP 读取均成功，新增 0 封。按原文和回复头核对后，7 封外部回信都匹配本邮箱的原发件，其中 3 封已有可关联的后续回信，4 封显示待跟进。另有 1 封待核实回执、28 封自动通知和 42 封退信。这 7 封在快照的 CRM 中均无唯一客户匹配，跟进表显示原发件地址。待跟进表示当前缓存中缺少可关联的后续回信，业务员可打开原线程判断是否需要回复。
 
-对独立 SQLite 副本运行 `node scripts/reclassify-mail-cache.mjs --db <副本的绝对路径>` 可预览已有邮件的分类变化。加 `--apply` 会在同一事务中更新副本的分类与索引。此次重分类后再预演，变更数为 0。
+对独立 SQLite 副本运行 `node scripts/reclassify-mail-cache.mjs --db <副本的绝对路径>` 可预览已有邮件的邮件分类与业务分类变化。加 `--apply` 会在同一事务中更新副本的分类与索引。更新后再预演，变更数应为 0。
 
 `node --test tests/mail-reply-history.test.mjs tests/mailbox-reader.test.mjs tests/mail-conversations.test.mjs` 覆盖真实回复头、无首封历史、跨账号/收件人误关联、内部与机器邮件、分类分页、只读 IMAP、游标重试和并发。测试的性能用例用 1,203 封合成邮件（其中 1,202 封包含 16 KiB 正文）测量首屏、通知筛选和深页，输出重复读取耗时和 JSON 字节数，并核对 SQLite 查询计划；运行测试不接触真实账号。
 
-读取接口为 `GET /api/v1/outreach/reply-history?mailboxId=all&kind=reply&handling=all&page=1`。来信类型支持 `reply`、`inquiry`、`notification`、`unverified`、`bounce`、`unsubscribe`、`complaint`、`internal`、`test`、`all`。处理情况支持 `all`、`answered`、`unanswered`。列表返回元数据，原文和附件在收件箱详情中查看。
+读取接口为 `GET /api/v1/outreach/reply-history?mailboxId=all&kind=reply&businessKind=all&handling=all&page=1`。来信类型支持 `reply`、`inquiry`、`notification`、`unverified`、`bounce`、`unsubscribe`、`complaint`、`internal`、`test`、`all`；业务分类支持 `positive`、`refusal`、`referral`、`notification`、`bounce`、`unverified`、`other`、`all`。处理情况支持 `all`、`answered`、`unanswered`。列表返回分类计数和元数据，原文和附件在收件箱详情中查看。

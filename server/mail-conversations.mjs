@@ -3,7 +3,7 @@ import { initializeThreadWorkflow, mergeThreadWorkflow } from './mail-thread-wor
 import { createHash } from 'node:crypto';
 import { setImmediate as yieldToRequests } from 'node:timers/promises';
 import { mailSyncFailure } from './mail-sync-errors.mjs';
-import { incomingClassification } from './communication-rounds.mjs';
+import { classifyInboundReply, incomingClassification } from './communication-rounds.mjs';
 import { initializeReplyHistory, listReplyHistory } from './mail-reply-history.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -105,6 +105,39 @@ export class MailConversations {
         )
         UPDATE mailbox_threads AS t SET data=json_set(t.data,'$.participantName',trim(names.name))
           FROM names WHERE names.ordinal=1 AND names.thread_id=t.id`);
+      });
+    if (!this.db.prepare('SELECT 1 FROM mailbox_summary_migrations WHERE version=2').get())
+      this.transaction(() => {
+        if (
+          !this.db.prepare('INSERT OR IGNORE INTO mailbox_summary_migrations VALUES(2)').run()
+            .changes
+        )
+          return;
+        const update = this.db.prepare('UPDATE mailbox_thread_messages SET data=? WHERE id=?');
+        const rows = this.db
+          .prepare(
+            `SELECT id,data FROM mailbox_thread_messages
+             WHERE json_extract(data,'$.direction')='inbound'
+             AND json_extract(data,'$.source')='imap'`,
+          )
+          .all();
+        for (const row of rows) {
+          const message = JSON.parse(row.data);
+          const business = classifyInboundReply({
+            ...message,
+            businessKind: undefined,
+            requestType: undefined,
+          });
+          if (
+            message.businessKind === business.kind &&
+            (message.requestType || null) === (business.requestType || null)
+          )
+            continue;
+          message.businessKind = business.kind;
+          if (business.requestType) message.requestType = business.requestType;
+          else delete message.requestType;
+          update.run(JSON.stringify(message), row.id);
+        }
       });
   }
 
@@ -351,6 +384,14 @@ export class MailConversations {
               : old.classification,
           attachments: input.attachments ? attachmentMetadata(input.attachments) : old.attachments,
         };
+        if (input.direction === 'inbound') {
+          const business = classifyInboundReply(enriched);
+          enriched = {
+            ...enriched,
+            businessKind: business.kind,
+            requestType: business.requestType || undefined,
+          };
+        }
       }
       if (
         ['outreach', 'manual', 'automatic'].includes(old.source) &&
@@ -398,6 +439,11 @@ export class MailConversations {
       source: input.source,
       unread: input.direction === 'inbound' && input.unread !== false,
     };
+    if (data.direction === 'inbound') {
+      const business = classifyInboundReply(data);
+      data.businessKind = business.kind;
+      data.requestType = business.requestType || undefined;
+    }
     this.db
       .prepare('INSERT INTO mailbox_thread_messages VALUES(?,?,?,?)')
       .run(id, accountKey, threadId, JSON.stringify(data));

@@ -20,6 +20,17 @@ const handling = {
   sent: '邮箱已回复',
   unanswered: '未见后续回信',
 };
+const businessKinds = {
+  all: '全部业务分类',
+  positive: '积极回复',
+  refusal: '明确拒绝',
+  referral: '渠道转介',
+  notification: '客服通知',
+  bounce: '退信',
+  unverified: '待核实',
+  other: '其他真人回复',
+};
+const requestTypes = { quote: '索价', catalog: '索目录', meeting: '约见' };
 interface Row {
   id: string;
   threadId: string;
@@ -32,6 +43,8 @@ interface Row {
   companyName: string | null;
   hasLocalParent: boolean;
   handling: keyof typeof handling;
+  businessKind: Exclude<keyof typeof businessKinds, 'all'>;
+  requestType: keyof typeof requestTypes | null;
 }
 interface Result {
   items: Row[];
@@ -39,10 +52,12 @@ interface Result {
   page: number;
   pageSize: number;
   mailboxes: { id: string; email: string }[];
+  businessCounts: Record<Exclude<keyof typeof businessKinds, 'all'>, number>;
 }
 export function MailReplyHistory({ revision }: { revision: number }) {
   const [mailbox, setMailbox] = useState('all'),
     [kind, setKind] = useState<keyof typeof kinds>('reply'),
+    [businessKind, setBusinessKind] = useState<keyof typeof businessKinds>('all'),
     [replyState, setReplyState] = useState('all'),
     [page, setPage] = useState(1);
   const [result, setResult] = useState<Result | null>(null),
@@ -55,6 +70,7 @@ export function MailReplyHistory({ revision }: { revision: number }) {
     const params = new URLSearchParams({
       mailboxId: mailbox,
       kind,
+      businessKind,
       handling: replyState,
       page: String(page),
     });
@@ -75,7 +91,7 @@ export function MailReplyHistory({ revision }: { revision: number }) {
     }
     void load();
     return () => abort.abort();
-  }, [mailbox, kind, replyState, page, revision]);
+  }, [mailbox, kind, businessKind, replyState, page, revision]);
   return (
     <section className="business-replies" aria-label="邮箱来信跟进">
       <div className="business-filters">
@@ -92,6 +108,22 @@ export function MailReplyHistory({ revision }: { revision: number }) {
             {boxes.map((b) => (
               <option key={b.id} value={b.id}>
                 {b.email}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          业务分类
+          <select
+            value={businessKind}
+            onChange={(e) => {
+              setBusinessKind(e.target.value as keyof typeof businessKinds);
+              setPage(1);
+            }}
+          >
+            {Object.entries(businessKinds).map(([key, label]) => (
+              <option key={key} value={key}>
+                {label}
               </option>
             ))}
           </select>
@@ -130,6 +162,16 @@ export function MailReplyHistory({ revision }: { revision: number }) {
           </label>
         )}
       </div>
+      {result && (
+        <p className="outreach-hint">
+          {Object.entries(result.businessCounts)
+            .map(
+              ([key, count]) =>
+                `${businessKinds[key as keyof typeof result.businessCounts]} ${count}`,
+            )
+            .join(' · ')}
+        </p>
+      )}
       {error ? (
         <p role="alert">{error}</p>
       ) : !result ? (
@@ -143,6 +185,7 @@ export function MailReplyHistory({ revision }: { revision: number }) {
                   {[
                     '客户 / 发件人',
                     '邮件主题',
+                    '业务分类',
                     '收件邮箱',
                     '收件时间（北京）',
                     '依据',
@@ -173,6 +216,10 @@ export function MailReplyHistory({ revision }: { revision: number }) {
                       >
                         {r.subject || '（无主题）'}
                       </Link>
+                    </td>
+                    <td>
+                      {businessKinds[r.businessKind]}
+                      {r.requestType && <small>{requestTypes[r.requestType]}</small>}
                     </td>
                     <td>{r.account}</td>
                     <td>

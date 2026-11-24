@@ -85,6 +85,20 @@ const classLabels: Record<string, string> = {
   unsubscribe: '退订',
   complaint: '投诉',
 };
+const businessLabels: Record<string, string> = {
+  positive: '积极回复',
+  refusal: '明确拒绝',
+  referral: '渠道转介',
+  notification: '客服通知',
+  bounce: '退信',
+  unverified: '待核实',
+  other: '其他真人回复',
+};
+const requestLabels: Record<string, string> = {
+  quote: '索价',
+  catalog: '索目录',
+  meeting: '约见',
+};
 export function MailConversationTimeline({
   conversation,
   messages,
@@ -163,9 +177,10 @@ export function MailConversationTimeline({
                       <b title={mail.from}>{author}</b>
                       <small>发给 {mail.to}</small>
                     </span>
-                    {mail.direction === 'inbound' && classLabels[mail.classification || ''] && (
+                    {mail.direction === 'inbound' && businessLabels[mail.businessKind || ''] && (
                       <span className="inbox-mail-kind">
-                        {classLabels[mail.classification || '']}
+                        {businessLabels[mail.businessKind || '']}
+                        {mail.requestType ? ` · ${requestLabels[mail.requestType]}` : ''}
                       </span>
                     )}
                     <span className="inbox-snippet">{mail.subject || '（无主题）'}</span>
@@ -195,7 +210,9 @@ export function MailConversationTimeline({
                         <dt>分类</dt>
                         <dd>
                           {mail.direction === 'inbound'
-                            ? classLabels[mail.classification || ''] || '客户来信'
+                            ? businessLabels[mail.businessKind || ''] ||
+                              classLabels[mail.classification || ''] ||
+                              '客户来信'
                             : operation?.origin === 'automatic' || mail.source === 'automatic'
                               ? '自动回复'
                               : '发出'}
