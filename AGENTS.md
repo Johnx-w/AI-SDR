@@ -61,6 +61,10 @@
 
 Issues and specs live in this repo's GitHub Issues; use the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
+### Triage labels
+
+Use the default triage label vocabulary. See `docs/agents/triage-labels.md`.
+
 ### Domain docs
 
 Use the single-context layout: root `GLOSSARY.md` and `docs/adr/`. See `docs/agents/domain.md`.

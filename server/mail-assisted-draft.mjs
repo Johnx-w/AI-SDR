@@ -249,9 +249,7 @@ export async function composeMailDraft(service, basis, model) {
     }
   }
   const query = [basis.mail.subject, basis.question].join(' ');
-  const match = declinesPhotos(query)
-    ? { attachments: [] }
-    : service.photoOptions?.(basis, null, true);
+  const match = declinesPhotos(query) ? { attachments: [] } : service.matchDraftPhotos?.(basis);
   const attachments = match?.attachments ?? service.draftPhotos?.(basis.sources, query) ?? [];
   const messages = [
     {

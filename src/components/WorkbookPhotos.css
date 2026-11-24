@@ -1,6 +1,5 @@
 .model-photos,
-.photo-review,
-.reply-photo-picker {
+.photo-review {
   display: grid;
   gap: 12px;
 }
@@ -41,9 +40,7 @@
 }
 .model-photos input:not([type='checkbox']),
 .model-photos select,
-.model-photos button,
-.reply-photo-picker button,
-.photo-open {
+.model-photos button {
   font: inherit;
   color: inherit;
   border: 1px solid #ced7e5;
@@ -51,13 +48,10 @@
   border-radius: 6px;
   padding: 5px 9px;
 }
-.model-photos button,
-.photo-open,
-.reply-photo-picker button {
+.model-photos button {
   cursor: pointer;
 }
-.model-photos button:disabled,
-.reply-photo-picker button:disabled {
+.model-photos button:disabled {
   opacity: 0.5;
   cursor: default;
 }
@@ -68,8 +62,7 @@
   gap: 12px;
   padding: 10px 0;
 }
-.model-photos small,
-.reply-photo-picker small {
+.model-photos small {
   display: block;
   color: #57657c;
 }
@@ -86,8 +79,7 @@
   width: 140px;
   height: 100px;
 }
-.photo-review,
-.reply-photo-picker {
+.photo-review {
   background: #f5f7fb;
   border: 1px solid #d5deeb;
   border-radius: 8px;

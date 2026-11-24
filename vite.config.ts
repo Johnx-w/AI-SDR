@@ -50,9 +50,7 @@ export default defineConfig({
                 path,
               )) ||
             (req.method === 'GET' &&
-              /^\/api\/v1\/outreach\/conversations\/[\w-]+\/(?:photo-options|photo-check)$/.test(
-                path,
-              )) ||
+              /^\/api\/v1\/outreach\/conversations\/[\w-]+\/photo-check$/.test(path)) ||
             (['GET', 'POST'].includes(req.method || '') &&
               /^\/api\/v1\/materials\/pk_[\da-f]+\/document\/pd_[\da-f]+\/photos(?:\/[\w-]+)?$/.test(
                 path,

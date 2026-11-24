@@ -11,7 +11,6 @@ import type {
 import { mailConversationsApi } from '../services/mailConversations';
 import { plainTextHtml, replyRecipient, validateMailAttachments } from '../services/mailHtml';
 import { MailRichEditor } from './MailRichEditor';
-import { ReplyPhotoPicker } from './ReplyPhotoPicker';
 import { outreachApi } from '../outreachApi';
 import { ReplySources } from './ReplyPreview';
 
@@ -511,10 +510,15 @@ export function MailReplyComposer({
           </div>
           {provenance?.photoNote && (
             <p role="status" className="mail-source-reason">
-              {provenance.photoNote}
+              {provenance.photoNote.replace('请从该型号选图并核对品类', '请核对品类')}
             </p>
           )}
-          {provenance && <ReplySources sources={provenance.sources} reason={provenance.reason} />}
+          {provenance && (
+            <ReplySources
+              sources={provenance.sources}
+              reason={provenance.reason?.replace('请从该型号选图并核对品类', '请核对品类')}
+            />
+          )}
           <MailRichEditor
             key={editorReset}
             formatting={formatting}
@@ -534,35 +538,6 @@ export function MailReplyComposer({
               setError('');
             }}
           />
-          {sourceEligible && canReply && (
-            <ReplyPhotoPicker
-              key={content.replyToMessageId}
-              conversation={conversation.id}
-              source={content.replyToMessageId}
-              attachments={content.attachments}
-              disabled={busy || generating}
-              onAdd={(photo) => {
-                const current = contentRef.current;
-                if (
-                  current.replyToMessageId !== content.replyToMessageId ||
-                  !mounted.current ||
-                  generationLock.current ||
-                  current.attachments.some(
-                    (a) =>
-                      a.id === photo.id ||
-                      (a.name === photo.name && a.contentBase64 === photo.contentBase64),
-                  )
-                )
-                  return;
-                const issue = validateMailAttachments([...current.attachments, photo]);
-                if (issue) {
-                  setError(issue);
-                  return;
-                }
-                setContent({ ...current, attachments: [...current.attachments, photo] });
-              }}
-            />
-          )}
           <dialog
             className="reply-photo-dialog"
             aria-label="草稿图片预览"

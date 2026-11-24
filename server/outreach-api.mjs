@@ -3,12 +3,7 @@ import { listSequences, sequenceDetail } from './outreach-sequences.mjs';
 import { verifyGrounding } from './mail-reception.mjs';
 import { requiresProductOrCommercialReview } from './mail-knowledge.mjs';
 import { renderMailboxSignature } from '../src/domain/mail-signature.mjs';
-import {
-  composeMailDraft,
-  signedMailDraft,
-  generateMailDraft,
-  mailDraftBasis,
-} from './mail-assisted-draft.mjs';
+import { composeMailDraft, signedMailDraft, generateMailDraft } from './mail-assisted-draft.mjs';
 import { addInternalNote, threadWorkflow, updateThreadWorkflow } from './mail-thread-workflow.mjs';
 import { previewOutreachTemplate } from './outreach-template-preview.mjs';
 import { sequencePolicy, saveSequencePolicy } from './outreach-sequence-policy.mjs';
@@ -105,7 +100,7 @@ export async function handleOutreach({
   if (path === '/reception' && method === 'GET')
     return service.reception.list(Object.fromEntries(url.searchParams));
   const conversation = path.match(
-    /^\/conversations\/([\w-]+)(?:\/(read|draft|reply|ownership|regenerate|generate-draft|workflow|notes|photo-options|photo-check))?$/,
+    /^\/conversations\/([\w-]+)(?:\/(read|draft|reply|ownership|regenerate|generate-draft|workflow|notes|photo-check))?$/,
   );
   if (conversation) {
     const [, id, action] = conversation;
@@ -158,10 +153,6 @@ export async function handleOutreach({
     }
     if (action === 'read' && method === 'POST')
       return service.conversations.markRead(id, (await readJson(request)).unread);
-    if (action === 'photo-options' && method === 'GET') {
-      const basis = mailDraftBasis(service, id, url.searchParams.get('source'));
-      return service.photoOptions?.(basis, url.searchParams.get('image')) || [];
-    }
     if (action === 'photo-check' && method === 'GET') {
       const draft = service.replies.draft(id);
       if (draft?.attachments?.length)

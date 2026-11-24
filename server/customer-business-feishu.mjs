@@ -21,6 +21,11 @@ import {
   BUSINESS_REPLY_LABELS,
   POSITIVE_REQUEST_LABELS,
 } from '../src/domain/reply-classification.mjs';
+const replyFieldNames = new Set([
+  '回信分类',
+  '客户请求',
+  ...Object.values(BUSINESS_REPLY_LABELS).map((label) => label + '封数'),
+]);
 const categories = {
   ventilation: '透气窗',
   shutters: '百叶窗',
@@ -455,15 +460,34 @@ export class CustomerBusinessFeishu {
         originalDemands: Boolean(this.env.FEISHU_DEMANDS_TABLE_ID?.trim()),
         originalMessages: Boolean(this.env.FEISHU_MESSAGES_TABLE_ID?.trim()),
       });
-      for (const key of Object.keys(BUSINESS_TABLES))
-        assertSchema(await this.client.fields(ids[key]), expected[key], {
+      let replyFields = [];
+      for (const key of Object.keys(BUSINESS_TABLES)) {
+        const fields = await this.client.fields(ids[key]);
+        if (key === 'messages') {
+          replyFields = fields
+            .map((field) => field.field_name)
+            .filter((name) => replyFieldNames.has(name));
+          // Additive reply columns may be provisioned later; present columns still require the exact schema.
+          expected[key] = expected[key].filter(
+            (field) =>
+              !replyFieldNames.has(field.field_name) || replyFields.includes(field.field_name),
+          );
+        }
+        assertSchema(fields, expected[key], {
           allowMultipleCustomer: Boolean(this.env[BUSINESS_TABLE_ID_ENV[key]]?.trim()),
         });
+      }
       assertSchema(
         await this.client.fields(ids.products),
         isOriginalT5(this.env) ? ORIGINAL_T5_FIELDS : PRODUCT_KNOWLEDGE_FEISHU_FIELDS,
       );
-      return { configured: true, status: 'ready', tables, productsTableId: ids.products };
+      return {
+        configured: true,
+        status: 'ready',
+        tables,
+        productsTableId: ids.products,
+        replyFields,
+      };
     } catch (error) {
       return { configured: false, ...pending(error.message), tables: {} };
     }
@@ -938,6 +962,9 @@ export class CustomerBusinessFeishu {
                 : {}),
             };
           }
+          if (key === 'messages')
+            for (const name of replyFieldNames)
+              if (!config.replyFields.includes(name)) delete fields[name];
           bases[key].set(entry.id, fields);
         }
       // Validate all local references before any remote business record is written.

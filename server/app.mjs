@@ -265,7 +265,7 @@ export function createApp({
             ),
           products: () => knowledge().list(),
           answerQuestion: (...args) => answerMailQuestion(knowledge(), ...args),
-          photoOptions: (basis, id, automatic = false) => {
+          matchDraftPhotos: (basis) => {
             const { box, mail, question, sources } = basis,
               query = mail.subject + ' ' + question;
             const k = knowledge(),
@@ -276,11 +276,7 @@ export function createApp({
               query,
               sources.map((s) => s.item),
             );
-            if (automatic) return photos.automaticMatch(groups, query);
-            if (!id) return groups;
-            if (!groups.some((g) => g.photos.some((p) => p.id === id)))
-              throw new ApiError(409, '图片或邮箱引用范围已变化，请重新选图');
-            return photos.attachment(id);
+            return photos.automaticMatch(groups, query);
           },
           guardPhotos: (box, draft, now) =>
             knowledge().documents.photos.guard(scopedPhotoDocs(knowledge(), box, now), draft),

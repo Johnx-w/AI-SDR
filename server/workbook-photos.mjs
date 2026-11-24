@@ -336,7 +336,7 @@ export class WorkbookPhotos {
         !declinesPhotos(query) && ambiguous.length
           ? '型号 ' +
             [...new Set(ambiguous.map((g) => g.item))].join('、') +
-            ' 有多条记录，请从该型号选图并核对品类。'
+            ' 有多条记录，请核对品类。'
           : '',
     };
   }
@@ -379,7 +379,7 @@ export class WorkbookPhotos {
             409,
             '产品图片「' +
               a.name +
-              '」已更换、移除或超出邮箱引用范围。请在草稿移除旧图，再从该型号选图并核对正文。',
+              '」已更换、移除或超出邮箱引用范围。请在草稿移除旧图并核对正文。',
           ),
           { code: 'REPLY_POLICY_CHANGED' },
         );
