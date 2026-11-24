@@ -8,6 +8,8 @@ T12 自动同步随本次版本交付，使用运行环境有效飞书连接和�
 
 ## 当前业务与运行入口
 
+陌生供应商的 PDF、Excel、Word 和 Markdown 报价表接入、人工校对及按邮箱起草见[图文报价清单](mail-automation/README.md#图文报价清单)。
+
 接手沟通中心或产品资料开发，从[当前进展与验收](mail-automation/status.md)查看生产版本、当前工作项和待用户验证的问题。
 
 多邮箱工作区的本机实数入口、正式基线、构建、验收与回退集中在[多邮箱销售邮件](mail-automation/README.md)。按邮箱勾选素材库文件及试运行见[邮箱引用资料](mail-automation/README.md#设置邮箱引用资料)。清洗表、型号参数确认和来源 PDF 见[型号参数导入与引用](mail-automation/README.md#型号参数导入与引用)。文件集合、通用解析方式、分块编辑、原文对照和按邮箱搜索测试见[素材库](mail-automation/README.md#素材库与业务员操作)。价格表配图维护和草稿自动配图见[工作簿产品图片](mail-automation/README.md#工作簿产品图片)。历史回复头及后续往来的判断见[历史来信与只读同步](mail-automation/mail-history.md)。

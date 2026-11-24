@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateMailDraft } from '../server/mail-assisted-draft.mjs';
@@ -10,6 +10,66 @@ import { MaterialLibrary } from '../server/materials.mjs';
 import { ProductKnowledge } from '../server/product-knowledge.mjs';
 import { answerMailQuestion } from '../server/mail-knowledge.mjs';
 const peer = 'buyer@dealer.test';
+test('陌生供应商 Excel 的已审单价、单位和同行图片进入本邮箱待审草稿', async (t) => {
+  const k = new ProductKnowledge(),
+    h = harness(t, 'manual');
+  t.after(() => k.close());
+  const box = h.s.mailboxes.get('own');
+  box.website = 'https://honeybadgerblinds.com';
+  const lib = new MaterialLibrary(k, [box]);
+  const { id, documentId, warning } = await lib.upload({
+    name: 'supplier.xlsx',
+    mode: 'quote_catalog',
+    key: 'quote-end-to-end',
+    site: 'honeybadgerblinds.com',
+    bytes: readFileSync(new URL('./fixtures/quote-table.xlsx', import.meta.url)),
+  });
+  assert.equal(warning, '');
+  const edit = lib.edit(id, {
+    version: lib.get(id).version,
+    cellEdits: [{ documentId, sheet: 'Supplier', ref: 'E3', value: '3.125' }],
+  });
+  lib.edit(id, { version: edit.version, status: 'approved', approvedBy: 'QA' });
+  box.knowledgeProductIds = [id];
+  h.s.answerQuestion = (...args) => answerMailQuestion(k, ...args);
+  h.s.draftPhotos = (sources, q) => k.documents.draftPhotos(sources, q);
+  h.incoming({
+    subject: 'Supplier quotation',
+    bodyText: 'What is the price of QF-019? Please include a photo.',
+  });
+  await h.sync();
+  const thread = h.thread().id,
+    sourceId = h.s.conversations.detail(thread).messages[0].id;
+  await generateMailDraft(
+    h.s,
+    thread,
+    { sourceId, expectedRevision: 0 },
+    {
+      name: 'local-test',
+      generate: async (messages) => {
+        const { evidence } = JSON.parse(messages[1].content);
+        const indexes = ['QF-019', '3.125', 'USD', 'PC'].map((value) =>
+          evidence.findIndex((s) => s.value === value),
+        );
+        assert.ok(indexes.every((i) => i >= 0));
+        return JSON.stringify({
+          coverage: 'answered',
+          body: 'The reference price for QF-019 is USD 3.125 per PC.',
+          sourceIndexes: indexes,
+        });
+      },
+    },
+  );
+  const draft = h.s.replies.draft(thread);
+  assert.equal(draft.provenance.automatic, false);
+  assert.match(draft.bodyText, /USD 3\.125 per PC/);
+  assert.equal(draft.provenance.sources.find((s) => s.field === '参考价格').original, '2.750');
+  assert.deepEqual(
+    draft.attachments.map((a) => a.name),
+    ['QF-019.jpg'],
+  );
+  assert.equal(h.sends.length, 0);
+});
 function harness(t, mode = 'auto') {
   const dir = mkdtempSync(join(tmpdir(), 'sdr-reception-')),
     path = join(dir, 'mail.sqlite');

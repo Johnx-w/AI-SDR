@@ -1,4 +1,9 @@
-export type ParseMode = 'rich_layout_recognition' | 'text_recognition' | 'model_parameters';
+export type ParseMode =
+  | 'rich_layout_recognition'
+  | 'text_recognition'
+  | 'model_parameters'
+  | 'quote_catalog'
+  | 'asset_only';
 import { checkMaterialSize, materialPartBytes } from '../domain/material-upload.mjs';
 
 export const materialFormats = [
@@ -80,6 +85,8 @@ export type StoredDocument = {
     facts: { text: string; page: number; location: string }[];
     warnings: string[];
     sheets?: { name: string; rows: number }[];
+    terms?: string[];
+    figures?: { label: string; source: string; index: number }[];
     model: string;
     pageCount?: number;
     mode?: ParseMode;
@@ -156,10 +163,10 @@ export async function uploadMaterial(
   const q = new URLSearchParams({ name: file.name });
   const paged = /\.(?:pdf|docx|pptx)$/iu.test(file.name);
   const structured =
-    options.mode === 'model_parameters' && !/\.(?:webm|mp4|mov)$/iu.test(file.name);
+    (options.mode === 'model_parameters' || options.mode === 'quote_catalog') && !/\.(?:webm|mp4|mov)$/iu.test(file.name);
   const media = /\.(?:png|jpe?g|webp|gif|mp4|mov|webm)$/iu.test(file.name);
   if (
-    (paged || structured || (media && options.mode === 'rich_layout_recognition')) &&
+    (paged || structured || (media && ['rich_layout_recognition', 'asset_only'].includes(options.mode ?? ''))) &&
     options.mode
   )
     q.set('mode', options.mode);

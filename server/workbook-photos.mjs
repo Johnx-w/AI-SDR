@@ -59,6 +59,18 @@ export class WorkbookPhotos {
       }
     });
   }
+  importRows(doc, photos) {
+    const existing = this.db.prepare(
+      'SELECT 1 FROM workbook_image_assets WHERE document_id=? AND sheet=? AND item=? AND slot=?',
+    );
+    const insert = this.db.prepare(
+      'INSERT INTO workbook_image_assets(id,document_id,sheet,item,slot,origin,sha,jpeg) VALUES(?,?,?,?,?,?,?,?)',
+    );
+    for (const { sheet, item, slot, origin, jpeg } of photos) {
+      if (!existing.get(doc, sheet, item, slot))
+        insert.run(photoId(), doc, sheet, item, slot, origin, digest(jpeg), jpeg);
+    }
+  }
   owned(product, doc, write = false) {
     if (
       !this.db

@@ -280,13 +280,22 @@ export function answerMailQuestion(
             if (cell) values.push({ attr: { en: cell.field, commercial: true }, cell });
           }
         }
+        const page =
+          doc.extraction?.mode === 'quote_catalog' &&
+          doc.contentType === 'application/pdf' &&
+          /^PDF p\.(\d+)/u.exec(row.sheet)?.[1];
+        const quoteLocation = page
+          ? cells.find((c) => c.field === '来源')?.value.replace(/^PDF p\.\d+\s*·\s*/u, '')
+          : '';
         const sourceFor = (c) => ({
           productId: product.id,
           version: product.version,
           documentId: doc.id,
           file: doc.name,
-          sheet: row.sheet,
-          ref: c.ref,
+          sheet: page ? undefined : row.sheet,
+          ref: page
+            ? ['第 ' + page + ' 页', quoteLocation, c.field].filter(Boolean).join(' · ')
+            : c.sourceRef || c.ref,
           field: c.field,
           value: c.value,
           original: c.original,
@@ -304,7 +313,10 @@ export function answerMailQuestion(
         if (!values.length) continue;
         const rowCommercial = values.some((v) => v.attr.commercial);
         const extra = rowCommercial
-          ? cells.filter((c) => /^(?:单位|适用条件|unit|conditions?)$/iu.test(c.field))
+          ? cells.filter(
+              (c) =>
+                c.value && /^(?:单位|币种|适用条件|unit|currency|conditions?)$/iu.test(c.field),
+            )
           : [];
         const selected = [...values.map((v) => v.cell), ...extra];
         const sources = [cells[0], ...selected].map(sourceFor);

@@ -192,7 +192,7 @@ export async function handleMaterials({
     throw fail(405, '图片操作不支持此方法');
   }
   const match =
-    /^\/(pk_[a-f0-9]{32})(?:\/(versions|restore|extract|document|evidence)(?:\/(pd_[a-f0-9]{64})(?:\/(rows|region))?)?)?$/.exec(
+    /^\/(pk_[a-f0-9]{32})(?:\/(versions|restore|extract|document|evidence)(?:\/(pd_[a-f0-9]{64})(?:\/(rows|region|figure))?)?)?$/.exec(
       path,
     );
   const [, id, op, docId, rows] = match || [];
@@ -293,6 +293,19 @@ export async function handleMaterials({
     return json(response, 200, await extract());
   }
   if (id && op === 'document' && docId && method === 'GET') {
+    if (rows === 'figure') {
+      const figure = knowledge.db
+        .prepare(
+          'SELECT f.jpeg FROM product_quote_figures f JOIN product_documents d ON d.id=f.document_id WHERE d.product_id=? AND f.document_id=? AND f.idx=?',
+        )
+        .get(id, docId, q.index ?? -1);
+      if (!figure) throw fail(404, '系列参考图不存在');
+      response.writeHead(200, {
+        'Content-Type': 'image/jpeg',
+        'Cache-Control': 'private, no-store',
+      });
+      return response.end(Buffer.from(figure.jpeg));
+    }
     if (rows === 'region') {
       const doc = knowledge.documents.get(id, docId);
       const candidate =

@@ -4,6 +4,7 @@ import { isPagedMaterial, pagedMaterialTypes } from '../src/domain/material-uplo
 import { parameterMode, linkParameter } from './model-parameters.mjs';
 import { pdfCount } from './parameter-extraction.mjs';
 import { materialMode } from './deepseek-materials.mjs';
+import { quoteMode, carryQuoteEdits } from './quote-catalog.mjs';
 import { materialType, validateFile } from './material-formats.mjs';
 
 const fail = (status, msg) => Object.assign(new Error(msg), { status });
@@ -103,7 +104,7 @@ export class MaterialLibrary {
            WHEN json_extract(d.extraction,'$.model')='manual' THEN 'manual'
            WHEN json_array_length(d.extraction,'$.facts')=0 AND json_type(d.extraction,'$.sheets') IS NULL THEN 'pending'
            ELSE 'ready' END AS extractionStatus,
-      COALESCE(json_array_length(d.extraction,'$.parameters'),json_array_length(d.extraction,'$.facts'),0) AS extractionCount`;
+      COALESCE(json_extract(d.extraction,'$.rowCount'),json_array_length(d.extraction,'$.parameters'),json_array_length(d.extraction,'$.facts'),0) AS extractionCount`;
     const cond = ['documentId IS NOT NULL'],
       args = [];
     if (q) {
@@ -229,8 +230,21 @@ export class MaterialLibrary {
       const current = this.get(id);
       mode = this.k.documents.list(id).find((d) => d.id === current.documentIds?.[0])?.parseMode;
     }
+    if (
+      mode === quoteMode &&
+      !/\.(?:pdf|docx|xlsx|md|markdown)$/iu.test(name) &&
+      !contentType.startsWith('video/')
+    )
+      throw fail(
+        400,
+        '图文报价清单支持 PDF、Excel、Word 和 Markdown。图片可选择型号参数或仅作附件。',
+      );
+    if (mode === 'asset_only' && !/^(image|video)\//u.test(contentType))
+      throw fail(400, '仅登记适用于图片和视频。');
     const chosen =
-      mode === parameterMode && !contentType.startsWith('video/')
+      mode === quoteMode
+        ? quoteMode
+        : mode === parameterMode && !contentType.startsWith('video/')
         ? parameterMode
         : isPagedMaterial(contentType) ||
             (/^(image|video)\//u.test(contentType) && mode === 'rich_layout_recognition')
@@ -295,6 +309,7 @@ export class MaterialLibrary {
             (chosen === 'rich_layout_recognition' &&
               /^(image|video)\//u.test(contentType) &&
               !d.parseMode) ||
+            (chosen === quoteMode) !== (d.parseMode === quoteMode) ||
             !p.documentIds?.includes(d.id) ||
             (site ? !sites.includes(site) : p.sourceUrl || p.brands?.length)
           )
@@ -316,7 +331,10 @@ export class MaterialLibrary {
             ...this.scope(site),
           });
       const document = this.k.documents.store(product.id, file);
-      if ((document.parseMode === parameterMode) !== (chosen === parameterMode))
+      if (
+        (document.parseMode === parameterMode) !== (chosen === parameterMode) ||
+        (document.parseMode === quoteMode) !== (chosen === quoteMode)
+      )
         throw fail(409, '请把原件按新的解析方式导入为独立素材');
       if (
         prepared &&
@@ -324,20 +342,33 @@ export class MaterialLibrary {
           document.extraction.model === 'failed' ||
           (isPagedMaterial(contentType) &&
             !document.extraction.parameters &&
+            !document.extraction.sheets &&
             !document.extraction.facts.length))
       )
         this.k.documents.saveExtraction(document.id, prepared);
       const ids = product.documentIds || [];
       // Historical products may link several independent files. Replace only the primary file.
       const documentIds = [...new Set([document.id, ...ids.slice(1)])];
+      let reviewNote = '';
       if (document.id !== ids[0]) {
+        const carried = carryQuoteEdits(this.db, product, ids[0], document.id);
+        if (chosen === quoteMode && id) {
+          const count = (product.cellEdits || []).filter((e) => e.documentId === ids[0]).length;
+          if (count > carried.length)
+            reviewNote =
+              String(count - carried.length) +
+              ' 处上版校对需要重新确认，可在历史版本查看原校对值。';
+        }
         this.k.save(
           {
             ...product,
             documentIds,
             parameterSet: undefined,
             status: 'draft',
-            cellEdits: (product.cellEdits || []).filter((e) => documentIds.includes(e.documentId)),
+            cellEdits: [
+              ...(product.cellEdits || []).filter((e) => documentIds.includes(e.documentId)),
+              ...carried,
+            ],
             sourceFacts: (product.sourceFacts || []).filter((e) =>
               documentIds.includes(e.documentId),
             ),
@@ -348,9 +379,15 @@ export class MaterialLibrary {
       this.db
         .prepare('INSERT INTO material_upload_requests VALUES(?,?,?,?)')
         .run(key, fingerprint, product.id, document.id);
-      return { id: product.id, documentId: document.id, reused: document.id === ids[0] };
+      return {
+        id: product.id,
+        documentId: document.id,
+        reused: document.id === ids[0],
+        reviewNote,
+      };
     });
-    let warning = '';
+    const { reviewNote = '', ...result } = record;
+    let warning = reviewNote;
     try {
       if (!prepared)
         await this.k.documents.extract(record.id, record.documentId, {
@@ -365,7 +402,7 @@ export class MaterialLibrary {
     } catch (e) {
       warning = e.message;
     }
-    return { ...record, warning };
+    return { ...result, warning };
   }
   async attachEvidence(id, { name, bytes, version }) {
     if (materialType(name) !== 'application/pdf') throw fail(400, '请上传来源 PDF');

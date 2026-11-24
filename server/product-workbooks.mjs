@@ -7,7 +7,7 @@ import * as XLSX from 'xlsx/xlsx.mjs';
 export const workbookType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
-function columnName(n) {
+export function columnName(n) {
   let name = '';
   for (let index = n + 1; index; index = Math.floor((index - 1) / 26))
     name = String.fromCharCode(65 + ((index - 1) % 26)) + name;
@@ -231,12 +231,12 @@ export function workbookPage(db, productId, documentId, { sheet, page = 1, q = '
     q.length > 200
   )
     throw fail(400, '工作表或页码无效');
-  if (
-    !db
-      .prepare('SELECT 1 FROM product_documents WHERE id=? AND product_id=?')
-      .get(documentId, productId)
-  )
-    throw fail(404, '产品原文件不存在');
+  const document = db
+    .prepare(
+      "SELECT json_extract(extraction,'$.mode') AS mode FROM product_documents WHERE id=? AND product_id=?",
+    )
+    .get(documentId, productId);
+  if (!document) throw fail(404, '产品原文件不存在');
   const where =
     'WHERE document_id=? AND sheet=?' + (q ? ' AND instr(lower(label), lower(?))>0' : '');
   const args = q ? [documentId, sheet, q] : [documentId, sheet];
@@ -251,5 +251,13 @@ export function workbookPage(db, productId, documentId, { sheet, page = 1, q = '
     )
     .all(...args, (page - 1) * 12)
     .map((row) => ({ number: row.row_number, cells: JSON.parse(row.data) }));
+  if (document.mode === 'quote_catalog') {
+    const photos = db
+      .prepare(
+        "SELECT item,id,slot,origin FROM workbook_image_assets WHERE document_id=? AND sheet=? AND active=1 AND item IN (SELECT value FROM json_each(?)) ORDER BY slot!='主图',slot",
+      )
+      .all(documentId, sheet, JSON.stringify(rows.map((r) => r.cells[0].value)));
+    for (const row of rows) row.photos = photos.filter((p) => p.item === row.cells[0].value);
+  }
   return { rows, total, page, pageSize: 12 };
 }

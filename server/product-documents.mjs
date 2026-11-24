@@ -14,6 +14,7 @@ import { parameterMode, mentionsModel } from './model-parameters.mjs';
 import { materialType, types, validateFile, extractText } from './material-formats.mjs';
 import { platformJson, providerBaseUrl } from './acquisition-config.mjs';
 import { parseWorkbook, workbookType } from './product-workbooks.mjs';
+import { quoteMode, readQuoteCatalog } from './quote-catalog.mjs';
 
 // The product JSON endpoint accepts Base64; the material library uploads original bytes.
 export const MAX_PRODUCT_DOCUMENT_BYTES = 10 * 1024 * 1024;
@@ -187,6 +188,7 @@ export class ProductDocuments {
     ); CREATE INDEX IF NOT EXISTS product_documents_product ON product_documents(product_id);
     CREATE INDEX IF NOT EXISTS product_documents_sha ON product_documents(json_extract(metadata,'$.sha256'));
     CREATE TABLE IF NOT EXISTS product_parameter_sets(id TEXT PRIMARY KEY, document_id TEXT NOT NULL, data TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS product_quote_figures(document_id TEXT NOT NULL, idx INTEGER NOT NULL, jpeg BLOB NOT NULL, PRIMARY KEY(document_id,idx)) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS product_workbook_photos(
         document_id TEXT NOT NULL, sheet TEXT NOT NULL, item TEXT NOT NULL, source_cell TEXT NOT NULL,
         jpeg BLOB NOT NULL CHECK(length(jpeg) BETWEEN 1 AND 524288),
@@ -321,7 +323,7 @@ export class ProductDocuments {
   prepareReplacement(file, options) {
     return this.runExtraction(file, () => documentExtraction(file, options));
   }
-  saveExtraction(id, { extraction, rows, photos }, replace = false) {
+  saveExtraction(id, { extraction, rows, photos, figures }, replace = false) {
     // Also used inside the transaction that switches the active version.
     this.db.exec('SAVEPOINT material_extraction');
     try {
@@ -366,6 +368,12 @@ export class ProductDocuments {
         );
         for (const row of rows) insert.run(id, ...row);
       }
+      if (photos) this.photos.importRows(id, photos);
+      if (figures) {
+        this.db.prepare('DELETE FROM product_quote_figures WHERE document_id=?').run(id);
+        const insert = this.db.prepare('INSERT INTO product_quote_figures VALUES(?,?,?)');
+        figures.forEach((f, i) => insert.run(id, i, f.jpeg));
+      }
       this.db
         .prepare(
           `UPDATE product_documents SET extraction=? WHERE id=? AND
@@ -398,8 +406,13 @@ export class ProductDocuments {
   ) {
     const file = this.get(productId, id);
     if (file.referencePages) throw fail(400, '这是用于核对的来源 PDF，可独立导入以提取参数');
-    const structured = material && file.parseMode === parameterMode;
-    if (material && mode && (mode === parameterMode) !== structured)
+    const structured = material && [parameterMode, quoteMode].includes(file.parseMode);
+    if (
+      material &&
+      mode &&
+      ((structured && mode !== file.parseMode) ||
+        (!structured && [parameterMode, quoteMode].includes(mode)))
+    )
       throw fail(400, '请以对应解析方式重新导入文件');
     const paged =
       material &&
@@ -408,7 +421,7 @@ export class ProductDocuments {
         isPagedMaterial(file.contentType) ||
         file.parseMode === 'rich_layout_recognition');
     const chosen = structured
-      ? parameterMode
+      ? file.parseMode
       : paged
         ? materialMode(mode ?? file.extraction?.mode ?? file.parseMode)
         : undefined;
@@ -417,7 +430,7 @@ export class ProductDocuments {
       throw fail(409, '该原件正在使用另一种方式解析，请稍后重试。');
     const visual = file.contentType === types.pdf || file.contentType.startsWith('image/');
     if (
-      !reparse &&
+      (!reparse || (chosen === quoteMode && file.extraction?.sheets)) &&
       file.extraction &&
       file.extraction.model !== 'failed' &&
       !(
