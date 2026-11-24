@@ -1,3 +1,4 @@
+import { WorkbookPhotos } from './workbook-photos.mjs';
 import { createHash } from 'node:crypto';
 import { isPagedMaterial } from '../src/domain/material-upload.mjs';
 import { readDeepSeekMaterial, materialMode } from './deepseek-materials.mjs';
@@ -153,30 +154,21 @@ export class ProductDocuments {
       document_id TEXT NOT NULL, sheet TEXT NOT NULL, row_number INTEGER NOT NULL, label TEXT NOT NULL,
       data TEXT NOT NULL, PRIMARY KEY(document_id,sheet,row_number)
     ) WITHOUT ROWID;`);
+    this.photos = new WorkbookPhotos(db);
   }
-  draftPhotos(sources, question) {
-    const attachments = [];
-    const seen = new Set();
-    const find = this.db.prepare(
-      'SELECT jpeg FROM product_workbook_photos WHERE document_id=? AND sheet=? AND item=?',
+  draftPhotos(
+    sources,
+    question,
+    docs = [...new Set(sources.map((s) => s.documentId).filter(Boolean))],
+  ) {
+    return this.photos.automatically(
+      this.photos.options(
+        docs,
+        question,
+        sources.map((s) => s.item),
+      ),
+      question,
     );
-    for (const { documentId, sheet, item } of sources) {
-      if (!documentId || !sheet || !item || !mentionsModel(question, item)) continue;
-      const key = JSON.stringify([documentId, sheet, item]);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const row = find.get(documentId, sheet, item);
-      if (!row) continue;
-      const bytes = Buffer.from(row.jpeg);
-      attachments.push({
-        name: item + '.jpg',
-        contentType: 'image/jpeg',
-        contentBase64: bytes.toString('base64'),
-        size: bytes.length,
-      });
-      if (attachments.length === 5) break;
-    }
-    return attachments;
   }
   parameterRecords(id) {
     const row = this.db.prepare('SELECT data FROM product_parameter_sets WHERE id=?').get(id);

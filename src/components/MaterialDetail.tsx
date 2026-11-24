@@ -17,6 +17,7 @@ import { isPagedMaterial } from '../domain/material-upload.mjs';
 import { MaterialOriginal } from './MaterialOriginal';
 import { MaterialPassages } from './MaterialPassages';
 import { ParameterReview } from './ParameterReview';
+import { WorkbookPhotos } from './WorkbookPhotos';
 import { WorkbookPreview } from './WorkbookPreview';
 import {
   type ParseMode,
@@ -40,6 +41,7 @@ export function MaterialDocument({
   initialPage,
   initialRevision = '',
   initialParameter = '',
+  showPhotos = false,
   openSource,
   onClose,
   onChanged,
@@ -48,10 +50,14 @@ export function MaterialDocument({
   initialPage: number;
   initialRevision?: string;
   initialParameter?: string;
+  showPhotos?: boolean;
   openSource: boolean;
   onClose: () => void;
   onChanged: () => void;
 }) {
+  const [workbookView, setWorkbookView] = useState<'rows' | 'photos'>(
+    showPhotos ? 'photos' : 'rows',
+  );
   const upload = useRef<HTMLInputElement>(null);
   const [side, setSide] = useState<'info' | 'original'>(openSource ? 'original' : 'info');
   const [mobileSide, setMobileSide] = useState(openSource);
@@ -504,23 +510,51 @@ export function MaterialDocument({
                       <MaterialOriginal doc={doc} url={original} page={1} />
                     ) : doc.extraction?.sheets ? (
                       <>
-                        <WorkbookPreview
-                          key={doc.id}
-                          url={original}
-                          id={doc.id}
-                          sheets={doc.extraction.sheets}
-                          edits={edits}
-                          onEdit={changeCell}
-                          linked={!!writable}
-                        />
-                        {writable && (
+                        <div className="photo-controls" aria-label="工作簿视图">
                           <button
-                            className="kb-primary"
-                            onClick={() => void save(reviewFields, '校对已保存')}
-                            disabled={incompleteFact}
+                            className="kb-text"
+                            aria-pressed={workbookView === 'rows'}
+                            onClick={() => setWorkbookView('rows')}
                           >
-                            保存校对
+                            价格表数据
                           </button>
+                          <button
+                            className="kb-text"
+                            aria-pressed={workbookView === 'photos'}
+                            onClick={() => setWorkbookView('photos')}
+                          >
+                            产品图片
+                          </button>
+                        </div>
+                        {workbookView === 'photos' ? (
+                          <WorkbookPhotos
+                            key={doc.id + revision}
+                            product={id}
+                            doc={doc.id}
+                            sheets={doc.extraction.sheets}
+                            writable={!!writable && p.documentIds?.[0] === doc.id}
+                          />
+                        ) : (
+                          <>
+                            <WorkbookPreview
+                              key={doc.id}
+                              url={original}
+                              id={doc.id}
+                              sheets={doc.extraction.sheets}
+                              edits={edits}
+                              onEdit={changeCell}
+                              linked={!!writable}
+                            />
+                            {writable && (
+                              <button
+                                className="kb-primary"
+                                onClick={() => void save(reviewFields, '校对已保存')}
+                                disabled={incompleteFact}
+                              >
+                                保存校对
+                              </button>
+                            )}
+                          </>
                         )}
                       </>
                     ) : (

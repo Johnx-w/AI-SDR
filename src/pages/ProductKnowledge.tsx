@@ -314,6 +314,7 @@ export function ProductKnowledgePage() {
         <MaterialDocument
           key={id}
           id={id}
+          showPhotos={params.get('view') === 'photos'}
           initialRevision={params.get('revision') || ''}
           initialParameter={params.get('parameter') || ''}
           initialPage={Math.max(1, parseInt(params.get('sourcePage') || '1', 10) || 1)}

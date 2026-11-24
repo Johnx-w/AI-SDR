@@ -523,6 +523,14 @@ test('手动或历史来信按当前邮箱匹配资料起草，保存来源及�
     { status: 409 },
   );
   box.paused = false;
+  h.s.guardPhotos = (_sender, saved) => {
+    assert.equal(saved.attachments[0].name, 'ZX-01.jpg');
+    throw Object.assign(new Error('产品图片已更换'), { status: 409, code: 'REPLY_POLICY_CHANGED' });
+  };
+  await assert.rejects(async () => h.approve(draft), /图片已更换/);
+  assert.equal(h.sends.length, 0);
+  assert.equal(h.s.replies.draft(id).revision, draft.revision);
+  h.s.guardPhotos = undefined;
   h.version++;
   await assert.rejects(async () => h.approve(draft), { status: 409 });
   assert.equal(h.sends.length, 0);

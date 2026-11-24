@@ -1,3 +1,4 @@
+import { declinesPhotos } from './workbook-photos.mjs';
 import { createHash } from 'node:crypto';
 import { customerReplyText } from './communication-rounds.mjs';
 import { managerReply, requiresProductOrCommercialReview } from './mail-knowledge.mjs';
@@ -248,11 +249,10 @@ export async function composeMailDraft(service, basis, model) {
     }
   }
   const query = [basis.mail.subject, basis.question].join(' ');
-  const skipPhotos =
-    /不要.{0,6}(图|附件)|(?:无需|不用|不需要).{0,6}(图|附件)|(?:no|without|do not (?:send|attach)|don't (?:send|attach))\s+(?:any\s+)?(?:photos?|images?|pictures?|attachments?)/iu.test(
-      query,
-    );
-  const attachments = skipPhotos ? [] : service.draftPhotos?.(basis.sources, query) || [];
+  const match = declinesPhotos(query)
+    ? { attachments: [] }
+    : service.photoOptions?.(basis, null, true);
+  const attachments = match?.attachments ?? service.draftPhotos?.(basis.sources, query) ?? [];
   const messages = [
     {
       role: 'system',
@@ -296,7 +296,11 @@ export async function composeMailDraft(service, basis, model) {
     const raw = await model.generate(messages);
     if (service.closed || service.isMaintaining()) throw fail(409, '服务正在维护，请稍后重新起草');
     const answer = readAnswer(raw, basis, service.mailboxes.list());
-    return attachments.length ? { ...answer, attachments } : answer;
+    return {
+      ...answer,
+      ...(attachments.length ? { attachments } : {}),
+      ...(match?.photoNote ? { photoNote: match.photoNote } : {}),
+    };
   };
   try {
     return await write();
@@ -339,17 +343,20 @@ export async function generateMailDraft(service, id, input, model) {
       mailDraftBasis(service, id, sourceId).stamp !== basis.stamp
     )
       throw fail(409, '来信、资料或草稿已变化，请重新打开会话');
-    const reason = result.needsManager
-      ? '资料未覆盖全部问题，需与上级确认后跟进'
-      : result.sources.length
-        ? '已按当前邮箱所选资料起草，请核对后发送'
-        : '没有引用产品资料，请核对来信后人工发送';
+    const reason =
+      result.photoNote ||
+      (result.needsManager
+        ? '资料未覆盖全部问题，需与上级确认后跟进'
+        : result.sources.length
+          ? '已按当前邮箱所选资料起草，请核对后发送'
+          : '没有引用产品资料，请核对来信后人工发送');
     const provenance = {
       generator: 'model',
       model: model.name,
       sourceId,
       stamp: basis.stamp,
       sources: result.sources,
+      ...(result.photoNote ? { photoNote: result.photoNote } : {}),
       automatic: false,
       reason,
     };

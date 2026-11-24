@@ -11,6 +11,8 @@ import type {
 import { mailConversationsApi } from '../services/mailConversations';
 import { plainTextHtml, replyRecipient, validateMailAttachments } from '../services/mailHtml';
 import { MailRichEditor } from './MailRichEditor';
+import { ReplyPhotoPicker } from './ReplyPhotoPicker';
+import { outreachApi } from '../outreachApi';
 import { ReplySources } from './ReplyPreview';
 
 const contentKey = (draft: MailDraftContent) => JSON.stringify(draft);
@@ -116,6 +118,8 @@ export function MailReplyComposer({
   const [error, setError] = useState('');
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'changed' | 'error'>('saved');
   const [sending, setSending] = useState(false);
+  const previewDialog = useRef<HTMLDialogElement>(null);
+  const [previewPhoto, setPreviewPhoto] = useState<MailReplyAttachment>();
   const [generating, setGenerating] = useState(false);
   const generationLock = useRef(false);
   const [provenance, setProvenance] = useState<MailReplyDraft['provenance']>();
@@ -301,6 +305,12 @@ export function MailReplyComposer({
     setResult(null);
     try {
       await persist(snapshot);
+      if (
+        snapshot.attachments.some(
+          (a) => a.id.startsWith('kbphoto_') || a.id.startsWith('attachment_'),
+        )
+      )
+        await outreachApi('/conversations/' + encodeURIComponent(conversation.id) + '/photo-check');
       const fingerprint = contentKey(snapshot);
       if (!attempt.current || attempt.current.fingerprint !== fingerprint)
         attempt.current = { key: crypto.randomUUID(), fingerprint };
@@ -499,6 +509,11 @@ export function MailReplyComposer({
                         : ''}
             </span>
           </div>
+          {provenance?.photoNote && (
+            <p role="status" className="mail-source-reason">
+              {provenance.photoNote}
+            </p>
+          )}
           {provenance && <ReplySources sources={provenance.sources} reason={provenance.reason} />}
           <MailRichEditor
             key={editorReset}
@@ -519,18 +534,76 @@ export function MailReplyComposer({
               setError('');
             }}
           />
+          {sourceEligible && canReply && (
+            <ReplyPhotoPicker
+              key={content.replyToMessageId}
+              conversation={conversation.id}
+              source={content.replyToMessageId}
+              attachments={content.attachments}
+              disabled={busy || generating}
+              onAdd={(photo) => {
+                const current = contentRef.current;
+                if (
+                  current.replyToMessageId !== content.replyToMessageId ||
+                  !mounted.current ||
+                  generationLock.current ||
+                  current.attachments.some(
+                    (a) =>
+                      a.id === photo.id ||
+                      (a.name === photo.name && a.contentBase64 === photo.contentBase64),
+                  )
+                )
+                  return;
+                const issue = validateMailAttachments([...current.attachments, photo]);
+                if (issue) {
+                  setError(issue);
+                  return;
+                }
+                setContent({ ...current, attachments: [...current.attachments, photo] });
+              }}
+            />
+          )}
+          <dialog
+            className="reply-photo-dialog"
+            aria-label="草稿图片预览"
+            ref={previewDialog}
+            onClose={() => setPreviewPhoto(undefined)}
+          >
+            {previewPhoto && (
+              <>
+                <img
+                  src={'data:image/jpeg;base64,' + previewPhoto.contentBase64}
+                  alt={previewPhoto.name + ' 大图'}
+                />
+                <p>{previewPhoto.name}</p>
+              </>
+            )}
+            <button type="button" onClick={() => previewDialog.current?.close()}>
+              关闭预览
+            </button>
+          </dialog>
           {!!content.attachments.length && (
             <div className="mail-reply-attachments">
               {content.attachments.map((attachment) => (
                 <span key={attachment.id}>
                   {attachment.contentType === 'image/jpeg' ? (
-                    <img
-                      width={64}
-                      height={48}
-                      style={{ objectFit: 'contain' }}
-                      src={'data:image/jpeg;base64,' + attachment.contentBase64}
-                      alt={attachment.name}
-                    />
+                    <button
+                      className="reply-photo-thumb"
+                      type="button"
+                      aria-label={'预览 ' + attachment.name}
+                      onClick={() => {
+                        setPreviewPhoto(attachment);
+                        previewDialog.current?.showModal();
+                      }}
+                    >
+                      <img
+                        width={64}
+                        height={48}
+                        style={{ objectFit: 'contain' }}
+                        src={'data:image/jpeg;base64,' + attachment.contentBase64}
+                        alt={attachment.name}
+                      />
+                    </button>
                   ) : (
                     <Paperclip size={14} />
                   )}

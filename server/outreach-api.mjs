@@ -3,7 +3,12 @@ import { listSequences, sequenceDetail } from './outreach-sequences.mjs';
 import { verifyGrounding } from './mail-reception.mjs';
 import { requiresProductOrCommercialReview } from './mail-knowledge.mjs';
 import { renderMailboxSignature } from '../src/domain/mail-signature.mjs';
-import { composeMailDraft, signedMailDraft, generateMailDraft } from './mail-assisted-draft.mjs';
+import {
+  composeMailDraft,
+  signedMailDraft,
+  generateMailDraft,
+  mailDraftBasis,
+} from './mail-assisted-draft.mjs';
 import { addInternalNote, threadWorkflow, updateThreadWorkflow } from './mail-thread-workflow.mjs';
 import { sequencePolicy, saveSequencePolicy } from './outreach-sequence-policy.mjs';
 
@@ -97,7 +102,7 @@ export async function handleOutreach({
   if (path === '/reception' && method === 'GET')
     return service.reception.list(Object.fromEntries(url.searchParams));
   const conversation = path.match(
-    /^\/conversations\/([\w-]+)(?:\/(read|draft|reply|ownership|regenerate|generate-draft|workflow|notes))?$/,
+    /^\/conversations\/([\w-]+)(?:\/(read|draft|reply|ownership|regenerate|generate-draft|workflow|notes|photo-options|photo-check))?$/,
   );
   if (conversation) {
     const [, id, action] = conversation;
@@ -150,6 +155,20 @@ export async function handleOutreach({
     }
     if (action === 'read' && method === 'POST')
       return service.conversations.markRead(id, (await readJson(request)).unread);
+    if (action === 'photo-options' && method === 'GET') {
+      const basis = mailDraftBasis(service, id, url.searchParams.get('source'));
+      return service.photoOptions?.(basis, url.searchParams.get('image')) || [];
+    }
+    if (action === 'photo-check' && method === 'GET') {
+      const draft = service.replies.draft(id);
+      if (draft?.attachments?.length)
+        service.guardPhotos?.(
+          service.replies.boundMailbox(service.conversations.detail(id).conversation),
+          draft,
+          service.now(),
+        );
+      return { ok: true };
+    }
     if (action === 'draft' && method === 'GET') return { draft: service.replies.draft(id) };
     if (action === 'generate-draft' && method === 'POST')
       return generateMailDraft(service, id, await readJson(request), draftModel);
@@ -258,6 +277,7 @@ export async function handleOutreach({
           !box.paused &&
           !!signature.text &&
           !result.needsManager &&
+          !result.photoNote &&
           !result.attachments?.length &&
           (answer.automatic || businessCorrespondence) &&
           result.sources.every((s) => answer.sources.includes(s)) &&
@@ -277,7 +297,7 @@ export async function handleOutreach({
                   : answer.reason;
         return {
           decision,
-          reason,
+          reason: result.photoNote || reason,
           body: signedMailDraft(result.body, signature).bodyText,
           sources: result.sources,
           ...(result.attachments?.length ? { attachments: result.attachments } : {}),

@@ -144,6 +144,39 @@ export async function handleMaterials({
     onChange?.();
     return json(response, 200, result);
   }
+  const photoPath =
+    /^\/(pk_[a-f0-9]{32})\/document\/(pd_[a-f0-9]{64})\/photos(?:\/(carry|kbphoto_[\w-]+))?$/.exec(
+      path,
+    );
+  if (photoPath) {
+    const [, product, doc, action] = photoPath,
+      store = knowledge.documents.photos;
+    if (!action && method === 'GET') return json(response, 200, store.list(product, doc, q));
+    if (!action && method === 'POST')
+      return json(
+        response,
+        200,
+        await store.change(product, doc, await readJson(request, 9 * 1024 * 1024)),
+      );
+    if (action === 'carry' && method === 'GET')
+      return json(response, 200, store.suggestions(product, doc));
+    if (action === 'carry' && method === 'POST')
+      return json(
+        response,
+        200,
+        store.carry(product, doc, (await readJson(request, 128 * 1024)).ids),
+      );
+    if (action && method === 'GET') {
+      const bytes = store.image(product, doc, action);
+      response.writeHead(200, {
+        'Content-Type': 'image/jpeg',
+        'Cache-Control': 'private, no-store',
+        'Content-Length': bytes.length,
+      });
+      return response.end(bytes);
+    }
+    throw fail(405, '图片操作不支持此方法');
+  }
   const match =
     /^\/(pk_[a-f0-9]{32})(?:\/(versions|restore|extract|document|evidence)(?:\/(pd_[a-f0-9]{64})(?:\/(rows|region))?)?)?$/.exec(
       path,

@@ -335,6 +335,8 @@ export class MailReception {
   }
   guardReply({ id, source, draft, origin, key }) {
     const thread = this.s.conversations.detail(id).conversation;
+    if (draft.attachments?.length)
+      this.s.guardPhotos?.(this.s.replies.boundMailbox(thread), draft, this.s.now());
     if (
       this.suppressed(thread, thread.participant) ||
       (thread.customerId && this.s.customerMailState(thread.customerId).context?.doNotContact)
@@ -482,6 +484,7 @@ export class MailReception {
         !box.paused &&
         basis.eligible &&
         !result.needsManager &&
+        !result.photoNote &&
         !result.attachments?.length &&
         result.sources.every((source) => basis.answer.sources?.includes(source)) &&
         (await verifyGrounding(model, basis, result));
@@ -502,12 +505,15 @@ export class MailReception {
           sourceId: source,
           stamp: basis.stamp,
           sources: result.sources,
+          ...(result.photoNote ? { photoNote: result.photoNote } : {}),
           automatic,
-          reason: result.needsManager
-            ? '资料未覆盖全部问题，需与上级确认后跟进'
-            : automatic || !basis.eligible
-              ? basis.reason
-              : '请业务员审核模型草稿后发送',
+          reason:
+            result.photoNote ||
+            (result.needsManager
+              ? '资料未覆盖全部问题，需与上级确认后跟进'
+              : automatic || !basis.eligible
+                ? basis.reason
+                : '请业务员审核模型草稿后发送'),
         },
       );
     }

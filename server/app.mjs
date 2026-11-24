@@ -1,3 +1,4 @@
+import { scopedPhotoDocs } from './workbook-photos.mjs';
 import { recordFollowUpTask } from './outreach-follow-ups.mjs';
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
@@ -262,7 +263,25 @@ export function createApp({
             ),
           products: () => knowledge().list(),
           answerQuestion: (...args) => answerMailQuestion(knowledge(), ...args),
-          draftPhotos: (sources, query) => knowledge().documents.draftPhotos(sources, query),
+          photoOptions: (basis, id, automatic = false) => {
+            const { box, mail, question, sources } = basis,
+              query = mail.subject + ' ' + question;
+            const k = knowledge(),
+              photos = k.documents.photos,
+              docs = scopedPhotoDocs(k, box, Date.now(), query);
+            const groups = photos.options(
+              docs,
+              query,
+              sources.map((s) => s.item),
+            );
+            if (automatic) return photos.automaticMatch(groups, query);
+            if (!id) return groups;
+            if (!groups.some((g) => g.photos.some((p) => p.id === id)))
+              throw new ApiError(409, '图片或邮箱引用范围已变化，请重新选图');
+            return photos.attachment(id);
+          },
+          guardPhotos: (box, draft, now) =>
+            knowledge().documents.photos.guard(scopedPhotoDocs(knowledge(), box, now), draft),
           getDraftModel,
           getEnv: () => connections.environment(),
           getScope: acquisitionScope,
