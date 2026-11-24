@@ -445,7 +445,13 @@ export class MailConversations {
           attachments: input.attachments ? attachmentMetadata(input.attachments) : old.attachments,
         };
         if (input.direction === 'inbound') {
-          const business = classifyInboundReply(enriched);
+          const business = classifyInboundReply({
+            ...enriched,
+            bodyText: input.bodyText || old.bodyText,
+            bodyHtml: input.bodyHtml || old.bodyHtml,
+            businessKind: undefined,
+            requestType: undefined,
+          });
           enriched = {
             ...enriched,
             businessKind: business.kind,

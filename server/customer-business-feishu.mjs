@@ -12,8 +12,10 @@ import {
 import { BUSINESS_TABLE_ID_ENV, mapBusinessFeishuClient } from './feishu-business-client.mjs';
 import {
   classifyInboundReply,
+  BUSINESS_REPLY_LABELS,
   communicationRounds,
   communicationRoundFields,
+  POSITIVE_REQUEST_LABELS,
   REPLY_TYPES,
 } from './communication-rounds.mjs';
 
@@ -248,6 +250,8 @@ export function buildBusinessTableFields(
         '回复类型',
         REPLY_TYPES.filter((type) => type !== '待核实回执'),
       ),
+      select('回信分类', BUSINESS_REPLY_LABELS),
+      select('客户请求', POSITIVE_REQUEST_LABELS),
       scalar('提取客户信息'),
       scalar('客户需求摘要'),
       scalar('业务员纪要'),
@@ -821,16 +825,6 @@ export class CustomerBusinessFeishu {
           }
           if (key === 'messages') {
             const business = entry.direction === 'inbound' ? classifyInboundReply(entry) : null;
-            const labels = {
-              positive: '积极回复',
-              refusal: '明确拒绝',
-              referral: '渠道转介',
-              notification: '客服通知',
-              bounce: '退信',
-              unverified: '待核实',
-              other: '其他真人回复',
-            };
-            const requests = { quote: '索价', catalog: '索目录', meeting: '约见' };
             fields = {
               ...common,
               渠道: choice(channels, entry.channel, '沟通渠道'),
@@ -862,22 +856,19 @@ export class CustomerBusinessFeishu {
                   : entry.origin === 'mailbox' || entry.mailboxMessageId
                     ? '邮箱同步'
                     : '人工补录',
-              回信分类: business ? labels[business.kind] : null,
-              客户请求: business?.requestType ? requests[business.requestType] : null,
+              回信分类: business ? BUSINESS_REPLY_LABELS[business.kind] : null,
+              客户请求: business?.requestType
+                ? POSITIVE_REQUEST_LABELS[business.requestType]
+                : null,
             };
           }
           if (key === 'messages' && originalMessages) {
             const roundFields = communicationRoundFields(roundById.get(entry.id));
-            const {
-              回信分类: _businessKind,
-              客户请求: _requestType,
-              ...originalRoundFields
-            } = roundFields;
             fields = {
               客户: customer(entry),
               渠道: choice(channels, entry.channel, '沟通渠道'),
               发生时间: date(entry.occurredAt),
-              ...originalRoundFields,
+              ...roundFields,
               // The original T3 enum has four fixed options. The body retains the pending label.
               回复类型: roundFields.回复类型 === '待核实回执' ? null : roundFields.回复类型,
             };

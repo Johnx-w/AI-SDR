@@ -190,6 +190,21 @@ const positiveEvidence = {
     /\b(?:arrange|schedule|book|have|join|accept|agree to|happy to|available for)\b.{0,80}\b(?:meeting|call|video call|appointment)\b|\b(?:meeting|call|appointment)\b.{0,80}\b(?:next week|tomorrow|available|schedule|arrange|happy|interested)\b|(?:同意|安排|预约).{0,12}(?:会面|会议|通话)/iu,
 };
 
+export const BUSINESS_REPLY_LABELS = Object.freeze({
+  positive: '积极回复',
+  refusal: '明确拒绝',
+  referral: '渠道转介',
+  notification: '客服通知',
+  bounce: '退信',
+  unverified: '待核实',
+  other: '其他真人回复',
+});
+export const POSITIVE_REQUEST_LABELS = Object.freeze({
+  quote: '索价',
+  catalog: '索目录',
+  meeting: '约见',
+});
+
 /** Shared deterministic business classification for inbox, ledger and reminders. */
 export function classifyInboundReply(message) {
   if (message.businessKind)
@@ -318,16 +333,6 @@ export function communicationRoundFields(round) {
     'other',
   ];
   const businessKind = businessPriority.find((kind) => business.some((item) => item.kind === kind));
-  const businessLabels = {
-    positive: '积极回复',
-    refusal: '明确拒绝',
-    referral: '渠道转介',
-    notification: '客服通知',
-    bounce: '退信',
-    unverified: '待核实',
-    other: '其他真人回复',
-  };
-  const requestLabels = { quote: '索价', catalog: '索目录', meeting: '约见' };
   return {
     发送内容摘要: anchor.direction === 'outbound' ? anchor.body || null : null,
     收到回复内容: replies.length
@@ -337,9 +342,9 @@ export function communicationRoundFields(round) {
               '【' + stamp(message.occurredAt) + ' 北京时间｜' + types[i] + '】',
               business[i]
                 ? '回信分类：' +
-                  businessLabels[business[i].kind] +
+                  BUSINESS_REPLY_LABELS[business[i].kind] +
                   (business[i].requestType
-                    ? '｜客户请求：' + requestLabels[business[i].requestType]
+                    ? '｜客户请求：' + POSITIVE_REQUEST_LABELS[business[i].requestType]
                     : '')
                 : '',
               message.subject ? '主题：' + message.subject : '',
@@ -352,8 +357,8 @@ export function communicationRoundFields(round) {
           .join('\n\n')
       : null,
     回复类型: replyType,
-    回信分类: businessKind ? businessLabels[businessKind] : null,
-    客户请求: join(business.map((item) => requestLabels[item.requestType])),
+    回信分类: businessKind ? BUSINESS_REPLY_LABELS[businessKind] : null,
+    客户请求: join(business.map((item) => POSITIVE_REQUEST_LABELS[item.requestType])),
     提取客户信息: join(
       replies.flatMap((message) => String(message.replyAnalysis?.customerInfo || '').split('\n')),
     ),
