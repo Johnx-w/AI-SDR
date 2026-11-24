@@ -4,6 +4,7 @@ import {
   mailDraftBasis,
   signedMailDraft,
 } from './mail-assisted-draft.mjs';
+import { parameterClaimsMatch } from './model-parameters.mjs';
 import { createHash } from 'node:crypto';
 import { requiresProductOrCommercialReview } from './mail-knowledge.mjs';
 
@@ -24,7 +25,12 @@ export async function verifyGrounding(model, basis, { body, sources }) {
   // A number echoed from the customer's question is not a verified product fact.
   const numbers = (text) => text.match(/\d+(?:[.,]\d+)*/gu) || [];
   if (!business) {
-    const facts = new Set(sources.flatMap(({ field, value }) => numbers([field, value].join(' '))));
+    if (!parameterClaimsMatch(body, sources)) return false;
+    const facts = new Set(
+      sources.flatMap(({ item, field, value, conditions }) =>
+        numbers([item, field, value, conditions].join(' ')),
+      ),
+    );
     if (numbers(body).some((n) => !facts.has(n))) return false;
   }
   const content = await model.generate([
@@ -46,7 +52,12 @@ export async function verifyGrounding(model, basis, { body, sources }) {
         subject: basis.mail.subject,
         history: basis.history,
         body,
-        evidence: sources.map(({ field, value }) => ({ field, value })),
+        evidence: sources.map(({ item, field, value, conditions }) => ({
+          item,
+          field,
+          value,
+          conditions,
+        })),
       }),
     },
   ]);
@@ -296,6 +307,7 @@ export class MailReception {
     const businessCorrespondence =
       box.autoBusinessReplies === true &&
       timestamp(m) >= Date.parse(box.businessReplySince) &&
+      !basis.answer.parameterQuery &&
       !basis.answer.sources?.length &&
       !requiresProductOrCommercialReview(basis.mail.subject + '\n' + basis.question, box);
     return {

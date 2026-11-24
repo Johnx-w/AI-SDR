@@ -1,3 +1,4 @@
+import { validReplyFileIds } from './reply-files.mjs';
 import { listSequences, sequenceDetail } from './outreach-sequences.mjs';
 import { verifyGrounding } from './mail-reception.mjs';
 import { requiresProductOrCommercialReview } from './mail-knowledge.mjs';
@@ -15,9 +16,7 @@ function replySettings(value) {
     typeof value.autoBusinessReplies !== 'boolean' ||
     typeof value.draftPersona !== 'string' ||
     value.draftPersona.length > 2000 ||
-    !Array.isArray(value.knowledgeProductIds) ||
-    value.knowledgeProductIds.length > 500 ||
-    value.knowledgeProductIds.some((id) => typeof id !== 'string' || id.length > 180)
+    !validReplyFileIds(value.knowledgeProductIds)
   )
     throw fail(400, '回复设置无效');
   return {
@@ -241,6 +240,7 @@ export async function handleOutreach({
         const signature = renderMailboxSignature(box);
         const businessCorrespondence =
           box.autoBusinessReplies &&
+          !answer.parameterQuery &&
           !answer.sources?.length &&
           !requiresProductOrCommercialReview(subject + ' ' + question, box);
         const basis = {

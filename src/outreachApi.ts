@@ -11,6 +11,8 @@ export interface OutreachFact {
 
 export interface OutreachProduct {
   materialOnly?: boolean;
+  materialCategory?: string;
+  effectiveDate?: string;
   id: string;
   label?: string;
   name?: string;

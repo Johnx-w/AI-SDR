@@ -1,3 +1,5 @@
+import { listReplyFiles } from './reply-files.mjs';
+import { regionImage } from './parameter-extraction.mjs';
 import { randomUUID } from 'node:crypto';
 import { MaterialLibrary } from './materials.mjs';
 import { materialType } from './material-formats.mjs';
@@ -113,9 +115,11 @@ export async function handleMaterials({
   uploads,
   jobs,
 }) {
-  const library = new MaterialLibrary(knowledge, sites?.() || []);
   const method = request.method,
     endpoint = url.pathname.slice('/api/v1/materials'.length);
+  if (endpoint === '/reply-files' && method === 'POST')
+    return json(response, 200, listReplyFiles(knowledge.db, await readJson(request)));
+  const library = new MaterialLibrary(knowledge, sites?.() || []);
   const progress = /^\/processing\/([\da-f-]{36})$/u.exec(endpoint);
   if (progress && method === 'GET') {
     const job = jobs.get(progress[1]);
@@ -123,7 +127,8 @@ export async function handleMaterials({
     return json(response, job.status, job.result);
   }
   const respondAsync = request.headers.prefer === 'respond-async';
-  const parts = method === 'POST' && /^\/(?:pk_[a-f0-9]{32}\/versions\/)?parts$/u.test(endpoint);
+  const parts =
+    method === 'POST' && /^\/(?:pk_[a-f0-9]{32}\/(?:versions|evidence)\/)?parts$/u.test(endpoint);
   const path = parts ? endpoint.slice(0, -'/parts'.length) : endpoint,
     q = Object.fromEntries(url.searchParams);
   if (!path && method === 'GET') {
@@ -140,10 +145,29 @@ export async function handleMaterials({
     return json(response, 200, result);
   }
   const match =
-    /^\/(pk_[a-f0-9]{32})(?:\/(versions|restore|extract|document)(?:\/(pd_[a-f0-9]{64})(?:\/(rows))?)?)?$/.exec(
+    /^\/(pk_[a-f0-9]{32})(?:\/(versions|restore|extract|document|evidence)(?:\/(pd_[a-f0-9]{64})(?:\/(rows|region))?)?)?$/.exec(
       path,
     );
   const [, id, op, docId, rows] = match || [];
+  if (id && op === 'evidence' && !docId && method === 'POST') {
+    if (parts !== (request.headers['content-range'] !== undefined))
+      throw fail(400, '来源文件分段请求无效');
+    const upload = await readUpload(
+      request,
+      q.name || '',
+      request.headers['idempotency-key'],
+      url.pathname + url.search,
+      uploads,
+    );
+    if (!upload.bytes) return json(response, 202, upload);
+    const result = await library.attachEvidence(id, {
+      name: q.name,
+      bytes: upload.bytes,
+      version: Number(q.version),
+    });
+    onChange?.();
+    return json(response, 201, result);
+  }
   if (method === 'POST' && (!path || (op === 'versions' && !docId))) {
     const name = q.name || '',
       type = materialType(name);
@@ -170,7 +194,7 @@ export async function handleMaterials({
       onChange?.();
       return data;
     };
-    if (isPagedMaterial(type) && respondAsync)
+    if ((isPagedMaterial(type) || q.mode === 'model_parameters') && respondAsync)
       return json(response, 202, processMaterial(jobs, save));
     return json(response, 201, await save());
   }
@@ -196,7 +220,10 @@ export async function handleMaterials({
   if (id && op === 'extract' && docId && method === 'POST') {
     if (q.reparse === '1') {
       const { product, documents } = library.detail(id);
-      if (product.status === 'archived' || !documents.some((d) => d.id === docId))
+      if (
+        product.status === 'archived' ||
+        !documents.some((d) => d.id === docId && !d.referencePages)
+      )
         throw fail(409, '只能重新解析当前在用版本。');
     }
     const extract = async (onPage) => {
@@ -214,6 +241,23 @@ export async function handleMaterials({
     return json(response, 200, await extract());
   }
   if (id && op === 'document' && docId && method === 'GET') {
+    if (rows === 'region') {
+      const doc = knowledge.documents.get(id, docId);
+      const candidate =
+        doc.extraction?.parameters?.find((p) => p.key === q.key) ||
+        (q.set &&
+          knowledge.documents
+            .parameterRecords(q.set)
+            .find((p) => p.documentId === docId && p.key === q.key));
+      if (!candidate?.box) throw fail(404, '原图区域不存在');
+      const png = await regionImage(doc, candidate.page, candidate.box, candidate.ref);
+      response.writeHead(200, {
+        'Content-Type': 'image/png',
+        'Cache-Control': 'private, max-age=300',
+        'X-Content-Type-Options': 'nosniff',
+      });
+      return response.end(png);
+    }
     if (rows) return json(response, 200, workbookPage(knowledge.db, id, docId, q));
     const meta = knowledge.db
       .prepare('SELECT metadata FROM product_documents WHERE id=? AND product_id=?')

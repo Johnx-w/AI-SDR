@@ -37,14 +37,19 @@ export function siteAllowsProduct(product, mailbox, requireSite = false) {
   // Legacy custom mailboxes can have manually assigned, untagged sales products.
   return !requireSite && !names[domain];
 }
-export function mentionsOtherSite(question, mailbox) {
+export function otherSitesInText(question, mailbox) {
   const domain = mailSite(mailbox.website),
     normalized = question.toLowerCase().replace(/[^a-z0-9]/gu, '');
-  return Object.entries(names).some(
-    ([other, name]) =>
-      other !== domain &&
-      (brandMention[other].test(question) ||
-        normalized.includes(other.split('.')[0]) ||
-        normalized.includes(name.toLowerCase().replace(/[^a-z0-9]/gu, ''))),
-  );
+  return Object.entries(names)
+    .filter(
+      ([other, name]) =>
+        other !== domain &&
+        (brandMention[other].test(question) ||
+          normalized.includes(other.split('.')[0]) ||
+          normalized.includes(name.toLowerCase().replace(/[^a-z0-9]/gu, ''))),
+    )
+    .map(([domain]) => domain);
+}
+export function mentionsOtherSite(question, mailbox) {
+  return otherSitesInText(question, mailbox).length > 0;
 }

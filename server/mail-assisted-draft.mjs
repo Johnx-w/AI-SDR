@@ -135,7 +135,11 @@ function readAnswer(raw, basis, boxes) {
     )
   )
     throw fail(502, '模型草稿出现其他品牌，请重新起草');
-  const evidence = sources.map((s) => String(s.value || '')).join('\n');
+  const evidence = sources
+    .map((s) =>
+      s.parameter ? [s.item, s.field, s.value, s.conditions].join(' ') : String(s.value || ''),
+    )
+    .join('\n');
   const figures = (text) => text.match(/\d+(?:[.,]\d+)*/gu) || [];
   const supportedFigures = new Set(
     figures(
@@ -211,6 +215,8 @@ export function guardAssistedDraft(service, { id, source, draft, origin, key }) 
 
 export async function composeMailDraft(service, basis, model) {
   if (!model?.generate || !model.name) throw fail(503, '草稿模型未就绪，请核对服务端模型连接配置');
+  if (basis.answer.clarification)
+    return { body: basis.answer.body, sources: [], needsManager: true };
   if (basis.answer.searchVersions && !basis.answer.automatic) {
     const words = await model.generate([
       {
@@ -237,6 +243,7 @@ export async function composeMailDraft(service, basis, model) {
         subject: basis.mail.subject,
         searchWords,
       });
+      if (expanded.clarification) return { body: expanded.body, sources: [], needsManager: true };
       basis = { ...basis, sources: expanded.draftSources || [] };
     }
   }
@@ -266,7 +273,12 @@ export async function composeMailDraft(service, basis, model) {
           subject: basis.mail.subject,
           body: basis.question,
         },
-        evidence: basis.sources.map(({ item, field, value }) => ({ item, field, value })),
+        evidence: basis.sources.map(({ item, field, value, conditions }) => ({
+          item,
+          field,
+          value,
+          conditions,
+        })),
       }),
     },
   ];

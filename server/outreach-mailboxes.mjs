@@ -1,3 +1,4 @@
+import { validReplyFileIds } from './reply-files.mjs';
 import { randomBytes, randomUUID, createCipheriv, createDecipheriv } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, chmodSync } from 'node:fs';
@@ -391,8 +392,7 @@ function normalize(input, previous) {
   const knowledgeProductIds = value.knowledgeProductIds ?? [];
   const replyMode = value.replyMode ?? 'manual';
   if (
-    !Array.isArray(knowledgeProductIds) ||
-    knowledgeProductIds.length > 500 ||
+    !validReplyFileIds(knowledgeProductIds) ||
     !['manual', 'review', 'auto'].includes(replyMode) ||
     typeof (value.autoBusinessReplies ?? false) !== 'boolean'
   )
@@ -410,7 +410,7 @@ function normalize(input, previous) {
     signature: text(value.signature ?? '', 8000, false, true),
     ...(signatureDesign ? { signatureDesign } : {}),
     productIds: [...new Set(productIds.map((id) => text(id, 180, true)))],
-    knowledgeProductIds: [...new Set(knowledgeProductIds.map((id) => text(id, 180, true)))],
+    knowledgeProductIds: [...knowledgeProductIds],
     owner: text(value.owner ?? value.displayName ?? '', 160),
     replyMode,
     draftPersona: text(value.draftPersona ?? '', 2000, false, true),
@@ -473,7 +473,13 @@ export class OutreachMailboxes {
             (!plainObject(policy) ||
               Object.keys(policy).some(
                 (key) =>
-                  !['owner', 'replyMode', 'knowledgeProductIds', 'replyEnabledAt'].includes(key),
+                  ![
+                    'owner',
+                    'replyMode',
+                    'knowledgeScope',
+                    'knowledgeProductIds',
+                    'replyEnabledAt',
+                  ].includes(key),
               ))
           )
             throw fail();
@@ -485,6 +491,7 @@ export class OutreachMailboxes {
             createdAt,
             updatedAt,
             replyEnabledAt,
+            knowledgeScope,
             ...settings
           } = { ...record, ...policy };
           const writing = Object.hasOwn(document.mailWriting || {}, record.id)
@@ -495,6 +502,7 @@ export class OutreachMailboxes {
             throw fail();
           const normalized = normalize({
             ...settings,
+            knowledgeProductIds: settings.knowledgeProductIds ?? knowledgeScope?.includedIds ?? [],
             draftPersona: writing.draftPersona,
             autoBusinessReplies: !!since,
             paused: settings.paused ?? false,

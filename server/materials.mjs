@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { mailSite, siteAllowsProduct } from '../src/domain/mail-site.mjs';
 import { isPagedMaterial, pagedMaterialTypes } from '../src/domain/material-upload.mjs';
+import { parameterMode, linkParameter } from './model-parameters.mjs';
+import { pdfCount } from './parameter-extraction.mjs';
 import { materialMode } from './deepseek-materials.mjs';
 import { materialType, validateFile } from './material-formats.mjs';
 
@@ -94,13 +96,14 @@ export class MaterialLibrary {
     const fields = `p.id,json_extract(p.data,'$.name') AS name,json_extract(p.data,'$.version') AS version,json_extract(p.data,'$.status') AS status,
       json_extract(p.data,'$.updatedAt') AS updatedAt,COALESCE(json_extract(p.data,'$.materialCategory'),'未分类') AS category,
       COALESCE(json_extract(p.data,'$.keywords'),'[]') AS keywords, json_extract(p.data,'$.sourceUrl') AS sourceUrl, json_extract(p.data,'$.brands') AS brands,
-      d.id AS documentId,json_extract(d.metadata,'$.contentType') AS contentType,COALESCE(json_extract(d.metadata,'$.size'),0) AS size,asset_format(json_extract(d.metadata,'$.contentType')) AS format,
+      d.id AS documentId,json_extract(d.metadata,'$.parseMode') AS parseMode,json_extract(d.metadata,'$.contentType') AS contentType,COALESCE(json_extract(d.metadata,'$.size'),0) AS size,asset_format(json_extract(d.metadata,'$.contentType')) AS format,
       CASE WHEN d.extraction IS NULL THEN 'pending'
            WHEN json_extract(d.extraction,'$.model')='failed' THEN 'failed'
+           WHEN json_type(d.extraction,'$.parameters')='array' THEN 'ready'
            WHEN json_extract(d.extraction,'$.model')='manual' THEN 'manual'
            WHEN json_array_length(d.extraction,'$.facts')=0 AND json_type(d.extraction,'$.sheets') IS NULL THEN 'pending'
            ELSE 'ready' END AS extractionStatus,
-      COALESCE(json_array_length(d.extraction,'$.facts'),0) AS extractionCount`;
+      COALESCE(json_array_length(d.extraction,'$.parameters'),json_array_length(d.extraction,'$.facts'),0) AS extractionCount`;
     const cond = ['documentId IS NOT NULL'],
       args = [];
     if (q) {
@@ -180,8 +183,13 @@ export class MaterialLibrary {
     }
     const all = this.k.documents.list(id);
     const linked = (p.documentIds || []).map((id) => all.find((d) => d.id === id)).filter(Boolean);
+    for (const doc of linked) {
+      if (doc.extraction?.parameters)
+        doc.extraction.parameters = doc.extraction.parameters.map((c) => linkParameter(c, linked));
+    }
     return {
       product: p,
+      confirmedParameters: p.parameterSet ? this.k.documents.parameterRecords(p.parameterSet) : [],
       sites: scoped(p, this.sites),
       siteOptions: this.sites,
       currentVersion: current.version,
@@ -217,7 +225,16 @@ export class MaterialLibrary {
       throw fail(400, '缺少有效的上传操作编号');
     const contentType = materialType(name);
     validateFile(name, contentType, bytes);
-    const chosen = isPagedMaterial(contentType) ? materialMode(mode) : undefined;
+    if (mode === undefined && id) {
+      const current = this.get(id);
+      mode = this.k.documents.list(id).find((d) => d.id === current.documentIds?.[0])?.parseMode;
+    }
+    const chosen =
+      mode === parameterMode && !contentType.startsWith('video/')
+        ? parameterMode
+        : isPagedMaterial(contentType)
+          ? materialMode(mode)
+          : undefined;
     const fingerprint = createHash('sha256')
       .update(
         JSON.stringify([
@@ -226,7 +243,7 @@ export class MaterialLibrary {
           name,
           site,
           category,
-          ...(chosen === 'text_recognition' ? [chosen] : []),
+          ...(chosen && chosen !== 'rich_layout_recognition' ? [chosen] : []),
         ]),
       )
       .update(bytes)
@@ -253,6 +270,8 @@ export class MaterialLibrary {
         mode: chosen,
       });
     }
+    if (prepared?.extraction.parameters?.length === 0)
+      throw fail(422, '新版没有可确认的参数，当前版本继续可用');
     const record = transaction(this.db, () => {
       const prior = findRequest.get(key);
       if (prior) {
@@ -263,13 +282,14 @@ export class MaterialLibrary {
         const digest = createHash('sha256').update(bytes).digest('hex');
         const matches = this.db
           .prepare(
-            "SELECT id,product_id FROM product_documents WHERE json_extract(metadata,'$.sha256')=? AND json_extract(metadata,'$.contentType')=? ORDER BY rowid",
+            "SELECT id,product_id,json_extract(metadata,'$.parseMode') parseMode FROM product_documents WHERE json_extract(metadata,'$.sha256')=? AND json_extract(metadata,'$.contentType')=? AND json_type(metadata,'$.referencePages') IS NULL ORDER BY rowid",
           )
           .all(digest, contentType);
         for (const d of matches) {
           const p = this.get(d.product_id),
             sites = scoped(p, this.sites);
           if (
+            (chosen === parameterMode) !== (d.parseMode === parameterMode) ||
             !p.documentIds?.includes(d.id) ||
             (site ? !sites.includes(site) : p.sourceUrl || p.brands?.length)
           )
@@ -291,11 +311,15 @@ export class MaterialLibrary {
             ...this.scope(site),
           });
       const document = this.k.documents.store(product.id, file);
+      if ((document.parseMode === parameterMode) !== (chosen === parameterMode))
+        throw fail(409, '请把原件按新的解析方式导入为独立素材');
       if (
         prepared &&
         (!document.extraction ||
           document.extraction.model === 'failed' ||
-          (isPagedMaterial(contentType) && !document.extraction.facts.length))
+          (isPagedMaterial(contentType) &&
+            !document.extraction.parameters &&
+            !document.extraction.facts.length))
       )
         this.k.documents.saveExtraction(document.id, prepared);
       const ids = product.documentIds || [];
@@ -306,6 +330,7 @@ export class MaterialLibrary {
           {
             ...product,
             documentIds,
+            parameterSet: undefined,
             status: 'draft',
             cellEdits: (product.cellEdits || []).filter((e) => documentIds.includes(e.documentId)),
             sourceFacts: (product.sourceFacts || []).filter((e) =>
@@ -335,7 +360,74 @@ export class MaterialLibrary {
     }
     return { ...record, warning };
   }
+  async attachEvidence(id, { name, bytes, version }) {
+    if (materialType(name) !== 'application/pdf') throw fail(400, '请上传来源 PDF');
+    validateFile(name, 'application/pdf', bytes);
+    let pages;
+    try {
+      pages = await pdfCount(bytes);
+    } catch {
+      throw fail(422, '来源 PDF 无法打开，请检查原件');
+    }
+    return transaction(this.db, () => {
+      const p = this.get(id);
+      const docs = this.k.documents.list(id);
+      if (
+        p.version !== version ||
+        p.status === 'archived' ||
+        !docs.some((d) => d.id === p.documentIds?.[0] && d.parseMode === parameterMode)
+      )
+        throw fail(409, '资料状态已变化，请刷新');
+      const d = this.k.documents.store(id, {
+        name,
+        bytes,
+        contentType: 'application/pdf',
+        referencePages: pages,
+      });
+      if (
+        d.name !== name ||
+        !d.referencePages ||
+        docs.some((x) => p.documentIds.includes(x.id) && x.id !== d.id && x.name === name)
+      )
+        throw fail(400, '请为不同版本的来源 PDF 使用不同文件名');
+      if (p.documentIds.includes(d.id)) return { id, documentId: d.id, version: p.version };
+      const next = this.k.save({ ...p, documentIds: [...p.documentIds, d.id], status: 'draft' });
+      return { id, documentId: d.id, version: next.version };
+    });
+  }
   edit(id, value) {
+    if (value && Object.hasOwn(value, 'parameterKeys'))
+      return transaction(this.db, () => {
+        const p = this.get(id);
+        if (value.version !== p.version || p.status === 'archived')
+          throw fail(409, '资料已变化，请刷新');
+        const docs = this.k.documents.list(id).filter((d) => p.documentIds?.includes(d.id));
+        const doc = docs.find((d) => d.id === p.documentIds[0]);
+        const candidates = doc?.extraction?.parameters;
+        const { parameterKeys, ...rest } = value;
+        if (!candidates || !Array.isArray(parameterKeys) || !parameterKeys.length)
+          throw fail(400, '请选择需要采用的参数');
+        const keys = new Set(parameterKeys);
+        const chosen = candidates.filter((c) => keys.has(c.key));
+        if (chosen.length !== keys.size) throw fail(409, '候选已变化，请重新核对');
+        const distinct = new Set();
+        const records = chosen.map((c) => {
+          const identity = JSON.stringify([
+            c.item.toLowerCase(),
+            c.field.toLowerCase(),
+            (c.conditions || '').toLowerCase(),
+          ]);
+          if (distinct.has(identity) || c.issue?.includes('补齐计量单位'))
+            throw fail(400, '相同配置和参数只能采用一项，缺少单位请修正原件');
+          distinct.add(identity);
+          return { ...linkParameter(c, docs), documentId: doc.id, file: doc.name };
+        });
+        const set = this.k.documents.sealParameters(doc.id, records);
+        return this.editFields(id, rest, set);
+      });
+    return this.editFields(id, value);
+  }
+  editFields(id, value, set) {
     const p = this.get(id);
     if (!value || value.version !== p.version) throw fail(409, '素材已变更，请刷新后重试');
     const allowed = new Set([
@@ -344,6 +436,7 @@ export class MaterialLibrary {
       'category',
       'keywords',
       'site',
+      'sites',
       'status',
       'approvedBy',
       'cellEdits',
@@ -351,7 +444,16 @@ export class MaterialLibrary {
       'adoptDocumentId',
     ]);
     if (Object.keys(value).some((k) => !allowed.has(k))) throw fail(400, '素材编辑字段无效');
-    const updates = {};
+    const updates = set ? { parameterSet: set } : {};
+    if (
+      value.status === 'approved' &&
+      !set &&
+      !p.parameterSet &&
+      this.k.documents
+        .list(id)
+        .some((d) => d.id === p.documentIds?.[0] && d.parseMode === parameterMode)
+    )
+      throw fail(400, '请先选择并确认型号参数');
     if (value.adoptDocumentId) {
       if (
         !this.db
@@ -365,6 +467,21 @@ export class MaterialLibrary {
       if (Object.hasOwn(value, k)) updates[k] = value[k];
     if (Object.hasOwn(value, 'category')) updates.materialCategory = value.category || '未分类';
     if (Object.hasOwn(value, 'site')) Object.assign(updates, this.scope(value.site));
+    if (Object.hasOwn(value, 'sites')) {
+      if (
+        !p.materialOnly ||
+        'site' in value ||
+        !Array.isArray(value.sites) ||
+        value.sites.length > 20 ||
+        value.sites.some((site) => !this.sites.some((s) => s.site === site))
+      )
+        throw fail(400, '请选择有效的适用品牌');
+      const sites = [...new Set(value.sites)].sort();
+      Object.assign(
+        updates,
+        sites.length === 1 ? this.scope(sites[0]) : { sourceUrl: '', brands: sites },
+      );
+    }
     if (
       value.status === 'approved' &&
       !(

@@ -84,6 +84,14 @@ test('业务备注与发件配置分开存储，单改、清空、重启及并�
   );
 });
 
+test('逐邮箱保存文件选择，重启回读和无效更新均保留已选文件', async (t) => {
+  const { registry, config } = fixture(t);
+  const box = await registry.save({ ...settings, knowledgeProductIds: ['one', 'two'] });
+  assert.deepEqual(new OutreachMailboxes(config).get(box.id).knowledgeProductIds, ['one', 'two']);
+  await assert.rejects(registry.save({ id: box.id, knowledgeProductIds: ['one', 'one'] }));
+  assert.deepEqual(registry.get(box.id).knowledgeProductIds, ['one', 'two']);
+});
+
 test('本地查看可保存备注、起草身份及回复选材，不能开启自动发送', async (t) => {
   const { registry } = fixture(t);
   const box = await registry.save({ ...settings, productIds: ['legacy'] });

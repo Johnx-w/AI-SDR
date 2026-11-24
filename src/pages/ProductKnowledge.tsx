@@ -39,6 +39,8 @@ import {
   uploadMaterial,
   type Material,
   type MaterialList,
+  type MaterialDetail,
+  attachParameterSource,
 } from '../services/materials';
 import './ProductKnowledge.css';
 
@@ -90,7 +92,7 @@ export function ProductKnowledgePage() {
     [error, setError] = useState(''),
     [loading, setLoading] = useState(true),
     [tick, setTick] = useState(0);
-  const [parseMode, setParseMode] = useState<ParseMode>('rich_layout_recognition');
+  const [parseMode, setParseMode] = useState<ParseMode>('model_parameters');
   const [importing, setImporting] = useState(false),
     [busy, setBusy] = useState(false),
     [drag, setDrag] = useState(false),
@@ -164,16 +166,41 @@ export function ProductKnowledgePage() {
     let added = 0,
       reused = 0;
     const problems: string[] = [];
-    for (const [index, f] of files.entries()) {
+    const books = files.filter((f) => /\.xlsx$/iu.test(f.name));
+    const grouped = parseMode === 'model_parameters' && books.length === 1;
+    const ordered = grouped ? [books[0], ...files.filter((f) => f !== books[0])] : files;
+    let sourceBook: MaterialDetail | null = null;
+    for (const [index, f] of ordered.entries()) {
       const label = index + 1 + ' / ' + files.length + ' · ' + f.name;
       setProgress('上传中 ' + label);
       try {
+        if (
+          sourceBook &&
+          /\.pdf$/iu.test(f.name) &&
+          sourceBook.documents[0]?.extraction?.parameters?.some(
+            (p) =>
+              p.origin &&
+              (p.origin === f.name ||
+                [' ', '，', ','].some((sep) => p.origin!.startsWith(f.name + sep))),
+          )
+        ) {
+          const linked = await attachParameterSource(
+            sourceBook.product.id,
+            sourceBook.currentVersion,
+            f,
+          );
+          sourceBook.currentVersion = linked.version;
+          added++;
+          continue;
+        }
         const r = await uploadMaterial(
           f,
           { site: site === 'unassigned' ? '' : site, mode: parseMode },
           crypto.randomUUID(),
           (n, total) => setProgress(label + ' · 正在解析第 ' + n + ' / ' + total + ' 页'),
         );
+        if (grouped && f === books[0] && !r.warning)
+          sourceBook = await materialsRequest<MaterialDetail>('/' + r.id);
         if (r.reused) reused++;
         else added++;
         if (r.warning) problems.push(f.name + ' · ' + r.warning);
@@ -248,7 +275,14 @@ export function ProductKnowledgePage() {
     }
   }
   const openFile = (value: string) =>
-    navigate({ id: value, product: null, productId: null, sourcePage: null });
+    navigate({
+      id: value,
+      product: null,
+      productId: null,
+      sourcePage: null,
+      revision: null,
+      parameter: null,
+    });
   const filtered = Boolean(search || site || format || status !== 'active');
   return (
     <SectionWorkspace
@@ -280,6 +314,8 @@ export function ProductKnowledgePage() {
         <MaterialDocument
           key={id}
           id={id}
+          initialRevision={params.get('revision') || ''}
+          initialParameter={params.get('parameter') || ''}
           initialPage={Math.max(1, parseInt(params.get('sourcePage') || '1', 10) || 1)}
           openSource={params.has('sourcePage')}
           onClose={() => openFile('')}
@@ -573,11 +609,13 @@ export function ProductKnowledgePage() {
                               </div>
                             </td>
                             <td>
-                              {m.extractionStatus === 'manual'
-                                ? '人工录入'
-                                : m.format === 'Excel'
-                                  ? '表格解析'
-                                  : '分块存储'}
+                              {m.parseMode === 'model_parameters'
+                                ? '型号参数'
+                                : m.extractionStatus === 'manual'
+                                  ? '人工录入'
+                                  : m.format === 'Excel'
+                                    ? '表格解析'
+                                    : '分块存储'}
                             </td>
                             <td>
                               {m.format === 'Excel' &&
@@ -682,7 +720,7 @@ export function ProductKnowledgePage() {
                 <dt>来源</dt>
                 <dd>本地上传</dd>
                 <dt>文件解析</dt>
-                <dd>DeepSeek 文档解析</dd>
+                <dd>Excel 本地读取 · 文档辅助识别</dd>
               </dl>
             </div>
             <div className="kb-side-section">
@@ -692,7 +730,7 @@ export function ProductKnowledgePage() {
               </h3>
               <dl>
                 <dt>处理方式</dt>
-                <dd>自动分块</dd>
+                <dd>型号参数 / 通用片段</dd>
                 <dt>文档 / 图片</dt>
                 <dd>{documentLimitMiB} MiB / 份</dd>
                 <dt>视频</dt>
@@ -737,6 +775,12 @@ export function ProductKnowledgePage() {
                 </button>
               </header>
               <MaterialParseMode value={parseMode} onChange={setParseMode} />
+              {parseMode === 'model_parameters' && (
+                <p>
+                  Excel 第一列填型号，参数值带单位。来源列填写“文件名.pdf，第 4 页”，可同时选择该
+                  PDF。
+                </p>
+              )}
               <button
                 className="kb-picker"
                 aria-label="选择文件上传"
