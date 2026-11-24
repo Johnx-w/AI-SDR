@@ -142,6 +142,7 @@ export function normalizeOutreachLead(lead = {}) {
         .map((value) => value.toLowerCase()),
     ),
   ];
+  const companyName = compact(lead.name || lead.companyName);
   const contactIssues = [];
   const contacts = emails.flatMap((address) => {
     const entries = array(lead.contactEvidence).filter(
@@ -160,15 +161,31 @@ export function normalizeOutreachLead(lead = {}) {
       if (sameDomain) return true;
       if (!ownSource(source, companyDomain) || item.method === 'guessed') return false;
       const context = quote.toLowerCase().replace(address, '[email]');
-      const contactBlock =
-        /(?:^|\/)contact(?:[-_/]|\.|$)/iu.test(new URL(source).pathname) &&
-        /(?:^|[|·;])\s*e-?mail\s*:\s*\[email\]/iu.test(context);
-      return (
-        contactBlock ||
-        ((context.includes('[email]') || item.method === 'mailto_link') &&
-          /(?:contact us|email us|reach us|our (?:email|office)|(?:business|sales|general) (?:enquiries|inquiries)|^e-?mail)\s*(?:at|address)?\s*[:：-]?\s*(?:\[email\]|$)/iu.test(
-            context,
-          ))
+      // A labelled email belongs to the company whose contact details precede it.
+      // A contact-page URL alone does not identify the owner of a listed address.
+      const contactLabel =
+        /(?:contact us|email us|reach us|our (?:email|office)|(?:business|sales|general) (?:enquiries|inquiries)|^e-?mail)\s*(?:at|address)?\s*[:：-]?\s*(?:\[email\]|$)/iu;
+      const fields = context.split(/[|·;]/u).map((field) => field.trim());
+      const emailIndex = fields.findIndex((field) => field.includes('[email]'));
+      const labelIndex =
+        emailIndex >= 0
+          ? emailIndex
+          : item.method === 'mailto_link'
+            ? fields.findIndex((field) => contactLabel.test(field))
+            : -1;
+      if (labelIndex < 0 || !contactLabel.test(fields[labelIndex])) return false;
+      const owner = fields
+        .slice(0, labelIndex)
+        .reverse()
+        .find((field) => field && !/^(?:phone|tel(?:ephone)?|fax)\b/iu.test(field));
+      if (
+        owner &&
+        owner !== companyName.toLowerCase() &&
+        !/^(?:contact(?: us| information| details)?|sales|general enquiries)$/iu.test(owner)
+      )
+        return false;
+      return !/\b(?:third[- ]party|external|platform)\b.{0,60}\b(?:support|help|service)\b/iu.test(
+        fields[labelIndex],
       );
     });
     const entry = applicable.find(
@@ -210,7 +227,7 @@ export function normalizeOutreachLead(lead = {}) {
       );
   return {
     customerId: text(lead.id || lead.customerId),
-    companyName: compact(lead.name || lead.companyName),
+    companyName,
     companyDomain,
     website,
     market: text(lead.market),

@@ -1810,10 +1810,24 @@ test('首封计划核对监管、平台客服及官网跨域联系方式', async
       '/contact',
       'Mastercraft Shutters | Phone 555 | Email:',
     ],
+    [
+      'homepage',
+      'home@partner.example',
+      '/index.html',
+      'Mastercraft Shutters | Phone 555 | Email:',
+    ],
+    ['platform', 'support@platform.example', '/contact', 'For radio platform support | Email:'],
+    [
+      'platform-cta',
+      'account@platform.example',
+      '/contact',
+      'Third-party radio platform support | Contact us at',
+    ],
     ['fallback', 'help@radio.example', 'https://radio.example/help', 'Radio customer support:'],
   ];
   h.state.leads = cases.map(([id, email, path, label]) => {
     const lead = buyer(id);
+    if (['mastercraft', 'homepage'].includes(id)) lead.name = 'Mastercraft Shutters';
     lead.contactEvidence = [
       {
         kind: 'email',
@@ -1834,13 +1848,13 @@ test('首封计划核对监管、平台客服及官网跨域联系方式', async
       .filter((r) => r.status === 'queued')
       .map((r) => r.to)
       .sort(),
-    ['info@fallback.example.org', 'office@partner.example'],
+    ['home@partner.example', 'info@fallback.example.org', 'office@partner.example'],
   );
   assert.deepEqual(
     rows
       .filter((r) => r.reasonCode === 'contact_unverified')
       .map((r) => r.customerId)
       .sort(),
-    ['crazy', 'dcb'],
+    ['crazy', 'dcb', 'platform', 'platform-cta'],
   );
 });

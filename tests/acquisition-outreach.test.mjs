@@ -1080,3 +1080,24 @@ test('获客计划开启自动首发后按邮箱主体入队，重复调度保�
     [own.email],
   );
 });
+
+test('旧版本已排队的同域首封在重启后按原地址发送一次', async (t) => {
+  const h = await smtpHarness(t);
+  const job = h.create();
+  const lead = buyer('queued-before-upgrade');
+  await h.capture(job.id, lead);
+  await h.service.tick();
+  await Promise.all([...h.service.preparing.values()]);
+  const [queued] = h.service.deliveries(undefined, ['queued']);
+  delete queued.candidate.leadSnapshot.contactIssues;
+  h.service.putDelivery(queued);
+  await h.service.close();
+  h.service = new OutreachService(h.options);
+  await h.pump();
+  await h.pump();
+  assert.deepEqual(
+    h.state.sent.map((mail) => mail.to),
+    [lead.email],
+  );
+  assert.equal(h.service.delivery(queued.id).status, 'accepted');
+});

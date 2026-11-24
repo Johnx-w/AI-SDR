@@ -25,6 +25,12 @@ import { renderMailboxSignature, signaturePlainTextHtml } from '../src/domain/ma
 import { deliveryGroup } from '../src/domain/outreach-status.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
+// Rejection explanations are diagnostic metadata, absent in older queued snapshots.
+function leadSnapshotHash(snapshot) {
+  if (!snapshot) return hash(snapshot || null);
+  const { contactIssues, ...facts } = snapshot;
+  return hash(facts);
+}
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const text = (value, max = 200) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
 const list = (value) =>
@@ -1628,7 +1634,10 @@ export class OutreachService {
           v.productId === d.candidate.productId &&
           v.productVersion === d.productVersion,
       );
-      if (!candidate || hash(candidate.leadSnapshot) !== hash(d.candidate.leadSnapshot)) {
+      if (
+        !candidate ||
+        leadSnapshotHash(candidate.leadSnapshot) !== leadSnapshotHash(d.candidate.leadSnapshot)
+      ) {
         const customerBlock = result.blocked.find(
           (row) => row.customerId === d.customerId && customerSkipCodes.has(row.reasonCode),
         );
