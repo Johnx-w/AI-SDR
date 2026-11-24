@@ -1049,3 +1049,34 @@ test('定时获客自然换轮仍按原首封的自定义日期同线程跟进�
     await h.close();
   }
 });
+
+test('获客计划开启自动首发后按邮箱主体入队，重复调度保留同一记录', async (t) => {
+  const h = await smtpHarness(t);
+  const plan = h.plan();
+  const job = h.create({}, plan.id);
+  const platform = { ...buyer('radio-customer'), email: 'support@radio.example' };
+  const own = { ...buyer('shutter-customer'), email: 'info@partner.example' };
+  own.contactEvidence = [
+    {
+      kind: 'email',
+      value: own.email,
+      source_url: own.website + '/contact',
+      quote: 'Contact us at ' + own.email,
+    },
+  ];
+  await h.capture(job.id, platform);
+  await h.capture(job.id, own);
+  await h.service.tick();
+  await Promise.all([...h.service.preparing.values()]);
+  assert.deepEqual(
+    h.service.deliveries(undefined, ['queued']).map((row) => row.to),
+    [own.email],
+  );
+  assert.equal(h.service.deliveries(undefined, ['skipped'])[0].reasonCode, 'contact_unverified');
+  await h.pump();
+  await h.pump();
+  assert.deepEqual(
+    h.state.sent.map((row) => row.to),
+    [own.email],
+  );
+});

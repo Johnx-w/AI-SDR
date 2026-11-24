@@ -142,11 +142,36 @@ export function normalizeOutreachLead(lead = {}) {
         .map((value) => value.toLowerCase()),
     ),
   ];
+  const contactIssues = [];
   const contacts = emails.flatMap((address) => {
     const entries = array(lead.contactEvidence).filter(
       (entry) => entry?.kind === 'email' && text(entry.value).toLowerCase() === address,
     );
-    const entry = entries.find(
+    const sameDomain = ownSource('https://' + address.split('@')[1], companyDomain);
+    const applicable = entries.filter((item) => {
+      const source = publicUrl(item.source_url || item.sourceUrl);
+      const quote = compact(item.quote);
+      if (
+        /information commissioner|supervisory authority|lodge (?:a )?complaint|监管机构/iu.test(
+          quote,
+        )
+      )
+        return false;
+      if (sameDomain) return true;
+      if (!ownSource(source, companyDomain) || item.method === 'guessed') return false;
+      const context = quote.toLowerCase().replace(address, '[email]');
+      const contactBlock =
+        /(?:^|\/)contact(?:[-_/]|\.|$)/iu.test(new URL(source).pathname) &&
+        /(?:^|[|·;])\s*e-?mail\s*:\s*\[email\]/iu.test(context);
+      return (
+        contactBlock ||
+        ((context.includes('[email]') || item.method === 'mailto_link') &&
+          /(?:contact us|email us|reach us|our (?:email|office)|(?:business|sales|general) (?:enquiries|inquiries)|^e-?mail)\s*(?:at|address)?\s*[:：-]?\s*(?:\[email\]|$)/iu.test(
+            context,
+          ))
+      );
+    });
+    const entry = applicable.find(
       (item) =>
         item.verification_status !== 'invalid' &&
         !dedicatedContactPurpose(
@@ -155,7 +180,19 @@ export function normalizeOutreachLead(lead = {}) {
           compact(item.quote),
         ),
     );
-    if ((!entry && entries.length) || dedicatedContactPurpose(address, '', '')) return [];
+    if ((!entry && (entries.length || !sameDomain)) || dedicatedContactPurpose(address, '', '')) {
+      contactIssues.push({
+        email: address,
+        reason: sameDomain
+          ? '地址无效或用途不适合商务联系'
+          : '跨域地址缺少官网明示自身商务联系用途的依据',
+        evidence: entries.map((item) => ({
+          sourceUrl: publicUrl(item.source_url || item.sourceUrl),
+          quote: compact(item.quote),
+        })),
+      });
+      return [];
+    }
     return [
       {
         email: address,
@@ -184,6 +221,7 @@ export function normalizeOutreachLead(lead = {}) {
     business,
     evidence,
     contacts,
+    contactIssues,
     emails,
     language: text(lead.language) || 'en',
     suppression: lead.suppression || {},
@@ -442,7 +480,11 @@ export function selectOutreachCandidates({
     }
     const contactResult = recipient(lead.contacts);
     if (contactResult.error) {
-      reject(contactResult.error, contactResult.reason);
+      reject(
+        contactResult.error,
+        lead.contactIssues.map((issue) => issue.email + '：' + issue.reason).join('；') ||
+          contactResult.reason,
+      );
       continue;
     }
     base.to = contactResult.contact.email;
