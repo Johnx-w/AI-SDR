@@ -164,3 +164,17 @@ test('unknown or failed replies never become successfully sent business messages
   assert.equal((await h.record(messages)).recorded, 0);
   assert.equal(h.store.all('messages').length, 0);
 });
+test('CRM 保存逐封原文分类，补录分类后重试幂等', async (t) => {
+  const h = setup(t);
+  await h.record([{ ...h.incoming, businessKind: 'positive', requestType: 'catalog' }]);
+  const before = h.store.view().messages[0];
+  assert.equal(before.businessKind, 'positive');
+  assert.equal(before.requestType, 'catalog');
+  const corrected = { ...h.incoming, businessKind: 'other', requestType: null };
+  await h.record([corrected]);
+  await h.record([corrected]);
+  const after = h.store.get('messages', before.id);
+  assert.equal(after.businessKind, 'other');
+  assert.equal(after.requestType, null);
+  assert.equal(after.version, before.version + 1);
+});

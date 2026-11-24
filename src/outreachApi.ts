@@ -114,6 +114,7 @@ export interface OutreachDelivery {
   createdAt: string;
   sentAt?: string | null;
   bouncedAt?: string;
+  bounce?: { category: string; diagnostic: string; action: string } | null;
   attemptedAt?: string | null;
   skippedAt?: string;
   messageId?: string | null;

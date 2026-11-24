@@ -18,6 +18,8 @@ const fixture = () => ({
     paused: '/business?tab=tasks&bucket=paused',
   },
   products: { draft: 0, to: '/materials?status=draft' },
+  positiveReplyTotal: 0,
+  positiveReplies: [],
 });
 const render = (data, props = {}) =>
   renderToStaticMarkup(
@@ -57,4 +59,10 @@ test('未知来源、请求失败与加载中不冒充空待办，有事项时�
   assert.match(html, /逾期跟进/);
   assert.match(html, /2 项/);
   assert.doesNotMatch(html, /当前没有到期或待核对事项/);
+  const reply = fixture();
+  reply.positiveReplies.push({ to: '/inbox?thread=one' }, { to: '/inbox?thread=two' });
+  reply.positiveReplyTotal = 32;
+  const replyHtml = render(reply);
+  assert.match(replyHtml, /积极回复待处理/);
+  assert.match(replyHtml, /32 项/);
 });

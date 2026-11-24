@@ -1,3 +1,4 @@
+import { emptyBusinessCounts } from '../src/domain/reply-classification.mjs';
 import { extractAutomaticDemands } from './automatic-demands.mjs';
 import { createHash } from 'node:crypto';
 import { CustomerBusiness } from './customer-business.mjs';
@@ -312,7 +313,16 @@ export class CustomerBusinessApi {
       const store = this.state().store;
       if (request.method === 'GET') {
         if (action) throw fail(405, '不支持的业务记录读取操作');
-        if (!id) return { status: 200, body: { records: (await this.workspace(url))[kind] } };
+        if (!id) {
+          const records = (await this.workspace(url))[kind];
+          if (kind === 'messages') {
+            const businessCounts = emptyBusinessCounts();
+            for (const m of records)
+              if (m.direction === 'inbound') businessCounts[m.businessKind]++;
+            return { status: 200, body: { records, businessCounts } };
+          }
+          return { status: 200, body: { records } };
+        }
         const record = store.get(kind, id);
         if (!record) throw fail(404, '业务记录不存在，请刷新列表');
         return { status: 200, body: { record } };

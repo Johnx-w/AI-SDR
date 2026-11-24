@@ -11,7 +11,11 @@ import {
 } from './outreach-content.mjs';
 import { OutreachFollowUps } from './outreach-follow-ups.mjs';
 import { MailboxTags } from './mailbox-tags.mjs';
-import { initializeOutreachBounces, recordOutreachBounces } from './outreach-bounces.mjs';
+import {
+  initializeOutreachBounces,
+  invalidAddressReason,
+  recordOutreachBounces,
+} from './outreach-bounces.mjs';
 import { MailConversations, mailboxAccountKey } from './mail-conversations.mjs';
 import { MailReplies } from './mail-replies.mjs';
 import { MailReception } from './mail-reception.mjs';
@@ -21,6 +25,12 @@ import { renderMailboxSignature, signaturePlainTextHtml } from '../src/domain/ma
 import { deliveryGroup } from '../src/domain/outreach-status.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
+// Rejection explanations are diagnostic metadata, absent in older queued snapshots.
+function leadSnapshotHash(snapshot) {
+  if (!snapshot) return hash(snapshot || null);
+  const { contactIssues, ...facts } = snapshot;
+  return hash(facts);
+}
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const text = (value, max = 200) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
 const list = (value) =>
@@ -82,6 +92,7 @@ export class OutreachService {
       body: 'Could you confirm the model and the detail you need?',
     }),
     getEnv = () => ({}),
+    fetchImpl,
     getDraftModel = () => null,
     getScope = () => 'local',
     businessState = () => ({}),
@@ -135,6 +146,7 @@ export class OutreachService {
       setMailOwnership,
       recordAccepted,
       generator,
+      fetchImpl,
       now,
       tickMs,
       acquisitionSources,
@@ -296,9 +308,15 @@ export class OutreachService {
     const bounce =
       delivery.status === 'accepted' &&
       this.db
-        .prepare('SELECT received_at FROM outreach_delivery_bounces WHERE delivery_id=?')
+        .prepare('SELECT received_at, diagnosis FROM outreach_delivery_bounces WHERE delivery_id=?')
         .get(id);
-    return bounce ? { ...delivery, bouncedAt: bounce.received_at } : delivery;
+    return bounce
+      ? {
+          ...delivery,
+          bouncedAt: bounce.received_at,
+          bounce: JSON.parse(bounce.diagnosis || 'null'),
+        }
+      : delivery;
   }
   putDelivery(d) {
     if (d.status === 'unknown' && !d.reconciliation) {
@@ -402,7 +420,9 @@ export class OutreachService {
     return { campaign: this.withStats(this.campaign(id)), deliveries: this.deliveries(id) };
   }
   generatorClient() {
-    return this.generator || createOutreachGenerator({ env: this.getEnv() });
+    return (
+      this.generator || createOutreachGenerator({ env: this.getEnv(), fetchImpl: this.fetchImpl })
+    );
   }
   async state(params) {
     const mailboxes = this.mailboxes
@@ -867,6 +887,10 @@ export class OutreachService {
                 mailboxId: delivery.mailboxId,
               })),
           },
+      invalidAddresses: this.db
+        .prepare('SELECT identity FROM outreach_suppression WHERE reason=?')
+        .all(invalidAddressReason)
+        .map((row) => row.identity.slice(6)),
       suppressed: identityValues(stopped),
       contacted: identityValues(identities),
       now: new Date(this.now()),
@@ -1061,7 +1085,9 @@ export class OutreachService {
           }
           continue;
         }
+        const template = this.followUps.policy();
         const d = {
+          firstTemplateRevision: template.revision,
           id: unfinished?.id || randomUUID(),
           campaignId: id,
           mode: 'production',
@@ -1114,6 +1140,8 @@ export class OutreachService {
         }
         try {
           const generated = await this.generatorClient().generate({
+            firstInstruction: template.firstInstruction,
+            firstBodyInstruction: template.firstBodyInstruction,
             candidate,
             mailbox,
             product,
@@ -1592,7 +1620,10 @@ export class OutreachService {
           v.productId === d.candidate.productId &&
           v.productVersion === d.productVersion,
       );
-      if (!candidate || hash(candidate.leadSnapshot) !== hash(d.candidate.leadSnapshot)) {
+      if (
+        !candidate ||
+        leadSnapshotHash(candidate.leadSnapshot) !== leadSnapshotHash(d.candidate.leadSnapshot)
+      ) {
         const customerBlock = result.blocked.find(
           (row) => row.customerId === d.customerId && customerSkipCodes.has(row.reasonCode),
         );

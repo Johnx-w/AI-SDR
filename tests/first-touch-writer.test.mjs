@@ -366,3 +366,17 @@ test('没有获准产品或双方产品不匹配时不产生可写作候选', ()
     );
   }
 });
+
+test('可编辑的首封结尾要求进入写作上下文，与客户和供货依据分开', async () => {
+  const { input, draft } = fixture();
+  input.firstInstruction = 'May I send a one-page product card?';
+  const result = await generate(input, draft, (req) => {
+    const context = JSON.parse(req.messages[1].content);
+    assert.equal(context.closing_instruction, input.firstInstruction);
+    assert.equal(
+      context.sender.facts.some((f) => f.text === input.firstInstruction),
+      false,
+    );
+  });
+  assert.ok(result.sourceIds.length);
+});

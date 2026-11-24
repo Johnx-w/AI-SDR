@@ -1,3 +1,7 @@
+import {
+  BUSINESS_REPLY_LABELS,
+  POSITIVE_REQUEST_LABELS as requestTypes,
+} from '../domain/reply-classification.mjs';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { formatBeijingTime } from '../domain/date-time.mjs';
@@ -20,6 +24,10 @@ const handling = {
   sent: '邮箱已回复',
   unanswered: '未见后续回信',
 };
+const businessKinds = {
+  all: '全部业务分类',
+  ...BUSINESS_REPLY_LABELS,
+};
 interface Row {
   id: string;
   threadId: string;
@@ -32,6 +40,8 @@ interface Row {
   companyName: string | null;
   hasLocalParent: boolean;
   handling: keyof typeof handling;
+  businessKind: Exclude<keyof typeof businessKinds, 'all'>;
+  requestType: keyof typeof requestTypes | null;
 }
 interface Result {
   items: Row[];
@@ -39,10 +49,23 @@ interface Result {
   page: number;
   pageSize: number;
   mailboxes: { id: string; email: string }[];
+  businessCounts: Record<Exclude<keyof typeof businessKinds, 'all'>, number>;
 }
-export function MailReplyHistory({ revision }: { revision: number }) {
+export function MailReplyHistory({
+  revision,
+  initialBusinessKind = 'all',
+}: {
+  revision: number;
+  initialBusinessKind?: string;
+}) {
+  const selectedBusinessKind = Object.hasOwn(businessKinds, initialBusinessKind)
+    ? (initialBusinessKind as keyof typeof businessKinds)
+    : 'all';
   const [mailbox, setMailbox] = useState('all'),
-    [kind, setKind] = useState<keyof typeof kinds>('reply'),
+    [kind, setKind] = useState<keyof typeof kinds>(
+      selectedBusinessKind === 'all' ? 'reply' : 'all',
+    ),
+    [businessKind, setBusinessKind] = useState<keyof typeof businessKinds>(selectedBusinessKind),
     [replyState, setReplyState] = useState('all'),
     [page, setPage] = useState(1);
   const [result, setResult] = useState<Result | null>(null),
@@ -55,6 +78,7 @@ export function MailReplyHistory({ revision }: { revision: number }) {
     const params = new URLSearchParams({
       mailboxId: mailbox,
       kind,
+      businessKind,
       handling: replyState,
       page: String(page),
     });
@@ -75,7 +99,7 @@ export function MailReplyHistory({ revision }: { revision: number }) {
     }
     void load();
     return () => abort.abort();
-  }, [mailbox, kind, replyState, page, revision]);
+  }, [mailbox, kind, businessKind, replyState, page, revision]);
   return (
     <section className="business-replies" aria-label="邮箱来信跟进">
       <div className="business-filters">
@@ -92,6 +116,22 @@ export function MailReplyHistory({ revision }: { revision: number }) {
             {boxes.map((b) => (
               <option key={b.id} value={b.id}>
                 {b.email}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          业务分类
+          <select
+            value={businessKind}
+            onChange={(e) => {
+              setBusinessKind(e.target.value as keyof typeof businessKinds);
+              setPage(1);
+            }}
+          >
+            {Object.entries(businessKinds).map(([key, label]) => (
+              <option key={key} value={key}>
+                {label}
               </option>
             ))}
           </select>
@@ -130,6 +170,16 @@ export function MailReplyHistory({ revision }: { revision: number }) {
           </label>
         )}
       </div>
+      {result && (
+        <p className="outreach-hint">
+          {Object.entries(result.businessCounts)
+            .map(
+              ([key, count]) =>
+                `${businessKinds[key as keyof typeof result.businessCounts]} ${count}`,
+            )
+            .join(' · ')}
+        </p>
+      )}
       {error ? (
         <p role="alert">{error}</p>
       ) : !result ? (
@@ -143,6 +193,7 @@ export function MailReplyHistory({ revision }: { revision: number }) {
                   {[
                     '客户 / 发件人',
                     '邮件主题',
+                    '业务分类',
                     '收件邮箱',
                     '收件时间（北京）',
                     '依据',
@@ -173,6 +224,10 @@ export function MailReplyHistory({ revision }: { revision: number }) {
                       >
                         {r.subject || '（无主题）'}
                       </Link>
+                    </td>
+                    <td>
+                      {businessKinds[r.businessKind]}
+                      {r.requestType && <small>{requestTypes[r.requestType]}</small>}
                     </td>
                     <td>{r.account}</td>
                     <td>

@@ -13,7 +13,9 @@ const text = (value) => (typeof value === 'string' ? value.trim() : '');
 const array = (value) => (Array.isArray(value) ? value : []);
 const compact = (value) => text(value).replace(/\s+/gu, ' ');
 const writerRoot = new URL('../agents/first-touch-writer/', import.meta.url);
-const writerPrompt = readFileSync(new URL('system.md', writerRoot), 'utf8');
+const writerPolicy = readFileSync(new URL('system.md', writerRoot), 'utf8');
+// Keep the original default prompt in the material fingerprint used by existing queues.
+const [writerPrompt] = writerPolicy.split(/\r?\n## Workspace template overrides\r?\n/u);
 const confirmedSupply = JSON.parse(
   readFileSync(new URL('confirmed-supply.json', writerRoot), 'utf8'),
 );
@@ -142,11 +144,53 @@ export function normalizeOutreachLead(lead = {}) {
         .map((value) => value.toLowerCase()),
     ),
   ];
+  const companyName = compact(lead.name || lead.companyName);
+  const contactIssues = [];
   const contacts = emails.flatMap((address) => {
     const entries = array(lead.contactEvidence).filter(
       (entry) => entry?.kind === 'email' && text(entry.value).toLowerCase() === address,
     );
-    const entry = entries.find(
+    const sameDomain = ownSource('https://' + address.split('@')[1], companyDomain);
+    const applicable = entries.filter((item) => {
+      const source = publicUrl(item.source_url || item.sourceUrl);
+      const quote = compact(item.quote);
+      if (
+        /information commissioner|supervisory authority|lodge (?:a )?complaint|监管机构/iu.test(
+          quote,
+        )
+      )
+        return false;
+      if (sameDomain) return true;
+      if (!ownSource(source, companyDomain) || item.method === 'guessed') return false;
+      const context = quote.toLowerCase().replace(address, '[email]');
+      // A labelled email belongs to the company whose contact details precede it.
+      // A contact-page URL alone does not identify the owner of a listed address.
+      const contactLabel =
+        /(?:contact us|email us|reach us|our (?:email|office)|(?:business|sales|general) (?:enquiries|inquiries)|^e-?mail)\s*(?:at|address)?\s*[:：-]?\s*(?:\[email\]|$)/iu;
+      const fields = context.split(/[|·;]/u).map((field) => field.trim());
+      const emailIndex = fields.findIndex((field) => field.includes('[email]'));
+      const labelIndex =
+        emailIndex >= 0
+          ? emailIndex
+          : item.method === 'mailto_link'
+            ? fields.findIndex((field) => contactLabel.test(field))
+            : -1;
+      if (labelIndex < 0 || !contactLabel.test(fields[labelIndex])) return false;
+      const owner = fields
+        .slice(0, labelIndex)
+        .reverse()
+        .find((field) => field && !/^(?:phone|tel(?:ephone)?|fax)\b/iu.test(field));
+      if (
+        owner &&
+        owner !== companyName.toLowerCase() &&
+        !/^(?:contact(?: us| information| details)?|sales|general enquiries)$/iu.test(owner)
+      )
+        return false;
+      return !/\b(?:third[- ]party|external|platform)\b.{0,60}\b(?:support|help|service)\b/iu.test(
+        fields[labelIndex],
+      );
+    });
+    const entry = applicable.find(
       (item) =>
         item.verification_status !== 'invalid' &&
         !dedicatedContactPurpose(
@@ -155,7 +199,19 @@ export function normalizeOutreachLead(lead = {}) {
           compact(item.quote),
         ),
     );
-    if ((!entry && entries.length) || dedicatedContactPurpose(address, '', '')) return [];
+    if ((!entry && (entries.length || !sameDomain)) || dedicatedContactPurpose(address, '', '')) {
+      contactIssues.push({
+        email: address,
+        reason: sameDomain
+          ? '地址无效或用途不适合商务联系'
+          : '跨域地址缺少官网明示自身商务联系用途的依据',
+        evidence: entries.map((item) => ({
+          sourceUrl: publicUrl(item.source_url || item.sourceUrl),
+          quote: compact(item.quote),
+        })),
+      });
+      return [];
+    }
     return [
       {
         email: address,
@@ -173,7 +229,7 @@ export function normalizeOutreachLead(lead = {}) {
       );
   return {
     customerId: text(lead.id || lead.customerId),
-    companyName: compact(lead.name || lead.companyName),
+    companyName,
     companyDomain,
     website,
     market: text(lead.market),
@@ -184,6 +240,7 @@ export function normalizeOutreachLead(lead = {}) {
     business,
     evidence,
     contacts,
+    contactIssues,
     emails,
     language: text(lead.language) || 'en',
     suppression: lead.suppression || {},
@@ -348,6 +405,7 @@ export function selectOutreachCandidates({
   products = [],
   campaign = {},
   suppressed = [],
+  invalidAddresses = [],
   contacted = [],
   now = new Date(),
 } = {}) {
@@ -355,6 +413,7 @@ export function selectOutreachCandidates({
     blocked = [];
   const suppressedKeys = identitySet(suppressed),
     contactedKeys = identitySet(contacted);
+  const invalidEmails = new Set(invalidAddresses);
   const selectedDomains = new Set(),
     selectedIds = new Set(),
     selectedRecipients = new Set();
@@ -421,7 +480,7 @@ export function selectOutreachCandidates({
       continue;
     }
     if (
-      identities.some((value) => suppressedKeys.has(value)) ||
+      identities.some((value) => suppressedKeys.has(value) && !invalidEmails.has(value)) ||
       Object.entries(lead.suppression).some(([key, value]) => key !== 'reason' && value === true)
     ) {
       reject('suppressed', '该企业或联系地址已标记为勿再联系');
@@ -440,9 +499,18 @@ export function selectOutreachCandidates({
       reject('business_unverified', '缺少有来源的企业经营主体依据');
       continue;
     }
-    const contactResult = recipient(lead.contacts);
+    const contacts = lead.contacts.filter((contact) => !invalidEmails.has(contact.email));
+    if (!contacts.length && lead.contacts.some((contact) => invalidEmails.has(contact.email))) {
+      reject('suppressed', '可用联系地址已有明确无效退信，需重新核实');
+      continue;
+    }
+    const contactResult = recipient(contacts);
     if (contactResult.error) {
-      reject(contactResult.error, contactResult.reason);
+      reject(
+        contactResult.error,
+        lead.contactIssues.map((issue) => issue.email + '：' + issue.reason).join('；') ||
+          contactResult.reason,
+      );
       continue;
     }
     base.to = contactResult.contact.email;
@@ -608,7 +676,15 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
   return {
     configured,
     configurationError: configured ? null : configurationError || '请先在连接设置中配置研究模型',
-    async generate({ candidate, mailbox, product, campaign, now = new Date() }) {
+    async generate({
+      candidate,
+      mailbox,
+      product,
+      campaign,
+      firstInstruction = '',
+      firstBodyInstruction = '',
+      now = new Date(),
+    }) {
       if (!configured)
         throw fail(503, '请先在连接设置中配置开发信使用的研究模型', 'outreach_model_unconfigured');
       const facts = eligibleOutreachFacts(product, campaign, now);
@@ -656,12 +732,14 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
           body_text: {
             type: 'string',
             description:
-              '55–85 English words in exactly three paragraphs separated by two newline characters: customer observation, sender brand and product supply introduction, then one easy question about a brief overview or introduction. No greeting or signature.',
+              '55–85 English words in exactly three paragraphs separated by two newline characters: customer observation, sender brand and product supply introduction, then one easy question following the closing instruction or the default brief introduction. No greeting or signature.',
           },
           source_ids: { type: 'array', items: { type: 'string' } },
         },
       };
       const input = {
+        ...(firstBodyInstruction ? { body_instruction: firstBodyInstruction } : {}),
+        ...(firstInstruction ? { closing_instruction: firstInstruction } : {}),
         customer: {
           name: candidate.companyName,
           country: candidate.leadSnapshot?.market,
@@ -685,7 +763,7 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
       const messages = [
         {
           role: 'system',
-          content: writerPrompt,
+          content: firstInstruction || firstBodyInstruction ? writerPolicy : writerPrompt,
         },
         { role: 'user', content: JSON.stringify(input) },
       ];
@@ -756,7 +834,7 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
               { role: 'assistant', content: JSON.stringify(draft) },
               {
                 role: 'user',
-                content: `Revise the draft's writing format only, using the same supplied facts and focus_product. It currently has ${wordCount} words and ${paragraphs.length} paragraphs. Return 60–75 English words in exactly three paragraphs separated by two newlines: paragraph 1 describes the customer's matching product as an offer or activity, without naming a terms, privacy or legal page; paragraph 2 names the sender brand, states its approved product supply and explains the contact purpose plainly; paragraph 3 is one easy question about a brief overview or introduction, optionally for the sourcing colleague if this is a general inbox. Add no filler, invented customer facts or counts inferred from a bare number in a source excerpt. No greeting, signature, generic well-wishes or internal phrases such as confirmed range/types. Keep customer source IDs valid and supplier claims grounded. Return the same JSON fields.`,
+                content: `Revise the draft's writing format only, using the same supplied facts and focus_product. It currently has ${wordCount} words and ${paragraphs.length} paragraphs. Return 60–75 English words in exactly three paragraphs separated by two newlines: paragraph 1 describes the customer's matching product as an offer or activity, without naming a terms, privacy or legal page; paragraph 2 names the sender brand, states its approved product supply and explains the contact purpose plainly; paragraph 3 is one easy question following closing_instruction when supplied, otherwise about a brief overview or introduction. Add no filler, invented customer facts or counts inferred from a bare number in a source excerpt. No greeting, signature, generic well-wishes or internal phrases such as confirmed range/types. Keep customer source IDs valid and supplier claims grounded. Return the same JSON fields.`,
               },
             );
             continue;

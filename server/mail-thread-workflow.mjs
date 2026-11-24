@@ -5,11 +5,30 @@ export function initializeThreadWorkflow(db) {
     CREATE TABLE IF NOT EXISTS mail_thread_workflow (
       thread_id TEXT PRIMARY KEY, state TEXT NOT NULL, snooze_until TEXT, updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS mail_thread_completions (
+      thread_id TEXT PRIMARY KEY, completed_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS mail_offline_handled (message_id TEXT PRIMARY KEY);
+    CREATE TRIGGER IF NOT EXISTS mail_completed_history AFTER INSERT ON mailbox_thread_messages
+    WHEN json_extract(new.data,'$.direction')='inbound' BEGIN
+      INSERT OR IGNORE INTO mail_offline_handled SELECT new.id FROM mail_thread_completions
+        WHERE thread_id=new.thread_id AND julianday(completed_at)>=julianday(coalesce(
+          json_extract(new.data,'$.receivedAt'),json_extract(new.data,'$.occurredAt')));
+    END;
     CREATE TABLE IF NOT EXISTS mail_internal_notes (
       id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS mail_internal_notes_thread ON mail_internal_notes(thread_id, created_at);
   `);
+}
+
+// The last workflow state is all that pre-migration databases retain.
+export function backfillOfflineCompletions(db) {
+  db.exec(`INSERT OR IGNORE INTO mail_thread_completions SELECT thread_id,updated_at
+      FROM mail_thread_workflow WHERE state='done';
+    INSERT OR IGNORE INTO mail_offline_handled SELECT h.id FROM mail_thread_completions c
+      JOIN mailbox_reply_headers h ON h.thread_id=c.thread_id
+      WHERE h.direction='inbound' AND julianday(h.stamp)<=julianday(c.completed_at)`);
 }
 
 // One expression is used by both the folder counts and the selected thread.
@@ -45,10 +64,27 @@ export function updateThreadWorkflow(db, id, input, now) {
     if (!Number.isFinite(time) || time <= now) throw fail(400, '请选择未来的提醒时间');
     until = new Date(time).toISOString();
   }
-  db.prepare(
-    `INSERT INTO mail_thread_workflow VALUES(?,?,?,?)
+  db.exec('SAVEPOINT update_workflow');
+  try {
+    if (state === 'done') {
+      db.prepare(
+        `INSERT INTO mail_thread_completions VALUES(?,?)
+        ON CONFLICT(thread_id) DO UPDATE SET completed_at=max(completed_at,excluded.completed_at)`,
+      ).run(id, new Date(now).toISOString());
+      db.prepare(
+        `INSERT OR IGNORE INTO mail_offline_handled SELECT id FROM mailbox_reply_headers
+        WHERE thread_id=? AND direction='inbound'`,
+      ).run(id);
+    }
+    db.prepare(
+      `INSERT INTO mail_thread_workflow VALUES(?,?,?,?)
     ON CONFLICT(thread_id) DO UPDATE SET state=excluded.state,snooze_until=excluded.snooze_until,updated_at=excluded.updated_at`,
-  ).run(id, state, until, new Date(now).toISOString());
+    ).run(id, state, until, new Date(now).toISOString());
+    db.exec('RELEASE update_workflow');
+  } catch (error) {
+    db.exec('ROLLBACK TO update_workflow; RELEASE update_workflow');
+    throw error;
+  }
   return threadWorkflow(db, id, now);
 }
 
@@ -71,6 +107,11 @@ export function addInternalNote(db, id, input, now) {
 }
 
 export function mergeThreadWorkflow(db, from, to) {
+  db.prepare(
+    `INSERT INTO mail_thread_completions SELECT ?,completed_at FROM mail_thread_completions
+    WHERE thread_id=? ON CONFLICT(thread_id) DO UPDATE SET completed_at=max(completed_at,excluded.completed_at)`,
+  ).run(to, from);
+  db.prepare('DELETE FROM mail_thread_completions WHERE thread_id=?').run(from);
   db.prepare('UPDATE mail_internal_notes SET thread_id=? WHERE thread_id=?').run(to, from);
   db.prepare(
     `INSERT INTO mail_thread_workflow SELECT ?,state,snooze_until,updated_at

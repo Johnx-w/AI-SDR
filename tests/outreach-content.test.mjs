@@ -1072,3 +1072,12 @@ test('资料版本可在原范围内更新，身份、品牌或市场扩大则�
       null,
     );
 });
+
+test('已确认退信仅排除该地址，其他旧档商务邮箱仍可用于首封', () => {
+  const input = fixture();
+  input.invalidAddresses = ['info@buyer.example.org'];
+  input.suppressed = ['info@buyer.example.org'];
+  assert.equal(selectOutreachCandidates(input).blocked[0].reasonCode, 'suppressed');
+  input.leads[0].email += ' office@buyer.example.org';
+  assert.equal(selectOutreachCandidates(input).eligible[0].to, 'office@buyer.example.org');
+});

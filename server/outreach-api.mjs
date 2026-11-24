@@ -4,6 +4,7 @@ import { requiresProductOrCommercialReview } from './mail-knowledge.mjs';
 import { renderMailboxSignature } from '../src/domain/mail-signature.mjs';
 import { composeMailDraft, signedMailDraft, generateMailDraft } from './mail-assisted-draft.mjs';
 import { addInternalNote, threadWorkflow, updateThreadWorkflow } from './mail-thread-workflow.mjs';
+import { previewOutreachTemplate } from './outreach-template-preview.mjs';
 import { sequencePolicy, saveSequencePolicy } from './outreach-sequence-policy.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -39,6 +40,8 @@ export async function handleOutreach({
 }) {
   const path = url.pathname.slice('/api/v1/outreach'.length),
     method = request.method;
+  if (path === '/sequence-policy/preview' && method === 'POST')
+    return previewOutreachTemplate(service, await readJson(request));
   if (path === '/sequence-policy' && method === 'GET') return sequencePolicy(service.db);
   if (path === '/sequence-policy' && method === 'PUT')
     return saveSequencePolicy(service, await readJson(request));

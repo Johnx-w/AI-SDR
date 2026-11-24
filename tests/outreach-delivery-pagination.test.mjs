@@ -134,11 +134,21 @@ test('发送失败包括缓存和新同步的退信，同一封邮件只计一�
     from: 'mailer-daemon@example.org',
     to: mailbox.email,
     subject: 'Delivery Status Notification (Failure)',
-    bodyText: 'Your message could not be delivered.',
+    bodyText: 'Diagnostic-Code: smtp; 550 5.1.1 User unknown',
     occurredAt,
     source: 'imap',
     ...patch,
   });
+  const diagnoses = [
+    ['sender', 'Diagnostic-Code: smtp; 550 5.1.8 Sender address not found', 'sender'],
+    ['limited', 'Diagnostic-Code: smtp; 4.1.1 User unknown', 'temporary'],
+    [
+      'delayed',
+      'Action: delayed\nStatus: 4.1.1\nDiagnostic-Code: smtp; 550 5.1.1 User unknown',
+      'temporary',
+    ],
+    ['policy', 'Diagnostic-Code: smtp; 550 5.7.1 policy rejection (upstream: 5.1.1)', 'policy'],
+  ];
   const open = () =>
     new OutreachService({
       path: join(folder, 'outreach.sqlite'),
@@ -149,10 +159,13 @@ test('发送失败包括缓存和新同步的退信，同一封邮件只计一�
             {
               path: 'INBOX',
               uidValidity: '1',
-              nextUid: 3,
+              nextUid: 3 + diagnoses.length,
               messages: [
                 makeNote('dsn', { uid: 1, inReplyTo: '<dsn@example.org>' }),
                 makeNote('dsn-copy', { uid: 2, inReplyTo: '<dsn@example.org>' }),
+                ...diagnoses.map(([id, bodyText], i) =>
+                  makeNote(id, { uid: i + 3, bodyText, inReplyTo: '<' + id + '@example.org>' }),
+                ),
               ],
             },
           ],
@@ -170,6 +183,9 @@ test('发送失败包括缓存和新同步的退信，同一封邮件只计一�
     { id: 'confirmed-failed', status: 'failed', resolution: { outcome: 'failed' } },
     { id: 'aliyun' },
     { id: 'dsn' },
+    ...diagnoses.map(([id]) => ({ id })),
+    { id: 'forwarded' },
+    { id: 'legacy' },
     { id: 'unaffected' },
     { id: 'ambiguous-1', to: 'same@buyer.example' },
     { id: 'ambiguous-2', to: 'same@buyer.example' },
@@ -199,6 +215,14 @@ test('发送失败包括缓存和新同步的退信，同一封邮件只计一�
 退信原因
   系统应答: 421 4.3.2 Delivery failed`,
     });
+  service.conversations.putMessage(
+    mailbox,
+    makeNote('forwarded', {
+      inReplyTo: '<forwarded@example.org>',
+      bodyText:
+        'Final-Recipient: rfc822; downstream@host.example\nDiagnostic-Code: smtp; 550 5.1.1 User unknown',
+    }),
+  );
   service.conversations.putMessage(mailbox, aliyunNote('aliyun', 'aliyun@buyer.example'));
   service.conversations.putMessage(mailbox, aliyunNote('ambiguous', 'same@buyer.example'));
   service.conversations.putMessage(
@@ -226,8 +250,10 @@ test('发送失败包括缓存和新同步的退信，同一封邮件只计一�
     ...aliyunNote('ordinary', 'unaffected@buyer.example'),
     from: 'unaffected@buyer.example',
   });
-  // Reopen the cache in the layout used before bounce tracking was added.
-  service.db.exec('DROP TABLE IF EXISTS outreach_delivery_bounces');
+  // Upgrade an existing timestamp-only history, including a row without a cached notice.
+  service.db.exec(
+    "DROP TABLE outreach_delivery_bounces; CREATE TABLE outreach_delivery_bounces(delivery_id TEXT PRIMARY KEY, received_at TEXT NOT NULL); INSERT INTO outreach_delivery_bounces VALUES('aliyun','2026-11-18T02:00:00.000Z'),('legacy','2026-11-18T02:00:00.000Z')",
+  );
   await service.close();
   service = open();
   const call = (path, method = 'GET') =>
@@ -237,19 +263,36 @@ test('发送失败包括缓存和新同步的退信，同一封邮件只计一�
       readJson: async () => ({ mailboxId: mailbox.id }),
       service,
     });
+  assert.equal((await call('/deliveries/legacy')).bouncedAt, occurredAt);
+  assert.equal((await call('/deliveries/legacy')).bounce, null);
   assert.equal((await call('/deliveries/aliyun')).bouncedAt, occurredAt);
+  await call('/conversations/sync', 'POST');
   await call('/conversations/sync', 'POST');
   for (const id of ['ambiguous-1', 'ambiguous-2', 'unaffected'])
     assert.equal((await call('/deliveries/' + id)).bouncedAt, undefined, id);
   const detail = await call('/deliveries/dsn');
+  await service.close();
+  service = open();
+  for (const [id, bodyText, category] of diagnoses) {
+    const { bounce } = await call('/deliveries/' + id);
+    assert.equal(bounce.category, category, id);
+    assert.ok(bounce.diagnostic.includes(bodyText.split('\n').at(-1)), id);
+    assert.equal(service.isReserved({ to: id + '@buyer.example' }), false, id);
+  }
   assert.equal(detail.status, 'accepted');
   assert.equal(detail.bouncedAt, occurredAt);
+  assert.equal(detail.bounce.category, 'invalid');
+  assert.ok(service.isReserved({ to: 'dsn@buyer.example' }));
+  assert.equal((await call('/deliveries/aliyun')).bounce.category, 'temporary');
+  assert.equal(service.isReserved({ to: 'aliyun@buyer.example' }), false);
   assert.equal(
     service.db.prepare('SELECT count(*) AS n FROM outreach_delivery_bounces').get().n,
-    2,
+    4 + diagnoses.length,
   );
+  assert.equal((await call('/deliveries/forwarded')).bounce.category, 'unknown');
+  assert.equal(service.isReserved({ to: 'forwarded@buyer.example' }), false);
   assert.equal(detail.bodyText, 'Original outgoing body');
-  assert.equal((await service.state()).deliveryStats.accepted, 5);
+  assert.equal((await service.state()).deliveryStats.accepted, 7 + diagnoses.length);
 });
 
 test('沟通中心状态统计全部发送记录，完整记录和邮箱署名按需读取', async (t) => {
@@ -286,4 +329,43 @@ test('沟通中心状态统计全部发送记录，完整记录和邮箱署名�
     service,
   });
   assert.equal(mailboxDetail.signatureDesign.logo.contentBase64, logo);
+});
+
+test('退信按主要诊断解释，附带码不覆盖明确的无效地址诊断', async () => {
+  const { bounceDiagnosis } = await import('../server/outreach-bounces.mjs');
+  assert.equal(
+    bounceDiagnosis({
+      from: 'no-reply@mailsupport.aliyun.com',
+      bodyText: '系统应答: Delivery failed\n退信原因: 收件人不存在',
+    }).category,
+    'invalid',
+  );
+  for (const [response, category] of [
+    ['550 5.1.1 User unknown (nested 5.4.1)', 'invalid'],
+    ['resolving by dns failed', 'dns'],
+    ['connect to the receiving server failed', 'connection'],
+    ['421 4.3.2 Maximum concurrent connections exceeded', 'temporary'],
+    ['550 5.4.1 Recipient address rejected: Access denied', 'access'],
+    ['550 5.7.1 Relay access denied', 'policy'],
+    ['451 4.4.1 Connection timed out', 'connection'],
+    ['450 4.4.3 DNS lookup failed', 'dns'],
+    ['550 5.1.11 Bad sender syntax', 'unknown'],
+    ['host mx.buyer.example said: 451 4.1.1 User unknown', 'temporary'],
+    ['host mx.buyer.example said: 550 5.7.1 Restricted senders (User unknown)', 'policy'],
+    ['552 5.2.2 Mailbox full (upstream: 550 5.1.1 User unknown)', 'unknown'],
+    ['Remote server returned: 450 4.1.1 User unknown', 'temporary'],
+    [
+      'SMTP error from remote mail server after RCPT TO:<a@b.example>: 450 4.1.1 User unknown',
+      'temporary',
+    ],
+    ['Delivery failed', 'unknown'],
+  ]) {
+    const diagnosis = bounceDiagnosis({
+      from: 'no-reply@mailsupport.aliyun.com',
+      bodyText: '系统应答: ' + response + '\n退信原因: 系统退回',
+    });
+    assert.equal(diagnosis.category, category);
+    assert.ok(diagnosis.diagnostic.includes(response));
+    assert.ok(diagnosis.action);
+  }
 });

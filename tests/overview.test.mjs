@@ -26,6 +26,7 @@ function fixture(overrides = {}) {
     conversations: [],
     messages: [],
     customerContexts: [],
+    positiveReplies: [],
     demands: [
       demand('d1', '1'),
       demand('d2', '2', 'quoting'),
@@ -126,6 +127,20 @@ test('总览按实际收录时间统计新增，待办不随成果范围改变�
     new URL(result.links.dueTasks, 'http://example.test').searchParams.get('bucket'),
     'due',
   );
+});
+
+test('总览保留积极回复待办的客户、请求、等待时间和原会话入口', async () => {
+  const { service, graph } = fixture();
+  graph.positiveReplies.push({
+    id: 'reply-1',
+    customer: 'Buyer Ltd',
+    requestType: 'quote',
+    waitingHours: 26,
+    receivedAt: '2026-10-24T00:00:00Z',
+    to: '/inbox?tab=inbox&thread=thread-1&mailboxId=one',
+  });
+  const result = await service.read();
+  assert.deepEqual(result.positiveReplies, graph.positiveReplies);
 });
 
 test('总览不再返回需求统计或阶段明细，真实需求仍可定位到客户邮件', async () => {
