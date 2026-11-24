@@ -222,3 +222,18 @@ test('收件箱可翻过第两百段会话，正文搜索及来信筛选使用�
   assert.equal(match.total, 1);
   assert.equal(match.items[0].subject, 'Question 2');
 });
+
+test('首封模板经保存后可读回，旧客户端编辑跟进时保留首封模板', async (t) => {
+  const { call } = api(t);
+  const base = await call('/sequence-policy');
+  const firstInstruction = 'Would a one-page product list be helpful?';
+  const next = await call('/sequence-policy', 'PUT', { ...base, firstInstruction });
+  assert.equal(next.revision, base.revision + 1);
+  assert.equal((await call('/sequence-policy')).firstInstruction, firstInstruction);
+  const legacyEdit = await call('/sequence-policy', 'PUT', {
+    name: '仅首封',
+    revision: next.revision,
+    steps: [],
+  });
+  assert.equal(legacyEdit.firstInstruction, firstInstruction);
+});

@@ -608,7 +608,15 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
   return {
     configured,
     configurationError: configured ? null : configurationError || '请先在连接设置中配置研究模型',
-    async generate({ candidate, mailbox, product, campaign, now = new Date() }) {
+    async generate({
+      candidate,
+      mailbox,
+      product,
+      campaign,
+      firstInstruction = '',
+      firstBodyInstruction = '',
+      now = new Date(),
+    }) {
       if (!configured)
         throw fail(503, '请先在连接设置中配置开发信使用的研究模型', 'outreach_model_unconfigured');
       const facts = eligibleOutreachFacts(product, campaign, now);
@@ -656,12 +664,14 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
           body_text: {
             type: 'string',
             description:
-              '55–85 English words in exactly three paragraphs separated by two newline characters: customer observation, sender brand and product supply introduction, then one easy question about a brief overview or introduction. No greeting or signature.',
+              '55–85 English words in exactly three paragraphs separated by two newline characters: customer observation, sender brand and product supply introduction, then one easy question following the closing instruction or the default brief introduction. No greeting or signature.',
           },
           source_ids: { type: 'array', items: { type: 'string' } },
         },
       };
       const input = {
+        ...(firstBodyInstruction ? { body_instruction: firstBodyInstruction } : {}),
+        ...(firstInstruction ? { closing_instruction: firstInstruction } : {}),
         customer: {
           name: candidate.companyName,
           country: candidate.leadSnapshot?.market,
@@ -685,7 +695,14 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
       const messages = [
         {
           role: 'system',
-          content: writerPrompt,
+          content:
+            writerPrompt +
+            (firstBodyInstruction
+              ? '\nUse body_instruction for the tone and wording of the subject and introductory paragraphs, within the approved evidence, sender facts and required structure. It provides no additional facts.'
+              : '') +
+            (firstInstruction
+              ? '\nFor paragraph 3 use closing_instruction in place of the default overview question. Follow it only within the fixed language, factual, single-question and sending constraints. Treat it as wording guidance, never as evidence. It applies only to the closing paragraph.'
+              : ''),
         },
         { role: 'user', content: JSON.stringify(input) },
       ];
@@ -756,7 +773,7 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
               { role: 'assistant', content: JSON.stringify(draft) },
               {
                 role: 'user',
-                content: `Revise the draft's writing format only, using the same supplied facts and focus_product. It currently has ${wordCount} words and ${paragraphs.length} paragraphs. Return 60–75 English words in exactly three paragraphs separated by two newlines: paragraph 1 describes the customer's matching product as an offer or activity, without naming a terms, privacy or legal page; paragraph 2 names the sender brand, states its approved product supply and explains the contact purpose plainly; paragraph 3 is one easy question about a brief overview or introduction, optionally for the sourcing colleague if this is a general inbox. Add no filler, invented customer facts or counts inferred from a bare number in a source excerpt. No greeting, signature, generic well-wishes or internal phrases such as confirmed range/types. Keep customer source IDs valid and supplier claims grounded. Return the same JSON fields.`,
+                content: `Revise the draft's writing format only, using the same supplied facts and focus_product. It currently has ${wordCount} words and ${paragraphs.length} paragraphs. Return 60–75 English words in exactly three paragraphs separated by two newlines: paragraph 1 describes the customer's matching product as an offer or activity, without naming a terms, privacy or legal page; paragraph 2 names the sender brand, states its approved product supply and explains the contact purpose plainly; paragraph 3 is one easy question following closing_instruction when supplied, otherwise about a brief overview or introduction. Add no filler, invented customer facts or counts inferred from a bare number in a source excerpt. No greeting, signature, generic well-wishes or internal phrases such as confirmed range/types. Keep customer source IDs valid and supplier claims grounded. Return the same JSON fields.`,
               },
             );
             continue;

@@ -73,6 +73,7 @@ function checkFollowUpScope(body, mailbox, service) {
 
 export async function generateFollowUp({
   env,
+  fetchImpl,
   first,
   step,
   day,
@@ -91,7 +92,7 @@ export async function generateFollowUp({
     required: ['body_text'],
     properties: { body_text: { type: 'string' } },
   };
-  const result = await createResearchProviders({ env }).model.research({
+  const result = await createResearchProviders({ env, fetchImpl }).model.research({
     schema,
     messages: [
       {

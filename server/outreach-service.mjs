@@ -1083,7 +1083,9 @@ export class OutreachService {
           }
           continue;
         }
+        const template = this.followUps.policy();
         const d = {
+          firstTemplateRevision: template.revision,
           id: unfinished?.id || randomUUID(),
           campaignId: id,
           mode: 'production',
@@ -1136,6 +1138,8 @@ export class OutreachService {
         }
         try {
           const generated = await this.generatorClient().generate({
+            firstInstruction: template.firstInstruction,
+            firstBodyInstruction: template.firstBodyInstruction,
             candidate,
             mailbox,
             product,
