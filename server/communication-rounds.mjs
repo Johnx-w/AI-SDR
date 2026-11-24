@@ -116,10 +116,10 @@ function receiptType(body, hasTicketHeading) {
   return null;
 }
 
-export function knownReplyType(message) {
+export function knownReplyType(message, evidence = receiptEvidence(message)) {
   if (message.classification === 'hard_bounce') return '联系方式失效';
   if (message.classification === 'unverified') return '待核实回执';
-  const { body, hasTicketHeading, plain } = receiptEvidence(message);
+  const { body, hasTicketHeading, plain } = evidence;
   const subject = String(message.subject || '');
   const ownSubject = /^(?:re|fw|fwd)\s*:/iu.test(subject.trim()) ? '' : subject;
   const notification =
@@ -152,8 +152,8 @@ export function knownReplyType(message) {
   );
 }
 
-export function incomingClassification(message) {
-  const body = customerReplyText({ body: message.bodyText || message.body || '' });
+export function incomingClassification(message, evidence = receiptEvidence(message)) {
+  const { body } = evidence;
   const subject = String(message.subject || '');
   if (
     /^(?:mailer-daemon|postmaster)@/iu.test(message.from) &&
@@ -163,7 +163,7 @@ export function incomingClassification(message) {
   if (/^no-reply@mailsupport\.aliyun\.com$/iu.test(message.from) && /退信/u.test(subject))
     return 'hard_bounce';
   if (message.classification && message.classification !== 'normal') return message.classification;
-  const replyType = knownReplyType(message);
+  const replyType = knownReplyType(message, evidence);
   if (replyType === '系统自动回复' || /^(?:no[-_.]?reply|notifications?)@/iu.test(message.from))
     return 'auto_reply';
   if (
@@ -200,8 +200,9 @@ const positiveEvidence = {
 export function classifyInboundReply(message) {
   if (message.businessKind)
     return { kind: message.businessKind, requestType: message.requestType || null };
-  const { body: customerPart, humanAboveTicket } = receiptEvidence(message);
-  const classification = incomingClassification(message);
+  const evidence = receiptEvidence(message);
+  const { body: customerPart, humanAboveTicket } = evidence;
+  const classification = incomingClassification(message, evidence);
   if (!humanAboveTicket) {
     if (classification === 'hard_bounce') return { kind: 'bounce', requestType: null };
     if (classification === 'auto_reply') return { kind: 'notification', requestType: null };

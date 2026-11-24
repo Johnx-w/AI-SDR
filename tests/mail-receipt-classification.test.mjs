@@ -227,6 +227,14 @@ test('客户本次原文决定态度与请求，忽略引文和分析摘要', ()
       'positive',
       'quote',
     ],
+    [
+      {
+        bodyText: 'Please send a quote.\nPlease unsubscribe me.',
+        bodyHtml: '<p>Please send a quote.</p><blockquote>Please unsubscribe me.</blockquote>',
+      },
+      'positive',
+      'quote',
+    ],
     [{ bodyHtml: '<p>Please send a quote.</p>' }, 'positive', 'quote'],
   ])
     assert.deepEqual(classifyInboundReply({ ...base, ...input }), { kind, requestType: request });
