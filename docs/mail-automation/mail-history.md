@@ -34,4 +34,4 @@ node scripts/sync-mail-readonly.mjs --data-dir D:\mail-review\outreach --mailbox
 
 读取接口为 `GET /api/v1/outreach/reply-history?mailboxId=all&kind=reply&handling=all&page=1`。来信类型支持 `reply`、`inquiry`、`notification`、`unverified`、`bounce`、`unsubscribe`、`complaint`、`internal`、`test`、`all`。处理情况支持 `all`、`answered`、`unanswered`。列表返回元数据，原文和附件在收件箱详情中查看。
 
-已唯一关联的退信在首发详情保留诊断及处置。明确无效的地址进入确切地址抑制，其他合格地址继续参与筛选。DNS、连接、临时限制、5.4.1、策略拒收分别提示核查方向。相同投递重复同步仍展示一次，旧库升级时用已缓存通知补充诊断。
+已唯一关联的退信在首发详情保留诊断及处置。明确无效的地址进入确切地址抑制，其他合格地址继续参与筛选。发件地址错误、临时失败与策略拒收按主要响应及回执的 Action、Status 字段核对，保留诊断。嵌套响应中的地址错误不足以抑制收件人。DNS、连接、临时限制、5.4.1、策略拒收分别提示核查方向。相同投递重复同步仍展示一次，旧库升级时用已缓存通知补充诊断。

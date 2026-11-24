@@ -8,6 +8,7 @@ const email = (value) =>
 
 export const invalidAddressReason = 'bounce_invalid_recipient';
 const actions = {
+  sender: '核对发件地址及发件域配置',
   invalid: '抑制该确切地址，重新核实公开联系方式',
   dns: '核对收件域拼写和 MX 解析',
   connection: '核对收件服务器连接及事件时段',
@@ -17,8 +18,9 @@ const actions = {
   unknown: '人工核对原退信',
 };
 
-export function bounceDiagnosis(message) {
-  const body = String(message.bodyText || '').slice(0, 16384);
+const noticeBody = (message) => String(message.bodyText || '').slice(0, 16_384);
+
+export function bounceDiagnosis(message, body = noticeBody(message)) {
   const lines = body.split(/\r?\n/u);
   const aliyun = normalize(message.from) === aliyunSender;
   const response = aliyun
@@ -33,23 +35,39 @@ export function bounceDiagnosis(message) {
     : lines.find((line) =>
         /^(?:\*\* )?(?:Address not found|Message blocked)(?: \*\*)?$/iu.test(line.trim()),
       );
-  const diagnostic = [response, explanation]
+  const status = aliyun
+    ? undefined
+    : lines.find((line) => /^Status:\s*[245]\.\d{1,3}\.\d{1,3}\b/iu.test(line));
+  const action = aliyun ? undefined : lines.find((line) => /^Action:\s*\w+/iu.test(line));
+  const diagnostic = [action, status, response, explanation]
     .filter(Boolean)
     .map((line) => line.trim())
     .join('\n')
     .slice(0, 2000);
-  const primary = classifyResponse(response || '');
-  const category = primary === 'unknown' ? classifyResponse(explanation || '') : primary;
+  const primary = classifyResponse(response || '', status, action);
+  const category =
+    primary === 'unknown' && !/\b[45]\.\d{1,3}\.\d{1,3}\b/u.test(response || status || '')
+      ? classifyResponse(explanation || '', status, action)
+      : primary;
   return { category, diagnostic, action: actions[category] };
 }
 
-function classifyResponse(primary) {
-  if (
-    /\b5\.1\.1\b|no such (?:user|recipient)|user unknown|(?:account|user|mailbox).*does not exist|address not found|mailbox (?:disabled|unavailable permanently)|收件人不存在|接收地址不存在/iu.test(
-      primary,
-    )
-  )
-    return /\b4\d\d[ -]/u.test(primary) ? 'temporary' : 'invalid';
+function classifyResponse(diagnostic, status, action) {
+  // Gate decisions on the outer response. Keep the entire original line for the detail view.
+  const primary = diagnostic.split(
+    /\b(?:upstream|nested|inner)\s*[:=]?\s*(?=[45]\d{2}\b|[45]\.\d)/iu,
+    1,
+  )[0];
+  const reply = primary.replace(/<[^>\r\n]*>/gu, '');
+  // Relays may insert their host, RCPT command or explanatory text before the status.
+  const codes =
+    /(?<![\w.@-])(?:([45]\d{2})(?![\w.])(?:[ -]+([45]\.\d{1,3}\.\d{1,3}))?|([45]\.\d{1,3}\.\d{1,3}))(?![\w.])/u.exec(
+      reply,
+    );
+  const smtp = codes?.[1] || '';
+  const enhanced = codes?.[2] || codes?.[3] || '';
+  const reported = status?.split(':')[1]?.trim().split(/\s/u)[0] || '';
+  const states = [enhanced, reported];
   if (
     /resolving by dns failed|domain not found|nxdomain|dns (?:lookup )?fail|域名不存在/iu.test(
       primary,
@@ -58,23 +76,42 @@ function classifyResponse(primary) {
     return 'dns';
   if (/connect(?:ion)? (?:to .*failed|refused|timed out)|连接收件方邮件系统失败/iu.test(primary))
     return 'connection';
-  if (/\b4\d\d[ -]|\b4\.\d\.\d\b|临时性错误/iu.test(primary)) return 'temporary';
-  if (/\b5\.4\.1\b/iu.test(primary)) return 'access';
   if (
-    /5\.7\.\d|message blocked|relay.*denied|blocklist|blacklist|policy|group.*reject/iu.test(
+    smtp.startsWith('4') ||
+    states.some((code) => code.startsWith('4.')) ||
+    /^Action:\s*delayed\b/iu.test(action || '') ||
+    /临时性错误/iu.test(primary)
+  )
+    return 'temporary';
+  if (
+    states.some((code) => /^5\.1\.[78]$/u.test(code)) ||
+    /(?:sender|from) (?:email )?address (?:not found|rejected|invalid)|invalid sender/iu.test(
       primary,
     )
   )
+    return 'sender';
+  if (states.includes('5.4.1')) return 'access';
+  if (states.some((code) => code.startsWith('5.7.'))) return 'policy';
+  if (states.includes('5.1.1')) return 'invalid';
+  // Only generic failures and mailbox-specific codes can use free-text evidence of an invalid recipient.
+  if (states.some((code) => code && !['5.0.0', '5.1.0', '5.2.0', '5.2.1'].includes(code)))
+    return 'unknown';
+  if (/message blocked|relay.*denied|blocklist|blacklist|policy|group.*reject/iu.test(primary))
     return 'policy';
+  if (
+    /no such (?:user|recipient)|user unknown|(?:account|user|mailbox).*does not exist|address not found|mailbox (?:disabled|unavailable permanently)|收件人不存在|接收地址不存在/iu.test(
+      primary,
+    )
+  )
+    return 'invalid';
   return 'unknown';
 }
 
-function bounceNotice(message) {
+function bounceNotice(message, body) {
   if (message.direction !== 'inbound') return null;
   const sender = normalize(message.from);
   const subject = String(message.subject || '').trim();
   if (sender === aliyunSender && subject.includes('退信')) {
-    const body = String(message.bodyText || '').slice(0, 16_384);
     if (!body.includes('邮件被退回') || !body.includes('退信原因')) return null;
     const header = body.split('退信原因', 1)[0];
     const originalSender = email(header.match(/^[^\S\r\n]*发件人[ \t]*[:：]([^\r\n]+)/mu)?.[1]);
@@ -99,18 +136,17 @@ function bounceNotice(message) {
 
 export function recordOutreachBounces(db, messages) {
   const notices = messages.flatMap((message) => {
-    const evidence = bounceNotice(message);
+    const body = noticeBody(message);
+    const evidence = bounceNotice(message, body);
     const receivedAt = Date.parse(message.occurredAt);
     return evidence && Number.isFinite(receivedAt)
       ? [
           {
             ...evidence,
-            diagnosis: bounceDiagnosis(message),
-            finalRecipients: [
-              ...String(message.bodyText || '')
-                .slice(0, 16384)
-                .matchAll(/^Final-Recipient:[^;\r\n]*;([^\r\n]*)/gimu),
-            ].map((match) => email(match[1])),
+            diagnosis: bounceDiagnosis(message, body),
+            finalRecipients: [...body.matchAll(/^Final-Recipient:[^;\r\n]*;([^\r\n]*)/gimu)].map(
+              (match) => email(match[1]),
+            ),
             mailboxId: message.mailboxId,
             account: normalize(message.account),
             receivedAt,
