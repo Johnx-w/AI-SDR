@@ -62,6 +62,11 @@ export function thirdPartyCompanySource({ url = '', title = '', text = '' } = {}
     'tradeindia.com',
     'indiamart.com',
     'mydeal.com.au',
+    'canpages.ca',
+    'yp.ca',
+    'loc8nearme.com',
+    'infoisinfo-ca.com',
+    'go4worldbusiness.com',
     'etsy.com',
     'tracxn.com',
   ];

@@ -87,6 +87,7 @@ export interface AcquisitionJob {
   failed: number;
   pending: number;
   searches: number;
+  carriedCandidates?: number;
   researched: number;
   review?: number;
   researchUsage?: ResearchUsage;
@@ -132,6 +133,7 @@ export interface AcquisitionJob {
 }
 export interface ResearchUsage {
   model_calls: number;
+  repeat_model_calls?: number;
   cache_hits: number;
   input_chars: number;
   input_tokens?: number;
