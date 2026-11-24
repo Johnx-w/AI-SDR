@@ -231,12 +231,13 @@ test('只读任务列表过滤旧人工和MOCK，底层真实历史仍保留', a
   const server = await serve(folder, remoteFixture());
   try {
     const result = await server.call();
-    const summary = await server.call('/api/v1/business/summary/customer-1');
+    const summary = await server.call('/api/v1/business/timeline/customer-1');
+    assert.equal(summary.status, 200);
     assert.deepEqual(
-      summary.body.tasks.map((row) => row.id),
+      summary.body.items.map((row) => row.id),
       ['automatic'],
     );
-    assert.deepEqual((await server.call('/api/v1/business/summary/customer-2')).body.tasks, []);
+    assert.deepEqual((await server.call('/api/v1/business/timeline/customer-2')).body.items, []);
     assert.equal((await server.call('/api/v1/overview?summary=reminders')).body.count, 1);
     assert.equal(result.status, 200);
     assert.deepEqual(
