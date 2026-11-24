@@ -82,6 +82,7 @@ export class OutreachService {
       body: 'Could you confirm the model and the detail you need?',
     }),
     getEnv = () => ({}),
+    fetchImpl,
     draftPhotos = () => [],
     photoOptions,
     guardPhotos,
@@ -141,6 +142,7 @@ export class OutreachService {
       setMailOwnership,
       recordAccepted,
       generator,
+      fetchImpl,
       now,
       tickMs,
       acquisitionSources,
@@ -408,7 +410,9 @@ export class OutreachService {
     return { campaign: this.withStats(this.campaign(id)), deliveries: this.deliveries(id) };
   }
   generatorClient() {
-    return this.generator || createOutreachGenerator({ env: this.getEnv() });
+    return (
+      this.generator || createOutreachGenerator({ env: this.getEnv(), fetchImpl: this.fetchImpl })
+    );
   }
   async state(params) {
     const mailboxes = this.mailboxes

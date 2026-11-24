@@ -510,6 +510,7 @@ export class OutreachFollowUps {
       sender = identity(mailbox);
     const body = await (s.generator?.generateFollowUp || generateFollowUp)({
       env: s.getEnv(),
+      fetchImpl: s.fetchImpl,
       first,
       step: item.step,
       day: item.day ?? legacyFollowUpStep(item.step)?.day,

@@ -273,6 +273,7 @@ const app = createApp({
   fetchImpl: async () => {
     throw new Error('offline demo');
   },
+  localMailInspection: { sync: async () => [] },
   outreachServiceFactory: () => service,
 });
 const esc = (value) =>
@@ -356,6 +357,8 @@ const server = createServer(async (req, res) => {
       }
       busy = true;
       try {
+        // Start each independent rehearsal at noon Beijing time on a fresh simulated day.
+        time = (Math.floor(time / 86400000) + 1) * 86400000 + 4 * 3600000;
         const idx = ++serial;
         const plan = await prepare('模板试演 ' + idx, [dealer('practice-' + idx)], true);
         await submit(plan);

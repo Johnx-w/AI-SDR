@@ -81,6 +81,7 @@ function PolicyEditor({
   const draftRows = (steps: Policy['steps']) =>
     steps.map((step) => ({ ...step, day: String(step.day), id: crypto.randomUUID() }));
   const [rows, setRows] = useState(() => draftRows(policy.steps));
+  const chronologicalSteps = [...rows].sort((a, b) => Number(a.day) - Number(b.day));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [conflict, setConflict] = useState(false);
@@ -169,6 +170,7 @@ function PolicyEditor({
             <label>
               首封主题与正文写作要求
               <textarea
+                aria-label="首封主题与正文写作要求"
                 rows={2}
                 maxLength={1200}
                 value={firstBodyInstruction}
@@ -179,6 +181,7 @@ function PolicyEditor({
             <label>
               首封结尾写作要求
               <textarea
+                aria-label="首封结尾写作要求"
                 rows={2}
                 maxLength={1200}
                 value={firstInstruction}
@@ -243,8 +246,8 @@ function PolicyEditor({
                 />
               </label>
               <TemplatePreview
-                key={JSON.stringify([row.day, row.instruction, index])}
-                step={index + 1}
+                key={JSON.stringify([row.day, row.instruction, chronologicalSteps.indexOf(row)])}
+                step={chronologicalSteps.indexOf(row) + 1}
                 day={Number(row.day)}
                 instruction={row.instruction}
               />

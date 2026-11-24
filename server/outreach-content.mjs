@@ -13,7 +13,9 @@ const text = (value) => (typeof value === 'string' ? value.trim() : '');
 const array = (value) => (Array.isArray(value) ? value : []);
 const compact = (value) => text(value).replace(/\s+/gu, ' ');
 const writerRoot = new URL('../agents/first-touch-writer/', import.meta.url);
-const writerPrompt = readFileSync(new URL('system.md', writerRoot), 'utf8');
+const writerPolicy = readFileSync(new URL('system.md', writerRoot), 'utf8');
+// Keep the original default prompt in the material fingerprint used by existing queues.
+const [writerPrompt] = writerPolicy.split(/\r?\n## Workspace template overrides\r?\n/u);
 const confirmedSupply = JSON.parse(
   readFileSync(new URL('confirmed-supply.json', writerRoot), 'utf8'),
 );
@@ -695,14 +697,7 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
       const messages = [
         {
           role: 'system',
-          content:
-            writerPrompt +
-            (firstBodyInstruction
-              ? '\nUse body_instruction for the tone and wording of the subject and introductory paragraphs, within the approved evidence, sender facts and required structure. It provides no additional facts.'
-              : '') +
-            (firstInstruction
-              ? '\nFor paragraph 3 use closing_instruction in place of the default overview question. Follow it only within the fixed language, factual, single-question and sending constraints. Treat it as wording guidance, never as evidence. It applies only to the closing paragraph.'
-              : ''),
+          content: firstInstruction || firstBodyInstruction ? writerPolicy : writerPrompt,
         },
         { role: 'user', content: JSON.stringify(input) },
       ];

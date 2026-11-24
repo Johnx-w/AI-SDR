@@ -80,6 +80,17 @@
   padding: 16px;
   border-block: 1px solid var(--color-border);
 }
+.modal[open]:has(> .sequence-form) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.modal:has(> .sequence-form) > .modal-head {
+  flex-shrink: 0;
+}
+.sequence-form fieldset > label + label {
+  margin-top: 10px;
+}
 .sequence-form {
   display: flex;
   flex-direction: column;

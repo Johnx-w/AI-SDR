@@ -55,16 +55,14 @@ export async function previewOutreachTemplate(service, input) {
   const greeting = 'Hi Example Dealer team,';
   const signature = renderMailboxSignature(mailbox).text;
   if (firstTouch) {
-    const draft = await service
-      .generatorClient()
-      .generate({
-        candidate,
-        mailbox,
-        product,
-        campaign,
-        firstBodyInstruction: writingInstruction(input.firstBodyInstruction ?? '', true),
-        firstInstruction: instruction,
-      });
+    const draft = await service.generatorClient().generate({
+      candidate,
+      mailbox,
+      product,
+      campaign,
+      firstBodyInstruction: writingInstruction(input.firstBodyInstruction ?? '', true),
+      firstInstruction: instruction,
+    });
     return { subject: draft.subject, body: draft.bodyText + '\n\n' + signature };
   }
   const first = {
@@ -77,6 +75,7 @@ export async function previewOutreachTemplate(service, input) {
   };
   const body = await (service.generator?.generateFollowUp || generateFollowUp)({
     env: service.getEnv(),
+    fetchImpl: service.fetchImpl,
     first,
     step: input.step,
     day: input.day,

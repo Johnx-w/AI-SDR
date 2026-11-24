@@ -47,8 +47,8 @@ try {
   await preview(0).click();
   await fields
     .nth(0)
-    .getByText(/May I send our one-page roller blinds product card/)
-    .last()
+    .locator('article')
+    .filter({ hasText: 'May I send our one-page roller blinds product card?' })
     .waitFor();
   const body =
     'I saw that your window furnishings range includes roller blinds for customers who are comparing products.';
@@ -63,6 +63,15 @@ try {
     await article.waitFor();
     assert.ok((await article.textContent()).includes(needle));
   }
+  // A step moved ahead of a sibling must preview at its new chronological position.
+  await button('添加步骤').click();
+  await page.getByLabel('跟进 2 天数').fill('1');
+  await page.getByLabel('跟进 2 写作要求').fill(follow);
+  const previewRequest = page.waitForRequest((r) => r.url().endsWith('/sequence-policy/preview'));
+  await preview(2).click();
+  assert.equal((await previewRequest).postDataJSON().step, 1);
+  await fields.nth(2).locator('article').waitFor();
+  await button('删除跟进 2').click();
   await button('保存序列').click();
   await page.getByText('序列已保存').waitFor();
   await page.reload();
@@ -82,9 +91,17 @@ try {
       .locator('.sequence-form-body')
       .evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
   );
+  const footer = await button('保存序列').boundingBox();
+  const dialog = await page.getByRole('dialog').boundingBox();
+  assert.ok(footer.y >= dialog.y && footer.y + footer.height <= dialog.y + dialog.height);
   await button('取消').click();
   await page.goto(base + '/demo');
+  const response = page.waitForResponse(
+    (r) => r.url() === base + '/demo/run' && r.request().method() === 'POST',
+  );
   await button('用已保存模板生成并模拟发送').click();
+  const submitted = await response;
+  assert.equal(submitted.status(), 303, submitted.status() === 303 ? '' : await submitted.text());
   const section = page
     .locator('section')
     .filter({ has: page.getByRole('heading', { name: '模板试演 1' }) });
@@ -96,7 +113,12 @@ try {
   await page.getByRole('heading', { name: '模板试演 1' }).waitFor();
   await button('查看首封').click();
   await page.getByRole('heading', { name: '首封实发邮件' }).waitFor();
-  assert.ok((await page.getByRole('dialog').textContent()).includes(closing));
+  await page
+    .getByRole('dialog')
+    .frameLocator('iframe')
+    .getByText(closing, { exact: false })
+    .first()
+    .waitFor();
   assert.deepEqual(errors, []);
   console.log(
     '1440px / 390px: preview, save, reload, generate, day-3 dispatch, historical delivery readback passed.',
