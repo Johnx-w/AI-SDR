@@ -447,16 +447,33 @@ function BatchProgressDetail({ job, control, busy }: BatchProgressProps) {
       </p>
       <p className="muted">
         已搜索 {job.searches} 次 · 已研究 {job.researched} 家
+        {!!job.carriedCandidates && <> · 承接往轮候选 {job.carriedCandidates} 家</>}
       </p>
       {job.researchUsage && (
         <p className="muted" title="模型请求按尝试统计；Token 仅累计供应商返回值。">
           模型请求 {job.researchUsage.model_calls} 次 · 结果复用 {job.researchUsage.cache_hits} 次
+          {job.researchUsage.repeat_model_calls !== undefined && (
+            <> · 同条件同域名再次请求 {job.researchUsage.repeat_model_calls} 次</>
+          )}
           {(job.researchUsage.input_tokens !== undefined ||
             job.researchUsage.output_tokens !== undefined) && (
             <>
               {' '}
               · Token 输入 {job.researchUsage.input_tokens ?? '未返回'} / 输出{' '}
               {job.researchUsage.output_tokens ?? '未返回'}
+              {job.inserted > 0 &&
+                job.researchUsage.input_tokens !== undefined &&
+                job.researchUsage.output_tokens !== undefined && (
+                  <>
+                    {' '}
+                    · 每新增一家已报告{' '}
+                    {Math.round(
+                      (job.researchUsage.input_tokens + job.researchUsage.output_tokens) /
+                        job.inserted,
+                    ).toLocaleString()}{' '}
+                    token
+                  </>
+                )}
             </>
           )}
         </p>

@@ -666,7 +666,9 @@ export class NativeAcquisition {
   }
   async research(input, item, { bypassExclusion = false } = {}) {
     // Also validate restored tasks and callers that bypass HTTP validation.
-    input = { ...input, ...validateTarget(input) };
+    const researchTarget = validateTarget(input);
+    input = { ...input, ...researchTarget };
+    const conditionsKey = exclusionConditionsKey(input);
     this.ensureConfigured();
     const id = item.operation_id;
     if (typeof id !== 'string' || !/^[\w-]{8,150}$/.test(id)) throw conflict('研究操作编号无效');
@@ -718,7 +720,7 @@ export class NativeAcquisition {
         return output;
       }
       if (!item.target_record_id && !bypassExclusion) {
-        const prior = this.store.exclusion(exclusionConditionsKey(input), item.source_url);
+        const prior = this.store.exclusion(conditionsKey, item.source_url);
         if (prior) {
           const reason = `命中历史排除记录（原操作 ${prior.operation_id}）：${prior.reason}`;
           const output = this.output(op, {
@@ -820,7 +822,7 @@ export class NativeAcquisition {
       op.research_usage.input_chars =
         page.input_stats?.inputChars ??
         page.research_pages.reduce((sum, p) => sum + p.text.length, 0);
-      const prompt = companyResearchRequest(page, input);
+      const prompt = companyResearchRequest(page, researchTarget);
       const request = {
         messages: prompt.messages,
         schema: companyResearchSchema,
@@ -833,6 +835,9 @@ export class NativeAcquisition {
       if (cacheKey && typeof this.store.modelResponse === 'function') {
         try {
           response = this.store.modelResponse(cacheKey);
+          if (!response && !item.target_record_id && !bypassExclusion) {
+            response = this.store.reviewResponse(conditionsKey, domain, cacheKey);
+          }
           // Replay through today's evidence and policy checks, never cached
           // eligibility, scores, customer writes or a prior operation result.
           if (response) parsed = parseCompanyResearch(response, page, input);
@@ -850,7 +855,8 @@ export class NativeAcquisition {
         // Count attempts before the network call, including an unknown remote
         // outcome; this is not a claim that the provider charged a given amount.
         op.research_usage.model_calls = 1;
-        this.store.save(op);
+        if (item.target_record_id || bypassExclusion) this.store.save(op);
+        else this.store.startModelAttempt(op, conditionsKey, domain);
         response = await this.providers.model.research(request);
         op.research_response = response;
         const usage = response.usage || response.body?.usage || {};
@@ -943,6 +949,7 @@ export class NativeAcquisition {
         }
       }
       if (!broadAdmissionReady && !item.target_record_id) {
+        op.reviewRequestKey = cacheKey;
         const output = this.output(op, {
           research,
           outcome: 'review',

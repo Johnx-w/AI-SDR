@@ -181,6 +181,24 @@ function fixture({
 
 const policyFact = (value, quote) => ({ value, quote, source_url: site });
 
+test('独立企业保留，目录的根域名及子域名在研究前过滤', () => {
+  const hosts = [
+    'cdn.canpages.ca',
+    'mobile.yp.ca',
+    'loc8nearme.com',
+    'ottawa.infoisinfo-ca.com',
+    'go4worldbusiness.com',
+    'sarabella.ca',
+    'notcanpages.ca',
+  ];
+  const selected = selectWebsiteCandidates(hosts.map((host) => ({ url: `https://${host}/` })));
+  assert.equal(selected.filtered_sources.length, 5);
+  assert.deepEqual(
+    selected.candidates.map((item) => item.domain),
+    ['sarabella.ca', 'notcanpages.ca'],
+  );
+});
+
 test('精简后的中部经营证据贯通研究、初评、模拟写入及读回，统计实际节省字符', async () => {
   const f = fixture({
     pageText:

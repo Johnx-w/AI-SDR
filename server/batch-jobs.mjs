@@ -4,11 +4,24 @@ import { dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { domainKey } from './website-identity.mjs';
 import { searchPlan } from './search-plan.mjs';
+import { exclusionConditionsKey } from './exclusion-conditions.mjs';
 import { locationOptions } from './search-target.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
+function discoveryPlanKey(input, plan) {
+  try {
+    return createHash('sha256')
+      .update(JSON.stringify([exclusionConditionsKey(input), plan]))
+      .digest('hex');
+  } catch (error) {
+    // A retired target can still be stopped. Its backlog must not be inherited.
+    if (error.status === 400) return null;
+    throw error;
+  }
+}
 const researchUsageKeys = [
   'model_calls',
+  'repeat_model_calls',
   'cache_hits',
   'input_chars',
   'input_tokens',
@@ -71,6 +84,12 @@ export class BatchJobs {
       scope TEXT NOT NULL, record_id TEXT NOT NULL, domain TEXT NOT NULL, data TEXT NOT NULL,
       PRIMARY KEY(scope,record_id), UNIQUE(scope,domain)
     ); CREATE TABLE IF NOT EXISTS handoff_baselines(scope TEXT PRIMARY KEY, created_at TEXT NOT NULL);`);
+    this.db.exec(`CREATE TABLE IF NOT EXISTS discovery_progress (
+      scope TEXT NOT NULL, provider TEXT NOT NULL, schedule_id TEXT NOT NULL, plan_key TEXT NOT NULL,
+      cursor INTEGER NOT NULL, queue TEXT NOT NULL,
+      PRIMARY KEY(scope,provider,schedule_id,plan_key)
+    ); CREATE INDEX IF NOT EXISTS jobs_by_schedule ON jobs(json_extract(data,'$.scheduleId'))
+       WHERE json_extract(data,'$.scheduleId') IS NOT NULL`);
     this.discover = discover;
     this.research = research;
     this.remoteStatus = status;
@@ -224,6 +243,14 @@ export class BatchJobs {
       return JSON.parse(old.data);
     }
     if (this.active()) throw fail(409, '已有未结束任务，请先继续或停止该任务');
+    const queryPlan = searchPlan(input);
+    const planKey = discoveryPlanKey(input, queryPlan);
+    const progress = this.db
+      .prepare(
+        'SELECT cursor,queue FROM discovery_progress WHERE scope=? AND provider=? AND schedule_id=? AND plan_key=?',
+      )
+      .get(this.scope, this.provider, scheduleId || '', planKey);
+    const queue = progress ? JSON.parse(progress.queue) : [];
     const job = {
       id: randomUUID(),
       provider: this.provider,
@@ -245,11 +272,12 @@ export class BatchJobs {
       searches: 0,
       researched: 0,
       review: 0,
-      queryPlan: searchPlan(input),
+      queryPlan,
       searchStats: [],
-      cursor: 0,
-      queue: [],
-      seen: [],
+      cursor: progress?.cursor ?? this.historicalCursor(scheduleId, planKey, queryPlan),
+      queue,
+      carriedCandidates: queue.length,
+      seen: queue.map((item) => item.domain),
       skippedDomains: [],
       rows: [],
       current: null,
@@ -264,6 +292,25 @@ export class BatchJobs {
     this.kick(job.id);
     if (input.auto_first_touch) this.onOutreachChange();
     return job;
+  }
+  historicalCursor(scheduleId, planKey, queryPlan) {
+    if (!scheduleId) return 0;
+    // Earlier releases discarded their queue, but retained the exact plan and cursor.
+    const row = this.db
+      .prepare(
+        `SELECT json_extract(data,'$.input') AS input,
+        json_extract(data,'$.queryPlan') AS plan, json_extract(data,'$.cursor') AS cursor
+      FROM jobs WHERE json_extract(data,'$.scope')=? AND json_extract(data,'$.provider')=?
+        AND json_extract(data,'$.scheduleId')=? ORDER BY rowid DESC LIMIT 1`,
+      )
+      .get(this.scope, this.provider, scheduleId);
+    if (
+      row?.plan !== JSON.stringify(queryPlan) ||
+      !Number.isSafeInteger(row.cursor) ||
+      row.cursor < 0
+    )
+      return 0;
+    return discoveryPlanKey(JSON.parse(row.input), queryPlan) === planKey ? row.cursor : 0;
   }
   kick(id) {
     if (this.schedule && !this.closed)
@@ -291,16 +338,40 @@ export class BatchJobs {
       });
   }
   finish(job, reason) {
-    job.reason = reason;
-    job.status = reason === 'target_reached' ? 'completed' : 'partial';
-    job.completedAt = new Date(this.now()).toISOString();
-    job.queue = [];
-    job.seen = [];
-    job.skippedDomains = [];
-    job.searchSignatures = [];
-    job.pendingSearch = null;
-    job.current = null;
-    return this.save(job);
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const planKey = job.queryPlan?.length && discoveryPlanKey(job.input, job.queryPlan);
+      if (job.scope === this.scope && job.provider === this.provider && planKey) {
+        this.db
+          .prepare(
+            `INSERT OR REPLACE INTO discovery_progress
+            (scope,provider,schedule_id,plan_key,cursor,queue) VALUES(?,?,?,?,?,?)`,
+          )
+          .run(
+            job.scope,
+            job.provider,
+            job.scheduleId || '',
+            planKey,
+            Math.max(0, job.cursor - (job.pendingSearch ? 1 : 0)),
+            JSON.stringify(job.queue),
+          );
+      }
+      job.reason = reason;
+      job.status = reason === 'target_reached' ? 'completed' : 'partial';
+      job.completedAt = new Date(this.now()).toISOString();
+      job.queue = [];
+      job.seen = [];
+      job.skippedDomains = [];
+      job.searchSignatures = [];
+      job.pendingSearch = null;
+      job.current = null;
+      this.save(job);
+      this.db.exec('COMMIT');
+      return job;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
   async reconcile(job) {
     if (!job.current) return;
