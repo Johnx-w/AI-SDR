@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { OutreachService } from '../server/outreach-service.mjs';
+import { mailboxAccountKey, positiveReplyTaskSql } from '../server/mail-conversations.mjs';
 import { updateThreadWorkflow } from '../server/mail-thread-workflow.mjs';
 
 const boxes = [
@@ -48,7 +49,14 @@ test('积极回复待办按来信时间出现，以实际回复或线下完成�
       '2026-03-03T08:00:00Z',
     ],
   ];
-  for (const args of messages) service.conversations.putMessage(args[0], received(...args));
+  for (const [index, args] of messages.entries()) {
+    service.conversations.putMessage(args[0], received(...args));
+    assert.deepEqual(
+      service.conversations.positiveReplyTasks().map((item) => item.requestType),
+      ['quote', 'catalog', 'meeting'].slice(0, index + 1),
+      '来信按时间顺序逐条形成待办',
+    );
+  }
   service.conversations.putMessage(
     boxes[0],
     received(
@@ -77,6 +85,7 @@ test('积极回复待办按来信时间出现，以实际回复或线下完成�
     ['one', 'two', 'one'],
   );
   assert.ok(reminders.every((item) => item.to.includes('thread=' + item.threadId)));
+  assert.equal(Date.parse(reminders[0].receivedAt), Date.parse('2026-03-01T08:00:00Z'));
 
   const meeting = reminders[2];
   service.replies.saveDraft(meeting.threadId, {
@@ -101,6 +110,11 @@ test('积极回复待办按来信时间出现，以实际回复或线下完成�
     bodyText: 'Attached is the requested price list.',
     occurredAt: '2026-03-04T08:00:00Z',
   });
+  assert.deepEqual(
+    service.conversations.positiveReplyTasks().map((item) => item.requestType),
+    ['catalog', 'meeting'],
+    '实际发出的索价回复只结束对应待办',
+  );
   const catalog = reminders[1];
   updateThreadWorkflow(
     service.db,
@@ -119,4 +133,47 @@ test('积极回复待办按来信时间出现，以实际回复或线下完成�
   assert.equal(reminders.length, 1);
   assert.equal(reminders[0].id, meeting.id);
   assert.equal(reminders[0].waitingHours, 52);
+
+  service.conversations.putMessage(boxes[0], {
+    messageId: '<meeting-answer@one.example>',
+    inReplyTo: meeting.externalId,
+    direction: 'outbound',
+    source: 'imap',
+    deliveryStatus: 'sent',
+    from: boxes[0].email,
+    to: meeting.from,
+    toAddresses: [meeting.from],
+    subject: 'Re: Product',
+    bodyText: 'The meeting is confirmed.',
+    occurredAt: '2026-03-05T09:00:00Z',
+  });
+  assert.deepEqual(service.conversations.positiveReplyTasks(), []);
+});
+
+test('积极回复等待时长以服务器收件时间而非邮件 Date 头起算', (t) => {
+  const service = new OutreachService({
+    mailboxes: { list: () => structuredClone(boxes), send: assert.fail },
+    now: () => Date.parse('2026-03-05T12:00:00Z'),
+  });
+  t.after(() => service.close());
+  service.conversations.putMessage(
+    boxes[0],
+    received(boxes[0], 'delayed', 'Please provide a quotation.', '2026-03-01T08:00:00Z', {
+      receivedAt: '2026-03-04T08:00:00Z',
+    }),
+  );
+  const [task] = service.conversations.positiveReplyTasks();
+  assert.equal(Date.parse(task.receivedAt), Date.parse('2026-03-04T08:00:00Z'));
+  assert.equal(task.waitingHours, 28);
+  const plan = service.db
+    .prepare('EXPLAIN QUERY PLAN ' + positiveReplyTaskSql(boxes.length))
+    .all(...boxes.flatMap((box) => [mailboxAccountKey(box), box.email.toLowerCase()]));
+  assert(
+    plan.some((step) => /mailbox_positive_tasks/.test(step.detail)),
+    plan.map((step) => step.detail).join('\n'),
+  );
+  assert(
+    plan.some((step) => /mailbox_reply_parent/.test(step.detail)),
+    plan.map((step) => step.detail).join('\n'),
+  );
 });

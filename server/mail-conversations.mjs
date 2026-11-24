@@ -29,6 +29,26 @@ const attachmentMetadata = (value) =>
       }))
     : [];
 
+export function positiveReplyTaskSql(accountCount) {
+  const accountRows = Array.from({ length: accountCount }, () => '(?,?)').join(',');
+  return `WITH account_email(account_key,email) AS (VALUES ${accountRows})
+    SELECT h.id,h.account_key,h.thread_id,h.sender,h.subject,h.stamp,h.external_id,
+      h.request_type,coalesce(w.state,'open') AS workflow_state
+    FROM mailbox_reply_headers h
+    JOIN account_email a ON a.account_key=h.account_key
+    LEFT JOIN mail_thread_workflow w ON w.thread_id=h.thread_id
+    WHERE h.direction='inbound' AND h.source='imap' AND h.business_kind='positive'
+      AND coalesce(w.state,'open')!='done'
+      AND (h.external_id IS NULL OR NOT EXISTS(
+        SELECT 1 FROM mailbox_reply_headers o
+        WHERE o.direction='outbound' AND o.account_key=h.account_key
+          AND o.parent_id=h.external_id AND o.sender=a.email AND o.stamp>=h.stamp
+          AND EXISTS(SELECT 1 FROM json_each(o.recipients) r
+            WHERE lower(r.value)=lower(h.sender))
+      ))
+    ORDER BY h.stamp,h.id`;
+}
+
 /** Local read model. Reading this model never opens an IMAP or SMTP connection. */
 export class MailConversations {
   constructor({
@@ -83,6 +103,8 @@ export class MailConversations {
     this.db
       .exec(`CREATE INDEX IF NOT EXISTS mailbox_thread_order ON mailbox_threads(account_key,json_extract(data,'$.updatedAt') DESC,id);
       CREATE INDEX IF NOT EXISTS mailbox_inbound_thread ON mailbox_reply_headers(thread_id) WHERE direction='inbound';
+      CREATE INDEX IF NOT EXISTS mailbox_positive_tasks ON mailbox_reply_headers(account_key,stamp,id)
+        WHERE direction='inbound' AND source='imap' AND business_kind='positive';
       CREATE INDEX IF NOT EXISTS mailbox_reply_evidence ON mailbox_reply_headers(account_key,thread_id)
         WHERE direction='inbound' AND source='imap' AND parent_id IS NOT NULL;`);
     this.db.exec(
@@ -150,31 +172,12 @@ export class MailConversations {
     if (!accounts.length) return [];
     const byKey = new Map(accounts.map((box) => [keyFor(box), box]));
     const rows = this.db
-      .prepare(
-        `SELECT h.id,h.account_key,h.thread_id,h.sender,h.subject,h.stamp,h.external_id,
-          h.request_type,coalesce(w.state,'open') AS workflow_state
-        FROM mailbox_reply_headers h
-        LEFT JOIN mail_thread_workflow w ON w.thread_id=h.thread_id
-        WHERE h.direction='inbound' AND h.source='imap' AND h.business_kind='positive'
-          AND h.account_key IN (${accounts.map(() => '?').join(',')})
-          AND coalesce(w.state,'open')!='done'
-        ORDER BY h.stamp,h.id`,
-      )
-      .all(...accounts.map(keyFor));
-    const answer = this.db.prepare(`SELECT 1 FROM mailbox_reply_headers o
-      WHERE o.direction='outbound' AND o.account_key=? AND o.parent_id=? AND o.sender=?
-        AND o.stamp>=? AND EXISTS(
-          SELECT 1 FROM json_each(o.recipients) r WHERE lower(r.value)=?
-        ) LIMIT 1`);
+      .prepare(positiveReplyTaskSql(accounts.length))
+      .all(...accounts.flatMap((box) => [keyFor(box), box.email.toLowerCase()]));
     const lookup = this.customerLookup();
     return rows.flatMap((row) => {
       const box = byKey.get(row.account_key);
       if (!box) return [];
-      if (
-        row.external_id &&
-        answer.get(row.account_key, row.external_id, box.email.toLowerCase(), row.stamp, row.sender)
-      )
-        return [];
       const customer = this.localCustomer({ participant: row.sender }, lookup);
       const waitingHours = Math.max(0, Math.floor((this.now() - Date.parse(row.stamp)) / 3600000));
       return [
