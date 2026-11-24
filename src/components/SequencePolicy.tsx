@@ -144,7 +144,7 @@ function PolicyEditor({
   }
   return (
     <Modal
-      title="编辑邮件模板与跟进序列"
+      title="编辑跟进序列"
       wide
       onClose={() => {
         if (!busy) close();
@@ -161,41 +161,6 @@ function PolicyEditor({
               onChange={(e) => setName(e.target.value)}
             />
           </label>
-          <p>
-            预览使用示例客户 Example Dealer
-            和卷帘产品。正式草稿读取客户及已审核产品事实，由负责邮箱添加称呼和签名，并执行发送限制。
-          </p>
-          <fieldset>
-            <legend>首封开发信</legend>
-            <label>
-              首封主题与正文写作要求
-              <textarea
-                aria-label="首封主题与正文写作要求"
-                rows={2}
-                maxLength={1200}
-                value={firstBodyInstruction}
-                onChange={(e) => setFirstBodyInstruction(e.target.value)}
-                placeholder="默认先写一条有依据的客户观察，再介绍品牌和供货产品。"
-              />
-            </label>
-            <label>
-              首封结尾写作要求
-              <textarea
-                aria-label="首封结尾写作要求"
-                rows={2}
-                maxLength={1200}
-                value={firstInstruction}
-                onChange={(e) => setFirstInstruction(e.target.value)}
-                placeholder="默认询问是否需要简短产品介绍。可填写新的写作要求或建议问句。"
-              />
-            </label>
-            <TemplatePreview
-              key={JSON.stringify([firstBodyInstruction, firstInstruction])}
-              firstBodyInstruction={firstBodyInstruction}
-              step={0}
-              instruction={firstInstruction}
-            />
-          </fieldset>
           <p>跟进日从首封实际发送算起。保存时按天数排序，写作要求会用于生成对应步骤的邮件。</p>
           {rows.map((row, index) => (
             <fieldset key={row.id}>
@@ -262,6 +227,43 @@ function PolicyEditor({
           >
             <Plus size={15} /> 添加步骤
           </button>
+          <details className="sequence-first-template">
+            <summary>首封开发信模板</summary>
+            <p>
+              预览使用示例客户 Example Dealer
+              和卷帘产品。正式草稿读取客户及已审核产品事实，由负责邮箱添加称呼和签名，并执行发送限制。
+            </p>
+            <div>
+              <label>
+                首封主题与正文写作要求
+                <textarea
+                  aria-label="首封主题与正文写作要求"
+                  rows={2}
+                  maxLength={1200}
+                  value={firstBodyInstruction}
+                  onChange={(e) => setFirstBodyInstruction(e.target.value)}
+                  placeholder="默认先写一条有依据的客户观察，再介绍品牌和供货产品。"
+                />
+              </label>
+              <label>
+                首封结尾写作要求
+                <textarea
+                  aria-label="首封结尾写作要求"
+                  rows={2}
+                  maxLength={1200}
+                  value={firstInstruction}
+                  onChange={(e) => setFirstInstruction(e.target.value)}
+                  placeholder="默认询问是否需要简短产品介绍。可填写新的写作要求或建议问句。"
+                />
+              </label>
+              <TemplatePreview
+                key={JSON.stringify([firstBodyInstruction, firstInstruction])}
+                firstBodyInstruction={firstBodyInstruction}
+                step={0}
+                instruction={firstInstruction}
+              />
+            </div>
+          </details>
           {error && (
             <div className="outreach-alert error" role="alert">
               {error}
@@ -324,7 +326,9 @@ export function SequencePolicyPanel({ refreshToken }: { refreshToken: number }) 
           <header>
             <div>
               <h3>{policy.name}</h3>
-              <p>首封模板用于新生成的草稿。启用跟进时，按首封提交时的规则排期。</p>
+              <p>
+                启用自动跟进的计划共用此序列。修改对之后提交的首封生效，已排期的邮件按原安排执行。
+              </p>
             </div>
             <button
               className="btn primary"
@@ -333,7 +337,7 @@ export function SequencePolicyPanel({ refreshToken }: { refreshToken: number }) 
                 setSaved(false);
               }}
             >
-              <Pencil size={15} /> 编辑邮件模板
+              <Pencil size={15} /> 编辑序列
             </button>
           </header>
           <ol>
@@ -344,7 +348,7 @@ export function SequencePolicyPanel({ refreshToken }: { refreshToken: number }) 
               <div>
                 <small>起点</small>
                 <strong>首封开发信</strong>
-                <p>{policy.firstInstruction || '询问对方是否需要简短的产品介绍。'}</p>
+                <p>负责邮箱发出首封后开始计时。</p>
               </div>
             </li>
             {policy.steps.map((step, i) => (

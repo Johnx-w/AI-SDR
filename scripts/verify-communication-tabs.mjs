@@ -196,9 +196,9 @@ try {
   const mailboxesHeading = await headingStyle();
   await tab('跟进序列').click();
   const rules = page.getByRole('region', { name: '未回复跟进规则' });
-  await rules.getByRole('button', { name: '编辑邮件模板' }).waitFor();
+  await rules.getByRole('button', { name: '编辑序列' }).waitFor();
   assert.equal(await rules.locator('ol li').count(), 3);
-  await button('编辑邮件模板').click();
+  await button('编辑序列').click();
   await label('序列名称').fill('QA 自定义跟进');
   await button('添加步骤').click();
   await label('跟进 3 天数').fill('7');
@@ -210,7 +210,7 @@ try {
   await rules.getByText('首封后第 11 天').waitFor();
   await page.reload();
   await rules.getByRole('heading', { name: 'QA 自定义跟进' }).waitFor();
-  await button('编辑邮件模板').click();
+  await button('编辑序列').click();
   await button('删除跟进 3').click();
   await button('保存序列').click();
   await rules.getByText('序列已保存').waitFor();

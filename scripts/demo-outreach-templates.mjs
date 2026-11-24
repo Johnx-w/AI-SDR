@@ -201,6 +201,7 @@ function groups(batch) {
   );
   return [pool.slice(0, 2), pool.slice(2)];
 }
+const initialPolicy = service.followUps.policy();
 const [a7, b7] = groups('07'),
   [a8, b8] = groups('08');
 revision('', dayThree);
@@ -262,6 +263,9 @@ assert.equal(eligible.eligible.length, 0);
 console.log(
   '07 A/B 2/2 first touches; 08 A/B 2/2 first touches, 0/1 follow-up, 1 reply stopped; duplicate eligible=0.',
 );
+
+// Leave the editor on the workspace schedule after seeding the completed comparisons.
+revision(initialPolicy.firstInstruction, initialPolicy.steps);
 
 const appEnv = {
   PORT: String(port),
@@ -339,7 +343,7 @@ function report() {
     '开发信对照演示',
     '<p>本机合成企业 · 模拟时钟 · 离线写作与发信通道</p><p><a href="' +
       templates +
-      '">打开沟通中心 → 编辑邮件模板</a>　<a href="/demo/card">查看演示产品卡</a></p><p>保存模板后可在这里用一家新企业重演。离线模型支持以英文陈述句试写首段、以英文问句试写结尾和跟进，例如 <em>May I send the roller blinds product card?</em>。正式模型可读取自然语言写作要求。</p><form method="post" action="/demo/run"><button>用已保存模板生成并模拟发送</button></form><p>重演先生成首封，再按已保存的步骤推进模拟日期。展开企业可看生成正文及实际跟进结果。</p>' +
+      '">打开沟通中心 → 跟进序列</a>　<a href="/demo/card">查看演示产品卡</a></p><p>保存模板后可在这里用一家新企业重演。离线模型支持以英文陈述句试写首段、以英文问句试写结尾和跟进，例如 <em>May I send the roller blinds product card?</em>。正式模型可读取自然语言写作要求。</p><form method="post" action="/demo/run"><button>用已保存模板生成并模拟发送</button></form><p>重演先生成首封，再按已保存的步骤推进模拟日期。展开企业可看生成正文及实际跟进结果。</p>' +
       plans.toReversed().map(summary).join(''),
   );
 }
@@ -350,6 +354,10 @@ const server = createServer(async (req, res) => {
     return;
   }
   try {
+    if (path === '/demo' && req.method === 'GET') {
+      res.writeHead(302, { Location: templates }).end();
+      return;
+    }
     if (path === '/demo/run' && req.method === 'POST') {
       if (req.headers.origin !== 'http://127.0.0.1:' + port || busy) {
         res.writeHead(409).end();
@@ -370,14 +378,14 @@ const server = createServer(async (req, res) => {
       } finally {
         busy = false;
       }
-      res.writeHead(303, { Location: '/demo' }).end();
+      res.writeHead(303, { Location: '/demo/records' }).end();
       return;
     }
-    if (req.method === 'GET' && ['/demo', '/demo/card'].includes(path)) {
+    if (req.method === 'GET' && ['/demo/records', '/demo/card'].includes(path)) {
       res
         .writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
         .end(
-          path === '/demo'
+          path === '/demo/records'
             ? report()
             : html(
                 'Roller blinds · Product card',
@@ -389,7 +397,7 @@ const server = createServer(async (req, res) => {
                   esc(product.id) +
                   ' · approved v' +
                   product.version +
-                  '</p><a href="/demo">返回试验记录</a>',
+                  '</p><a href="/demo/records">返回试验记录</a>',
               ),
         );
       return;
@@ -411,5 +419,5 @@ const server = createServer(async (req, res) => {
 server.listen(port, '127.0.0.1', () => {
   port = server.address().port;
   appEnv.PORT = String(port);
-  console.log('http://127.0.0.1:' + port + '/demo', dir);
+  console.log('http://127.0.0.1:' + port + templates, dir);
 });

@@ -15,7 +15,7 @@ try {
     const timeout = setTimeout(() => reject(Error('演示启动超时')), 25000);
     child.stdout.on('data', (buf) => {
       output += buf;
-      const match = output.match(/(http:\/\/127\.0\.0\.1:\d+)\/demo/);
+      const match = output.match(/(http:\/\/127\.0\.0\.1:\d+)\/inbox/);
       if (match) {
         clearTimeout(timeout);
         resolve(match[1]);
@@ -40,15 +40,23 @@ try {
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
   const button = (name) => page.getByRole('button', { name, exact: true });
-  await page.goto(base + '/inbox?tab=sequences');
-  await button('编辑邮件模板').click();
-  const fields = page.locator('fieldset');
-  const preview = (i) => fields.nth(i).getByRole('button', { name: '预览示例邮件' });
-  await preview(0).click();
-  await fields
-    .nth(0)
+  await page.goto(base + '/demo');
+  assert.equal(page.url(), base + '/inbox?tab=sequences');
+  const policy = page.getByRole('region', { name: '未回复跟进规则' });
+  await policy.getByText('负责邮箱发出首封后开始计时。').waitFor();
+  for (const label of ['起点', '首封后第 3 天', '首封后第 7 天'])
+    await policy.getByText(label, { exact: true }).waitFor();
+  await button('编辑序列').click();
+  const dialogEditor = page.getByRole('dialog', { name: '编辑跟进序列' });
+  const first = dialogEditor.locator('details').filter({ hasText: '首封开发信模板' });
+  const step = (n) => dialogEditor.getByRole('group', { name: '跟进 ' + n, exact: true });
+  const preview = (group) => group.getByRole('button', { name: '预览示例邮件' });
+  assert.equal(await first.getAttribute('open'), null);
+  await first.locator('summary').click();
+  await preview(first).click();
+  await first
     .locator('article')
-    .filter({ hasText: 'May I send our one-page roller blinds product card?' })
+    .filter({ hasText: 'Would a brief product overview be useful to your team?' })
     .waitFor();
   const body =
     'I saw that your window furnishings range includes roller blinds for customers who are comparing products.';
@@ -57,25 +65,29 @@ try {
   await page.getByLabel('首封主题与正文写作要求').fill(body);
   await page.getByLabel('首封结尾写作要求').fill(closing);
   await page.getByLabel('跟进 1 写作要求').fill(follow);
-  for (const [i, needle] of [closing, follow].entries()) {
-    await preview(i).click();
-    const article = fields.nth(i).locator('article');
+  for (const [group, needle] of [
+    [first, closing],
+    [step(1), follow],
+  ]) {
+    await preview(group).click();
+    const article = group.locator('article');
     await article.waitFor();
     assert.ok((await article.textContent()).includes(needle));
   }
   // A step moved ahead of a sibling must preview at its new chronological position.
   await button('添加步骤').click();
-  await page.getByLabel('跟进 2 天数').fill('1');
-  await page.getByLabel('跟进 2 写作要求').fill(follow);
+  await page.getByLabel('跟进 3 天数').fill('1');
+  await page.getByLabel('跟进 3 写作要求').fill(follow);
   const previewRequest = page.waitForRequest((r) => r.url().endsWith('/sequence-policy/preview'));
-  await preview(2).click();
+  await preview(step(3)).click();
   assert.equal((await previewRequest).postDataJSON().step, 1);
-  await fields.nth(2).locator('article').waitFor();
-  await button('删除跟进 2').click();
+  await step(3).locator('article').waitFor();
+  await button('删除跟进 3').click();
   await button('保存序列').click();
   await page.getByText('序列已保存').waitFor();
   await page.reload();
-  await button('编辑邮件模板').click();
+  await button('编辑序列').click();
+  await first.locator('summary').click();
   for (const [label, value] of [
     ['首封主题与正文写作要求', body],
     ['首封结尾写作要求', closing],
@@ -83,8 +95,8 @@ try {
   ])
     assert.equal(await page.getByLabel(label, { exact: true }).inputValue(), value);
   await page.setViewportSize({ width: 390, height: 844 });
-  await preview(1).click();
-  await fields.nth(1).locator('article').waitFor();
+  await preview(step(1)).click();
+  await step(1).locator('article').waitFor();
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   assert.ok(
     await page
@@ -95,7 +107,7 @@ try {
   const dialog = await page.getByRole('dialog').boundingBox();
   assert.ok(footer.y >= dialog.y && footer.y + footer.height <= dialog.y + dialog.height);
   await button('取消').click();
-  await page.goto(base + '/demo');
+  await page.goto(base + '/demo/records');
   const response = page.waitForResponse(
     (r) => r.url() === base + '/demo/run' && r.request().method() === 'POST',
   );
