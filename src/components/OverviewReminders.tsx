@@ -18,7 +18,7 @@ export function OverviewReminders({
         { title: '今日待跟进', count: data.work.today, to: data.links.today },
         {
           title: '积极回复待处理',
-          count: data.positiveReplies.length,
+          count: data.positiveReplyTotal,
           to: data.positiveReplies[0]?.to || '/business?view=replies&businessKind=positive',
         },
         { title: '产品资料待审核', count: data.products.draft, to: data.products.to },

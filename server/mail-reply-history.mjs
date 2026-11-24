@@ -99,8 +99,26 @@ export function initializeReplyHistory(db) {
     if (!timeout) db.exec('PRAGMA busy_timeout=0');
   }
 }
+export const internalSenderSql = (emails) => `h.sender IN (${emails})`;
+export function outboundLinkSql(
+  column,
+  { account = '?', message = '?', sender = '?', stamp = '?', recipient = '?' } = {},
+) {
+  return `o.direction='outbound' AND o.account_key=${account} AND o.${column}=${message}
+    AND o.sender=${sender} AND o.stamp ${column === 'parent_id' ? '>=' : '<='} ${stamp}
+    AND EXISTS(SELECT 1 FROM json_each(o.recipients) r WHERE lower(r.value)=${recipient})`;
+}
+export const replyToInboundSql = (sender) =>
+  outboundLinkSql('parent_id', {
+    account: 'h.account_key',
+    message: 'h.external_id',
+    sender,
+    stamp: 'h.stamp',
+    recipient: 'h.sender',
+  });
+
 export function replyHeaderKindSql(known) {
-  const internal = 'h.sender IN (' + known.map(() => '?').join(',') + ')';
+  const internal = internalSenderSql(known.map(() => '?').join(','));
   return `CASE WHEN ${internal} THEN CASE WHEN instr(lower(h.subject),'[ai-sdr internal qa ')>0 THEN 'test' ELSE 'internal' END
     WHEN h.classification='hard_bounce' THEN 'bounce' WHEN h.classification='auto_reply' THEN 'notification'
     WHEN h.classification IN ('unsubscribe','complaint','unverified') THEN h.classification
@@ -159,9 +177,7 @@ export function listReplyHistory(
     const senderByKey =
       'CASE h.account_key ' + selected.map(() => 'WHEN ? THEN ?').join(' ') + ' END';
     where += ` AND ${handling === 'unanswered' ? 'NOT ' : ''}EXISTS(SELECT 1 FROM mailbox_reply_headers o
-      WHERE o.direction='outbound' AND o.account_key=h.account_key AND o.parent_id=h.external_id
-      AND o.sender=(${senderByKey}) AND o.stamp>=h.stamp
-      AND EXISTS(SELECT 1 FROM json_each(o.recipients) r WHERE lower(r.value)=h.sender))`;
+      WHERE ${replyToInboundSql('(' + senderByKey + ')')})`;
     for (const box of selected) args.push(keyFor(box), box.email.toLowerCase());
   }
   const countRows = store.db
@@ -176,9 +192,10 @@ export function listReplyHistory(
     where += ` AND coalesce(h.business_kind,'other')=?`;
     args.push(businessKind);
   }
-  const total = store.db
-    .prepare('SELECT count(*) AS n FROM mailbox_reply_headers h WHERE ' + where)
-    .get(...args).n;
+  const total =
+    businessKind === 'all'
+      ? countRows.reduce((sum, row) => sum + row.count, 0)
+      : businessCounts[businessKind];
   const rows = store.db
     .prepare(
       `SELECT h.id,h.thread_id,h.account_key,h.sender,h.subject,h.stamp,h.external_id,h.parent_id,
@@ -188,8 +205,7 @@ export function listReplyHistory(
     .all(...known, ...args, pageSize, (page - 1) * pageSize);
   const related = (column) =>
     store.db.prepare(`SELECT origin FROM mailbox_reply_headers o
-    WHERE o.account_key=? AND o.direction='outbound' AND o.${column}=? AND o.sender=? AND o.stamp ${column === 'parent_id' ? '>=' : '<='} ?
-      AND EXISTS (SELECT 1 FROM json_each(o.recipients) r WHERE lower(r.value)=?)
+    WHERE ${outboundLinkSql(column)}
     ORDER BY o.stamp LIMIT 1`);
   const prior = related('external_id'),
     answer = related('parent_id'),

@@ -19,10 +19,10 @@ import { Badge } from '../components/ui';
 import type { OverviewPeriod } from '../domain/overview-rules.mjs';
 import { overviewApi } from '../services/overview';
 import type { OverviewData, OverviewSource } from '../services/overview';
+import { POSITIVE_REQUEST_LABELS as requestTypeText } from '../domain/reply-classification.mjs';
 import './Dashboard.css';
 
 const countText = (value: number | null) => (value === null ? '—' : value.toLocaleString('zh-CN'));
-import { POSITIVE_REQUEST_LABELS as requestTypeText } from '../domain/reply-classification.mjs';
 const waitingText = (hours: number) =>
   hours >= 24 ? `${Math.floor(hours / 24)} 天 ${hours % 24} 小时` : `${hours} 小时`;
 const isVisible = () => document.visibilityState !== 'hidden';
@@ -262,6 +262,7 @@ export function Dashboard() {
   );
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
+  const [positivePage, setPositivePage] = useState(1);
   const [revision, setRevision] = useState(0);
   const cache = useRef<Partial<Record<OverviewPeriod, OverviewData>>>({});
   const data = dataByPeriod[period];
@@ -281,9 +282,13 @@ export function Dashboard() {
         const result = await overviewApi.get(
           period,
           AbortSignal.any([controller.signal, AbortSignal.timeout(30000)]),
+          undefined,
+          positivePage,
         );
         if (!alive || controller.signal.aborted) return;
         if (result.range.period !== period) throw new Error('返回的统计期间不一致，请重新读取');
+        if (result.sources.business.state === 'ready' && result.positiveReplyPage !== positivePage)
+          setPositivePage(result.positiveReplyPage);
         cache.current[period] = result;
         setDataByPeriod((current) => ({ ...current, [period]: result }));
         setError('');
@@ -323,7 +328,7 @@ export function Dashboard() {
       if (timer) clearTimeout(timer);
       document.removeEventListener('visibilitychange', visible);
     };
-  }, [period, revision]);
+  }, [period, revision, positivePage]);
 
   const header = (
     <PageHeading
@@ -493,6 +498,33 @@ export function Dashboard() {
             detail="新的索价、索目录或约见会在这里形成待办。"
           />
         ) : null}
+        {data.positiveReplyPageSize && data.positiveReplyTotal > data.positiveReplyPageSize && (
+          <nav className="ov-reply-pages" aria-label="积极回复待办分页">
+            <button
+              type="button"
+              className="btn secondary small"
+              disabled={refreshing || data.positiveReplyPage <= 1}
+              onClick={() => setPositivePage(data.positiveReplyPage - 1)}
+            >
+              上一页
+            </button>
+            <span>
+              共 {data.positiveReplyTotal} 项，第 {data.positiveReplyPage}/
+              {Math.ceil(data.positiveReplyTotal / data.positiveReplyPageSize)} 页
+            </span>
+            <button
+              type="button"
+              className="btn secondary small"
+              disabled={
+                refreshing ||
+                data.positiveReplyPage * data.positiveReplyPageSize >= data.positiveReplyTotal
+              }
+              onClick={() => setPositivePage(data.positiveReplyPage + 1)}
+            >
+              下一页
+            </button>
+          </nav>
+        )}
       </section>
       <div className="ov-metrics">
         <Metric

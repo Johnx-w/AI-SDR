@@ -77,31 +77,44 @@ test('客户入口未接通时总览其它本地来源仍可读，客户数不�
   );
 });
 
-test('总览与提醒计数读取同一条未处理积极回复，不发送邮件', async () => {
+test('总览分页稳定，提醒只统计总数，越界页收敛且非法页返回 400', async () => {
   const mailbox = { id: 'one', email: 'sales@brand.example', configured: true };
   const service = new OutreachService({
     mailboxes: { list: () => [mailbox], send: assert.fail },
     now: () => Date.parse('2026-10-25T02:00:00Z'),
   });
-  service.conversations.putMessage(mailbox, {
-    messageId: '<quote@buyer.example>',
-    direction: 'inbound',
-    source: 'imap',
-    deliveryStatus: 'received',
-    from: 'buyer@buyer.example',
-    to: mailbox.email,
-    toAddresses: [mailbox.email],
-    subject: 'Re: Product',
-    bodyText: 'Please send your price list.',
-    occurredAt: '2026-10-24T02:00:00Z',
-  });
+  for (let i = 0; i < 28; i++)
+    service.conversations.putMessage(mailbox, {
+      messageId: `<quote-${i}@buyer.example>`,
+      direction: 'inbound',
+      source: 'imap',
+      deliveryStatus: 'received',
+      from: 'buyer@buyer.example',
+      to: mailbox.email,
+      toAddresses: [mailbox.email],
+      subject: `Re: Product ${i}`,
+      bodyText: 'Please send your price list.',
+      occurredAt: new Date(Date.parse('2026-10-24T02:00:00Z') + i * 1000).toISOString(),
+    });
   await withApp({ env: {}, outreachServiceFactory: () => service }, async (root) => {
     const overview = await (await fetch(root + '/api/v1/overview')).json();
-    assert.equal(overview.positiveReplies.length, 1);
+    assert.equal(overview.positiveReplies.length, 25);
+    assert.equal(overview.positiveReplyTotal, 28);
+    assert.equal(overview.positiveReplyPageSize, 25);
+    assert.equal(overview.positiveReplies[0].subject, 'Re: Product 0');
+    const tail = await (await fetch(root + '/api/v1/overview?positivePage=99')).json();
+    assert.equal(tail.positiveReplyPage, 2);
+    assert.deepEqual(
+      tail.positiveReplies.map((item) => item.subject),
+      ['Re: Product 25', 'Re: Product 26', 'Re: Product 27'],
+    );
+    assert.equal((await fetch(root + '/api/v1/overview?positivePage=-1')).status, 400);
+    service.conversations.positiveReplyTasks = assert.fail;
+    service.conversations.customerLookup = assert.fail;
     assert.equal(overview.positiveReplies[0].requestType, 'quote');
     assert.equal(
       (await (await fetch(root + '/api/v1/overview?summary=reminders')).json()).count,
-      1,
+      28,
     );
   });
 });

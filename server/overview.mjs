@@ -54,10 +54,11 @@ export class OverviewService {
     this.currentScope = undefined;
     this.generation++;
   }
-  async source(key, asOf, generation) {
+  async source(key, asOf, generation, positivePage) {
     let timer;
     try {
-      const pending = this.readers[key]();
+      const pending =
+        key === 'business' ? this.readers.business(positivePage) : this.readers[key]();
       const data = await Promise.race([
         pending,
         new Promise((_, reject) => {
@@ -85,10 +86,11 @@ export class OverviewService {
         updatedAt,
         error: stale ? '客户库同步尚未完成，当前显示上次保存的数据' : '',
       };
-      if (generation === this.generation) this.cache.set(key, { data, status });
+      if (generation === this.generation) this.cache.set(key, { data, status, positivePage });
       return { data, status };
     } catch {
       let prior = this.cache.get(key);
+      if (key === 'business' && prior?.positivePage !== positivePage) prior = undefined;
       if (!prior && key === 'customers' && this.customerSnapshot) {
         try {
           const data = this.customerSnapshot();
@@ -111,7 +113,10 @@ export class OverviewService {
       clearTimeout(timer);
     }
   }
-  async read({ period = '7d', asOf } = {}) {
+  async read({ period = '7d', asOf, positivePage = 1 } = {}) {
+    positivePage = Number(positivePage);
+    if (!Number.isSafeInteger(positivePage) || positivePage < 1 || positivePage > 1000000)
+      throw Object.assign(new Error('积极回复待办页码无效'), { status: 400 });
     const range = overviewRange(period, asOf || this.now());
     const scope = this.scope();
     if (scope !== this.currentScope) {
@@ -122,7 +127,7 @@ export class OverviewService {
     const generation = this.generation;
     const keys = Object.keys(this.readers);
     const entries = await Promise.all(
-      keys.map(async (key) => [key, await this.source(key, range.asOf, generation)]),
+      keys.map(async (key) => [key, await this.source(key, range.asOf, generation, positivePage)]),
     );
     if (generation !== this.generation || scope !== this.scope())
       throw Object.assign(new Error('客户表已切换，请刷新总览'), { status: 409 });
@@ -330,6 +335,9 @@ export class OverviewService {
       trend,
       captures,
       positiveReplies: graph?.positiveReplies || [],
+      positiveReplyTotal: graph?.positiveReplyTotal ?? 0,
+      positiveReplyPage: graph?.positiveReplyPage ?? positivePage,
+      positiveReplyPageSize: graph?.positiveReplyPageSize ?? null,
       products: {
         draft: productRows
           ? productRows.filter((product) => product.status === 'draft').length

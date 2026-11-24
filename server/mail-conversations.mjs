@@ -1,10 +1,19 @@
 import { initializeThreadSearch, listThreadPage } from './mail-thread-page.mjs';
-import { initializeThreadWorkflow, mergeThreadWorkflow } from './mail-thread-workflow.mjs';
+import {
+  backfillOfflineCompletions,
+  initializeThreadWorkflow,
+  mergeThreadWorkflow,
+} from './mail-thread-workflow.mjs';
 import { createHash } from 'node:crypto';
 import { setImmediate as yieldToRequests } from 'node:timers/promises';
 import { mailSyncFailure } from './mail-sync-errors.mjs';
 import { classifyInboundReply, incomingClassification } from './communication-rounds.mjs';
-import { initializeReplyHistory, listReplyHistory } from './mail-reply-history.mjs';
+import {
+  initializeReplyHistory,
+  listReplyHistory,
+  internalSenderSql,
+  replyToInboundSql,
+} from './mail-reply-history.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -19,6 +28,7 @@ const messageId = (value) => {
 };
 const keyFor = (mailbox) => hash([mailbox.id, address(mailbox.email)]);
 export { keyFor as mailboxAccountKey };
+const accountParameters = (boxes) => boxes.flatMap((box) => [keyFor(box), box.email.toLowerCase()]);
 const iso = (value) => new Date(value).toISOString();
 const attachmentMetadata = (value) =>
   Array.isArray(value)
@@ -29,24 +39,20 @@ const attachmentMetadata = (value) =>
       }))
     : [];
 
-export function positiveReplyTaskSql(accountCount) {
+const positivePageSize = 25;
+export function positiveReplyTaskSql(accountCount, countOnly = false) {
   const accountRows = Array.from({ length: accountCount }, () => '(?,?)').join(',');
+  const columns = countOnly
+    ? 'count(*) AS total'
+    : 'h.id,h.account_key,h.thread_id,h.sender,h.subject,h.stamp,h.external_id,h.request_type';
   return `WITH account_email(account_key,email) AS (VALUES ${accountRows})
-    SELECT h.id,h.account_key,h.thread_id,h.sender,h.subject,h.stamp,h.external_id,
-      h.request_type,coalesce(w.state,'open') AS workflow_state
-    FROM mailbox_reply_headers h
+    SELECT ${columns} FROM mailbox_reply_headers h
     JOIN account_email a ON a.account_key=h.account_key
-    LEFT JOIN mail_thread_workflow w ON w.thread_id=h.thread_id
     WHERE h.direction='inbound' AND h.source='imap' AND h.business_kind='positive'
-      AND coalesce(w.state,'open')!='done'
-      AND (h.external_id IS NULL OR NOT EXISTS(
-        SELECT 1 FROM mailbox_reply_headers o
-        WHERE o.direction='outbound' AND o.account_key=h.account_key
-          AND o.parent_id=h.external_id AND o.sender=a.email AND o.stamp>=h.stamp
-          AND EXISTS(SELECT 1 FROM json_each(o.recipients) r
-            WHERE lower(r.value)=lower(h.sender))
-      ))
-    ORDER BY h.stamp,h.id`;
+      AND NOT (${internalSenderSql('SELECT email FROM account_email')})
+      AND NOT EXISTS(SELECT 1 FROM mail_offline_handled done WHERE done.message_id=h.id)
+      AND NOT EXISTS(SELECT 1 FROM mailbox_reply_headers o WHERE ${replyToInboundSql('a.email')})
+    ${countOnly ? '' : 'ORDER BY h.stamp,h.id LIMIT ? OFFSET ?'}`;
 }
 
 /** Local read model. Reading this model never opens an IMAP or SMTP connection. */
@@ -110,6 +116,11 @@ export class MailConversations {
     this.db.exec(
       'CREATE TABLE IF NOT EXISTS mailbox_summary_migrations (version INTEGER PRIMARY KEY)',
     );
+    if (!db.prepare('SELECT 1 FROM mailbox_summary_migrations WHERE version=4').get())
+      this.transaction(() => {
+        if (db.prepare('INSERT OR IGNORE INTO mailbox_summary_migrations VALUES(4)').run().changes)
+          backfillOfflineCompletions(db);
+      });
     if (!this.db.prepare('SELECT 1 FROM mailbox_summary_migrations WHERE version=1').get())
       this.transaction(() => {
         if (
@@ -167,13 +178,42 @@ export class MailConversations {
     return listReplyHistory(this, filters, keyFor);
   }
 
-  positiveReplyTasks() {
-    const accounts = this.mailboxes.list();
+  positiveReplyCount(accounts = this.mailboxes.list()) {
+    if (!accounts.length) return 0;
+    return this.db
+      .prepare(positiveReplyTaskSql(accounts.length, true))
+      .get(...accountParameters(accounts)).total;
+  }
+
+  positiveReplyPage(requestedPage = 1) {
+    // Counts and rows share one snapshot even when a second process is syncing mail.
+    return this.transaction(
+      () => {
+        const accounts = this.mailboxes.list();
+        const positiveReplyTotal = this.positiveReplyCount(accounts);
+        const positiveReplyPage = Math.min(
+          requestedPage,
+          Math.max(1, Math.ceil(positiveReplyTotal / positivePageSize)),
+        );
+        return {
+          positiveReplyTotal,
+          positiveReplyPage,
+          positiveReplyPageSize: positivePageSize,
+          positiveReplies: positiveReplyTotal
+            ? this.positiveReplyTasks(positiveReplyPage, accounts)
+            : [],
+        };
+      },
+      { readOnly: true },
+    );
+  }
+
+  positiveReplyTasks(page = 1, accounts = this.mailboxes.list()) {
     if (!accounts.length) return [];
     const byKey = new Map(accounts.map((box) => [keyFor(box), box]));
     const rows = this.db
       .prepare(positiveReplyTaskSql(accounts.length))
-      .all(...accounts.flatMap((box) => [keyFor(box), box.email.toLowerCase()]));
+      .all(...accountParameters(accounts), positivePageSize, (page - 1) * positivePageSize);
     const lookup = this.customerLookup();
     return rows.flatMap((row) => {
       const box = byKey.get(row.account_key);
@@ -201,16 +241,15 @@ export class MailConversations {
               tab: 'inbox',
               thread: row.thread_id,
               mailboxId: box.id,
-              hasReply: '1',
             }),
         },
       ];
     });
   }
 
-  transaction(work) {
+  transaction(work, { readOnly = false } = {}) {
     if (this.db.isTransaction) return work();
-    this.db.exec('BEGIN IMMEDIATE');
+    this.db.exec(readOnly ? 'BEGIN' : 'BEGIN IMMEDIATE');
     try {
       const value = work();
       this.db.exec('COMMIT');

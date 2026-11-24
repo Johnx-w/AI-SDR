@@ -640,6 +640,14 @@
     transform: rotate(360deg);
   }
 }
+.ov-reply-pages {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  font-size: 0.875rem;
+}
 @media (max-width: 1200px) {
   .ov-todo {
     padding: 15px 11px;

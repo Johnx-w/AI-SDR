@@ -58,6 +58,9 @@ export interface OverviewData {
   schedules: { id: string; name: string; status: string; nextRunAt: string | null; to: string }[];
   trend: { date: string; count: number | null }[];
   captures: OverviewCapture[];
+  positiveReplyTotal: number;
+  positiveReplyPage: number;
+  positiveReplyPageSize: number | null;
   positiveReplies: {
     id: string;
     customer: string;
@@ -81,9 +84,11 @@ export const overviewApi = {
     period: OverviewPeriod = '7d',
     signal?: AbortSignal,
     asOf?: string,
+    positivePage = 1,
   ): Promise<OverviewData> {
     const params = new URLSearchParams({ period });
     if (asOf) params.set('asOf', asOf);
+    if (positivePage > 1) params.set('positivePage', String(positivePage));
     const response = await fetch(`/api/v1/overview?${params}`, {
       signal: signal
         ? AbortSignal.any([signal, AbortSignal.timeout(30000)])

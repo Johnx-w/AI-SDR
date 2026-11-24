@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { OutreachService } from '../server/outreach-service.mjs';
 import { mailboxAccountKey, positiveReplyTaskSql } from '../server/mail-conversations.mjs';
 
+import { createApp } from '../server/app.mjs';
+
 const directory = mkdtempSync(join(tmpdir(), 'reply-read-benchmark-'));
 const boxes = [
   { id: 'one', email: 'sales@one.example', configured: true },
@@ -17,6 +19,7 @@ const service = new OutreachService({
   now: () => Date.parse('2026-11-24T04:00:00Z'),
 });
 const count = 1203;
+let app;
 
 try {
   const thread = service.db.prepare('INSERT INTO mailbox_threads VALUES(?,?,?)');
@@ -80,59 +83,79 @@ try {
   }
   service.db.exec('COMMIT');
 
-  for (const [label, filters, expected] of [
-    ['来信首页', { mailboxId: 'all', kind: 'all', page: '1' }, count],
+  app = createApp({
+    env: {},
+    outreachServiceFactory: () => ({
+      conversations: service.conversations,
+      mailboxes: service.mailboxes,
+      close() {},
+    }),
+    fetchImpl: assert.fail,
+  });
+  await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
+  const root = 'http://127.0.0.1:' + app.address().port + '/api/v1/';
+  for (const [label, path, check] of [
     [
-      '积极且未回复筛选',
-      { mailboxId: 'all', kind: 'all', businessKind: 'positive', handling: 'unanswered' },
-      137,
+      '来信首页',
+      'outreach/reply-history?kind=all',
+      (r) => r.total === count && r.items[0].id === 'in-1202',
     ],
-    ['来信后续页', { mailboxId: 'all', kind: 'all', page: '40' }, count],
+    [
+      '组合筛选',
+      'outreach/reply-history?kind=all&businessKind=positive&handling=unanswered',
+      (r) => r.total === 137 && r.items.every((i) => i.businessKind === 'positive'),
+    ],
+    [
+      '第40页',
+      'outreach/reply-history?kind=all&page=40',
+      (r) => r.total === count && r.items[0].id === 'in-0227',
+    ],
+    [
+      '工作台',
+      'overview',
+      (r) =>
+        r.positiveReplyTotal === 137 &&
+        r.positiveReplies.length === 25 &&
+        r.positiveReplies[0].id === 'in-0007',
+    ],
+    [
+      '待办末页',
+      'overview?positivePage=6',
+      (r) =>
+        r.positiveReplyPage === 6 &&
+        r.positiveReplies.length === 12 &&
+        r.positiveReplies.at(-1).id === 'in-1197',
+    ],
+    ['提醒角标', 'overview?summary=reminders', (r) => r.count === 137],
   ]) {
     const times = [];
-    let bytes = 0;
+    let bytes;
     for (let run = 0; run < 22; run++) {
       const start = performance.now();
-      const result = service.conversations.replyHistory(filters);
+      const response = await fetch(root + path);
+      const raw = await response.text();
       times.push(performance.now() - start);
-      bytes = Buffer.byteLength(JSON.stringify(result));
-      assert.equal(result.total, expected);
+      assert.equal(response.status, 200);
+      assert.ok(check(JSON.parse(raw)), label);
+      bytes = Buffer.byteLength(raw);
     }
     const firstMs = times.shift();
-    times.sort((left, right) => left - right);
+    times.sort((a, b) => a - b);
     console.log(label, {
-      firstMs: Number(firstMs.toFixed(2)),
-      p50Ms: Number(times[10].toFixed(2)),
-      maxMs: Number(times.at(-1).toFixed(2)),
+      firstMs: firstMs.toFixed(2),
+      p50Ms: times[10].toFixed(2),
+      maxMs: times.at(-1).toFixed(2),
       bytes,
     });
   }
-
-  const taskTimes = [];
-  let taskBytes = 0;
-  for (let run = 0; run < 22; run++) {
-    const start = performance.now();
-    const tasks = service.conversations.positiveReplyTasks();
-    taskTimes.push(performance.now() - start);
-    taskBytes = Buffer.byteLength(JSON.stringify(tasks));
-    assert.equal(tasks.length, 137);
-  }
-  const taskFirst = taskTimes.shift();
-  taskTimes.sort((left, right) => left - right);
-  console.log('工作台积极回复待办', {
-    firstMs: Number(taskFirst.toFixed(2)),
-    p50Ms: Number(taskTimes[10].toFixed(2)),
-    maxMs: Number(taskTimes.at(-1).toFixed(2)),
-    bytes: taskBytes,
-  });
-
   const sql = positiveReplyTaskSql(boxes.length);
   const plan = service.db
     .prepare('EXPLAIN QUERY PLAN ' + sql)
-    .all(...boxes.flatMap((box) => [mailboxAccountKey(box), box.email.toLowerCase()]));
+    .all(...boxes.flatMap((box) => [mailboxAccountKey(box), box.email.toLowerCase()]), 25, 0);
   console.log('待办查询计划');
   for (const step of plan) console.log('-', step.detail);
 } finally {
+  if (app) await new Promise((resolve) => app.close(resolve));
   await service.close();
   rmSync(directory, { recursive: true, force: true });
 }
