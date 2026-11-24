@@ -68,7 +68,13 @@ export class OverviewService {
         key === 'customers'
           ? data.leads
           : key === 'business'
-            ? [...data.conversations, ...data.demands, ...data.tasks, ...data.messages]
+            ? [
+                ...data.conversations,
+                ...data.demands,
+                ...data.tasks,
+                ...data.messages,
+                ...(data.positiveReplies || []),
+              ]
             : key === 'products'
               ? data
               : [...data.jobs, ...data.captures, ...data.schedules];
@@ -323,6 +329,7 @@ export class OverviewService {
       schedules,
       trend,
       captures,
+      positiveReplies: graph?.positiveReplies || [],
       products: {
         draft: productRows
           ? productRows.filter((product) => product.status === 'draft').length

@@ -366,7 +366,10 @@ export function createApp({
       decorateLeadDevelopment(await library().list(), business.state().store.view()),
     customerSnapshot: () =>
       decorateLeadDevelopment(library().snapshot(), business.state().store.view()),
-    business: () => business.state().store.view(),
+    business: () => ({
+      ...business.state().store.view(),
+      positiveReplies: outreach().conversations.positiveReplyTasks(),
+    }),
     acquisition: () => ({ ...jobs().overview(), schedules: plans().list() }),
     products: () => knowledge().list(),
     scope: () =>
@@ -534,7 +537,8 @@ export function createApp({
                 "SELECT count(*) AS count FROM product_knowledge WHERE json_extract(data,'$.status')='draft'",
               )
               .get();
-            return json(response, 200, { count: due.count + draft.count });
+            const positiveReplies = outreach().conversations.positiveReplyTasks().length;
+            return json(response, 200, { count: due.count + draft.count + positiveReplies });
           }
           return json(
             response,

@@ -2,6 +2,7 @@ import { withFeishuAuth } from './helpers/feishu.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { withApp } from './helpers/http.mjs';
+import { OutreachService } from '../server/outreach-service.mjs';
 
 test('总览HTTP只读聚合真实客户与本地业务，不调用搜索、邮件或飞书写入', async () => {
   const calls = [];
@@ -74,4 +75,33 @@ test('客户入口未接通时总览其它本地来源仍可读，客户数不�
       assert.equal(result.products.draft, 0);
     },
   );
+});
+
+test('总览与提醒计数读取同一条未处理积极回复，不发送邮件', async () => {
+  const mailbox = { id: 'one', email: 'sales@brand.example', configured: true };
+  const service = new OutreachService({
+    mailboxes: { list: () => [mailbox], send: assert.fail },
+    now: () => Date.parse('2026-10-25T02:00:00Z'),
+  });
+  service.conversations.putMessage(mailbox, {
+    messageId: '<quote@buyer.example>',
+    direction: 'inbound',
+    source: 'imap',
+    deliveryStatus: 'received',
+    from: 'buyer@buyer.example',
+    to: mailbox.email,
+    toAddresses: [mailbox.email],
+    subject: 'Re: Product',
+    bodyText: 'Please send your price list.',
+    occurredAt: '2026-10-24T02:00:00Z',
+  });
+  await withApp({ env: {}, outreachServiceFactory: () => service }, async (root) => {
+    const overview = await (await fetch(root + '/api/v1/overview')).json();
+    assert.equal(overview.positiveReplies.length, 1);
+    assert.equal(overview.positiveReplies[0].requestType, 'quote');
+    assert.equal(
+      (await (await fetch(root + '/api/v1/overview?summary=reminders')).json()).count,
+      1,
+    );
+  });
 });

@@ -54,10 +54,19 @@ interface Result {
   mailboxes: { id: string; email: string }[];
   businessCounts: Record<Exclude<keyof typeof businessKinds, 'all'>, number>;
 }
-export function MailReplyHistory({ revision }: { revision: number }) {
+export function MailReplyHistory({
+  revision,
+  initialBusinessKind = 'all',
+}: {
+  revision: number;
+  initialBusinessKind?: string;
+}) {
+  const selectedBusinessKind = Object.hasOwn(businessKinds, initialBusinessKind)
+    ? (initialBusinessKind as keyof typeof businessKinds)
+    : 'all';
   const [mailbox, setMailbox] = useState('all'),
     [kind, setKind] = useState<keyof typeof kinds>('reply'),
-    [businessKind, setBusinessKind] = useState<keyof typeof businessKinds>('all'),
+    [businessKind, setBusinessKind] = useState<keyof typeof businessKinds>(selectedBusinessKind),
     [replyState, setReplyState] = useState('all'),
     [page, setPage] = useState(1);
   const [result, setResult] = useState<Result | null>(null),

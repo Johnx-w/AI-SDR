@@ -58,6 +58,15 @@ export interface OverviewData {
   schedules: { id: string; name: string; status: string; nextRunAt: string | null; to: string }[];
   trend: { date: string; count: number | null }[];
   captures: OverviewCapture[];
+  positiveReplies: {
+    id: string;
+    customer: string;
+    requestType: 'quote' | 'catalog' | 'meeting';
+    waitingHours: number;
+    receivedAt: string;
+    subject: string;
+    to: string;
+  }[];
   products: { draft: number | null; to: string; syncIssues: number | null };
   coverage: { recordedOnly: true; note: string };
 }
