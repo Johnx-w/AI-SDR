@@ -125,11 +125,16 @@ export async function platformJson(fetchImpl, url, options, service) {
   } catch {
     throw Object.assign(new Error(service + '连接中断或超时'), { status: 502 });
   }
-  if (!response.ok)
-    throw Object.assign(new Error(service + '请求失败（HTTP ' + response.status + '）'), {
+  if (!response.ok) {
+    const body = service === '飞书' ? await response.json().catch(() => null) : null;
+    const remoteCode = Number.isSafeInteger(body?.code) ? body.code : undefined;
+    const detail = remoteCode === undefined ? '' : '，代码 ' + remoteCode;
+    throw Object.assign(new Error(service + '请求失败（HTTP ' + response.status + detail + '）'), {
+      ...(remoteCode === undefined ? {} : { remoteCode }),
       status: 502,
       upstreamStatus: response.status,
     });
+  }
   try {
     return await response.json();
   } catch {

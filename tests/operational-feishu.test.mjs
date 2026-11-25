@@ -139,6 +139,7 @@ test('正式 Base T11/T7/T8/T10 首次补写与再次同步均按业务键核对
     ['t11', []],
   ]);
   const writes = [];
+  let recordReads = 0;
   const client = {
     tables: async () => tables,
     fields: async (id) =>
@@ -149,8 +150,10 @@ test('正式 Base T11/T7/T8/T10 首次补写与再次同步均按业务键核对
         ...(property ? { property } : {}),
       })),
     records: async (id) => structuredClone(records.get(id)),
-    record: async (id, table) =>
-      structuredClone(records.get(table).find((r) => r.record_id === id)),
+    record: async (id, table) => {
+      recordReads++;
+      return structuredClone(records.get(table).find((r) => r.record_id === id));
+    },
     write: async (action, values, id, _token, table) => {
       writes.push({ action, table, values });
       const rows = records.get(table);
@@ -191,7 +194,10 @@ test('正式 Base T11/T7/T8/T10 首次补写与再次同步均按业务键核对
   assert.deepEqual(records.get('t7')[0].fields.关联关键词组, ['t11-1']);
   assert.deepEqual(records.get('t7')[1].fields.关联关键词组, ['t11-2']);
   assert(!JSON.stringify(writes).includes('must-not-export'));
+  const initialReads = recordReads;
+  assert.equal(initialReads, writes.length);
   await syncOperationalFeishu(input);
+  assert.equal(recordReads, initialReads);
   assert.equal(writes.length, 8);
   const waiting = job('job-3');
   waiting.searchStats = [{ query: 'not finished', status: 'failed' }];

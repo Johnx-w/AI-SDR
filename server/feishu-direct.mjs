@@ -64,13 +64,21 @@ export class FeishuClient {
           },
           '飞书',
         );
+        if (data.code === 1254607)
+          throw Object.assign(fail('飞书数据尚未就绪（代码 1254607）'), {
+            remoteCode: data.code,
+            upstreamStatus: 400,
+          });
         break;
       } catch (error) {
         // Reads can be retried; an uncertain remote write must be reconciled by its owner.
         if (
           method !== 'GET' ||
           attempt >= 2 ||
-          (error.upstreamStatus && error.upstreamStatus < 500 && error.upstreamStatus !== 429)
+          (error.upstreamStatus &&
+            error.upstreamStatus < 500 &&
+            error.upstreamStatus !== 429 &&
+            error.remoteCode !== 1254607)
         )
           throw error;
         await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));

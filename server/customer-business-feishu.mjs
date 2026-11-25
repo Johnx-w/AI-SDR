@@ -315,7 +315,8 @@ export async function safeWrite({ journal, checkpoint, retry = false }, key, wri
     await checkpoint?.(journal);
   };
   if (await confirm()) {
-    if (previous && ['pending', 'uncertain'].includes(previous.state)) await save('done');
+    if (previous && ['pending', 'uncertain', 'rejected'].includes(previous.state))
+      await save('done');
     return;
   }
   if (!retry && previous && ['pending', 'uncertain'].includes(previous.state))
@@ -323,7 +324,13 @@ export async function safeWrite({ journal, checkpoint, retry = false }, key, wri
   await save('pending');
   try {
     await write();
-  } catch {
+  } catch (error) {
+    if (error?.remoteCode === 91403) {
+      await save('rejected');
+      throw new Error('飞书拒绝写入（91403），请检查应用对目标表的编辑权限：' + key, {
+        cause: error,
+      });
+    }
     /* Reconcile uncertain external writes by reading only. */
   }
   try {
