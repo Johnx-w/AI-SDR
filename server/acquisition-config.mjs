@@ -1,11 +1,4 @@
-export const nativeRequirements = [
-  'TAVILY_API_KEY',
-  'DEEPSEEK_API_KEY',
-  'FEISHU_APP_ID',
-  'FEISHU_APP_SECRET',
-  'FEISHU_APP_TOKEN',
-  'FEISHU_TABLE_ID',
-];
+export const nativeRequirements = ['TAVILY_API_KEY', 'DEEPSEEK_API_KEY'];
 
 const configured = (value) => typeof value === 'string' && Boolean(value.trim());
 const configError = (message) => Object.assign(new Error(message), { status: 503 });
@@ -98,11 +91,7 @@ export function researchProviderConfig(env = {}) {
 
 export function acquisitionConfig(env = {}) {
   const research = researchProviderConfig(env);
-  const requirements = [
-    ...research.web.requirements,
-    ...research.model.requirements,
-    ...nativeRequirements.filter((name) => name.startsWith('FEISHU_')),
-  ];
+  const requirements = [...research.web.requirements, ...research.model.requirements];
   const missing = requirements.filter((name) => !configured(env[name]));
   return {
     provider: 'native',

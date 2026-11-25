@@ -87,36 +87,14 @@ async function measure(iterations, read) {
   return distribution(durations);
 }
 
-async function refreshMeasurement(library, expectedRowsWritten) {
-  const started = performance.now();
-  await library.refresh();
-  const durationMs = performance.now() - started;
-  const rowsWritten = library.metrics().last?.rowsWritten;
-  if (rowsWritten !== expectedRowsWritten)
-    throw new Error(
-      `Differential refresh wrote ${rowsWritten} customer rows; expected ${expectedRowsWritten}`,
-    );
-  return { durationMs: rounded(durationMs), rowsWritten };
-}
-
 async function benchmark(size, folder) {
   let current = Array.from({ length: size }, (_, index) => fixture(index));
   const library = new LeadLibrary({
     path: join(folder, `customers-${size}.sqlite`),
     scope: `synthetic-benchmark-${size}`,
-    ttlMs: Number.MAX_SAFE_INTEGER,
-    intervalMs: 0,
-    readLeads: async () => ({
-      leads: current,
-      total: current.length,
-      syncedAt: fixtureTime,
-      source: 'synthetic',
-    }),
   });
   try {
-    if (typeof library.metrics !== 'function')
-      throw new Error('LeadLibrary.metrics() is required before running this benchmark');
-    await library.refresh();
+    for (const lead of current) library.upsert(lead);
     // Warm up each read path without including initial sync or JIT setup in samples.
     await library.list();
     await library.list();
@@ -126,10 +104,8 @@ async function benchmark(size, folder) {
     const warmDetail = await measure(20, (index) =>
       library.detail(current[Math.floor((index * size) / 20)].id),
     );
-    const unchangedRefresh = await refreshMeasurement(library, 0);
     const added = fixture(size);
-    current.push(added);
-    const changedRefresh = await refreshMeasurement(library, 1);
+    library.upsert(added);
     const detail = await library.detail(added.id);
     if (detail.lead.email !== added.email) throw new Error('New customer detail was not persisted');
     return {
@@ -138,8 +114,6 @@ async function benchmark(size, folder) {
       seededDetailBytesTotal: size * fixtureDetailBytes,
       warmList,
       warmDetail,
-      unchangedRefresh,
-      oneCustomerAddedRefresh: changedRefresh,
     };
   } finally {
     library.close();

@@ -165,7 +165,7 @@ export class ProductKnowledgeFeishu {
         (key) => typeof env[key] === 'string' && env[key].trim(),
       );
   }
-  async info() {
+  connectionStatus() {
     if (isOriginalT5(this.env))
       return {
         configured: false,
@@ -177,6 +177,11 @@ export class ProductKnowledgeFeishu {
         status: 'not_configured',
         error: '尚未配置飞书连接，产品资料已保存在本地',
       };
+    return { configured: true, status: 'pending' };
+  }
+  async info() {
+    const connection = this.connectionStatus();
+    if (!connection.configured) return connection;
     try {
       const configured = this.env.FEISHU_PRODUCTS_TABLE_ID?.trim();
       const tables = (await this.client.tables()).filter((table) =>

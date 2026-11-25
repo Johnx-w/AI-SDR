@@ -1,4 +1,4 @@
-import { withFeishuAuth } from './helpers/feishu.mjs';
+import { seedCustomers } from './helpers/customer-library.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, unlink, writeFile } from 'node:fs/promises';
@@ -345,29 +345,13 @@ test('同源图片接口提供长期缓存、ETag和HEAD，重启后仍可读，
 test('客户品牌入口贯通官网发现、本地图片和重复请求缓存，不再返回外站图片地址', async (t) => {
   const path = await fixture(t);
   let pages = 0;
+  const env = { BRANDING_CACHE_PATH: path, LEAD_LIBRARY_DB_PATH: path + '.customers.sqlite' };
+  seedCustomers(env, [
+    { record_id: 'rec_brand', fields: { 公司名称: lead.name, 企业官网: lead.website } },
+  ]);
   await withApp(
     {
-      env: {
-        BRANDING_CACHE_PATH: path,
-        FEISHU_APP_ID: 'fixture-app',
-        FEISHU_TABLE_ID: 'fixture-table',
-        FEISHU_APP_SECRET: 'fixture-secret',
-        FEISHU_APP_TOKEN: 'fixture-base',
-      },
-      fetchImpl: withFeishuAuth(async () =>
-        Response.json({
-          code: 0,
-          data: {
-            items: [
-              {
-                record_id: 'rec_brand',
-                fields: { 公司名称: lead.name, 企业官网: lead.website },
-              },
-            ],
-            has_more: false,
-          },
-        }),
-      ),
+      env,
       brandingOptions: {
         discover: async () => {
           pages++;

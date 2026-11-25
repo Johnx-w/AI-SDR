@@ -1,3 +1,4 @@
+import { seedCustomers } from './helpers/customer-library.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -439,6 +440,7 @@ test('待核对保存遇到远端字段变化或新评估时停止覆盖，保�
 
 test('实际HTTP补充入口验证保存编号和跨站请求，保存及刷新使用后台当前快照', async () => {
   const f = fixture({ mirrorFields: true });
+  seedCustomers(f.env, [f.record()]);
   const app = createApp({ env: f.env, fetchImpl: f.fetchImpl, nativeImpl: f.engine });
   await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${app.address().port}`;
@@ -475,6 +477,7 @@ test('实际HTTP补充入口验证保存编号和跨站请求，保存及刷新�
 
 test('HTTP补充先完成本地保存，飞书失败不要求重填表单，恢复后继续同步', async () => {
   const f = fixture({ mirrorFields: true });
+  seedCustomers(f.env, [f.record()]);
   const app = createApp({ env: f.env, fetchImpl: f.fetchImpl, nativeImpl: f.engine });
   await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
   const url = `http://127.0.0.1:${app.address().port}/api/v1/leads/real/${customerId}/supplements`;

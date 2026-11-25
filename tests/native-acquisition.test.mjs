@@ -803,7 +803,7 @@ test('缺少直连凭证时禁止运行，但允许查看历史', async () => {
   try {
     const status = await (await fetch(root + '/status')).json();
     assert.equal(status.configured, false);
-    assert.ok(status.missing.includes('FEISHU_APP_SECRET'));
+    assert.ok(!status.missing.includes('FEISHU_APP_SECRET'));
     assert.equal((await fetch(root + '/jobs')).status, 200);
     assert.equal(
       (

@@ -87,36 +87,13 @@ export type LeadSummary = Pick<
 export interface LeadMetadata {
   syncedAt: string | null;
   total: number;
-  source: 'feishu' | 'sqlite';
+  source: 'sqlite';
   scope: string;
   sync: {
     refreshing: boolean;
-    stale: boolean;
-    error: string;
-    lastAttemptAt: string | null;
     revision: number | string;
-    mode?: 'active' | 'idle';
-    intervalMs?: number;
     pendingWrites?: number;
     writeError?: string;
-    metrics?: {
-      attempts: number;
-      successes: number;
-      failures: number;
-      last: {
-        at: string;
-        status: string;
-        durationMs: number;
-        upstreamMs: number;
-        writeMs: number;
-        total: number;
-        inserted: number;
-        updated: number;
-        deleted: number;
-        unchanged: number;
-        rowsWritten: number;
-      } | null;
-    };
   };
 }
 export interface LeadList extends LeadMetadata {

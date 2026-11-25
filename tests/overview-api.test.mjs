@@ -1,17 +1,27 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { seedCustomers } from './helpers/customer-library.mjs';
 import { withFeishuAuth } from './helpers/feishu.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { withApp } from './helpers/http.mjs';
 import { OutreachService } from '../server/outreach-service.mjs';
 
-test('总览HTTP只读聚合真实客户与本地业务，不调用搜索、邮件或飞书写入', async () => {
+test('总览HTTP只读聚合真实客户与本地业务，不调用搜索、邮件或飞书', async (t) => {
+  const folder = mkdtempSync(join(tmpdir(), 'overview-customers-'));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
   const calls = [];
   const env = {
+    LEAD_LIBRARY_DB_PATH: join(folder, 'library.sqlite'),
     FEISHU_APP_ID: 'fixture-app',
     FEISHU_TABLE_ID: 'fixture-table',
     FEISHU_APP_SECRET: 'fixture-secret',
     FEISHU_APP_TOKEN: 'fixture-base',
   };
+  seedCustomers(env, [
+    { record_id: 'real-one', fields: { 公司名称: '真实企业', 开发状态: '待开发' } },
+  ]);
   await withApp(
     {
       env,
@@ -44,7 +54,7 @@ test('总览HTTP只读聚合真实客户与本地业务，不调用搜索、邮�
       assert.equal(result.asOf, '2026-10-25T02:00:00.000Z');
       assert.equal(result.sources.business.state, 'ready');
       assert.equal(result.coverage.recordedOnly, true);
-      assert.equal(calls.length, 1);
+      assert.equal(calls.length, 0);
       assert.equal((await fetch(root + '/api/v1/overview', { method: 'POST' })).status, 405);
       assert.equal((await fetch(root + '/api/v1/overview?period=all')).status, 400);
       assert.equal((await fetch(root + '/api/v1/overview?asOf=bad-time')).status, 400);
@@ -57,7 +67,7 @@ test('总览HTTP只读聚合真实客户与本地业务，不调用搜索、邮�
   );
 });
 
-test('客户入口未接通时总览其它本地来源仍可读，客户数不伪装成零', async () => {
+test('飞书未配置时总览可读，空客户库返回零', async () => {
   await withApp(
     {
       env: {},
@@ -69,8 +79,8 @@ test('客户入口未接通时总览其它本地来源仍可读，客户数不�
       const response = await fetch(root + '/api/v1/overview');
       assert.equal(response.status, 200);
       const result = await response.json();
-      assert.equal(result.metrics.companies, null);
-      assert.equal(result.sources.customers.state, 'unavailable');
+      assert.equal(result.metrics.companies, 0);
+      assert.equal(result.sources.customers.state, 'ready');
       assert.equal(result.metrics.dueTasks, 0);
       assert.equal(result.products.draft, 0);
     },

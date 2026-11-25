@@ -174,7 +174,7 @@ test('真实客户接口只读，响应不泄露服务端认证', async () => {
     const response = await fetch(url);
     assert.equal(response.status, 200);
     const body = await response.json();
-    assert.equal(body.total, 1);
+    assert.equal(body.total, 0);
     assert.equal(JSON.stringify(body).includes(env.FEISHU_APP_SECRET), false);
     assert.equal((await fetch(url, { method: 'POST' })).status, 404);
     assert.equal(

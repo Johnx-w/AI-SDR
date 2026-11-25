@@ -1072,7 +1072,9 @@ export class NativeAcquisition {
               definitions.some((f) => f.field_name === key && f.type === 1),
             ),
           )
-        : encodeResearchFields(raw, definitions);
+        : this.feishu.localFirst
+          ? encodeCustomerFields(raw, definitions)
+          : encodeResearchFields(raw, definitions);
       if (op.assessment) {
         fields[resolveCustomerField(definitions, '用户评级')] = assessmentRating(op.assessment);
         for (const [key, value] of Object.entries(assessmentSummaryFields(op.assessment)))

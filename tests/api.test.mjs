@@ -82,7 +82,7 @@ test('未配置直连凭证时明确报告缺项，不能伪造运行成功', as
     const status = await (await fetch(base + '/api/v1/acquisition/status')).json();
     assert.equal(status.provider, 'native');
     assert.equal(status.configured, false);
-    assert.ok(status.missing.includes('FEISHU_APP_SECRET'));
+    assert.ok(!status.missing.includes('FEISHU_APP_SECRET'));
     assert.equal((await post(base)).status, 503);
   });
 });

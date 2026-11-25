@@ -263,58 +263,22 @@ export function LeadLibrary({
           onClick={() => void load(true)}
         >
           <RefreshCw size={16} className={loading || remote?.sync.refreshing ? 'spin' : ''} />
-          {remote?.sync.refreshing ? '正在同步' : '同步飞书'}
+          {remote?.sync.refreshing ? '正在推送' : '推送到飞书'}
         </button>
       </PageHeading>
       <div className="library-sync-status" role="status" aria-live="polite">
-        {remote?.source === 'sqlite' && <span>优先读取本地档案</span>}
-        <span>
-          {remote?.syncedAt ? `最近同步：${formatBeijingTime(remote.syncedAt)}` : '尚未同步客户'}
-        </span>
-        {remote?.sync.refreshing && <span>正在后台同步，当前客户可继续查看</span>}
+        {remote?.source === 'sqlite' && <span>数据来自项目数据库</span>}
+        {remote?.sync.refreshing && <span>正在后台推送，当前客户可继续查看</span>}
         {!!remote?.sync.pendingWrites && (
           <span className={remote.sync.writeError ? 'library-sync-warning' : undefined}>
             本地已保存，{remote.sync.pendingWrites} 位客户待同步飞书
             {remote.sync.writeError ? `：${remote.sync.writeError}` : ''}
           </span>
         )}
-        {(error || remote?.sync.error) && remote && (
-          <span className="library-sync-warning">
-            同步未完成，保留已有客户：{error || remote?.sync.error}
-          </span>
+        {error && remote && (
+          <span className="library-sync-warning">同步未完成，保留已有客户：{error}</span>
         )}
       </div>
-      {remote?.sync.metrics && (
-        <details className="library-sync-details">
-          <summary>同步详情</summary>
-          <div>
-            <p>
-              {remote.sync.mode === 'active' ? '正在使用时' : '空闲时'}每{' '}
-              {Math.round((remote.sync.intervalMs || 60000) / 1000)}{' '}
-              秒同步；页面隐藏后暂停自动读取。 手动刷新立即同步。
-            </p>
-            <p>
-              已尝试 {remote.sync.metrics.attempts} 次 · 成功 {remote.sync.metrics.successes} 次 ·
-              失败 {remote.sync.metrics.failures} 次
-            </p>
-            {remote.sync.metrics.last && (
-              <>
-                <p>
-                  最近一次{remote.sync.metrics.last.status === 'success' ? '成功' : '失败'}，耗时{' '}
-                  {(remote.sync.metrics.last.durationMs / 1000).toFixed(2)} 秒 （飞书读取{' '}
-                  {(remote.sync.metrics.last.upstreamMs / 1000).toFixed(2)} 秒，本地保存{' '}
-                  {(remote.sync.metrics.last.writeMs / 1000).toFixed(2)} 秒）。
-                </p>
-                <p>
-                  新增 {remote.sync.metrics.last.inserted} 位 · 更新{' '}
-                  {remote.sync.metrics.last.updated} 位 · 移除 {remote.sync.metrics.last.deleted} 位
-                  · 未变化 {remote.sync.metrics.last.unchanged} 位
-                </p>
-              </>
-            )}
-          </div>
-        </details>
-      )}
       <div className="library-stats">
         {[
           { name: '全部客户', value: remote?.total || 0 },
@@ -544,7 +508,7 @@ export function LeadLibrary({
             </table>
           </div>
         ) : (
-          <Empty title="暂无匹配客户" detail="飞书暂无记录或当前筛选无匹配项。" />
+          <Empty title="暂无匹配客户" detail="客户库为空，或当前筛选无匹配项。" />
         )}
         <footer className="table-bottom library-pagination-footer">
           <div className="pagination">

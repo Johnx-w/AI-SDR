@@ -260,19 +260,18 @@ test('后台同步保留精简列表，档案尚未加载时显示独立加载�
   });
   assert.match(html, /Acme Screens/);
   assert.match(html, /<table\b[^>]*>[\s\S]*Acme Screens[\s\S]*?<\/table>/);
-  assert.match(html, /正在后台同步/);
+  assert.match(html, /正在后台推送/);
   assert.match(html, /正在读取客户档案/);
 });
 
-test('同步失败时保留客户列表，并展示最近同步时间与错误', () => {
+test('推送失败时保留客户列表，并展示待推送数量与错误', () => {
   const html = renderLibrary('客户画像', [lead], {
     snapshot: {
-      sync: { refreshing: false, stale: true, error: '飞书暂时不可用', revision: 1 },
+      sync: { refreshing: false, pendingWrites: 1, writeError: '飞书暂时不可用', revision: 1 },
     },
   });
   assert.match(html, /<table\b[^>]*>[\s\S]*Acme Screens[\s\S]*?<\/table>/);
-  assert.match(html, /最近同步/);
-  assert.match(html, /保留已有客户：飞书暂时不可用/);
+  assert.match(html, /1 位客户待同步飞书：飞书暂时不可用/);
 });
 
 test('档案更新失败时保留已加载资料，并只显示一次重试提醒', () => {
@@ -283,45 +282,14 @@ test('档案更新失败时保留已加载资料，并只显示一次重试提�
   assert.match(html, /档案更新未完成，正在显示已加载资料：网络中断/);
 });
 
-test('同步耗时与变更计数集中在默认折叠的同步详情中', () => {
+test('同步状态只展示向飞书推送的进度', () => {
   const html = renderLibrary('客户画像', [lead], {
-    snapshot: {
-      sync: {
-        refreshing: false,
-        stale: false,
-        error: '',
-        revision: 1,
-        mode: 'idle',
-        intervalMs: 300000,
-        metrics: {
-          attempts: 3,
-          successes: 2,
-          failures: 1,
-          last: {
-            status: 'success',
-            durationMs: 1234,
-            upstreamMs: 1200,
-            writeMs: 4,
-            inserted: 1,
-            updated: 2,
-            deleted: 3,
-            unchanged: 10,
-          },
-        },
-      },
-    },
+    snapshot: { sync: { pendingWrites: 2, writeError: '权限不足' } },
   });
-  const disclosure = html.match(/<details class="library-sync-details">([\s\S]*?)<\/details>/)?.[0];
-  assert.ok(disclosure);
-  assert.doesNotMatch(disclosure, /<details[^>]*\sopen(?:=|[\s>])/);
-  const text = disclosure.replace(/<[^>]*>/g, '');
-  assert.match(text, /同步详情/);
-  assert.match(text, /空闲时每 300 秒同步/);
-  assert.match(text, /已尝试 3 次 · 成功 2 次 · 失败 1 次/);
-  assert.match(text, /最近一次成功，耗时 1\.23 秒/);
-  assert.match(text, /新增 1 位 · 更新 2 位 · 移除 3 位 · 未变化 10 位/);
+  assert.match(html, /推送到飞书/);
+  assert.match(html, /2 位客户待同步飞书/);
+  assert.match(html, /权限不足/);
 });
-
 test('企业客群事实使用可理解的中文名称', () => {
   const html = renderLibrary('官网证据', [
     {
