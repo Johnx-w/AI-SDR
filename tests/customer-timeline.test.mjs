@@ -91,11 +91,11 @@ test('customer timeline reads actual sent messages, pending and historical work 
   assert.equal(data.sentCount, 1);
   assert.deepEqual(
     data.items.map((r) => r.kind),
-    ['reply', 'auto', 'manual', 'mail'],
+    ['received', 'reply', 'auto', 'manual', 'mail'],
   );
   assert.ok(data.items.at(-1).thread);
-  assert.equal(data.items[1].state, 'unknown');
-  assert.equal(data.items[0].state, 'quote');
+  assert.equal(data.items[2].state, 'unknown');
+  assert.equal(data.items[1].state, 'quote');
   const http = await fetch(
     'http://127.0.0.1:' + app.address().port + '/api/v1/business/timeline/buyer',
   );
@@ -114,6 +114,14 @@ test('customer timeline reads actual sent messages, pending and historical work 
     deliveryStatus: 'sent',
   });
   assert.ok(!read().items.some((r) => r.kind === 'reply'));
+  const history = read().items.filter((r) => r.kind === 'received');
+  assert.equal(history.length, 1);
+  assert.equal(history[0].title, 'Price request');
+  assert.ok(
+    svc.conversations
+      .detail(history[0].thread)
+      .messages.some((m) => m.id === history[0].id && m.bodyText === 'Please send a quote.'),
+  );
   for (let i = 0; i < 30; i++)
     svc.putDelivery({
       ...first,

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { mailConversationsApi } from '../services/mailConversations';
 import { Link } from 'react-router-dom';
 import { Mail, CalendarClock, UserRound } from 'lucide-react';
 import {
@@ -13,7 +14,8 @@ import { Badge, Modal } from './ui';
 import './CustomerBusinessSummary.css';
 
 const types = {
-  mail: '已发送邮件',
+  mail: '我方发信',
+  received: '客户回信',
   first: '自动首发',
   auto: '自动追信',
   manual: '人工跟进',
@@ -21,6 +23,7 @@ const types = {
 };
 const states: Record<string, string> = {
   sent: '已发送',
+  received: '已收到',
   accepted: '已完成',
   completed: '已完成',
   pending: '待执行',
@@ -52,8 +55,18 @@ function Original({
   const [error, setError] = useState('');
   useEffect(() => {
     const controller = new AbortController();
-    customerBusinessApi
-      .original(customerId, item, controller.signal)
+    const read = item.thread
+      ? mailConversationsApi.detail(item.thread, controller.signal).then((detail) => {
+          const message = detail.messages.find((m) => m.id === item.id);
+          if (!message) throw new Error('未找到这封回信，请刷新时间线');
+          return {
+            ...message,
+            bodyHtml: message.bodyHtml || '',
+            sentAt: item.stamp || message.occurredAt,
+          };
+        })
+      : customerBusinessApi.original(customerId, item, controller.signal);
+    read
       .then((m) => {
         if (!controller.signal.aborted) setMail(m);
       })
@@ -63,7 +76,7 @@ function Original({
     return () => controller.abort();
   }, [customerId, item]);
   return (
-    <Modal title="已发送邮件" wide onClose={close}>
+    <Modal title={item.kind === 'received' ? '客户回信原文' : '已发送邮件'} wide onClose={close}>
       <article className="modal-body timeline-original">
         {error ? (
           <p role="alert">{error}</p>
@@ -74,7 +87,9 @@ function Original({
               {mail.from} → {mail.to}
             </p>
             <p>{formatBeijingTime(mail.sentAt)}</p>
-            <MailMessageBody message={{ ...mail, source: 'outreach' }} />
+            <MailMessageBody
+              message={{ ...mail, source: item.kind === 'received' ? 'imap' : 'outreach' }}
+            />
           </>
         ) : (
           <p role="status">正在读取邮件…</p>
@@ -115,23 +130,29 @@ export function CustomerBusinessSummary({ customerId }: { customerId: string }) 
     days.get(day)!.push(r);
   }
   function event(r: TimelineItem) {
-    const Icon =
-      r.kind === 'mail' ? Mail : ['manual', 'reply'].includes(r.kind) ? UserRound : CalendarClock;
+    const Icon = ['mail', 'received'].includes(r.kind)
+      ? Mail
+      : ['manual', 'reply'].includes(r.kind)
+        ? UserRound
+        : CalendarClock;
     const title = r.title || '（无主题）';
-    const to = r.thread
-      ? inbox + '&thread=' + encodeURIComponent(r.thread)
-      : r.source === 'task' && r.kind === 'auto'
-        ? '/business?' + new URLSearchParams({ customerId, task: r.id })
-        : r.campaign && r.kind !== 'mail'
-          ? '/inbox?' + new URLSearchParams({ tab: 'campaigns', campaignId: r.campaign })
-          : null;
+    const to =
+      r.kind === 'received'
+        ? null
+        : r.thread
+          ? inbox + '&thread=' + encodeURIComponent(r.thread)
+          : r.source === 'task' && r.kind === 'auto'
+            ? '/business?' + new URLSearchParams({ customerId, task: r.id })
+            : r.campaign && r.kind !== 'mail'
+              ? '/inbox?' + new URLSearchParams({ tab: 'campaigns', campaignId: r.campaign })
+              : null;
     const tone = ['sent', 'completed', 'accepted'].includes(r.state)
       ? 'green'
       : ['failed', 'unknown', 'verifiedFailed', 'blocked'].includes(r.state)
         ? 'red'
         : r.kind === 'reply'
           ? 'amber'
-          : ['pending', 'queued', 'sending'].includes(r.state)
+          : ['received', 'pending', 'queued', 'sending'].includes(r.state)
             ? 'blue'
             : 'neutral';
     const time = r.stamp ? formatBeijingTime(r.stamp).split(' ')[1]?.slice(0, 5) : '';
@@ -141,7 +162,7 @@ export function CustomerBusinessSummary({ customerId }: { customerId: string }) 
         <div>
           {to ? (
             <Link to={to}>{title}</Link>
-          ) : r.kind === 'mail' ? (
+          ) : ['received', 'mail'].includes(r.kind) ? (
             <button className="text-link" onClick={() => setSelected(r)}>
               {title}
             </button>
@@ -169,19 +190,8 @@ export function CustomerBusinessSummary({ customerId }: { customerId: string }) 
   }
   return (
     <div className="customer-business-summary">
-      {data?.fixedEmail && <p>固定对外邮箱：{data.fixedEmail}</p>}
+      {data?.fixedEmail && <p>我方联系邮箱：{data.fixedEmail}</p>}
       {data?.doNotContact && <p role="alert">客户已明确拒绝联系。</p>}
-      <div className="business-summary-links">
-        <Link className="btn secondary" to={inbox}>
-          客户邮件
-        </Link>
-        <Link
-          className="btn secondary"
-          to={'/business?' + new URLSearchParams({ customerId, tab: 'tasks' })}
-        >
-          自动跟进任务
-        </Link>
-      </div>
       <h3>
         沟通与任务时间线 <small>北京时间</small>
       </h3>
