@@ -175,7 +175,57 @@ export interface TimelineOriginal {
   bodyHtml: string;
   sentAt: string;
 }
+export interface FollowupTaskSummary {
+  id: string;
+  customerId: string;
+  customerName: string;
+  recipient: string;
+  account: string;
+  dueAt: string;
+  step: number;
+  day?: number;
+  reason?: string;
+  campaignId: string;
+  campaignName: string;
+  status: 'pending' | 'sending' | 'accepted' | 'unknown' | 'failed' | 'skipped' | 'cancelled';
+  replied: boolean;
+}
+export interface FollowupTaskPage {
+  items: FollowupTaskSummary[];
+  total: number;
+  page: number;
+  pageSize: number;
+  counts: Record<'all' | 'upcoming' | 'review' | 'responded', number>;
+}
+export interface FollowupTaskDetail {
+  thread?: string;
+  day?: number;
+  instruction?: string;
+  policyRevision?: number;
+  policyName?: string;
+  recordedAt?: string;
+  attemptedAt?: string;
+  sentAt?: string;
+  messages: {
+    id: string;
+    kind: 'first' | 'sent' | 'prepared' | 'reply';
+    subject: string;
+    from: string;
+    to: string;
+    at?: string;
+    bodyText: string;
+    bodyHtml?: string;
+    source: import('./mailConversations').MailMessage['source'];
+    bodyFormatVersion?: number;
+    inlineImages?: import('./mailConversations').MailInlineImage[];
+    bodyUnavailable?: import('./mailConversations').MailMessage['bodyUnavailable'];
+  }[];
+}
 export const customerBusinessApi = {
+  followups: (params: URLSearchParams, signal: AbortSignal) =>
+    request<FollowupTaskPage>('/followups?' + params, { signal }),
+  followup: (id: string, signal: AbortSignal) =>
+    request<FollowupTaskDetail>('/followups/' + encodeURIComponent(id), { signal }),
   timeline: (id: string, page: number, signal: AbortSignal) =>
     request<CustomerTimeline>('/timeline/' + encodeURIComponent(id) + '?page=' + page, { signal }),
   original: (id: string, row: TimelineItem, signal: AbortSignal) =>

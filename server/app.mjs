@@ -30,6 +30,7 @@ import { answerMailQuestion } from './mail-knowledge.mjs';
 import { MAX_PRODUCT_DOCUMENT_BYTES } from './product-documents.mjs';
 import { ProductKnowledgeFeishu } from './product-knowledge-feishu.mjs';
 import { CustomerBusinessApi } from './customer-business-api.mjs';
+import { listFollowupTasks, readFollowupTask } from './followup-task-view.mjs';
 import { readCustomerTimeline, timelineOriginal } from './customer-timeline.mjs';
 import { searchPlan } from './search-plan.mjs';
 import { OutreachMailboxes } from './outreach-mailboxes.mjs';
@@ -559,6 +560,15 @@ export function createApp({
             }),
           );
         }
+        const followup = /^\/api\/v1\/business\/followups(?:\/([\w-]+))?$/.exec(url.pathname);
+        if (followup && request.method === 'GET')
+          return json(
+            response,
+            200,
+            followup[1]
+              ? readFollowupTask(outreach(), followup[1])
+              : listFollowupTasks(outreach(), url.searchParams),
+          );
         const timeline = url.pathname.match(
           /^\/api\/v1\/business\/timeline\/([\w-]{1,100})(?:\/(message|delivery|followup)\/([\w-]+))?$/,
         );
