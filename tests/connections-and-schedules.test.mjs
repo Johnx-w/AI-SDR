@@ -15,6 +15,7 @@ import {
 import { validateTarget } from '../server/search-target.mjs';
 import { BatchJobs } from '../server/batch-jobs.mjs';
 import { withApp } from './helpers/http.mjs';
+import { acquisitionMarkets, marketTimeZone } from '../src/domain/country-catalog.ts';
 import { scheduleRepeatLabel } from '../src/domain/schedule-timing.mjs';
 
 const input = {
@@ -119,7 +120,7 @@ test('多时间点按北京时间排序，拒绝重复时间和无效日期', ()
     { times: ['09:00', '09:00'] },
     { times: ['24:00'] },
     { startDate: '2030-02-30' },
-    { timezone: 'UTC' },
+    { timezone: 'Fake/Zone' },
     { repeat: 'once', times: ['09:00', '18:00'] },
     { repeat: 'once', times: ['07:00'] },
   ])
@@ -148,6 +149,165 @@ function harness(extra = {}) {
     },
   };
 }
+
+test('本地上午 11 点按各国工作日执行并跨夏令时，周末无触发', () => {
+  const countries = [
+    ['Europe/Berlin', '2026-03-27T10:00:00.000Z', '2026-03-30T09:00:00.000Z'],
+    ['Asia/Tokyo', '2026-03-27T02:00:00.000Z', '2026-03-30T02:00:00.000Z'],
+    ['Pacific/Auckland', '2026-03-26T22:00:00.000Z', '2026-03-29T22:00:00.000Z'],
+  ];
+  for (const [timezone, friday, monday] of countries) {
+    const plan = validateTiming({
+      repeat: 'weekly',
+      startDate: '2026-03-27',
+      times: ['11:00'],
+      weekdays: [1, 2, 3, 4, 5],
+      timezone,
+    });
+    assert.equal(nextOccurrence(plan, Date.parse('2026-03-26T00:00Z')), friday);
+    assert.equal(nextOccurrence(plan, Date.parse(friday)), monday);
+  }
+});
+
+test('定时计划 API 保存并读回 25 国的工作日当地时间', async () => {
+  await withApp({ env: nativeEnv }, async (base) => {
+    const path = base + '/api/v1/acquisition/schedules';
+    const requested = acquisitionMarkets.map(({ value }) => value);
+    assert.equal(new Set(requested).size, 25);
+    for (const [index, country] of requested.entries()) {
+      const response = await fetch(path, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'country-hours-' + index,
+        },
+        body: JSON.stringify({
+          name: country,
+          input: { country, product_scope: 'all', target_count: 20, auto_first_touch: false },
+          timing: {
+            ...timing,
+            timezone: marketTimeZone(country),
+            times: ['11:00'],
+            weekdays: [1, 2, 3, 4, 5],
+            waitForPrevious: true,
+          },
+        }),
+      });
+      assert.equal(response.status, 201, country);
+    }
+    const { schedules } = await (await fetch(path + '?summary=1')).json();
+    assert.deepEqual(schedules.map((plan) => plan.input.country).sort(), requested.sort());
+    for (const plan of schedules) {
+      assert.equal(plan.timing.timezone, marketTimeZone(plan.input.country));
+      const when = new Intl.DateTimeFormat('en-GB', {
+        timeZone: plan.timing.timezone,
+        weekday: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+      }).format(new Date(plan.nextRunAt));
+      assert.match(when, /^(Mon|Tue|Wed|Thu|Fri) 11:00$/);
+      assert.equal(plan.timing.waitForPrevious, true);
+      assert.equal(plan.input.auto_first_touch, false);
+    }
+  });
+});
+
+test('请求限流时按服务响应重试，超出并发请求数的调用等待', async () => {
+  let active = 0;
+  let peak = 0;
+  let attempts = 0;
+  const provider = createResearchProviders({
+    env: nativeEnv,
+    fetchImpl: async () => {
+      attempts++;
+      if (attempts === 1)
+        return new Response(null, { status: 429, headers: { 'Retry-After': '0' } });
+      active++;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setImmediate(resolve));
+      active--;
+      return Response.json({ results: [] });
+    },
+  });
+  const results = await Promise.all(
+    Array.from({ length: 8 }, () => provider.web.search({ query: 'test' })),
+  );
+  assert.equal(attempts, 9);
+  assert.equal(peak, 4);
+  assert.equal(results.length, 8);
+});
+
+test('同点的两国独立启动，同国后续轮次持久排队并在重启后补跑一次', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'shadeflow-country-queue-'));
+  const path = join(dir, 'schedules.sqlite');
+  const jobPath = join(dir, 'jobs.sqlite');
+  let now = Date.parse('2030-01-01T08:00:00+08:00');
+  let jobs;
+  let schedules;
+  function open() {
+    jobs = new BatchJobs({ path: jobPath, schedule: false, now: () => now });
+    schedules = new AcquisitionSchedules({
+      path,
+      jobs: () => jobs,
+      ready: () => true,
+      available: () => true,
+      now: () => now,
+    });
+  }
+  function close() {
+    schedules.close();
+    jobs.close();
+  }
+  open();
+  try {
+    const schedule = { ...timing, times: ['09:00'], waitForPrevious: true };
+    const make = (country, index) =>
+      schedules.create(
+        {
+          name: country,
+          input: { ...input, country, query_mode: 'auto', search_query: '' },
+          timing: schedule,
+        },
+        'parallel-countries-' + index,
+      );
+    const usa = make('United States', 1);
+    const canada = make('Canada', 2);
+    const usaOther = make('United States', 3);
+    now = Date.parse('2030-01-01T09:00:00+08:00');
+    schedules.tick();
+    assert.equal(schedules.get(canada.id).lastError, '');
+    const pair = jobs.activeJobs();
+    assert.deepEqual(pair.map((job) => job.input.country).sort(), ['Canada', 'United States']);
+    assert.equal(pair.find((job) => job.input.country === 'Canada').scheduleId, canada.id);
+    const queued = [usa, usaOther].find((plan) => schedules.get(plan.id).runs === 0);
+    assert.match(schedules.get(queued.id).lastError, /排队中/);
+    assert.equal(schedules.get(canada.id).runs, 1);
+    close();
+    open();
+    assert.equal(jobs.activeJobs().length, 2);
+    assert.equal(
+      jobs.activeJobs().every((job) => job.status === 'paused'),
+      true,
+    );
+    jobs.finish(
+      jobs.activeJobs().find((job) => job.input.country === 'United States'),
+      'target_reached',
+    );
+    now += 30 * 60000;
+    schedules.tick();
+    schedules.tick();
+    assert.equal(jobs.list().length, 3);
+    const delayed = schedules.get(queued.id);
+    assert.equal(delayed.runs, 1);
+    assert.equal(delayed.lastScheduledAt, '2030-01-01T01:00:00.000Z');
+    assert.equal(delayed.lastRunAt, '2030-01-01T01:30:00.000Z');
+    assert.equal(schedules.get(canada.id).runs, 1);
+  } finally {
+    close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test('旧州计划到期时暂停，重新选择国家并恢复后按该国执行', () => {
   const h = harness({ checkInput: validateTarget });

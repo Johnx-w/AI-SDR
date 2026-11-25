@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import { platformJson, researchProviderConfig } from './acquisition-config.mjs';
 import { websiteUrl } from './branding.mjs';
 
@@ -28,16 +29,54 @@ function normalizeWebResults(data, label) {
   };
 }
 
+function requestLane() {
+  let active = 0;
+  let cooldownUntil = 0;
+  const waiting = [];
+  return async (send) => {
+    if (active < 4) active++;
+    else await new Promise((resolve) => waiting.push(resolve));
+    try {
+      for (let attempt = 0; ; attempt++) {
+        while (cooldownUntil > Date.now()) await delay(cooldownUntil - Date.now());
+        try {
+          return await send();
+        } catch (error) {
+          if (error.upstreamStatus !== 429) throw error;
+          const cooldown = error.retryAfterMs ?? 1000 * 2 ** attempt;
+          cooldownUntil = Math.max(cooldownUntil, Date.now() + Math.min(cooldown, 60000));
+          if (attempt >= 2 || cooldown > 60000) throw error;
+        }
+      }
+    } finally {
+      const next = waiting.shift();
+      if (next) next();
+      else active--;
+    }
+  };
+}
+
 // HTTP search gateways implement POST /search and /extract using the same
 // provider-neutral request fields as the current flow (query/urls, limits etc.).
 // Their JSON response is { results: [{url,title,content?,raw_content?}], usage? }.
 // No response/error text is ever copied into transport failures or logs.
 export function createResearchProviders({ env = {}, fetchImpl = fetch } = {}) {
   const config = researchProviderConfig(env);
+  const webLane = requestLane();
+  const modelLane =
+    config.web.baseUrl &&
+    config.model.baseUrl &&
+    new URL(config.web.baseUrl).origin === new URL(config.model.baseUrl).origin
+      ? webLane
+      : requestLane();
+  const call = (lane, url, options, timeout, label) =>
+    lane(() =>
+      platformJson(fetchImpl, url, { ...options, signal: AbortSignal.timeout(timeout) }, label),
+    );
   const deepseekCall = (path, body) => {
     requireConfigured(config.web, '网页检索');
-    return platformJson(
-      fetchImpl,
+    return call(
+      webLane,
       config.web.baseUrl.replace(/\/v1$/, '') + '/v1/tools/' + path,
       {
         method: 'POST',
@@ -46,16 +85,16 @@ export function createResearchProviders({ env = {}, fetchImpl = fetch } = {}) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(path === 'fetch' ? 60000 : 30000),
       },
+      path === 'fetch' ? 60000 : 30000,
       'DeepSeek',
     );
   };
   const webCall = async (path, body) => {
     requireConfigured(config.web, '网页检索');
     const label = config.web.provider === 'tavily' ? 'Tavily' : '网页检索';
-    const data = await platformJson(
-      fetchImpl,
+    const data = await call(
+      webLane,
       config.web.baseUrl + '/' + path,
       {
         method: 'POST',
@@ -68,8 +107,8 @@ export function createResearchProviders({ env = {}, fetchImpl = fetch } = {}) {
         body: JSON.stringify(
           config.web.provider === 'tavily' ? { ...body, include_usage: true } : body,
         ),
-        signal: AbortSignal.timeout(path === 'extract' ? 60000 : 30000),
       },
+      path === 'extract' ? 60000 : 30000,
       label,
     );
     if (!Array.isArray(data?.results)) throw fail(label + ' 未返回有效结果');
@@ -171,8 +210,8 @@ export function createResearchProviders({ env = {}, fetchImpl = fetch } = {}) {
                 json_schema: { name: 'company_research', strict: true, schema },
               },
             };
-        return platformJson(
-          fetchImpl,
+        return call(
+          modelLane,
           config.model.baseUrl + (deepseek ? '/responses' : '/chat/completions'),
           {
             method: 'POST',
@@ -180,9 +219,9 @@ export function createResearchProviders({ env = {}, fetchImpl = fetch } = {}) {
               Authorization: 'Bearer ' + config.model.apiKey,
               'Content-Type': 'application/json',
             },
-            signal: AbortSignal.timeout(config.model.timeoutMs),
             body: JSON.stringify(body),
           },
+          config.model.timeoutMs,
           deepseek ? 'DeepSeek' : '研究模型',
         );
       },

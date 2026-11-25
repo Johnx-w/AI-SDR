@@ -78,7 +78,7 @@ export class BatchJobs {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
     this.db.exec(
-      "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY, idem TEXT UNIQUE NOT NULL, hash TEXT NOT NULL, data TEXT NOT NULL); CREATE UNIQUE INDEX IF NOT EXISTS one_active_job ON jobs((1)) WHERE json_extract(data,'$.status') IN ('running','stopping','paused');",
+      "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY, idem TEXT UNIQUE NOT NULL, hash TEXT NOT NULL, data TEXT NOT NULL); CREATE UNIQUE INDEX IF NOT EXISTS one_active_job_per_country ON jobs(COALESCE(json_extract(data,'$.input.country'),'')) WHERE json_extract(data,'$.status') IN ('running','stopping','paused'); DROP INDEX IF EXISTS one_active_job;",
     );
     this.db.exec(`CREATE TABLE IF NOT EXISTS handoff_entities (
       scope TEXT NOT NULL, record_id TEXT NOT NULL, domain TEXT NOT NULL, data TEXT NOT NULL,
@@ -100,9 +100,10 @@ export class BatchJobs {
     this.scope = scope || provider;
     this.onOutreachChange = onOutreachChange;
     this.isMaintaining = isMaintaining;
-    this.busy = false;
+    this.working = new Set();
+    this.resuming = new Set();
     this.closed = false;
-    for (const job of this.list())
+    for (const job of this.activeJobs())
       if (['running', 'stopping'].includes(job.status)) {
         job.status = 'paused';
         job.reason = 'interrupted';
@@ -189,8 +190,24 @@ export class BatchJobs {
       }));
     return { jobs, captures, scope: this.scope };
   }
+  get busy() {
+    return this.working.size > 0 || this.resuming.size > 0;
+  }
+  activeJobs() {
+    return this.db
+      .prepare(
+        "SELECT data FROM jobs WHERE json_extract(data,'$.status') IN ('running','stopping','paused') ORDER BY rowid DESC",
+      )
+      .all()
+      .map((row) => JSON.parse(row.data));
+  }
   active() {
-    return this.list().find((j) => ['running', 'stopping', 'paused'].includes(j.status));
+    return this.activeJobs()[0];
+  }
+  blockingJob(input, scheduleId) {
+    return this.activeJobs().find(
+      (job) => !scheduleId || !job.scheduleId || job.input.country === input.country,
+    );
   }
   findByKey(key) {
     const row = this.db.prepare('SELECT data FROM jobs WHERE idem=?').get(key);
@@ -242,7 +259,8 @@ export class BatchJobs {
       if (old.hash !== hash) throw fail(409, '同一请求编号不能使用不同参数');
       return JSON.parse(old.data);
     }
-    if (this.active()) throw fail(409, '已有未结束任务，请先继续或停止该任务');
+    if (this.blockingJob(input, scheduleId))
+      throw fail(409, '已有未结束任务，请先继续或停止该任务');
     const queryPlan = searchPlan(input);
     const planKey = discoveryPlanKey(input, queryPlan);
     const progress = this.db
@@ -422,9 +440,9 @@ export class BatchJobs {
   }
   async resume(id, { automatic = false } = {}) {
     if (this.closed) throw fail(409, '服务已关闭');
-    if (this.busy || this.resuming || (this.recovering && !automatic))
+    if (this.working.has(id) || this.resuming.has(id) || (this.recovering && !automatic))
       throw fail(409, '当前企业仍在处理中');
-    this.resuming = true;
+    this.resuming.add(id);
     try {
       let job = this.get(id);
       if (job.status !== 'paused') throw fail(409, '只有暂停任务可以继续');
@@ -451,7 +469,7 @@ export class BatchJobs {
       this.kick(id);
       return job;
     } finally {
-      this.resuming = false;
+      this.resuming.delete(id);
     }
   }
   recoverInterrupted() {
@@ -467,14 +485,16 @@ export class BatchJobs {
     return recovery;
   }
   async resumeInterrupted() {
-    const job = this.active();
+    await Promise.allSettled(this.activeJobs().map((job) => this.resumeJob(job)));
+  }
+  async resumeJob(job) {
     if (
       this.closed ||
       this.isMaintaining() ||
-      this.busy ||
-      this.resuming ||
+      this.working.has(job.id) ||
+      this.resuming.has(job.id) ||
       this.provider !== 'native' ||
-      job?.status !== 'paused' ||
+      job.status !== 'paused' ||
       !['interrupted', 'uncertain'].includes(job.reason) ||
       job.provider !== this.provider ||
       job.scope !== this.scope
@@ -657,8 +677,8 @@ export class BatchJobs {
     if (job.input.auto_first_touch) this.onOutreachChange();
   }
   async work(id) {
-    if (this.busy) return;
-    this.busy = true;
+    if (this.working.has(id)) return;
+    this.working.add(id);
     let tick = this.now();
     const checkpoint = (j) => {
       const t = this.now();
@@ -833,7 +853,7 @@ export class BatchJobs {
       j.pending = j.current ? 1 : 0;
       checkpoint(j);
     } finally {
-      this.busy = false;
+      this.working.delete(id);
     }
   }
   view(job, { summary = false } = {}) {

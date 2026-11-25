@@ -441,9 +441,8 @@ export function createApp({
             acquisition: Number(
               Boolean(
                 batch?.busy ||
-                  batch?.resuming ||
                   batch?.recovering ||
-                  batch?.list().some((job) => ['running', 'stopping'].includes(job.status)),
+                  batch?.activeJobs().some((job) => ['running', 'stopping'].includes(job.status)),
               ),
             ),
             direct: running,
@@ -625,7 +624,7 @@ export function createApp({
               operationalSync ||
               productKnowledge?.documents.running.size ||
               batch?.recovering ||
-              batch?.resuming ||
+              batch?.busy ||
               jobs().active()
             )
               throw new ApiError(409, '请先完成或核对当前任务，再修改 API 连接');

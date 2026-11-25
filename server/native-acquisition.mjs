@@ -192,6 +192,7 @@ export class NativeAcquisition {
         String(env.FEISHU_APP_TOKEN) + '/' + String(env.FEISHU_TABLE_ID),
       );
     this.active = new Set();
+    this.researchByDomain = new Map();
     this.assessments = assessments || new AssessmentService({ env });
     this.supplements = new LeadSupplementStore(
       env.ACQUISITION_DB_PATH || env.BATCH_DB_PATH || ':memory:',
@@ -661,7 +662,22 @@ export class NativeAcquisition {
       operation.input.item.source_url,
     );
   }
-  async research(input, item, { bypassExclusion = false } = {}) {
+  async research(input, item, options) {
+    const domain = domainKey(item.source_url);
+    if (!domain) return this.researchDomain(input, item, options);
+    const previous = this.researchByDomain.get(domain);
+    const current = (async () => {
+      await previous?.catch(() => {});
+      return this.researchDomain(input, item, options);
+    })();
+    this.researchByDomain.set(domain, current);
+    try {
+      return await current;
+    } finally {
+      if (this.researchByDomain.get(domain) === current) this.researchByDomain.delete(domain);
+    }
+  }
+  async researchDomain(input, item, { bypassExclusion = false } = {}) {
     // Also validate restored tasks and callers that bypass HTTP validation.
     const researchTarget = validateTarget(input);
     input = { ...input, ...researchTarget };

@@ -163,7 +163,8 @@ export interface ScheduleTiming {
   weekdays?: number[];
   startDate: string;
   times: string[];
-  timezone: 'Asia/Shanghai';
+  timezone: string;
+  waitForPrevious?: boolean;
 }
 
 export interface AcquisitionSchedule {

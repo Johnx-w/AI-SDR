@@ -117,11 +117,19 @@ export async function platformJson(fetchImpl, url, options, service) {
   if (!response.ok) {
     const body = service === '飞书' ? await response.json().catch(() => null) : null;
     const remoteCode = Number.isSafeInteger(body?.code) ? body.code : undefined;
+    const retry = response.status === 429 ? response.headers.get('Retry-After') : null;
+    const retryAfterMs =
+      retry === null
+        ? undefined
+        : /^\d+$/.test(retry)
+          ? Number(retry) * 1000
+          : Date.parse(retry) - Date.now();
     const detail = remoteCode === undefined ? '' : '，代码 ' + remoteCode;
     throw Object.assign(new Error(service + '请求失败（HTTP ' + response.status + detail + '）'), {
       ...(remoteCode === undefined ? {} : { remoteCode }),
       status: 502,
       upstreamStatus: response.status,
+      ...(Number.isFinite(retryAfterMs) ? { retryAfterMs: Math.max(0, retryAfterMs) } : {}),
     });
   }
   try {

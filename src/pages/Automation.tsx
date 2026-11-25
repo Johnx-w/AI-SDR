@@ -20,7 +20,7 @@ import { PageHeading } from '../components/PageHeading';
 import { ProductPicker } from '../components/ProductPicker';
 import { useWorkspace } from '../app/WorkspaceProvider';
 import { acquisitionApi } from '../services/acquisition';
-import { acquisitionMarkets, isCountryScope } from '../domain/country-catalog';
+import { acquisitionMarkets, isCountryScope, marketTimeZone } from '../domain/country-catalog';
 import { SearchableLocation } from '../components/SearchableLocation';
 import type {
   AcquisitionJob,
@@ -42,6 +42,8 @@ import acquisition from '../data/acquisition.json' with { type: 'json' };
 import {
   weekdays,
   scheduleRepeatLabel,
+  scheduleDate,
+  scheduleZoneLabel,
   validateTiming,
   nextOccurrence,
 } from '../domain/schedule-timing.mjs';
@@ -58,7 +60,6 @@ type Submission = {
   timing: ScheduleTiming;
 };
 const submissionStorage = 'shadeflow:pending-acquisition-v2';
-const dateInBeijing = () => new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
 const initialInput: WorkflowInput = {
   query_mode: 'auto',
   auto_first_touch: false,
@@ -122,7 +123,7 @@ export function Automation() {
     restored?.timing || {
       repeat: 'weekly',
       weekdays: [1, 2, 3, 4, 5, 6, 7],
-      startDate: dateInBeijing(),
+      startDate: scheduleDate(),
       times: ['09:00'],
       timezone: 'Asia/Shanghai',
     },
@@ -178,7 +179,7 @@ export function Automation() {
           restored?.timing || {
             repeat: 'weekly',
             weekdays: [1, 2, 3, 4, 5, 6, 7],
-            startDate: dateInBeijing(),
+            startDate: scheduleDate(),
             times: ['09:00'],
             timezone: 'Asia/Shanghai',
           },
@@ -300,8 +301,19 @@ export function Automation() {
     acquisitionMarkets.find((m) => m.value === input.country)?.label || '请选择国家';
   let timingError = '';
   let nextRunAt: string | null = null;
+  const zoneLabel = scheduleZoneLabel(timing.timezone);
+  const countryZone = marketTimeZone(input.country);
   const effectiveTiming =
-    editPlan || timing.repeat === 'once' ? timing : { ...timing, startDate: dateInBeijing() };
+    editPlan || timing.repeat === 'once'
+      ? timing
+      : { ...timing, startDate: scheduleDate(timing.timezone, now) };
+  function changeZone(timezone: string) {
+    setTiming({
+      ...timing,
+      timezone,
+      startDate: timing.repeat === 'once' ? timing.startDate : scheduleDate(timezone, now),
+    });
+  }
   if (runMode === 'scheduled') {
     try {
       nextRunAt = nextOccurrence(validateTiming(effectiveTiming, now), now);
@@ -472,7 +484,10 @@ export function Automation() {
           <>
             <p>
               {scheduleRepeatLabel(timing)} · {timing.times.join('、')}
-              <small>{timing.repeat === 'once' ? `${timing.startDate} · ` : ''}北京时间</small>
+              <small>
+                {timing.repeat === 'once' ? `${timing.startDate} · ` : ''}
+                {zoneLabel}
+              </small>
             </p>
             {timing.repeat !== 'once' && !timingError && (
               <p>
@@ -488,7 +503,11 @@ export function Automation() {
               {timingError ? '请完善定时设置' : formatBeijingTime(nextRunAt)}
             </p>
             {timing.repeat !== 'once' && <small>持续执行，直到暂停或关闭</small>}
-            <small>错过的时点跳过，不补跑</small>
+            <small>
+              {timing.waitForPrevious
+                ? '到期后等待上一轮结束，按原时点补跑'
+                : '错过的时点跳过，不补跑'}
+            </small>
           </>
         )}
       </div>
@@ -633,7 +652,11 @@ export function Automation() {
                           value={input.country}
                           options={acquisitionMarkets}
                           disabled={locked}
-                          onChange={(country) => patch({ country })}
+                          onChange={(country) => {
+                            patch({ country });
+                            if (timing.timezone !== 'Asia/Shanghai')
+                              changeZone(marketTimeZone(country) ?? 'Asia/Shanghai');
+                          }}
                         />
                         {!input.country && (
                           <small role="status">
@@ -839,8 +862,34 @@ export function Automation() {
                       <div className="acq-schedule-config">
                         <div className="acq-field-label">
                           <CalendarDays size={16} />
-                          定时设置<span>北京时间</span>
+                          定时设置<span>{zoneLabel}</span>
                         </div>
+                        <label className="acq-block-label">
+                          排程时区
+                          <select
+                            value={timing.timezone}
+                            onChange={(e) => changeZone(e.target.value)}
+                          >
+                            <option value="Asia/Shanghai">北京时间</option>
+                            {countryZone && countryZone !== 'Asia/Shanghai' && (
+                              <option value={countryZone}>目标国家当地时间（{countryZone}）</option>
+                            )}
+                            {timing.timezone !== 'Asia/Shanghai' &&
+                              timing.timezone !== countryZone && (
+                                <option value={timing.timezone}>{zoneLabel}</option>
+                              )}
+                          </select>
+                        </label>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(timing.waitForPrevious)}
+                            onChange={(e) =>
+                              setTiming({ ...timing, waitForPrevious: e.target.checked })
+                            }
+                          />
+                          到期后排队补跑
+                        </label>
                         <div className="acq-run-mode" role="radiogroup" aria-label="重复方式">
                           {(
                             [
@@ -907,7 +956,7 @@ export function Automation() {
                             <input
                               aria-label="执行日期"
                               type="date"
-                              min={dateInBeijing()}
+                              min={scheduleDate(timing.timezone, now)}
                               required
                               value={timing.startDate}
                               onChange={(e) => setTiming({ ...timing, startDate: e.target.value })}
@@ -920,7 +969,7 @@ export function Automation() {
                               <label>
                                 {timing.repeat === 'once' ? '执行时间' : `执行时间 ${i + 1}`}
                                 <input
-                                  aria-label={`执行时间 ${i + 1}（北京时间）`}
+                                  aria-label={`执行时间 ${i + 1}（${zoneLabel}）`}
                                   type="time"
                                   required
                                   value={time}

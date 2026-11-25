@@ -5,7 +5,7 @@ import { Badge, Empty } from '../components/ui';
 import { BatchProgress } from '../components/BatchProgress';
 import { acquisitionApi } from '../services/acquisition';
 import type { AcquisitionSchedule } from '../domain/types';
-import { scheduleRepeatLabel } from '../domain/schedule-timing.mjs';
+import { scheduleRepeatLabel, scheduleZoneLabel } from '../domain/schedule-timing.mjs';
 import {
   ALL_PRODUCTS_LABEL,
   directionLabels,
@@ -128,7 +128,7 @@ export function ScheduledAcquisition() {
         </Link>
       </div>
       <p className="muted schedule-help">
-        按北京时间执行，每个时间点各运行一轮；上轮未结束或停机错过的时点跳过，不补跑。重复计划持续运行直到暂停或关闭；暂停或关闭会停止后续触发和待发首封，本轮在当前企业处理结束后停止。恢复计划后从未来时点继续，并按当前条件重新核对未发客户。
+        各计划按所选时区到期，不同国家可同时执行。开启排队补跑的计划会保留未执行时点，等待同国上一轮结束；其他计划错过时点后直接进入下一轮。
       </p>
       <div className="filter-chips">
         {[
@@ -172,8 +172,7 @@ export function ScheduledAcquisition() {
                 </h2>
                 <p>
                   {scheduleRepeatLabel(plan.timing)} · {plan.timing.startDate} 起 ·{' '}
-                  {plan.timing.times.join('、')}
-                  （北京时间，每个时间点执行一次）
+                  {plan.timing.times.join('、')}（{scheduleZoneLabel(plan.timing.timezone)}）
                 </p>
               </div>
               <Badge tone={plan.status === 'enabled' ? 'green' : 'neutral'}>
@@ -208,11 +207,11 @@ export function ScheduledAcquisition() {
             </div>
             <dl className="schedule-times">
               <div>
-                <dt>下次执行</dt>
+                <dt>计划到期时间（北京时间）</dt>
                 <dd>{time(plan.nextRunAt)}</dd>
               </div>
               <div>
-                <dt>上次触发</dt>
+                <dt>上次实际启动（北京时间）</dt>
                 <dd>{time(plan.lastRunAt)}</dd>
                 {plan.lastScheduledAt && (
                   <small className="muted">计划时间：{time(plan.lastScheduledAt)}</small>
