@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import * as XLSX from 'xlsx/xlsx.mjs';
@@ -7,6 +8,27 @@ import { MaterialLibrary } from '../server/materials.mjs';
 import { ProductKnowledge } from '../server/product-knowledge.mjs';
 import { answerMailQuestion } from '../server/mail-knowledge.mjs';
 
+test('版面服务拒绝 PPTX 时回读幻灯片原文', async (t) => {
+  const k = new ProductKnowledge();
+  t.after(() => k.close());
+  const lib = new MaterialLibrary(k);
+  const r = await lib.upload({
+    name: '规格.pptx',
+    bytes: readFileSync(new URL('./fixtures/model-parameters.pptx', import.meta.url)),
+    key: randomUUID(),
+    mode: 'rich_layout_recognition',
+    env: { MATERIAL_DEEPSEEK_API_KEY: 'fixture' },
+    fetchImpl: async () => Response.json({ error: { message: 'unsupported document' } }),
+  });
+  assert.equal(r.warning, '');
+  const doc = lib.detail(r.id).documents[0];
+  assert.equal(doc.extraction.model, 'Office XML');
+  assert.ok(
+    doc.extraction.facts.some(
+      (f) => f.text.includes('0128') && f.text.includes('152 mm') && f.location.includes('幻灯片'),
+    ),
+  );
+});
 test('上传有标题和非首列编码的目录，两个产品、空对照和横排参数按原件取值', async (t) => {
   const k = new ProductKnowledge();
   t.after(() => k.close());
