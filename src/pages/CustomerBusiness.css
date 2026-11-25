@@ -199,6 +199,7 @@
   background: var(--color-success-soft);
   color: var(--color-success);
 }
+.followup-status.candidate,
 .followup-status.unknown,
 .followup-status.failed {
   background: var(--color-warning-soft);

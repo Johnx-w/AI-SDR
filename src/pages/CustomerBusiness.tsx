@@ -42,7 +42,7 @@ const queues = [
     id: 'review',
     label: '待核实',
     icon: ShieldQuestion,
-    description: '核对发送结果未确认或等待核对的追信。',
+    description: '查看已发首封、等待人工核对的客户，以及执行中需要核实的追信。',
   },
   {
     id: 'responded',
@@ -52,6 +52,7 @@ const queues = [
   },
 ] as const;
 const statuses = {
+  candidate: '待评估跟进',
   pending: '待执行',
   sending: '提交中',
   accepted: '服务商已接受',
@@ -69,7 +70,9 @@ const mailKinds = {
 const errorText = (error: unknown) => (error instanceof Error ? error.message : '读取失败');
 const statusLabel = (task: FollowupTaskSummary) =>
   task.replied ? '回信后停止' : statuses[task.status];
-const when = (value?: string) => (value ? formatBeijingTime(value) : '—');
+const when = (value?: string | null) => (value ? formatBeijingTime(value) : '—');
+const stepLabel = (task: FollowupTaskSummary) =>
+  task.status === 'candidate' ? '首封后跟进评估' : `第 ${task.step} 次追信`;
 
 function TaskDetail({ task, revision }: { task: FollowupTaskSummary; revision: number }) {
   const [result, setResult] = useState<{ detail?: FollowupTaskDetail; error?: string }>({});
@@ -100,7 +103,7 @@ function TaskDetail({ task, revision }: { task: FollowupTaskSummary; revision: n
       <header>
         <div>
           <h2>
-            {task.customerName} · 第 {task.step} 次追信
+            {task.customerName} · {stepLabel(task)}
           </h2>
           <Link
             to={'/inbox?' + new URLSearchParams({ tab: 'campaigns', campaignId: task.campaignId })}
@@ -150,8 +153,8 @@ function TaskDetail({ task, revision }: { task: FollowupTaskSummary; revision: n
         <aside className="followup-events">
           <h3>执行记录</h3>
           <dl>
-            <dt>计划时间（北京）</dt>
-            <dd>{when(task.dueAt)}</dd>
+            <dt>{task.status === 'candidate' ? '首封发送时间（北京）' : '计划时间（北京）'}</dt>
+            <dd>{when(task.dueAt || task.firstSentAt)}</dd>
             {detail.attemptedAt && (
               <>
                 <dt>提交时间</dt>
@@ -166,7 +169,8 @@ function TaskDetail({ task, revision }: { task: FollowupTaskSummary; revision: n
             )}
             <dt>最新状态</dt>
             <dd>
-              <strong>{statusLabel(task)}</strong> · {when(detail.recordedAt)}
+              <strong>{statusLabel(task)}</strong>
+              {detail.recordedAt && ' · ' + when(detail.recordedAt)}
             </dd>
           </dl>
           {task.reason && <p>{task.reason}</p>}
@@ -351,7 +355,11 @@ export function CustomerBusiness() {
               <div className="followup-empty" role="status">
                 <Mail size={24} />
                 <strong>{scoped ? '该筛选范围暂无追信任务' : '暂无符合条件的追信任务'}</strong>
-                <p>首封开发信和收到来信后的即时回复单独记录在邮箱会话。</p>
+                <p>
+                  {queue.id === 'upcoming'
+                    ? '此处只显示未来 7 天已排期的追信。'
+                    : '已发首封的客户可在「待核实」查看符合条件的跟进评估。'}
+                </p>
               </div>
             )}
             {!!data?.items.length && (
@@ -359,7 +367,7 @@ export function CustomerBusiness() {
                 <div className="followup-columns followup-list-head" aria-hidden="true">
                   <span>客户 / 收件邮箱</span>
                   <span>跟进步骤</span>
-                  <span>计划时间（北京）</span>
+                  <span>时间（北京）</span>
                   <span>执行状态</span>
                   <span />
                 </div>
@@ -377,10 +385,15 @@ export function CustomerBusiness() {
                         <small>{task.recipient}</small>
                       </span>
                       <span>
-                        第 {task.step} 次追信
+                        {stepLabel(task)}
                         {task.day != null && <small>首封后第 {task.day} 天</small>}
                       </span>
-                      <time dateTime={task.dueAt}>{when(task.dueAt)}</time>
+                      <span>
+                        <time dateTime={task.dueAt || task.firstSentAt || undefined}>
+                          {when(task.dueAt || task.firstSentAt)}
+                        </time>
+                        <small>{task.status === 'candidate' ? '首封发送' : '计划执行'}</small>
+                      </span>
                       <span className={'followup-status ' + task.status}>{statusLabel(task)}</span>
                       <ChevronDown size={15} />
                     </button>
