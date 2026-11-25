@@ -34,6 +34,20 @@ const queues = [
     description: '展开任务查看邮件、执行记录和原会话。暂停或关闭追信请进入所属发送计划。',
   },
   {
+    id: 'scheduled',
+    label: '待执行',
+    icon: ListChecks,
+    description: '查看待执行或正在提交的追信。',
+  },
+  { id: 'completed', label: '已发出', icon: Mail, description: '查看已发出的首封开发信和追信。' },
+  { id: 'bounced', label: '已拒收', icon: ShieldQuestion, description: '查看原邮箱已确认的退信。' },
+  {
+    id: 'skipped',
+    label: '已跳过',
+    icon: ListChecks,
+    description: '核对跳过首封或追信的客户、所属计划及原始原因。',
+  },
+  {
     id: 'review',
     label: '待核实',
     icon: ShieldQuestion,
@@ -55,10 +69,9 @@ const queues = [
 ] as const;
 const statuses = {
   bounced: '已拒收',
-  candidate: '待评估跟进',
   pending: '待执行',
   sending: '提交中',
-  accepted: '服务商已接受',
+  accepted: '已发出',
   unknown: '待核实',
   failed: '发送失败',
   skipped: '已跳过',
@@ -77,9 +90,11 @@ const when = (value?: string | null) => (value ? formatBeijingTime(value) : '—
 const stepLabel = (task: FollowupTaskSummary) =>
   task.status === 'bounced'
     ? '首封退信'
-    : task.status === 'candidate'
-      ? '首封后跟进评估'
-      : `第 ${task.step} 次追信`;
+    : task.status === 'accepted' && task.step == null
+      ? '首封开发信'
+      : task.status === 'skipped' && task.step == null
+        ? '首封已跳过'
+        : `第 ${task.step} 次追信`;
 
 function TaskDetail({
   task,
@@ -150,6 +165,12 @@ function TaskDetail({
               </button>
             ))}
           </div>
+          {!mail && task.status === 'skipped' && (
+            <article>
+              <h3>跳过原因</h3>
+              <p>{task.reason || '记录未保存具体原因。'}</p>
+            </article>
+          )}
           {mail && (
             <article>
               <h3>{mail.subject || '（无主题）'}</h3>
@@ -169,7 +190,11 @@ function TaskDetail({
         <aside className="followup-events">
           <h3>执行记录</h3>
           <dl>
-            <dt>{task.status === 'candidate' ? '首封发送时间（北京）' : '计划时间（北京）'}</dt>
+            <dt>
+              {task.status === 'accepted' && task.step == null
+                ? '首封发送时间（北京）'
+                : '计划时间（北京）'}
+            </dt>
             <dd>{when(task.dueAt || task.firstSentAt)}</dd>
             {detail.attemptedAt && (
               <>
@@ -214,7 +239,10 @@ export function CustomerBusiness() {
   const [params, setParams] = useSearchParams();
   const view = params.get('view'),
     replies = view === 'replies';
-  const queue = queues.find((q) => q.id === params.get('queue')) || queues[0];
+  const state = params.get('state');
+  const legacyQueue =
+    state === 'candidate' ? 'completed' : state === 'attention' ? 'review' : state;
+  const queue = queues.find((q) => q.id === (params.get('queue') || legacyQueue)) || queues[0];
   const [refresh, setRefresh] = useState(0),
     [opened, setOpened] = useState(params.get('task')?.replace(/^task_/, '') || '');
   const extra = ['approval', 'priority', 'assigned'].includes(queue.id);
@@ -239,6 +267,10 @@ export function CustomerBusiness() {
       busy = true;
       try {
         const filters = new URLSearchParams(key);
+        if (!filters.has('queue') && legacyQueue === queue.id && queue.id !== 'all') {
+          filters.set('queue', queue.id);
+          filters.delete('state');
+        }
         const [data, deskData] = await Promise.all([
           customerBusinessApi.followups(extra ? new URLSearchParams() : filters, c.signal),
           followupDeskApi.list(filters, c.signal),
@@ -259,7 +291,7 @@ export function CustomerBusiness() {
       clearInterval(timer);
       c.abort();
     };
-  }, [key, refresh, replies, extra]);
+  }, [key, refresh, replies, extra, queue.id, legacyQueue]);
   const selectedTask = params.get('task');
   useEffect(() => setOpened(selectedTask?.replace(/^task_/, '') || ''), [selectedTask]);
   useEffect(() => setQuery(new URLSearchParams(key).get('q') || ''), [key]);
@@ -343,30 +375,6 @@ export function CustomerBusiness() {
                 </Link>
               )}
             </form>
-            {queue.id === 'all' && (
-              <nav className="followup-state-tabs" aria-label="追信状态">
-                {[
-                  ['', '全部'],
-                  ['candidate', '待评估'],
-                  ['scheduled', '待执行'],
-                  ['completed', '已发出'],
-                  ['cancelled', '已停止'],
-                  ['attention', '待核实'],
-                  ['bounced', '已拒收'],
-                  ['skipped', '已跳过'],
-                ].map(([value, label]) => (
-                  <button
-                    key={label}
-                    aria-pressed={(params.get('state') || '') === value}
-                    onClick={() =>
-                      update({ state: value, page: '', task: '', bucket: '', asOf: '' })
-                    }
-                  >
-                    {label}
-                  </button>
-                ))}
-              </nav>
-            )}
             {queue.id === 'assigned' && (
               <div className="business-filters">
                 {[
@@ -426,13 +434,20 @@ export function CustomerBusiness() {
                       </span>
                       <span>
                         {stepLabel(task)}
+                        {task.status === 'skipped' && <small>{task.reason}</small>}
                         {task.day != null && <small>首封后第 {task.day} 天</small>}
                       </span>
                       <span>
                         <time dateTime={task.dueAt || task.firstSentAt || undefined}>
                           {when(task.dueAt || task.firstSentAt)}
                         </time>
-                        <small>{task.status === 'candidate' ? '首封发送' : '计划执行'}</small>
+                        <small>
+                          {task.status === 'accepted' && task.step == null
+                            ? '首封发送'
+                            : task.status === 'skipped'
+                              ? '跳过记录'
+                              : '计划执行'}
+                        </small>
                       </span>
                       <span className={'followup-status ' + task.status}>{statusLabel(task)}</span>
                       <ChevronDown size={15} />

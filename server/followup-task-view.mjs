@@ -6,6 +6,10 @@ const replied = "status='cancelled' AND reason=$received";
 const attention =
   "(status IN ('unknown','failed','bounced') OR (status='cancelled' AND (reason LIKE '%退信%' OR reason LIKE '%拒收%')) OR (status='pending' AND (reason LIKE '%待核实%' OR reason LIKE '%核对后%')))";
 const queues = {
+  scheduled: "status IN ('pending','sending')",
+  completed: "status='accepted'",
+  bounced: "status='bounced'",
+  skipped: "status='skipped'",
   upcoming: "status='pending' AND dueAt >= $now AND dueAt < $until",
   review: attention,
   responded: replied,
@@ -23,10 +27,10 @@ const taskSource = `SELECT f.id, f.state AS status, f.data->>'customerId' AS cus
     AND f.data->>'mailboxId'=d.data->>'mailboxId'`;
 // Unary + removes column affinity so SQLite can use the firstId JSON expression index.
 // A candidate is a read-only view of an accepted first email.
-const candidateSource = `SELECT 'candidate-'||d.id AS id,'candidate' AS status,
+const candidateSource = `SELECT 'candidate-'||d.id AS id,'accepted' AS status,
   d.data->>'customerId' AS customerId,coalesce(nullif(d.data->>'companyName',''),d.data->>'to') AS customerName,
   d.data->>'to' AS recipient,d.data->>'from' AS account,NULL AS dueAt,NULL AS step,NULL AS day,
-  '首封已获服务商接受，尚无追信排期。请核对原会话和客户联系意愿。' AS reason,
+  '首封已获服务商接受，尚无追信排期。' AS reason,
   c.id AS campaignId,c.data->>'name' AS campaignName,d.data->>'sentAt' AS firstSentAt
   FROM outreach_campaigns c JOIN outreach_deliveries d ON d.campaign_id=c.id AND d.state='accepted'
   WHERE c.data->>'mode'='production' AND c.data->>'scope'=$scope
@@ -57,6 +61,13 @@ const bounceSource = `SELECT 'bounce-'||d.id id,'bounced' status,d.data->>'custo
   FROM outreach_delivery_bounces b JOIN outreach_deliveries d ON d.id=b.delivery_id
   JOIN outreach_campaigns c ON c.id=d.campaign_id WHERE c.data->>'scope'=$scope AND c.data->>'mode'='production'
   AND d.data->>'mode'='production' AND d.data->>'customerId'>''`;
+const skippedSource = `SELECT 'skip-'||d.id id,'skipped' status,d.data->>'customerId' customerId,
+  coalesce(nullif(d.data->>'companyName',''),d.data->>'customerId') customerName,
+  d.data->>'to' recipient,d.data->>'from' account,coalesce(d.data->>'skippedAt',d.data->>'createdAt') dueAt,
+  NULL step,NULL day,d.data->>'reason' reason,c.id campaignId,c.data->>'name' campaignName,NULL firstSentAt
+  FROM outreach_campaigns c JOIN outreach_deliveries d ON d.campaign_id=c.id AND d.state='skipped'
+  WHERE c.data->>'mode'='production' AND c.data->>'scope'=$scope
+    AND d.data->>'mode'='production' AND d.data->>'customerId'>''`;
 const fail = () => Object.assign(new Error('追信任务不存在'), { status: 404 });
 
 export function listFollowupTasks(service, params) {
@@ -77,14 +88,14 @@ export function listFollowupTasks(service, params) {
     start: range.asOf,
   };
   const base = `WITH tasks AS (${taskSource}
-    UNION ALL ${candidateSource} UNION ALL ${bounceSource}), scoped AS (
+    UNION ALL ${candidateSource} UNION ALL ${bounceSource} UNION ALL ${skippedSource}), scoped AS (
     SELECT * FROM tasks WHERE ($customer='' OR customerId=$customer)
       AND ($campaign='' OR campaignId=$campaign)), matched AS (
     SELECT * FROM scoped WHERE ($id='' OR id=$id)
       AND ($q='' OR instr(lower(concat_ws(' ',customerName,recipient,campaignName,'第 '||step||' 次追信')), $q)>0))`;
   // Use the dashboard's Beijing-day links and the four queue predicates on the same read model.
   const status = {
-    candidate: "status='candidate'",
+    candidate: queues.completed,
     scheduled: "status IN ('pending','sending')",
     attention: "status IN ('unknown','failed')",
     bounced: "status='bounced'",
@@ -111,11 +122,11 @@ export function listFollowupTasks(service, params) {
   const sql = `${base}, filtered AS (SELECT * FROM matched WHERE ${filters})`;
   const count = service.db.prepare(`${sql} SELECT count(*) AS total,
     (SELECT count(*) FROM scoped) AS allCount,
-    (SELECT count(*) FROM scoped WHERE ${queues.upcoming}) AS upcoming,
+    ${['scheduled', 'completed', 'bounced', 'skipped', 'upcoming'].map((key) => `(SELECT count(*) FROM scoped WHERE ${queues[key]}) AS ${key}`).join(',')},
     (SELECT count(*) FROM scoped WHERE ${attention}) AS review,
     (SELECT count(*) FROM scoped WHERE ${replied}) AS responded FROM filtered`);
   count.setAllowUnknownNamedParameters(true);
-  const { total, allCount, upcoming, review, responded } = count.get(bindings);
+  const { total, allCount, ...counts } = count.get(bindings);
   const pageSize = 25,
     page = Math.max(
       1,
@@ -128,7 +139,7 @@ export function listFollowupTasks(service, params) {
     total,
     page,
     pageSize,
-    counts: { all: allCount, upcoming, review, responded },
+    counts: { all: allCount, ...counts },
     items: rows
       .all({ ...bindings, limit: pageSize, offset: (page - 1) * pageSize })
       .map((r) => ({ ...r, day: r.day ?? legacyFollowUpStep(r.step)?.day, replied: !!r.replied })),
@@ -137,6 +148,13 @@ export function listFollowupTasks(service, params) {
 
 export function readFollowupTask(service, id) {
   const { db } = service;
+  if (id.startsWith('skip-')) {
+    const row = db
+      .prepare(skippedSource + ' AND d.id=$id')
+      .get({ scope: service.getScope(), id: id.slice(5) });
+    if (!row) throw fail();
+    return { messages: [], recordedAt: row.dueAt };
+  }
   const candidate = id.startsWith('candidate-');
   const bounce = id.startsWith('bounce-');
   const sourceId = candidate || bounce ? id.slice(id.indexOf('-') + 1) : id;
