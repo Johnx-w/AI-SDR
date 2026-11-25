@@ -2,6 +2,7 @@ import subdivisions from './data/subdivisions-bilingual.json' with { type: 'json
 import { countries, countryFor } from '../src/domain/country-catalog.ts';
 import { marketRegions } from './market-regions.mjs';
 const subdivisionsByCountry = new Map();
+const keywordsByLabel = new Map();
 for (const country of countries) {
   const lookup = new Map();
   const rows = [
@@ -14,6 +15,10 @@ for (const country of countries) {
     const label = labels.get(code);
     for (const key of [code, en, zh, country.code + '-' + code])
       lookup.set(key.toLowerCase(), label);
+  }
+  for (const [keyword, label] of lookup) {
+    if (!keywordsByLabel.has(label)) keywordsByLabel.set(label, new Set());
+    keywordsByLabel.get(label).add(keyword);
   }
   subdivisionsByCountry.set(country.code, lookup);
 }
@@ -41,4 +46,10 @@ export function regionChoices(market, observed) {
         a.slice(a.indexOf('.') + 1).localeCompare(b.slice(b.indexOf('.') + 1), 'en') ||
         a.localeCompare(b, 'zh'),
     );
+}
+
+export function regionKeywords(labels) {
+  return Object.fromEntries(
+    labels.map((label) => [label, [...(keywordsByLabel.get(label) || [])].join(' ')]),
+  );
 }

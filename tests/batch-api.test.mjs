@@ -5,10 +5,10 @@ import { createApp } from '../server/app.mjs';
 const env = { ...feishuEnv, TAVILY_API_KEY: 'test', DEEPSEEK_API_KEY: 'test' };
 const input = {
   country: 'United States',
-  region: 'Florida',
+  region: '',
   product: 'outdoor zip screens',
   acquisition_channel: 'tavily_web',
-  search_query: 'outdoor zip screens Florida',
+  search_query: 'outdoor zip screens United States',
   target_count: 1,
 };
 test('批量接口持久、幂等且活跃任务保护共享连接，允许独立资料识别配置', async () => {

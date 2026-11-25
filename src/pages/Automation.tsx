@@ -20,7 +20,7 @@ import { PageHeading } from '../components/PageHeading';
 import { ProductPicker } from '../components/ProductPicker';
 import { useWorkspace } from '../app/WorkspaceProvider';
 import { acquisitionApi } from '../services/acquisition';
-import { acquisitionMarkets } from '../domain/country-catalog';
+import { acquisitionMarkets, isCountryScope } from '../domain/country-catalog';
 import { SearchableLocation } from '../components/SearchableLocation';
 import type {
   AcquisitionJob,
@@ -72,6 +72,12 @@ const initialInput: WorkflowInput = {
   acquisition_channel: 'web',
   search_query: '',
 };
+function editableInput(
+  saved: WorkflowInput & { market_countries?: string[]; target_markets?: string[] },
+) {
+  const { market_countries, target_markets, ...fields } = saved;
+  return { ...fields, country: isCountryScope(saved) ? saved.country : '', region: '' };
+}
 function readSubmission(): Submission | null {
   try {
     const value = JSON.parse(sessionStorage.getItem(submissionStorage) || 'null');
@@ -105,7 +111,7 @@ export function Automation() {
   const [restored] = useState(readSubmission);
   const [input, setInput] = useState<WorkflowInput>({
     ...initialInput,
-    ...(restored?.input || {}),
+    ...(restored ? editableInput(restored.input) : {}),
   });
   const [runMode, setRunMode] = useState(
     restored?.mode || (params.get('mode') === 'scheduled' ? 'scheduled' : 'now'),
@@ -165,7 +171,7 @@ export function Automation() {
   useEffect(() => {
     if (!editId) {
       if (previousEditId.current) {
-        setInput({ ...initialInput, ...(restored?.input || {}) });
+        setInput({ ...initialInput, ...(restored ? editableInput(restored.input) : {}) });
         setTargetCount(restored?.target || 20);
         setName(restored?.name ?? null);
         setTiming(
@@ -196,7 +202,7 @@ export function Automation() {
         if (!plan || !['enabled', 'paused'].includes(plan.status))
           throw new Error('该计划已结束或不存在');
         setEditing(plan);
-        setInput({ ...plan.input, region: '' });
+        setInput(editableInput(plan.input));
         setTargetCount(plan.input.target_count);
         setName(plan.name);
         setTiming(plan.timing);
@@ -261,7 +267,7 @@ export function Automation() {
     const controller = new AbortController();
     setPreview([]);
     setPreviewError('');
-    if (!hasProductSelection) {
+    if (!hasProductSelection || !input.country) {
       setPreviewLoading(false);
       return () => controller.abort();
     }
@@ -291,7 +297,7 @@ export function Automation() {
       80,
     );
   const marketLabel =
-    acquisitionMarkets.find((m) => m.value === input.country)?.label || input.country;
+    acquisitionMarkets.find((m) => m.value === input.country)?.label || '请选择国家';
   let timingError = '';
   let nextRunAt: string | null = null;
   const effectiveTiming =
@@ -309,6 +315,7 @@ export function Automation() {
     !statusError &&
     !previewError &&
     !previewLoading &&
+    !!input.country &&
     hasProductSelection &&
     Number.isInteger(targetCount) &&
     targetCount >= 1 &&
@@ -408,7 +415,6 @@ export function Automation() {
         <h3>目标客户</h3>
         <p>
           <strong>{marketLabel}</strong>
-          {input.region && <small>{input.region}</small>}
         </p>
         {allProductScope ? (
           <p>
@@ -615,20 +621,29 @@ export function Automation() {
                       <span className="acq-step-number">01</span>
                       <div>
                         <h2>目标客户</h2>
-                        <p>选择市场、产品和企业经营角色</p>
+                        <p>选择国家、产品和企业经营角色</p>
                       </div>
                     </header>
                     <div className="acq-form-grid">
                       <div>
-                        <label htmlFor="acquisition-market">目标国家／市场</label>
+                        <label htmlFor="acquisition-market">目标国家</label>
                         <SearchableLocation
                           id="acquisition-market"
                           label="任务国家"
                           value={input.country}
                           options={acquisitionMarkets}
                           disabled={locked}
-                          onChange={(country) => patch({ country, region: '' })}
+                          onChange={(country) => patch({ country })}
                         />
+                        {!input.country && (
+                          <small role="status">
+                            原获客范围
+                            {editPlan
+                              ? `（${[editPlan.input.country, editPlan.input.region].filter(Boolean).join(' / ')}）`
+                              : ''}
+                            已停用，请重新选择一个国家。保存后将按该国全境获客。
+                          </small>
+                        )}
                       </div>
                     </div>
                     <div className="acq-field-label">产品范围</div>
@@ -1044,7 +1059,7 @@ export function Automation() {
                       </span>
                     </summary>
                     <p className="muted">
-                      系统根据产品、市场和客户条件生成查询；执行后可在记录中查看实际产出。
+                      系统根据产品、国家和客户条件生成查询；执行后可在记录中查看实际产出。
                     </p>
                     {previewError && (
                       <p className="error-message" role="alert">

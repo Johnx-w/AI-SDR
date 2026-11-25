@@ -30,8 +30,7 @@ import {
 } from './company-research.mjs';
 import { pageRelevance } from './relevance.mjs';
 import { validateTarget } from './search-target.mjs';
-import { normalizeCountry } from './relevance.mjs';
-import { markets } from './markets.mjs';
+import { acquisitionMarkets, countryFor } from '../src/domain/country-catalog.ts';
 import {
   assessCompany,
   assessmentId,
@@ -202,7 +201,7 @@ export class NativeAcquisition {
   assessmentInfo() {
     return {
       ruleVersion: ASSESSMENT_RULE_VERSION,
-      markets,
+      markets: acquisitionMarkets,
       assessmentStorage: 'latest_only',
       businessSchemaVersion: BUSINESS_SCHEMA_VERSION,
     };
@@ -380,9 +379,7 @@ export class NativeAcquisition {
         throw Object.assign(new Error('请先完成T2评分字段配置：' + name), { status: 503 });
     const record = await this.feishu.record(recordId);
     const countryValue = body.country || fieldText(fieldValue(record.fields, '国家'));
-    const country = markets.find(
-      (m) => normalizeCountry(m.value) === normalizeCountry(countryValue),
-    )?.value;
+    const country = countryFor(countryValue)?.name;
     if (!country)
       throw Object.assign(new Error('请在研究评级表单中选择已支持的企业国家'), { status: 400 });
     const product =

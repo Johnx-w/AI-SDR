@@ -19,7 +19,7 @@ export function SearchableLocation({
   onChange: (value: string) => void;
   disabled?: boolean;
 }) {
-  const selected = options.find((item) => item.value === value) || { value, label: value };
+  const selected = options.find((item) => item.value === value) || null;
   return (
     <Select<LocationOption, false>
       instanceId={id}
@@ -31,6 +31,7 @@ export function SearchableLocation({
       isSearchable
       options={options}
       value={selected}
+      placeholder={'请选择' + label}
       filterOption={filterOption}
       onChange={(option) => option && onChange(option.value)}
       noOptionsMessage={() => '没有匹配的选项'}

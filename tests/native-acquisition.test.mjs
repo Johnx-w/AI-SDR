@@ -22,11 +22,11 @@ const env = {
 };
 const input = {
   country: 'United States',
-  region: 'Florida',
+  region: '',
   product: 'zip screens',
   customer_type: '',
   customer_profile: 'all',
-  search_query: 'zip screens Florida',
+  search_query: 'zip screens United States',
   acquisition_channel: 'tavily_web',
 };
 const sourceText =

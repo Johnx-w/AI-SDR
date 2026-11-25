@@ -23,6 +23,9 @@ const aliases: Record<string, string[]> = {
   KR: ['Republic of Korea', 'Korea, Republic of'],
   VN: ['Viet Nam'],
   CN: ['PRC'],
+  TR: ['Turkey'],
+  HK: ['Hong Kong', '香港', '中国香港'],
+  MO: ['Macao', 'Macau', '澳门', '中国澳门'],
 };
 const byName = new Map(
   countries.flatMap((c) =>
@@ -32,25 +35,34 @@ const byName = new Map(
   ),
 );
 export const countryFor = (value?: string | null) => byName.get(value?.trim().toLowerCase() || '');
+const targetCodes = new Set(
+  'US AU CA GB SG MY NZ TH VN AE ZA GH PH PL NL DE IT BE BR CL AR CO MX KR JP'.split(' '),
+);
+const targetCountries = countries.filter((country) => targetCodes.has(country.code));
+export const acquisitionMarkets = targetCountries.map((c) => ({
+  label: c.code === 'AE' ? c.label + '（迪拜）' : c.label,
+  value: c.name,
+  keywords: [c.code, c.iso3, ...(aliases[c.code] || [])].join(' '),
+}));
 export const countryFilters = [
   { label: '全部国家', value: '' },
-  ...countries.map((c) => ({
-    label: c.label,
-    value: c.zh,
-    keywords: [c.code, c.iso3, ...(aliases[c.code] || [])].join(' '),
-  })),
+  ...acquisitionMarkets.map((option, i) => ({ ...option, value: targetCountries[i].zh })),
   { label: '待核实', value: '待核实' },
 ];
-export const acquisitionMarkets = [
-  ...countries.map((c) => ({
-    label: c.label,
-    value: c.name,
-    keywords: [
-      c.code,
-      c.iso3,
-      ...(aliases[c.code] || []).filter((s) => !['Dubai', '迪拜'].includes(s)),
-    ].join(' '),
-  })),
-  { label: '迪拜.Dubai（阿联酋）', value: 'Dubai', keywords: 'United Arab Emirates' },
-  { label: '欧洲（不含英国）.Europe', value: 'Europe' },
-];
+
+export function isCountryScope(input: {
+  country: string;
+  region?: unknown;
+  market_countries?: unknown;
+  target_markets?: unknown;
+}) {
+  return (
+    acquisitionMarkets.some((option) => option.value === input.country) &&
+    !input.region &&
+    [input.market_countries, input.target_markets].every(
+      (group) =>
+        group === undefined ||
+        (Array.isArray(group) && group.length === 1 && group[0] === input.country),
+    )
+  );
+}

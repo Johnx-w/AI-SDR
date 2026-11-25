@@ -122,8 +122,6 @@ export const acquisitionApi = {
   controlJob: (id: string, action: 'stop' | 'resume') =>
     request<AcquisitionJob>(`/jobs/${encodeURIComponent(id)}/${action}`, { method: 'POST' }),
   status: () => request<IntegrationStatus>('/status'),
-  locations: (country: string, region: string, signal?: AbortSignal) =>
-    request<LocationOptions>(`/locations?${new URLSearchParams({ country, region })}`, { signal }),
 };
 
 async function connectionsRequest(init?: RequestInit): Promise<ConnectionSettings> {
@@ -144,11 +142,3 @@ export const connectionsApi = {
       body: JSON.stringify({ values, clear }),
     }),
 };
-
-export interface LocationOptions {
-  markets: { value: string; label: string }[];
-  countries: string[];
-  country: string;
-  region: string;
-  regions: { name: string; code: string; label?: string }[];
-}

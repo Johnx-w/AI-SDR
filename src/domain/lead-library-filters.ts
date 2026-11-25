@@ -1,12 +1,7 @@
 import { countryFor } from './country-catalog.ts';
 export const developmentStatuses = ['待开发', '已联系', '已回复', '跟进中', '已成交', '停止开发'];
 
-export const marketLabel = (value?: string | null) => {
-  const market = value?.trim() || '';
-  return !market || /^(unknown|未知|未记录|待核实)$/i.test(market)
-    ? '待核实'
-    : countryFor(market)?.zh || (market === 'Europe' ? '欧洲' : market);
-};
+export const marketLabel = (value?: string | null) => countryFor(value)?.zh || '待核实';
 
 export const leadProductCategoryLabels = {
   plantation: 'Plantation Shutters（透气窗）',

@@ -32,7 +32,7 @@ test('结构化产品和角色经过校验，并由同一快照生成搜索词',
     products: [selectedProduct],
     customer_types: ['supplier', 'distributor'],
     country: 'United States',
-    region: 'Texas',
+    region: '',
     product: '由结构化产品覆盖',
     acquisition_channel: 'tavily_web',
   });
@@ -43,9 +43,7 @@ test('结构化产品和角色经过校验，并由同一快照生成搜索词',
   const queries = automaticSearchPlan(target);
   assert.ok(queries.some(({ query }) => query.includes('"motorized roller blinds"')));
   assert.ok(queries.some(({ query }) => query.includes('"electric roller shades"')));
-  assert.ok(
-    queries.every(({ query }) => query.includes('Texas') && query.includes('United States')),
-  );
+  assert.ok(queries.every(({ query }) => query.includes('United States')));
 });
 
 test('室内和室外成品可以同时全选并提交', () => {
@@ -83,35 +81,31 @@ test('产品数量仍受任务上限保护', () => {
 });
 
 test('大型组合按执行上限均匀生成搜索计划', () => {
-  const countries = Array.from({ length: 30 }, (_, index) => `Market ${index + 1}`);
   const products = Array.from({ length: 12 }, (_, index) => ({
     ...selectedProduct,
     value: `product ${index + 1}`,
     label: `产品 ${index + 1}`,
     aliases: Array.from({ length: 5 }, (__, alias) => `product ${index + 1} alias ${alias + 1}`),
   }));
-  const queries = automaticSearchPlan(
-    {
-      products,
-      customer_types: [
-        'supplier',
-        'wholesaler',
-        'distributor',
-        'importer',
-        'trader',
-        'brand',
-        'retailer',
-        'contractor',
-        'manufacturer',
-        'service_provider',
-      ],
-      country: countries[0],
-      region: '',
-    },
-    countries,
-  );
+  const queries = automaticSearchPlan({
+    products,
+    customer_types: [
+      'supplier',
+      'wholesaler',
+      'distributor',
+      'importer',
+      'trader',
+      'brand',
+      'retailer',
+      'contractor',
+      'manufacturer',
+      'service_provider',
+    ],
+    country: 'Japan',
+    region: '',
+  });
   assert.equal(queries.length, MAX_AUTO_SEARCH_QUERIES);
-  assert.ok(new Set(queries.map((item) => item.country)).size > 20);
+  assert.ok(queries.every((item) => item.country === 'Japan'));
   assert.ok(new Set(queries.map((item) => item.query.match(/product \d+/)?.[0])).size > 8);
 });
 

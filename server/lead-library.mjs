@@ -1,4 +1,4 @@
-import { addressRegion, regionChoices } from './library-regions.mjs';
+import { addressRegion, regionChoices, regionKeywords } from './library-regions.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -102,6 +102,7 @@ export function summarizeLead(lead) {
   ];
   return {
     regionLabel: addressRegion(lead),
+    regionLabelVersion: 2,
     version: contentVersion(lead),
     ...Object.fromEntries(
       fields.map((key) => [
@@ -221,7 +222,7 @@ export class LeadLibrary {
       );
     const rows = this.db
       .prepare(
-        "SELECT scope,record_id,detail FROM lead_library_customers WHERE version='' OR json_extract(summary,'$.regionLabel') IS NULL",
+        "SELECT scope,record_id,detail FROM lead_library_customers WHERE version='' OR json_extract(summary,'$.regionLabelVersion') IS NOT 2",
       )
       .all();
     if (!rows.length) return;
@@ -428,6 +429,9 @@ export class LeadLibrary {
       )
       .all(...args, ...(exportDetails ? [] : [(page - 1) * 8]));
     const leads = rows.map(({ data }) => decorate(JSON.parse(data)));
+    const facetRegions = filters.get('market')
+      ? regionChoices(filters.get('market'), [])
+      : this.facets.regions;
     return {
       ...this.metadata(),
       leads,
@@ -442,9 +446,11 @@ export class LeadLibrary {
       total: this.facets.total,
       filteredTotal,
       page,
-      facets: filters.get('market')
-        ? { ...this.facets, regions: regionChoices(filters.get('market'), []) }
-        : this.facets,
+      facets: {
+        ...this.facets,
+        regions: facetRegions,
+        regionKeywords: regionKeywords(facetRegions),
+      },
     };
   }
 

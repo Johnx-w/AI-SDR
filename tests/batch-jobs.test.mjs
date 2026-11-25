@@ -9,9 +9,9 @@ import { domainKey } from '../server/website-identity.mjs';
 import { searchPlan } from '../server/search-plan.mjs';
 const input = {
   country: 'United States',
-  region: 'Florida',
+  region: '',
   product: 'outdoor zip screens, pergolas',
-  search_query: 'outdoor zip screens Florida United States',
+  search_query: 'outdoor zip screens United States',
   acquisition_channel: 'tavily_web',
   target_count: 20,
 };
@@ -245,7 +245,7 @@ test('数量仅接受1–200整数，域名规范化并保留地域', () => {
   assert.equal(domainKey('https://WWW.Example.com/contact?x=1'), 'example.com');
   assert.equal(domainKey('http://127.0.0.1/'), '');
   const plan = searchPlan(input);
-  assert.ok(plan.every((p) => p.query.includes('Florida') && p.query.includes('United States')));
+  assert.ok(plan.every((p) => p.query.includes('United States')));
 });
 for (const target of [1, 20, 200])
   test(`模拟新增${target}家，达到目标立即停止且无超额`, async () => {

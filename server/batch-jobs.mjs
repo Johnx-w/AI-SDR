@@ -5,7 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { domainKey } from './website-identity.mjs';
 import { searchPlan } from './search-plan.mjs';
 import { exclusionConditionsKey } from './exclusion-conditions.mjs';
-import { locationOptions } from './search-target.mjs';
+import { validateCountryScope } from './search-target.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 function discoveryPlanKey(input, plan) {
@@ -227,7 +227,7 @@ export class BatchJobs {
     return job;
   }
   create(input, key, { scheduleId } = {}) {
-    locationOptions(input.country, input.region);
+    validateCountryScope(input);
     if (!['web', 'tavily_web', undefined].includes(input.acquisition_channel))
       throw fail(400, '该获客渠道已停用');
     input = { ...input, target_count: validateCount(input.target_count) };
@@ -438,7 +438,7 @@ export class BatchJobs {
       if (automatic && (this.closed || this.isMaintaining())) return job;
       job = this.get(id);
       // Reconcile any prior write first, then forbid new work in retired markets.
-      locationOptions(job.input.country, job.input.region);
+      validateCountryScope(job.input);
       job.status = 'running';
       job.reason = '';
       this.save(job);
@@ -680,7 +680,7 @@ export class BatchJobs {
           this.finish(j, 'stopped');
           return;
         }
-        locationOptions(j.input.country, j.input.region);
+        validateCountryScope(j.input);
         if (j.elapsedMs >= j.limits.timeMs) {
           this.finish(j, 'time_limit');
           return;

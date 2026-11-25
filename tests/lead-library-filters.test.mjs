@@ -11,7 +11,8 @@ test('客户库支持的市场使用中文显示，中文原值保持不变', ()
     ['Australia', '澳大利亚'],
     ['Canada', '加拿大'],
     ['United Kingdom', '英国'],
-    ['Europe', '欧洲'],
+    ['Europe', '待核实'],
+    ['Turkey', '土耳其'],
     ['加拿大', '加拿大'],
   ])
     assert.equal(marketLabel(value), label);

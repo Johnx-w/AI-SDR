@@ -5,10 +5,10 @@ import { BatchJobs } from '../server/batch-jobs.mjs';
 
 const input = {
   country: 'United States',
-  region: 'Florida',
+  region: '',
   product: 'outdoor zip screens',
   acquisition_channel: 'tavily_web',
-  search_query: 'outdoor zip screens Florida United States',
+  search_query: 'outdoor zip screens United States',
   target_count: 1,
 };
 const timing = {

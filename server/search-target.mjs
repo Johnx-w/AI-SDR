@@ -1,5 +1,4 @@
-import { markets, groupedMarkets } from './markets.mjs';
-import { marketRegions } from './market-regions.mjs';
+import { isCountryScope } from '../src/domain/country-catalog.ts';
 import acquisition from '../src/data/acquisition.json' with { type: 'json' };
 import {
   MAX_SELECTED_PRODUCTS,
@@ -11,18 +10,12 @@ import {
 } from '../src/domain/acquisition-products.mjs';
 
 const invalid = (message) => Object.assign(new Error(message), { status: 400 });
-export function locationOptions(country, region = '') {
-  if (!markets.some((m) => m.value === country)) throw invalid('请选择支持的国家 / 市场');
-  const regions = marketRegions[country] || [];
-  const selected = regions.find((item) => item.name === region);
-  if (region && !selected) throw invalid('请选择该国家有效的州 / 地区');
-  return {
-    country,
-    region,
-    regions: regions.map(({ name, code, label }) => ({ name, code, ...(label ? { label } : {}) })),
-    markets,
-    countries: groupedMarkets[country] || [country],
-  };
+export function validateCountryScope(input) {
+  if (!isCountryScope(input))
+    throw Object.assign(
+      invalid('请选择一个支持的国家，获客范围仅限该国全境。旧范围需要重新选择国家。'),
+      { code: 'INVALID_COUNTRY_SCOPE' },
+    );
 }
 
 export function validateTarget(input) {
@@ -75,7 +68,7 @@ export function validateTarget(input) {
     result[key] = value.trim();
     if (['country', 'product'].includes(key) && !result[key]) throw invalid(`参数 ${key} 不能为空`);
   }
-  locationOptions(result.country, result.region);
+  validateCountryScope({ ...input, country: result.country, region: result.region });
   if (input.products !== undefined && !allProducts) {
     if (
       !Array.isArray(input.products) ||
@@ -118,6 +111,6 @@ export function validateTarget(input) {
   const channel = input.acquisition_channel ?? 'tavily_web';
   if (!['tavily_web', 'web'].includes(channel)) throw invalid('该获客渠道尚未接入');
   result.acquisition_channel = channel;
-  result.market_countries = groupedMarkets[result.country] || [result.country];
+  result.market_countries = [result.country];
   return result;
 }

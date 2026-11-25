@@ -10,10 +10,10 @@ const configured = {
 };
 const input = {
   country: 'United States',
-  region: 'Florida',
+  region: '',
   product: 'outdoor zip screens',
   acquisition_channel: 'tavily_web',
-  search_query: 'outdoor zip screens Florida',
+  search_query: 'outdoor zip screens United States',
 };
 const post = (base, body = input, key = 'run-test-0001', headers = {}) =>
   fetch(base + '/api/v1/acquisition/jobs', {
@@ -29,7 +29,7 @@ test('入口限制市场和已接入渠道，结构化客户类型成为新任�
     market_countries: ['United States'],
   });
   assert.throws(() => validateInput({ ...input, country: 'invalid' }), /支持的国家/);
-  assert.throws(() => validateInput({ ...input, region: 'New South Wales' }), /该国家/);
+  assert.throws(() => validateInput({ ...input, region: 'New South Wales' }), /支持的国家/);
   assert.deepEqual(
     validateInput({ ...input, customer_types: ['service_provider', 'distributor'] }),
     {

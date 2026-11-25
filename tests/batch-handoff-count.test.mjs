@@ -8,7 +8,7 @@ import { calculateHandoffReadiness } from '../server/handoff-readiness.mjs';
 
 const target = {
   country: 'United States',
-  region: 'Florida',
+  region: '',
   product: 'roller blinds',
   acquisition_channel: 'tavily_web',
   target_count: 1,

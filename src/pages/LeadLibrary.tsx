@@ -1,4 +1,4 @@
-import { countryFilters } from '../domain/country-catalog';
+import { countryFilters, countryFor } from '../domain/country-catalog';
 import { SearchableLocation } from '../components/SearchableLocation';
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -45,6 +45,12 @@ const typeNames: Record<string, string> = {
   service_provider: '服务商',
   unknown: '待核实',
 };
+function countryFlag(market: string) {
+  const code = countryFor(market)?.code;
+  return code
+    ? String.fromCodePoint(...Array.from(code, (letter) => 0x1f1e6 + letter.charCodeAt(0) - 65))
+    : '◎';
+}
 const statusTones: Record<string, string> = {
   待开发: 'neutral',
   已联系: 'blue',
@@ -214,7 +220,7 @@ export function LeadLibrary({
           公司名称: l.name,
           官网名称: l.companyIdentity?.website_name || '',
           公司别名: l.companyIdentity?.aliases.join('、') || '',
-          市场: marketLabel(l.market),
+          国家: marketLabel(l.market),
           类型: typeNames[l.type] || l.type,
           产品: l.product,
           客户评级: l.grade,
@@ -361,7 +367,11 @@ export function LeadLibrary({
             options={[
               { label: '全部州／地区', value: '' },
               { label: '待核实', value: '待核实' },
-              ...(remote?.facets?.regions || []).map((value) => ({ label: value, value })),
+              ...(remote?.facets?.regions || []).map((value) => ({
+                label: value,
+                value,
+                keywords: remote?.facets?.regionKeywords?.[value],
+              })),
             ]}
             value={region}
             onChange={(value) => {
@@ -449,7 +459,7 @@ export function LeadLibrary({
               <thead>
                 <tr>
                   <th>公司名称／来源</th>
-                  <th>市场与客户类型</th>
+                  <th>国家与客户类型</th>
                   <th>客户评级</th>
                   <th>联系准备</th>
                   <th>开发状态</th>
@@ -480,16 +490,7 @@ export function LeadLibrary({
                     </td>
                     <td>
                       <span>
-                        {marketLabel(l.market) === '澳大利亚'
-                          ? '🇦🇺'
-                          : marketLabel(l.market) === '美国'
-                            ? '🇺🇸'
-                            : marketLabel(l.market) === '英国'
-                              ? '🇬🇧'
-                              : marketLabel(l.market) === '阿联酋'
-                                ? '🇦🇪'
-                                : '◎'}{' '}
-                        {marketLabel(l.market)}
+                        {countryFlag(l.market)} {marketLabel(l.market)}
                         {l.regionLabel && l.regionLabel !== '待核实' ? ' · ' + l.regionLabel : ''}
                       </span>
                       <span className="subtext">

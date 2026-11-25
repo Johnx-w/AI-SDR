@@ -1,3 +1,4 @@
+import { countryFor } from '../src/domain/country-catalog.ts';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -12,12 +13,10 @@ const templates = readFileSync(
 );
 const day = () =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
-const countries = {
-  Australia: '澳大利亚',
-  Canada: '加拿大',
-  'United Kingdom': '英国',
-  'United States': '美国',
-};
+function taskCountryLabel(value) {
+  const country = countryFor(value);
+  return country && country.name === value ? country.zh : value;
+}
 const reasons = {
   target_reached: '达到新增目标',
   stopped: '任务已停止',
@@ -53,7 +52,7 @@ export function keywordRow(job) {
         .filter(Boolean),
     ),
   ];
-  const country = countries[job.input.country] || job.input.country;
+  const country = taskCountryLabel(job.input.country);
   return {
     '国家/地区': [country, job.input.region].filter(Boolean).join(' / '),
     关键词列表: queries.join('\n'),
@@ -70,7 +69,7 @@ export function keywordRow(job) {
 
 export function taskRow(job, keywordIds = []) {
   assert(job.id && job.input && Number.isFinite(Date.parse(job.createdAt)), '获客执行记录不完整');
-  const country = countries[job.input.country] || job.input.country;
+  const country = taskCountryLabel(job.input.country);
   const product = job.input.product === 'window coverings' ? '窗饰' : job.input.product || '产品';
   const target = job.target ?? job.input.target_count;
   assert(Number.isSafeInteger(target) && target > 0, '获客新增目标无效');

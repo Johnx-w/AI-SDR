@@ -128,6 +128,7 @@ export interface LeadList extends LeadMetadata {
     grades: Record<string, number>;
     markets: string[];
     regions?: string[];
+    regionKeywords?: Record<string, string>;
     statuses: string[];
   };
 }

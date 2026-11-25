@@ -383,29 +383,8 @@ export function businessProductRelation(products, target = {}) {
 }
 
 // Normalize country names for the market check; returns '' when unmappable.
-const countryAliases = {
-  usa: 'united states',
-  'u.s.': 'united states',
-  'u.s.a.': 'united states',
-  'united states of america': 'united states',
-  america: 'united states',
-  uk: 'united kingdom',
-  'great britain': 'united kingdom',
-  australia: 'australia',
-  澳大利亚: 'australia',
-  澳洲: 'australia',
-  美国: 'united states',
-  加拿大: 'canada',
-  英国: 'united kingdom',
-  中国: 'china',
-  新西兰: 'new zealand',
-};
 export function normalizeCountry(value) {
-  const key = String(value || '')
-    .trim()
-    .toLowerCase();
-  if (!key) return '';
-  return countryFor(key)?.name.toLowerCase() || countryAliases[key] || key;
+  return countryFor(String(value || ''))?.name.toLowerCase() || '';
 }
 export function countryMatches(actual, marketCountries = []) {
   const normalized = normalizeCountry(actual);

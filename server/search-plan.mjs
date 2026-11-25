@@ -1,18 +1,12 @@
-import { groupedMarkets } from './markets.mjs';
-import { locationOptions } from './search-target.mjs';
+import { validateCountryScope } from './search-target.mjs';
 import acquisition from '../src/data/acquisition.json' with { type: 'json' };
 import { automaticSearchPlan } from '../src/domain/search-query.mjs';
 import { isAllProductScope } from '../src/domain/acquisition-products.mjs';
 
 export function searchPlan(input) {
-  locationOptions(input.country, input.region);
-  return webSearchPlan(input.country === 'Dubai' ? { ...input, region: 'Dubai' } : input);
-}
-
-function webSearchPlan(input) {
-  const countries = groupedMarkets[input.country] || [input.country];
-  if (input.query_mode === 'auto' || isAllProductScope(input))
-    return automaticSearchPlan(input, countries);
+  validateCountryScope(input);
+  const country = input.country;
+  if (input.query_mode === 'auto' || isAllProductScope(input)) return automaticSearchPlan(input);
   // Quote multi-word product phrases so Tavily matches them as exact phrases
   // instead of scattering generic words (e.g. "awnings") across unrelated sites.
   const products = input.product
@@ -25,24 +19,21 @@ function webSearchPlan(input) {
     : ['', 'supplier', 'installation', 'dealer', 'manufacturer', 'company', 'contact', 'showroom'];
   const result = [];
   for (const suffix of variants)
-    for (const product of products)
-      for (const country of countries) {
-        result.push({
+    for (const product of products) {
+      result.push({
+        country,
+        query: [
+          product,
+          acquisition.customerTypes.find((t) => t.value === input.customer_type)?.terms,
+          acquisition.profiles.find((p) => p.value === input.customer_profile)?.terms,
           country,
-          query: [
-            product,
-            acquisition.customerTypes.find((t) => t.value === input.customer_type)?.terms,
-            acquisition.profiles.find((p) => p.value === input.customer_profile)?.terms,
-            input.region,
-            country,
-            suffix,
-          ]
-            .filter(Boolean)
-            .join(' ')
-            .slice(0, 395),
-        });
-      }
-  if (countries.length === 1 && input.country !== 'Dubai')
-    result.unshift({ country: countries[0], query: input.search_query });
+          suffix,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .slice(0, 395),
+      });
+    }
+  if (input.search_query) result.unshift({ country, query: input.search_query });
   return [...new Map(result.map((p) => [p.query, p])).values()];
 }
