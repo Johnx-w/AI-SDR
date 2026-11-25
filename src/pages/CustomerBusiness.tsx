@@ -1,3 +1,4 @@
+import { FollowupDetail } from '../components/FollowupDetail';
 import { Fragment, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
@@ -6,7 +7,6 @@ import {
   ClipboardList,
   ListChecks,
   Mail,
-  UserRoundCheck,
   RefreshCw,
   ShieldQuestion,
 } from 'lucide-react';
@@ -60,12 +60,6 @@ const queues = [
     description: '核对 AI 回复草稿和需要人工处理的客户来信。',
   },
   { id: 'priority', label: '重点跟进', icon: Star, description: '查看业务员手动标记的客户。' },
-  {
-    id: 'assigned',
-    label: '已接手',
-    icon: UserRoundCheck,
-    description: '查看人工接手的邮件会话、负责人和下一步。',
-  },
 ] as const;
 const statuses = {
   bounced: '已拒收',
@@ -125,70 +119,33 @@ function TaskDetail({
   const latest = detail.messages.at(-1);
   const mail = detail.messages.find((m) => m.id === selected) || latest;
   return (
-    <section
-      className="followup-detail"
+    <FollowupDetail
       id={'detail-' + task.id}
-      aria-label={task.customerName + ' 的追信详情'}
-    >
-      <header>
-        <div>
-          <h2>
-            {task.customerName} · {stepLabel(task)}
-          </h2>
-          <Link
-            to={'/inbox?' + new URLSearchParams({ tab: 'campaigns', campaignId: task.campaignId })}
-          >
-            {task.campaignName || '查看所属计划'}
-          </Link>
-        </div>
-        <PriorityAction id={task.customerId} refresh={refresh} />
-        {detail.thread && (
-          <Link
-            className="btn secondary"
-            to={'/inbox?' + new URLSearchParams({ tab: 'inbox', thread: detail.thread })}
-          >
-            查看原会话
-          </Link>
-        )}
-      </header>
-      <div className="followup-detail-grid">
-        <div className="followup-letter">
-          <div className="followup-mail-tabs" aria-label="关联邮件">
-            {detail.messages.map((m) => (
-              <button
-                className="btn secondary"
-                key={m.id}
-                aria-pressed={m.id === mail?.id}
-                onClick={() => setSelected(m.id)}
-              >
-                {mailKinds[m.kind]}
-              </button>
-            ))}
-          </div>
-          {!mail && task.status === 'skipped' && (
-            <article>
-              <h3>跳过原因</h3>
-              <p>{task.reason || '记录未保存具体原因。'}</p>
-            </article>
+      title={task.customerName + ' · ' + stepLabel(task)}
+      subtitle={
+        <Link
+          to={'/inbox?' + new URLSearchParams({ tab: 'campaigns', campaignId: task.campaignId })}
+        >
+          {task.campaignName || '查看所属计划'}
+        </Link>
+      }
+      actions={
+        <>
+          {' '}
+          <PriorityAction id={task.customerId} refresh={refresh} />
+          {detail.thread && (
+            <Link
+              className="btn secondary"
+              to={'/inbox?' + new URLSearchParams({ tab: 'inbox', thread: detail.thread })}
+            >
+              查看原会话
+            </Link>
           )}
-          {mail && (
-            <article>
-              <h3>{mail.subject || '（无主题）'}</h3>
-              <div className="followup-mail-meta">
-                发件人 {mail.from} · 收件人 {mail.to}
-                <br />
-                {when(mail.at)}
-              </div>
-              {mail.bodyText || mail.bodyHtml || mail.bodyUnavailable ? (
-                <MailMessageBody key={mail.id} message={mail} collapseQuotes />
-              ) : (
-                <p>原始记录暂未保存邮件正文。</p>
-              )}
-            </article>
-          )}
-        </div>
-        <aside className="followup-events">
-          <h3>执行记录</h3>
+        </>
+      }
+      events={
+        <>
+          {' '}
           <dl>
             <dt>
               {task.status === 'accepted' && task.step == null
@@ -229,9 +186,44 @@ function TaskDetail({
               {detail.instruction && <p>{detail.instruction}</p>}
             </details>
           )}
-        </aside>
+        </>
+      }
+    >
+      {' '}
+      <div className="followup-mail-tabs" aria-label="关联邮件">
+        {detail.messages.map((m) => (
+          <button
+            className="btn secondary"
+            key={m.id}
+            aria-pressed={m.id === mail?.id}
+            onClick={() => setSelected(m.id)}
+          >
+            {mailKinds[m.kind]}
+          </button>
+        ))}
       </div>
-    </section>
+      {!mail && task.status === 'skipped' && (
+        <article>
+          <h3>跳过原因</h3>
+          <p>{task.reason || '记录未保存具体原因。'}</p>
+        </article>
+      )}
+      {mail && (
+        <article>
+          <h3>{mail.subject || '（无主题）'}</h3>
+          <div className="followup-mail-meta">
+            发件人 {mail.from} · 收件人 {mail.to}
+            <br />
+            {when(mail.at)}
+          </div>
+          {mail.bodyText || mail.bodyHtml || mail.bodyUnavailable ? (
+            <MailMessageBody key={mail.id} message={mail} collapseQuotes />
+          ) : (
+            <p>原始记录暂未保存邮件正文。</p>
+          )}
+        </article>
+      )}
+    </FollowupDetail>
   );
 }
 
@@ -245,7 +237,7 @@ export function CustomerBusiness() {
   const queue = queues.find((q) => q.id === (params.get('queue') || legacyQueue)) || queues[0];
   const [refresh, setRefresh] = useState(0),
     [opened, setOpened] = useState(params.get('task')?.replace(/^task_/, '') || '');
-  const extra = ['approval', 'priority', 'assigned'].includes(queue.id);
+  const extra = ['approval', 'priority'].includes(queue.id);
   const key = params.toString();
   const [desk, setDesk] = useState<{ key: string; data?: DeskPage; error?: string }>();
   const [query, setQuery] = useState(params.get('q') || '');
@@ -314,7 +306,6 @@ export function CustomerBusiness() {
         setOpened('');
         update({
           view: '',
-          completed: '',
           customerId: '',
           campaignId: '',
           queue: queues.some((q) => q.id === id) && id !== 'all' ? id : '',
@@ -326,7 +317,7 @@ export function CustomerBusiness() {
           q: '',
         });
       }}
-      sections={[{ group: '任务队列', items: queues.map((q) => ({ ...q, count: counts[q.id] })) }]}
+      sections={[{ items: queues.map((q) => ({ ...q, count: counts[q.id] })) }]}
     >
       <div className="business-page section-page">
         <PageHeading
@@ -375,29 +366,11 @@ export function CustomerBusiness() {
                 </Link>
               )}
             </form>
-            {queue.id === 'assigned' && (
-              <div className="business-filters">
-                {[
-                  ['', '进行中'],
-                  ['1', '已完成'],
-                ].map(([value, label]) => (
-                  <button
-                    key={label}
-                    className="btn secondary"
-                    aria-pressed={(params.get('completed') || '') === value}
-                    onClick={() => update({ completed: value, page: '' })}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            )}
             {extra && !shown?.error && (
               <DeskList
                 key={key}
                 queue={queue.id}
                 data={deskData}
-                completed={params.get('completed') === '1'}
                 refresh={() => setRefresh((n) => n + 1)}
               />
             )}

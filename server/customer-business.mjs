@@ -107,7 +107,6 @@ export class CustomerBusiness {
     this.product = product;
     this.now = now;
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
-      CREATE TABLE IF NOT EXISTS followup_assignment_plans(scope TEXT,id TEXT,owner TEXT,next_step TEXT,due_at TEXT,completed INTEGER,PRIMARY KEY(scope,id));
       CREATE TABLE IF NOT EXISTS customer_business_entities(
         scope TEXT NOT NULL,kind TEXT NOT NULL,id TEXT NOT NULL,data TEXT NOT NULL,
         PRIMARY KEY(scope,kind,id));

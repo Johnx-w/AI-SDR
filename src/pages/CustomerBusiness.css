@@ -322,3 +322,12 @@
     border-top: 0;
   }
 }
+.followup-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.followup-actions small:empty {
+  display: none;
+}
