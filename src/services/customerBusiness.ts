@@ -190,7 +190,6 @@ export interface FollowupTaskSummary {
   campaignName: string;
   status:
     | 'bounced'
-    | 'candidate'
     | 'pending'
     | 'sending'
     | 'accepted'
@@ -205,7 +204,10 @@ export interface FollowupTaskPage {
   total: number;
   page: number;
   pageSize: number;
-  counts: Record<'all' | 'upcoming' | 'review' | 'responded', number>;
+  counts: Record<
+    'all' | 'upcoming' | 'review' | 'responded' | 'scheduled' | 'completed' | 'skipped' | 'bounced',
+    number
+  >;
 }
 export interface FollowupTaskDetail {
   thread?: string;

@@ -113,7 +113,16 @@ test('追信任务按业务来源分页，详情核对客户、原会话和邮�
   }
   task('north-next', north, { step: 2 });
   const list = await read();
-  assert.deepEqual(list.value.counts, { all: 8, upcoming: 1, review: 3, responded: 1 });
+  assert.deepEqual(list.value.counts, {
+    all: 8,
+    upcoming: 1,
+    review: 3,
+    responded: 1,
+    scheduled: 1,
+    completed: 3,
+    bounced: 1,
+    skipped: 0,
+  });
   assert.equal(
     list.value.items.some((row) => Object.hasOwn(row, 'bodyText')),
     false,
@@ -132,7 +141,7 @@ test('追信任务按业务来源分页，详情核对客户、原会话和邮�
     const scoped = (await read('?customerId=' + id)).value;
     assert.deepEqual(
       scoped.items.map((r) => [r.customerId, r.status, r.dueAt]),
-      [[id, 'candidate', null]],
+      [[id, 'accepted', null]],
     );
     const detail = (await read('/' + scoped.items[0].id)).value;
     assert.deepEqual(
@@ -222,17 +231,34 @@ test('追信任务按业务来源分页，详情核对客户、原会话和邮�
     const id = 'buyer-' + i;
     first('letter-' + id, { id, email: id + '@buyer.example' });
   }
+  for (const id of ['north', 'south']) {
+    svc.putDelivery({
+      ...north,
+      id: 'skipped-' + id,
+      customerId: id,
+      status: 'skipped',
+      messageId: null,
+      sentAt: null,
+      skippedAt: quiet.sentAt,
+      reason: '邮箱产品与客户经营范围不匹配',
+    });
+    const item = (await read('?queue=skipped&customerId=' + id)).value.items[0];
+    assert.equal(item.id, 'skip-skipped-' + id);
+    assert.equal(item.reason, '邮箱产品与客户经营范围不匹配');
+    assert.deepEqual((await read('/' + item.id)).value.messages, []);
+  }
+  assert.equal((await read('?queue=skipped&customerId=quiet')).value.total, 0);
   const reviewTimes = [];
   for (let i = 0; i < 7; i++) {
     const at = performance.now();
     const result = await read('?state=candidate&page=27');
     reviewTimes.push(performance.now() - at);
-    assert.equal(result.value.total, 662);
-    assert.equal(result.value.items.length, 12);
+    assert.equal(result.value.total, 663);
+    assert.equal(result.value.items.length, 13);
   }
   reviewTimes.sort((a, b) => a - b);
   t.diagnostic(
-    '661 封额外首封，首封待评估末页中位 ' +
+    '661 封额外首封，已发出末页中位 ' +
       reviewTimes[3].toFixed(1) +
       ' ms，最慢 ' +
       reviewTimes.at(-1).toFixed(1) +

@@ -322,21 +322,3 @@
     border-top: 0;
   }
 }
-.followup-state-tabs {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.followup-state-tabs button {
-  font: inherit;
-  border: 0;
-  border-radius: 6px;
-  padding: 6px 10px;
-  color: var(--color-text-secondary);
-  background: transparent;
-}
-.followup-state-tabs button[aria-pressed='true'] {
-  background: var(--color-primary-soft);
-  color: var(--color-primary-text);
-  font-weight: 600;
-}
