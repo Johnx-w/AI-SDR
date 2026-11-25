@@ -9,6 +9,7 @@ import {
   type TimelineOriginal,
 } from '../services/customerBusiness';
 import { formatBeijingTime } from '../domain/date-time.mjs';
+import { BUSINESS_REPLY_LABELS } from '../domain/reply-classification.mjs';
 import { MailMessageBody } from './MailMessageBody';
 import { Badge, Modal } from './ui';
 import './CustomerBusinessSummary.css';
@@ -20,6 +21,12 @@ const types = {
   auto: '自动追信',
   manual: '人工跟进',
   reply: '积极回复待办',
+};
+const incomingLabels: Record<string, string> = {
+  received: types.received,
+  notification: BUSINESS_REPLY_LABELS.notification,
+  bounce: BUSINESS_REPLY_LABELS.bounce,
+  unverified: '待核实回执',
 };
 const states: Record<string, string> = {
   sent: '已发送',
@@ -76,7 +83,13 @@ function Original({
     return () => controller.abort();
   }, [customerId, item]);
   return (
-    <Modal title={item.kind === 'received' ? '客户回信原文' : '已发送邮件'} wide onClose={close}>
+    <Modal
+      title={
+        item.kind === 'received' ? (incomingLabels[item.state] || '来信') + '原文' : '已发送邮件'
+      }
+      wide
+      onClose={close}
+    >
       <article className="modal-body timeline-original">
         {error ? (
           <p role="alert">{error}</p>
@@ -152,7 +165,7 @@ export function CustomerBusinessSummary({ customerId }: { customerId: string }) 
         ? 'red'
         : r.kind === 'reply'
           ? 'amber'
-          : ['received', 'pending', 'queued', 'sending'].includes(r.state)
+          : r.kind === 'received' || ['pending', 'queued', 'sending'].includes(r.state)
             ? 'blue'
             : 'neutral';
     const time = r.stamp ? formatBeijingTime(r.stamp).split(' ')[1]?.slice(0, 5) : '';
@@ -170,7 +183,7 @@ export function CustomerBusinessSummary({ customerId }: { customerId: string }) 
             <strong>{title}</strong>
           )}
           <small>
-            {types[r.kind]} ·{' '}
+            {r.kind === 'received' ? incomingLabels[r.state] || '来信' : types[r.kind]} ·{' '}
             {time
               ? r.clock + ' ' + time
               : r.kind === 'first' && r.state === 'queued'
@@ -184,7 +197,9 @@ export function CustomerBusinessSummary({ customerId }: { customerId: string }) 
           </small>
           {r.note && <small>{r.note}</small>}
         </div>
-        <Badge tone={tone}>{states[r.state] || r.state}</Badge>
+        <Badge tone={tone}>
+          {r.kind === 'received' ? states.received : states[r.state] || r.state}
+        </Badge>
       </li>
     );
   }

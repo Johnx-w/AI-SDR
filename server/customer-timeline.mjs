@@ -4,6 +4,12 @@ import { replyToInboundSql } from './mail-reply-history.mjs';
 const pageSize = 25;
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const field = (name) => `json_extract(data,'$.${name}')`;
+const incomingState = (businessKind, classification) =>
+  `CASE WHEN ${businessKind} IN ('notification','bounce','unverified') THEN ${businessKind}
+    WHEN ${classification}='auto_reply' THEN 'notification'
+    WHEN ${classification}='hard_bounce' THEN 'bounce'
+    WHEN ${classification}='unverified' THEN 'unverified'
+    ELSE 'received' END`;
 
 // Both stores can live in separate databases, including separate in-memory databases.
 // Transfer only the indexed customer's display fields, never the CRM mail bodies.
@@ -20,6 +26,8 @@ function businessRows(store, customerId) {
     'dueAt',
     'status',
     'deliveryStatus',
+    'classification',
+    'businessKind',
     'notes',
     'completionNotes',
     'campaignId',
@@ -32,9 +40,7 @@ function businessRows(store, customerId) {
     AND json_extract(data,'$.customerId')=? AND coalesce(json_extract(data,'$.origin'),'')!='mock'
     AND NOT (kind='tasks' AND upper(coalesce(json_extract(data,'$.notes'),'')) LIKE 'MOCK%')
     AND (kind='tasks' OR (json_extract(data,'$.channel')='email' AND ((json_extract(data,'$.direction')='outbound' AND json_extract(data,'$.deliveryStatus') IN ('sent','accepted'))
-      OR (json_extract(data,'$.direction')='inbound' AND json_extract(data,'$.deliveryStatus')='received'
-      AND coalesce(json_extract(data,'$.classification'),'normal') NOT IN ('hard_bounce','auto_reply','unverified')
-      AND coalesce(json_extract(data,'$.businessKind'),'other') NOT IN ('bounce','notification','unverified')))))`,
+      OR (json_extract(data,'$.direction')='inbound' AND json_extract(data,'$.deliveryStatus')='received'))))`,
     )
     .all(store.scope, customerId);
 }
@@ -74,11 +80,11 @@ export function readCustomerTimeline(store, service, customerId, requestedPage =
       WHERE json_extract(d.data,'$.customerId')=$id AND c.data->>'mode'='production' AND c.data->>'scope'=$scope),
     follow AS MATERIALIZED (SELECT f.id,f.state,f.data FROM outreach_followups f JOIN firsts d ON d.id=f.data->>'firstId'
       WHERE json_extract(f.data,'$.customerId')=$id),
-    received AS MATERIALIZED (SELECT h.*,a.email AS account FROM threads t JOIN mailbox_reply_headers h ON h.thread_id=t.id
+    received AS MATERIALIZED (SELECT h.*,a.email AS account,
+      ${incomingState('h.business_kind', 'h.classification')} AS incoming_state
+      FROM threads t JOIN mailbox_reply_headers h ON h.thread_id=t.id
       JOIN accounts a ON a.key=h.account_key WHERE h.direction='inbound' AND h.source='imap'
-      AND h.sender NOT IN (SELECT email FROM accounts)
-      AND coalesce(h.business_kind,'other') NOT IN ('bounce','notification','unverified')
-      AND coalesce(h.classification,'normal') NOT IN ('hard_bounce','auto_reply','unverified')),
+      AND h.sender NOT IN (SELECT email FROM accounts)),
     events(kind,id,title,state,stamp,clock,note,thread,campaign,source,identity,priority) AS (
       SELECT 'mail',h.id,h.subject,'sent',m.data->>'occurredAt','发送',NULL,h.thread_id,NULL,'thread',
         coalesce(nullif(h.external_id,''),h.id)||':'||lower(h.sender),1
@@ -101,14 +107,15 @@ export function readCustomerTimeline(store, service, customerId, requestedPage =
       UNION ALL SELECT CASE WHEN data->>'origin'='automatic-followup' THEN 'auto' ELSE 'manual' END,data->>'id',data->>'title',
         coalesce(nullif(data->>'deliveryStatus',''),data->>'status'),data->>'dueAt','计划',
         coalesce(nullif(data->>'notes',''),data->>'completionNotes'),NULL,data->>'campaignId','task',data->>'id',2 FROM crm WHERE data->>'kind'='tasks'
-      UNION ALL SELECT 'received',h.id,h.subject,'received',h.stamp,'收到',h.sender,h.thread_id,NULL,'thread',
+      UNION ALL SELECT 'received',h.id,h.subject,h.incoming_state,h.stamp,'收到',h.sender,h.thread_id,NULL,'thread',
         coalesce(nullif(h.external_id,''),h.id)||':'||h.account,1 FROM received h
-      UNION ALL SELECT 'received',data->>'id',data->>'subject','received',data->>'occurredAt','收到',data->>'from',NULL,NULL,'message',
+      UNION ALL SELECT 'received',data->>'id',data->>'subject',
+        ${incomingState("data->>'businessKind'", "data->>'classification'")},data->>'occurredAt','收到',data->>'from',NULL,NULL,'message',
         coalesce(nullif(data->>'externalId',''),data->>'mailboxMessageId',data->>'id')||':'||lower(coalesce(data->>'account','')),3
         FROM crm WHERE data->>'kind'='messages' AND data->>'direction'='inbound'
         AND lower(coalesce(data->>'from','')) NOT IN (SELECT email FROM accounts)
       UNION ALL SELECT 'reply',h.id,h.subject,h.request_type,h.stamp,'收到',NULL,h.thread_id,NULL,'thread',h.id,1 FROM received h
-        WHERE h.business_kind='positive' AND h.request_type IS NOT NULL
+        WHERE h.incoming_state='received' AND h.business_kind='positive' AND h.request_type IS NOT NULL
         AND NOT EXISTS(SELECT 1 FROM mail_offline_handled WHERE message_id=h.id)
         AND NOT EXISTS(SELECT 1 FROM mailbox_reply_headers o WHERE ${replyToInboundSql('h.account')})
     ), ranked AS (SELECT *,row_number() OVER (PARTITION BY kind,CASE WHEN kind IN ('mail','auto','received') THEN identity ELSE id END ORDER BY priority,id) AS rank FROM events),
