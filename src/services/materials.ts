@@ -66,6 +66,7 @@ export type StoredDocument = {
   parseMode?: ParseMode;
   createdAt: string;
   extraction: null | {
+    photoCount?: number;
     parameters?: ModelParameter[];
     facts: { text: string; page: number; location: string }[];
     warnings: string[];
@@ -147,13 +148,18 @@ export async function uploadMaterial(
   const paged = /\.(?:pdf|docx|pptx)$/iu.test(file.name);
   const structured =
     options.mode === 'model_parameters' && !/\.(?:webm|mp4|mov)$/iu.test(file.name);
-  if ((paged || structured) && options.mode) q.set('mode', options.mode);
+  const media = /\.(?:png|jpe?g|webp|gif|mp4|mov|webm)$/iu.test(file.name);
+  if (
+    (paged || structured || (media && options.mode === 'rich_layout_recognition')) &&
+    options.mode
+  )
+    q.set('mode', options.mode);
   if (options.site) q.set('site', options.site);
   if (options.category) q.set('category', options.category);
   if (options.version) q.set('version', String(options.version));
   const path = options.id ? '/' + options.id + '/versions' : '';
   type Result = { id: string; documentId: string; warning: string; reused: boolean };
-  return uploadBytes<Result>(file, path, q, key, paged || structured, onPage);
+  return uploadBytes<Result>(file, path, q, key, paged || structured || media, onPage);
 }
 async function uploadBytes<Result>(
   file: File,

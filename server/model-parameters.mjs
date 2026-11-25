@@ -15,12 +15,12 @@ export function mentionsModel(text, model) {
 const meta =
   /来源|出处|备注|待核|核对|source|warning|notes?|别名|aliases?|配置|适用条件|conditions?|configuration|variant|^单位$|^unit$/iu;
 const modelHeader =
-  /^(?:产品型号|型号|货号|model(?:\s*(?:no\.?|number|code))?|sku|item\s*(?:no\.?|code))$/iu;
+  /^(?:产品型号|型号或品名|型号|货号|产品编码|产品编号|物料编码|商品编号|编码|part\s*(?:no\.?|number)|model(?:\s*(?:no\.?|number|code))?|sku|item\s*(?:no\.?|code))$/iu;
 const dimensions = /宽|厚|长|直径|高度|重量|width|thickness|length|diameter|height|weight/iu;
 const unit = /(?:毫米|厘米|英寸|千克|克|米|公斤|磅|mm|cm|kg|inches|inch|lbs?|ft|in|m|g)(?![a-z])/iu;
 export const hasModelHeader = (name) => modelHeader.test(clean(name));
 export function tableParameters(cells, location) {
-  const first = cells[0],
+  const first = cells.find((c) => hasModelHeader(c.field)) ?? cells[0],
     out = [];
   const read = (pattern) => cells.find((c) => pattern.test(c.field.trim()))?.value || '';
   const conditions = cells
@@ -29,7 +29,8 @@ export function tableParameters(cells, location) {
     )
     .map((c) => c.value)
     .join(' · ');
-  for (const cell of cells.slice(1)) {
+  for (const cell of cells) {
+    if (cell === first) continue;
     if (meta.test(cell.field) || commerce.test(cell.field)) continue;
     const origin =
       cells.find((c) =>
@@ -59,8 +60,11 @@ export function tableParameters(cells, location) {
 export function workbookParameters(rows) {
   return rows.flatMap(([sheet, , , json]) => {
     const cells = JSON.parse(json);
-    if (!hasModelHeader(cells[0]?.field) || !/^A\d+$/u.test(cells[0].ref))
-      throw fail('型号参数表每个工作表首列须为“型号”，每行填写型号。');
+    if (
+      !hasModelHeader(cells[0]?.field) &&
+      !/^(产品名称|品名|product name)$/iu.test(cells[0]?.field)
+    )
+      return [];
     return tableParameters(cells, { sheet });
   });
 }

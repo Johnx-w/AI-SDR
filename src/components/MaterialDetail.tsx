@@ -109,7 +109,12 @@ export function MaterialDocument({
     doc = data?.documents.find((d) => d.id === docId),
     active = p?.version === data?.currentVersion;
   const structured = doc?.parseMode === 'model_parameters';
-  const visual = !doc?.referencePages && (structured || isPagedMaterial(doc?.contentType));
+  const parameterReview = structured && !(!doc?.extraction?.parameters && doc?.extraction?.sheets);
+  const visual =
+    !doc?.referencePages &&
+    (structured ||
+      isPagedMaterial(doc?.contentType) ||
+      doc?.parseMode === 'rich_layout_recognition');
   const storedMode = doc?.extraction?.mode ?? doc?.parseMode ?? 'rich_layout_recognition';
   const parseMode = modeOverride ?? storedMode;
   useEffect(() => setModeOverride(null), [docId, revision]);
@@ -120,8 +125,12 @@ export function MaterialDocument({
     doc &&
     visual &&
     !doc.extraction?.facts.length &&
+    !doc.extraction?.sheets &&
     !doc.extraction?.parameters &&
-    doc.extraction?.model !== 'failed'
+    (doc.extraction?.model !== 'failed' ||
+      doc.extraction.warnings.some((w) => w.includes('首列须为'))) &&
+    doc.extraction?.model !== 'manual' &&
+    !doc.extraction?.photoCount
       ? doc.id
       : '';
   useEffect(() => {
@@ -539,7 +548,7 @@ export function MaterialDocument({
                             aria-pressed={workbookView === 'rows'}
                             onClick={() => setWorkbookView('rows')}
                           >
-                            价格表数据
+                            表格数据
                           </button>
                           <button
                             className="kb-text"
@@ -593,6 +602,34 @@ export function MaterialDocument({
                         onSave={saveFacts}
                         onEditing={setEditingChunk}
                       />
+                    )}
+                    {!!doc.extraction?.sheets && !!doc.extraction.facts.length && (
+                      <details className="kb-notice">
+                        <summary>识别出的产品资料 · {doc.extraction.facts.length}</summary>
+                        <MaterialPassages
+                          doc={doc}
+                          facts={facts}
+                          writable={!!writable}
+                          page={sourcePage}
+                          initialPage={firstPage}
+                          original={original}
+                          onPage={viewOriginal}
+                          onSave={saveFacts}
+                          onEditing={setEditingChunk}
+                        />
+                      </details>
+                    )}
+                    {!!doc.extraction?.photoCount && !doc.extraction.sheets && (
+                      <details className="kb-notice">
+                        <summary>产品图片 · {doc.extraction.photoCount}</summary>
+                        <WorkbookPhotos
+                          key={doc.id + revision}
+                          product={id}
+                          doc={doc.id}
+                          writable={!!writable && p.documentIds?.[0] === doc.id}
+                          sheets={[{ name: '产品图片' }]}
+                        />
+                      </details>
                     )}
                     {doc.extraction?.warnings.map((m, n) => (
                       <p className="kb-notice" key={n}>
@@ -721,7 +758,7 @@ export function MaterialDocument({
                   <footer className="kb-manage" inert={editingChunk}>
                     {p.status !== 'archived' && visual && (
                       <>
-                        {!structured && (
+                        {!structured && isPagedMaterial(doc?.contentType) && (
                           <MaterialParseMode
                             generalOnly
                             value={parseMode}
@@ -789,7 +826,7 @@ export function MaterialDocument({
                               {
                                 status: 'approved',
                                 approvedBy: reviewer,
-                                ...(structured ? { parameterKeys } : doc ? reviewFields : {}),
+                                ...(parameterReview ? { parameterKeys } : doc ? reviewFields : {}),
                               },
                               '已审核通过',
                             );
@@ -807,6 +844,8 @@ export function MaterialDocument({
                             busy ||
                             editingChunk ||
                             (data.documents[0]?.parseMode === 'model_parameters' &&
+                              (!data.documents[0]?.extraction?.sheets ||
+                                !!data.documents[0]?.extraction?.parameters) &&
                               (!structured || !parameterKeys.length)) ||
                             incompleteFact ||
                             (!doc && !p.sourceUrl && !p.attachments.length)
