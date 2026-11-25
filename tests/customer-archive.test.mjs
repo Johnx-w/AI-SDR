@@ -234,3 +234,94 @@ test('精简原T2按实际写入列核对，内部编号和完整摘要保留本
   );
   assert.equal(restarted.archive.remoteId(saved.record_id), remote.rows[0].record_id);
 });
+
+test('首次关联已有报表时，只补同一企业可核实的业务进展', async (t) => {
+  const { remote, open } = fixture(t);
+  const { archive, library } = open();
+  const hive = {
+    公司名称: 'Hive & Design Ltd',
+    企业官网: 'https://www.stitched.co.uk/shop/press',
+    开发状态: '已回复',
+    最近联系时间: 1794999583324,
+    最近回复时间: 1794999615000,
+    评级依据摘要: '主营产品、定制服务已核实',
+    邮箱有效性: '有效',
+  };
+  const cases = [
+    [hive, { 开发状态: '待开发' }, true],
+    [
+      {
+        公司名称: 'Shade Co',
+        企业官网: 'https://shade.example',
+        开发状态: '已联系',
+        最近联系时间: 1794999583324,
+      },
+      { 开发状态: '待开发' },
+      true,
+    ],
+    [
+      { ...hive, 企业官网: 'https://other.example' },
+      { 公司名称: 'Other Company', 开发状态: '待开发' },
+      false,
+    ],
+    [{ ...hive, 企业官网: 'https://closed.example' }, { 开发状态: '停止开发' }, false],
+    [
+      { ...hive, 企业官网: 'https://different.example' },
+      { 开发状态: '待开发', 邮箱有效性: '失效' },
+      false,
+    ],
+    [
+      { ...hive, 企业官网: 'https://missing.example', 最近回复时间: null },
+      { 开发状态: '待开发' },
+      false,
+    ],
+  ];
+  remote.fields = async () => Object.keys(hive).map((field_name) => ({ field_name, type: 1 }));
+  const ids = [];
+  const originals = [];
+  for (const [i, [local, overrides]] of cases.entries()) {
+    const old = {
+      公司名称: local.公司名称,
+      企业官网: local.企业官网,
+      内部备注: '保留',
+      ...overrides,
+    };
+    originals.push(old);
+    remote.rows.push({ record_id: 'rec_' + i, fields: { ...old } });
+    ids.push((await archive.write('insert', local, undefined, 'customer-' + i)).record_id);
+  }
+  await archive.write('update', { 最近联系时间: hive.最近联系时间 }, ids[0]);
+  await archive.write('update', { 最近回复时间: hive.最近回复时间 }, ids[0]);
+  assert.equal(archive.entry(ids[0]).revision, 3);
+  await archive.sync();
+  await archive.sync();
+  assert.equal(remote.rows.length, cases.length);
+  for (const [i, [local, , recover]] of cases.entries()) {
+    const entry = archive.entry(ids[i]);
+    assert.equal(entry.remoteId, recover ? 'rec_' + i : null, local.企业官网);
+    assert.deepEqual(remote.rows[i].fields, recover ? { ...originals[i], ...local } : originals[i]);
+    assert.equal(entry.syncedRevision, recover ? entry.revision : 0);
+    if (!recover) assert.ok(entry.error.includes(local.公司名称));
+  }
+  assert.equal(remote.writes, 2);
+  assert.equal(library.metadata().sync.pendingWrites, 4);
+});
+
+test('首次关联遇到同域名多行、已归属的飞书行或读回时主体改变，均保留待核对', async (t) => {
+  const { remote, open } = fixture(t);
+  const { archive, library } = open();
+  const { record_id } = await archive.write('insert', fields, undefined, 'verify-owner');
+  remote.rows = ['rec_a', 'rec_b'].map((id) => ({ record_id: id, fields: { ...fields } }));
+  await archive.sync();
+  assert.match(archive.entry(record_id).error, /多条同官网/);
+  remote.rows.pop();
+  remote.record = async () => ({ ...remote.rows[0], fields: { ...fields, 公司名称: 'Other' } });
+  await archive.sync();
+  assert.match(archive.entry(record_id).error, /公司名称/);
+  remote.record = async () => remote.rows[0];
+  library.upsert(mapFeishuRecord(remote.rows[0]));
+  await archive.sync();
+  assert.match(archive.entry(record_id).error, /另一份本地档案/);
+  assert.equal(archive.remoteId(record_id), null);
+  assert.equal(remote.writes, 0);
+});
