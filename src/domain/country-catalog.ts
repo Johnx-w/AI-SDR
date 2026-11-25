@@ -55,6 +55,37 @@ const byName = new Map(
 );
 export const countryFor = (value?: string | null) => byName.get(value?.trim().toLowerCase() || '');
 const targetCountries = countries.filter((country) => targetCodes.has(country.code));
+const capitalTimeZones: Record<string, string> = {
+  US: 'America/New_York',
+  AU: 'Australia/Sydney',
+  CA: 'America/Toronto',
+  GB: 'Europe/London',
+  SG: 'Asia/Singapore',
+  MY: 'Asia/Kuala_Lumpur',
+  NZ: 'Pacific/Auckland',
+  TH: 'Asia/Bangkok',
+  VN: 'Asia/Ho_Chi_Minh',
+  AE: 'Asia/Dubai',
+  ZA: 'Africa/Johannesburg',
+  GH: 'Africa/Accra',
+  PH: 'Asia/Manila',
+  PL: 'Europe/Warsaw',
+  NL: 'Europe/Amsterdam',
+  DE: 'Europe/Berlin',
+  IT: 'Europe/Rome',
+  BE: 'Europe/Brussels',
+  BR: 'America/Sao_Paulo',
+  CL: 'America/Santiago',
+  AR: 'America/Argentina/Buenos_Aires',
+  CO: 'America/Bogota',
+  MX: 'America/Mexico_City',
+  KR: 'Asia/Seoul',
+  JP: 'Asia/Tokyo',
+};
+
+export const marketTimeZone = (country: string) =>
+  capitalTimeZones[countryFor(country)?.code ?? ''];
+
 export const acquisitionMarkets = targetCountries.map((c) => ({
   label: c.code === 'AE' ? c.label + '（迪拜）' : c.label,
   value: c.name,

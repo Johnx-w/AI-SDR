@@ -276,6 +276,26 @@ for (const product_scope of ['all', 'specific']) {
   });
 }
 
+test('两个市场同时遇到同一官网时，只有一个写入和一次新增', async () => {
+  const f = fixture();
+  const svc = f.make();
+  try {
+    const [first, second] = await Promise.all([
+      svc.research(input, { source_url: site, operation_id: 'shared-company-us' }),
+      svc.research(
+        { ...input, country: 'Canada', query_mode: 'auto' },
+        { source_url: site, operation_id: 'shared-company-ca' },
+      ),
+    ]);
+    assert.equal(first.新增, 1);
+    assert.equal(second.outcome, 'no_new_candidates');
+    assert.equal(f.records.length, 1);
+    assert.equal(f.calls.filter((call) => call.url.endsWith('/responses')).length, 1);
+  } finally {
+    svc.close();
+  }
+});
+
 test('客户已入库但最新评估保存失败时可恢复，恢复不重复研究或写客户', async () => {
   const f = fixture({ automaticAssessment: true });
   const svc = f.make();

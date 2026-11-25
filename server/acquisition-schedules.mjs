@@ -182,17 +182,28 @@ export class AcquisitionSchedules {
         // Recover a crash between job creation and schedule bookkeeping without replaying it.
         let job = manager.findByKey(key);
         if (!job) {
-          // A minute-precision slot can run during that minute; missed slots never build a backlog.
+          // A retained slot keeps its original time and idempotency key while waiting.
           const missed = Date.parse(plan.nextRunAt) < minuteStart;
-          const skipped = missed
-            ? '执行时点已错过'
-            : !this.ready()
-              ? 'API 连接尚未配置'
-              : !this.available() || manager.active()
-                ? manager.active()?.status === 'paused'
-                  ? '当前任务执行结果待确认'
-                  : '当前任务尚未完成'
-                : '';
+          const blocker = manager.blockingJob(plan.input, plan.id);
+          if (plan.timing.waitForPrevious && (!this.ready() || !this.available() || blocker)) {
+            const waiting = !this.ready()
+              ? '等待 API 连接恢复'
+              : blocker?.status === 'paused'
+                ? '排队中，等待上一轮结果确认'
+                : '排队中，等待当前任务结束';
+            if (plan.lastError !== waiting) this.save({ ...plan, lastError: waiting });
+            break;
+          }
+          const skipped =
+            missed && !plan.timing.waitForPrevious
+              ? '执行时点已错过'
+              : !this.ready()
+                ? 'API 连接尚未配置'
+                : !this.available() || blocker
+                  ? blocker?.status === 'paused'
+                    ? '当前任务执行结果待确认'
+                    : '当前任务尚未完成'
+                  : '';
           if (skipped) {
             plan.lastError = `${skipped}，已跳过本次执行，不补跑`;
             plan.nextRunAt = nextOccurrence(plan.timing, missed ? minuteStart - 1 : now);
@@ -220,7 +231,9 @@ export class AcquisitionSchedules {
         plan.lastError = '';
         plan.nextRunAt = nextOccurrence(
           plan.timing,
-          Math.max(Date.parse(plan.nextRunAt), minuteStart - 1),
+          plan.timing.waitForPrevious
+            ? Date.parse(plan.nextRunAt)
+            : Math.max(Date.parse(plan.nextRunAt), minuteStart - 1),
         );
         if (!plan.nextRunAt) plan.status = 'completed';
         this.save(plan);
