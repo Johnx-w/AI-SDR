@@ -25,13 +25,13 @@ const batch = (messages, nextUid = 2, uidValidity = '1') => ({
 
 test('format upgrade rescans old cached mail once and enriches HTML without clearing original text or read state', async (t) => {
   const h = harness(t);
-  h.respond(batch([received('old-format')]));
+  h.respond(batch([received('old-format', { bodyFormatVersion: 2, inlineImages: [] })]));
   await h.inbox.sync({ mailboxId: 'one' });
   const id = h.inbox.list().items[0].id;
   h.inbox.markRead(id, false);
   const stateRow = h.service.db.prepare('SELECT account_key,data FROM mailbox_sync_state').get();
   const oldState = JSON.parse(stateRow.data);
-  delete oldState.contentVersion;
+  oldState.contentVersion = 2;
   h.service.db
     .prepare('UPDATE mailbox_sync_state SET data=? WHERE account_key=?')
     .run(JSON.stringify(oldState), stateRow.account_key);
@@ -40,6 +40,7 @@ test('format upgrade rescans old cached mail once and enriches HTML without clea
     return batch([
       received('old-format', {
         bodyText: 'Parser produced different text',
+        inlineImages: [{ cid: 'logo', contentType: 'image/png', contentBase64: 'aW1hZ2U=' }],
         bodyHtml: '<table><tr><td>Original styled content</td></tr></table>',
         bodyFormatVersion: 2,
         replyTo: ['reply@buyer.example'],
@@ -53,6 +54,7 @@ test('format upgrade rescans old cached mail once and enriches HTML without clea
   assert.equal(detail.conversation.unread, false);
   assert.equal(detail.messages[0].bodyText, 'Please share the product information.');
   assert.match(detail.messages[0].bodyHtml, /<table>/);
+  assert.equal(detail.messages[0].inlineImages[0].cid, 'logo');
   assert.deepEqual(detail.messages[0].replyTo, ['reply@buyer.example']);
   h.respond((_id, options) => {
     assert.equal(options.cursors.INBOX.nextUid, 2);
