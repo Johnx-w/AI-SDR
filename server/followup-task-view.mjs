@@ -4,7 +4,7 @@ import { legacyFollowUpStep } from './outreach-sequence-policy.mjs';
 const replyReason = '收到客户来信，结束本轮追信';
 const replied = "status='cancelled' AND reason=$received";
 const attention =
-  "(status IN ('unknown','candidate') OR (status='pending' AND (reason LIKE '%待核实%' OR reason LIKE '%核对后%')))";
+  "(status IN ('unknown','failed','bounced') OR (status='cancelled' AND (reason LIKE '%退信%' OR reason LIKE '%拒收%')) OR (status='pending' AND (reason LIKE '%待核实%' OR reason LIKE '%核对后%')))";
 const queues = {
   upcoming: "status='pending' AND dueAt >= $now AND dueAt < $until",
   review: attention,
@@ -50,6 +50,13 @@ const candidateSource = `SELECT 'candidate-'||d.id AS id,'candidate' AS status,
           OR (h.direction='outbound' AND coalesce(h.external_id,'')!=coalesce(d.data->>'messageId','')
             AND EXISTS (SELECT 1 FROM mailbox_thread_messages m WHERE m.id=h.id
               AND m.data->>'deliveryStatus' IN ('sent','accepted')))))`;
+const bounceSource = `SELECT 'bounce-'||d.id id,'bounced' status,d.data->>'customerId' customerId,
+  coalesce(nullif(d.data->>'companyName',''),d.data->>'to') customerName,d.data->>'to' recipient,
+  d.data->>'from' account,b.received_at dueAt,NULL step,NULL day,'原邮件已确认退信' reason,
+  c.id campaignId,c.data->>'name' campaignName,d.data->>'sentAt' firstSentAt
+  FROM outreach_delivery_bounces b JOIN outreach_deliveries d ON d.id=b.delivery_id
+  JOIN outreach_campaigns c ON c.id=d.campaign_id WHERE c.data->>'scope'=$scope AND c.data->>'mode'='production'
+  AND d.data->>'mode'='production' AND d.data->>'customerId'>''`;
 const fail = () => Object.assign(new Error('追信任务不存在'), { status: 404 });
 
 export function listFollowupTasks(service, params) {
@@ -70,13 +77,17 @@ export function listFollowupTasks(service, params) {
     start: range.asOf,
   };
   const base = `WITH tasks AS (${taskSource}
-    UNION ALL ${candidateSource}), scoped AS (
+    UNION ALL ${candidateSource} UNION ALL ${bounceSource}), scoped AS (
     SELECT * FROM tasks WHERE ($customer='' OR customerId=$customer)
       AND ($campaign='' OR campaignId=$campaign)), matched AS (
     SELECT * FROM scoped WHERE ($id='' OR id=$id)
       AND ($q='' OR instr(lower(concat_ws(' ',customerName,recipient,campaignName,'第 '||step||' 次追信')), $q)>0))`;
   // Use the dashboard's Beijing-day links and the four queue predicates on the same read model.
   const status = {
+    candidate: "status='candidate'",
+    scheduled: "status IN ('pending','sending')",
+    attention: "status IN ('unknown','failed')",
+    bounced: "status='bounced'",
     pending: "status NOT IN ('accepted','skipped','cancelled')",
     completed: "status='accepted'",
     skipped: "status='skipped'",
@@ -127,12 +138,16 @@ export function listFollowupTasks(service, params) {
 export function readFollowupTask(service, id) {
   const { db } = service;
   const candidate = id.startsWith('candidate-');
-  const sourceId = candidate ? id.slice('candidate-'.length) : id;
-  const source = candidate ? candidateSource + ' AND d.id=$id' : taskSource + ' AND f.id=$id';
+  const bounce = id.startsWith('bounce-');
+  const sourceId = candidate || bounce ? id.slice(id.indexOf('-') + 1) : id;
+  const source =
+    candidate || bounce
+      ? (bounce ? bounceSource : candidateSource) + ' AND d.id=$id'
+      : taskSource + ' AND f.id=$id';
   const row = db.prepare(source).get({ scope: service.getScope(), id: sourceId });
   if (!row) throw fail();
-  const task = candidate ? null : service.followUps.get(id);
-  const first = service.deliveryRecord(candidate ? sourceId : task.firstId);
+  const task = candidate || bounce ? null : service.followUps.get(id);
+  const first = service.deliveryRecord(candidate || bounce ? sourceId : task.firstId);
   if (!first) throw fail();
   const thread = db
     .prepare(
@@ -158,7 +173,7 @@ export function readFollowupTask(service, id) {
     bodyUnavailable: item.bodyUnavailable,
   });
   messages.push(mail(first, 'first', first.sentAt));
-  if (candidate) return { thread, messages };
+  if (candidate || bounce) return { thread, messages, recordedAt: bounce ? row.dueAt : undefined };
   if (task.subject || task.bodyText || task.bodyHtml)
     messages.push(
       mail(task, task.status === 'accepted' ? 'sent' : 'prepared', task.sentAt || task.attemptedAt),

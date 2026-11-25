@@ -1,23 +1,24 @@
 import { Fragment, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
-  CalendarDays,
+  Star,
   ChevronDown,
   ClipboardList,
   ListChecks,
   Mail,
-  MessageSquare,
+  UserRoundCheck,
   RefreshCw,
-  Settings2,
   ShieldQuestion,
 } from 'lucide-react';
 import { SectionWorkspace } from '../components/SectionWorkspace';
 import { PageHeading } from '../components/PageHeading';
 import { MailReplyHistory } from '../components/MailReplyHistory';
 import { MailMessageBody } from '../components/MailMessageBody';
-import { SequencePolicyPanel } from '../components/SequencePolicy';
+import { DeskList, PriorityAction } from '../components/FollowupDesk';
 import {
   customerBusinessApi,
+  followupDeskApi,
+  type DeskPage,
   type FollowupTaskDetail,
   type FollowupTaskPage,
   type FollowupTaskSummary,
@@ -33,25 +34,27 @@ const queues = [
     description: '展开任务查看邮件、执行记录和原会话。暂停或关闭追信请进入所属发送计划。',
   },
   {
-    id: 'upcoming',
-    label: '近期安排',
-    icon: CalendarDays,
-    description: '按时间查看接下来 7 天待执行的追信。',
-  },
-  {
     id: 'review',
     label: '待核实',
     icon: ShieldQuestion,
-    description: '查看已发首封、等待人工核对的客户，以及执行中需要核实的追信。',
+    description: '核对发送失败、被拒收或发送结果不确定的邮件。',
   },
   {
-    id: 'responded',
-    label: '回信后停止',
-    icon: MessageSquare,
-    description: '查看系统因客户来信停止的追信。',
+    id: 'approval',
+    label: '待审核',
+    icon: Mail,
+    description: '核对 AI 回复草稿和需要人工处理的客户来信。',
+  },
+  { id: 'priority', label: '重点跟进', icon: Star, description: '查看业务员手动标记的客户。' },
+  {
+    id: 'assigned',
+    label: '已接手',
+    icon: UserRoundCheck,
+    description: '查看人工接手的邮件会话、负责人和下一步。',
   },
 ] as const;
 const statuses = {
+  bounced: '已拒收',
   candidate: '待评估跟进',
   pending: '待执行',
   sending: '提交中',
@@ -72,9 +75,21 @@ const statusLabel = (task: FollowupTaskSummary) =>
   task.replied ? '回信后停止' : statuses[task.status];
 const when = (value?: string | null) => (value ? formatBeijingTime(value) : '—');
 const stepLabel = (task: FollowupTaskSummary) =>
-  task.status === 'candidate' ? '首封后跟进评估' : `第 ${task.step} 次追信`;
+  task.status === 'bounced'
+    ? '首封退信'
+    : task.status === 'candidate'
+      ? '首封后跟进评估'
+      : `第 ${task.step} 次追信`;
 
-function TaskDetail({ task, revision }: { task: FollowupTaskSummary; revision: number }) {
+function TaskDetail({
+  task,
+  revision,
+  refresh,
+}: {
+  task: FollowupTaskSummary;
+  revision: number;
+  refresh: () => void;
+}) {
   const [result, setResult] = useState<{ detail?: FollowupTaskDetail; error?: string }>({});
   const [selected, setSelected] = useState<string | null>(null);
   useEffect(() => {
@@ -111,6 +126,7 @@ function TaskDetail({ task, revision }: { task: FollowupTaskSummary; revision: n
             {task.campaignName || '查看所属计划'}
           </Link>
         </div>
+        <PriorityAction id={task.customerId} refresh={refresh} />
         {detail.thread && (
           <Link
             className="btn secondary"
@@ -197,12 +213,13 @@ function TaskDetail({ task, revision }: { task: FollowupTaskSummary; revision: n
 export function CustomerBusiness() {
   const [params, setParams] = useSearchParams();
   const view = params.get('view'),
-    replies = view === 'replies',
-    rules = view === 'rules';
+    replies = view === 'replies';
   const queue = queues.find((q) => q.id === params.get('queue')) || queues[0];
   const [refresh, setRefresh] = useState(0),
     [opened, setOpened] = useState(params.get('task')?.replace(/^task_/, '') || '');
+  const extra = ['approval', 'priority', 'assigned'].includes(queue.id);
   const key = params.toString();
+  const [desk, setDesk] = useState<{ key: string; data?: DeskPage; error?: string }>();
   const [query, setQuery] = useState(params.get('q') || '');
   const [result, setResult] = useState<{ key: string; data?: FollowupTaskPage; error?: string }>();
   function update(values: Record<string, string>) {
@@ -214,14 +231,19 @@ export function CustomerBusiness() {
     setParams(next);
   }
   useEffect(() => {
-    if (replies || rules) return;
+    if (replies) return;
     const c = new AbortController();
     let busy = false;
     async function load() {
       if (busy) return;
       busy = true;
       try {
-        const data = await customerBusinessApi.followups(new URLSearchParams(key), c.signal);
+        const filters = new URLSearchParams(key);
+        const [data, deskData] = await Promise.all([
+          customerBusinessApi.followups(extra ? new URLSearchParams() : filters, c.signal),
+          followupDeskApi.list(filters, c.signal),
+        ]);
+        if (!c.signal.aborted) setDesk({ key, data: deskData });
         if (!c.signal.aborted) setResult({ key, data });
       } catch (error) {
         if (!c.signal.aborted) setResult({ key, error: errorText(error) });
@@ -237,24 +259,32 @@ export function CustomerBusiness() {
       clearInterval(timer);
       c.abort();
     };
-  }, [key, refresh, replies, rules]);
+  }, [key, refresh, replies, extra]);
   const selectedTask = params.get('task');
   useEffect(() => setOpened(selectedTask?.replace(/^task_/, '') || ''), [selectedTask]);
   useEffect(() => setQuery(new URLSearchParams(key).get('q') || ''), [key]);
   const shown = result?.key === key ? result : undefined,
     data = shown?.data,
-    counts = data?.counts;
+    counts: Record<string, number> = {
+      ...data?.counts,
+      ...(desk?.key === key ? desk.data?.counts : {}),
+    };
+  const deskData = desk?.key === key ? desk.data : undefined;
+  const pagination = extra ? deskData : data;
   const scoped = params.has('customerId') || params.has('campaignId');
-  const title = replies ? '邮箱来信跟进' : rules ? '跟进规则' : queue.label;
+  const title = replies ? '邮箱来信跟进' : queue.label;
   return (
     <SectionWorkspace
       title="跟进任务"
       icon={ClipboardList}
-      selected={replies ? 'replies' : rules ? 'rules' : queue.id}
+      selected={replies ? 'replies' : queue.id}
       onSelect={(id) => {
         setOpened('');
         update({
-          view: id === 'rules' || id === 'replies' ? id : '',
+          view: '',
+          completed: '',
+          customerId: '',
+          campaignId: '',
           queue: queues.some((q) => q.id === id) && id !== 'all' ? id : '',
           page: '',
           task: '',
@@ -264,32 +294,20 @@ export function CustomerBusiness() {
           q: '',
         });
       }}
-      sections={[
-        { items: queues.map((q) => ({ ...q, count: counts?.[q.id] })) },
-        { group: '设置', items: [{ id: 'rules', label: '跟进规则', icon: Settings2 }] },
-        { group: '邮件', items: [{ id: 'replies', label: '邮箱来信跟进', icon: Mail }] },
-      ]}
+      sections={[{ group: '任务队列', items: queues.map((q) => ({ ...q, count: counts[q.id] })) }]}
     >
       <div className="business-page section-page">
         <PageHeading
           eyebrow="AUTOMATIC FOLLOW-UP"
           title={title}
-          description={
-            replies
-              ? '按原会话查看客户来信与回复。'
-              : rules
-                ? '编辑自动追信的时间和每一步的写作要求。'
-                : queue.description
-          }
+          description={replies ? '按原会话查看客户来信与回复。' : queue.description}
         >
           <button type="button" className="btn secondary" onClick={() => setRefresh((n) => n + 1)}>
             <RefreshCw size={15} />
             刷新
           </button>
         </PageHeading>
-        {rules ? (
-          <SequencePolicyPanel refreshToken={refresh} />
-        ) : replies ? (
+        {replies ? (
           <MailReplyHistory
             key={params.get('businessKind') || 'all'}
             revision={refresh}
@@ -314,30 +332,6 @@ export function CustomerBusiness() {
                   onChange={(e) => setQuery(e.target.value)}
                 />
               </label>
-              {queue.id === 'all' && (
-                <label>
-                  状态{' '}
-                  <select
-                    value={params.get('state') || 'all'}
-                    onChange={(e) => {
-                      setOpened('');
-                      update({
-                        state: e.target.value === 'all' ? '' : e.target.value,
-                        bucket: '',
-                        asOf: '',
-                        task: '',
-                        page: '',
-                      });
-                    }}
-                  >
-                    <option value="all">全部</option>
-                    <option value="pending">待执行与待核实</option>
-                    <option value="completed">服务商已接受</option>
-                    <option value="skipped">跳过</option>
-                    <option value="cancelled">已停止</option>
-                  </select>
-                </label>
-              )}
               <button className="btn secondary">搜索</button>
               {(scoped ||
                 params.has('task') ||
@@ -349,20 +343,66 @@ export function CustomerBusiness() {
                 </Link>
               )}
             </form>
+            {queue.id === 'all' && (
+              <nav className="followup-state-tabs" aria-label="追信状态">
+                {[
+                  ['', '全部'],
+                  ['candidate', '待评估'],
+                  ['scheduled', '待执行'],
+                  ['completed', '已发出'],
+                  ['cancelled', '已停止'],
+                  ['attention', '待核实'],
+                  ['bounced', '已拒收'],
+                  ['skipped', '已跳过'],
+                ].map(([value, label]) => (
+                  <button
+                    key={label}
+                    aria-pressed={(params.get('state') || '') === value}
+                    onClick={() =>
+                      update({ state: value, page: '', task: '', bucket: '', asOf: '' })
+                    }
+                  >
+                    {label}
+                  </button>
+                ))}
+              </nav>
+            )}
+            {queue.id === 'assigned' && (
+              <div className="business-filters">
+                {[
+                  ['', '进行中'],
+                  ['1', '已完成'],
+                ].map(([value, label]) => (
+                  <button
+                    key={label}
+                    className="btn secondary"
+                    aria-pressed={(params.get('completed') || '') === value}
+                    onClick={() => update({ completed: value, page: '' })}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {extra && !shown?.error && (
+              <DeskList
+                key={key}
+                queue={queue.id}
+                data={deskData}
+                completed={params.get('completed') === '1'}
+                refresh={() => setRefresh((n) => n + 1)}
+              />
+            )}
             {shown?.error && <p role="alert">{shown.error}</p>}
-            {!shown && <p role="status">正在读取任务…</p>}
-            {data && data.items.length === 0 && (
+            {!extra && !shown && <p role="status">正在读取任务…</p>}
+            {!extra && data && data.items.length === 0 && (
               <div className="followup-empty" role="status">
                 <Mail size={24} />
                 <strong>{scoped ? '该筛选范围暂无追信任务' : '暂无符合条件的追信任务'}</strong>
-                <p>
-                  {queue.id === 'upcoming'
-                    ? '此处只显示未来 7 天已排期的追信。'
-                    : '已发首封的客户可在「待核实」查看符合条件的跟进评估。'}
-                </p>
+                <p>可以调整搜索词或切换任务队列。</p>
               </div>
             )}
-            {!!data?.items.length && (
+            {!extra && !!data?.items.length && (
               <div className="followup-list">
                 <div className="followup-columns followup-list-head" aria-hidden="true">
                   <span>客户 / 收件邮箱</span>
@@ -397,32 +437,42 @@ export function CustomerBusiness() {
                       <span className={'followup-status ' + task.status}>{statusLabel(task)}</span>
                       <ChevronDown size={15} />
                     </button>
-                    {opened === task.id && <TaskDetail task={task} revision={refresh} />}
+                    {opened === task.id && (
+                      <TaskDetail
+                        task={task}
+                        revision={refresh}
+                        refresh={() => setRefresh((n) => n + 1)}
+                      />
+                    )}
                   </Fragment>
                 ))}
               </div>
             )}
-            {data && data.total > data.pageSize && (
-              <nav className="business-page-controls" aria-label="追信任务分页">
-                <button
-                  className="btn secondary"
-                  disabled={data.page === 1}
-                  onClick={() => update({ page: String(data.page - 1) })}
-                >
-                  上一页
-                </button>
-                <span>
-                  第 {data.page} / {Math.ceil(data.total / data.pageSize)} 页 · 共 {data.total} 条
-                </span>
-                <button
-                  className="btn secondary"
-                  disabled={data.page * data.pageSize >= data.total}
-                  onClick={() => update({ page: String(data.page + 1) })}
-                >
-                  下一页
-                </button>
-              </nav>
-            )}
+            {pagination?.total != null &&
+              pagination.page != null &&
+              pagination.pageSize != null &&
+              pagination.total > pagination.pageSize && (
+                <nav className="business-page-controls" aria-label="追信任务分页">
+                  <button
+                    className="btn secondary"
+                    disabled={pagination.page === 1}
+                    onClick={() => update({ page: String(pagination.page! - 1) })}
+                  >
+                    上一页
+                  </button>
+                  <span>
+                    第 {pagination.page} / {Math.ceil(pagination.total / pagination.pageSize)} 页 ·
+                    共 {pagination.total} 条
+                  </span>
+                  <button
+                    className="btn secondary"
+                    disabled={pagination.page * pagination.pageSize >= pagination.total}
+                    onClick={() => update({ page: String(pagination.page! + 1) })}
+                  >
+                    下一页
+                  </button>
+                </nav>
+              )}
           </>
         )}
       </div>

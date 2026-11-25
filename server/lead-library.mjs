@@ -131,6 +131,7 @@ export class LeadLibrary {
     this.isSyncing = isSyncing;
     this.closed = false;
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
+      CREATE TABLE IF NOT EXISTS followup_priority(scope TEXT,customer_id TEXT,marked_at TEXT,PRIMARY KEY(scope,customer_id));
       CREATE TABLE IF NOT EXISTS lead_library_customers (
         scope TEXT NOT NULL, record_id TEXT NOT NULL, position INTEGER NOT NULL,
         summary TEXT NOT NULL, detail TEXT NOT NULL, version TEXT NOT NULL DEFAULT '',
