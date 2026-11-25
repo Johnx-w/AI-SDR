@@ -16,6 +16,7 @@ import {
 } from './mail-reply-history.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
+const SYNC_CONTENT_VERSION = 3;
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const text = (value, maximum = 500) => (typeof value === 'string' ? value.slice(0, maximum) : '');
 const address = (value) => {
@@ -742,10 +743,10 @@ export class MailConversations {
         throw Object.assign(fail(409, '请先配置邮箱客户端授权码'), {
           code: 'MAILBOX_NOT_CONFIGURED',
         });
+      const restartWindow = extendWindow || rescan || prior.contentVersion !== SYNC_CONTENT_VERSION;
       const batch = await this.mailboxes.readMailbox(mailbox.id, {
-        // One bounded rescan upgrades previously cached text-only messages. Later
-        // pages continue from their returned cursors, using the original window.
-        cursors: !extendWindow && !rescan && prior.contentVersion === 2 ? prior.cursors || {} : {},
+        // Re-read the original window in bounded pages when the reader gains new content.
+        cursors: restartWindow ? {} : prior.cursors || {},
         since,
       });
       const current = this.mailboxes.list().find((item) => item.id === mailbox.id);
@@ -761,7 +762,7 @@ export class MailConversations {
       this.transaction(() => {
         // Another reader may have committed this (or a newer) page while IMAP was open.
         if (!checkpointIsCurrent()) return;
-        const cursors = extendWindow || rescan ? {} : { ...prior.cursors };
+        const cursors = restartWindow ? {} : { ...prior.cursors };
         for (const folder of batch.folders) {
           if (
             !folder.path ||
@@ -801,7 +802,7 @@ export class MailConversations {
           batch.folders.filter((folder) => !folder.sent).flatMap((folder) => folder.messages),
         );
         this.saveState(key, {
-          contentVersion: 2,
+          contentVersion: SYNC_CONTENT_VERSION,
           cursors,
           since,
           lastSyncAt: iso(this.now()),

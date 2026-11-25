@@ -629,7 +629,7 @@ test('CID reads only referenced supported image parts, validates signatures and 
     Buffer.from('synthetic-image'),
   ]);
   const bodyHtml =
-    '<p>Brand</p><img src="cid:logo@brand"><img src="cid:unsafe@brand"><img src="cid:fake@brand">';
+    '<p>Brand</p><img src="cid:logo@brand"><img src="cid:unsafe@brand"><img src="cid:fake@brand"><img src="cid:ali-logo"><img src="cid:not-image">';
   const structure = {
     type: 'multipart/related',
     childNodes: [
@@ -679,13 +679,28 @@ test('CID reads only referenced supported image parts, validates signatures and 
         encoding: '8bit',
         size: 19,
       },
+      ...['ali-logo', 'not-image'].map((cid, index) => ({
+        part: String(7 + index),
+        type: 'application/octet-stream',
+        id: `<${cid}>`,
+        disposition: 'inline',
+        dispositionParameters: { filename: 'image.png' },
+        encoding: 'base64',
+        size: png.toString('base64').length,
+      })),
     ],
   };
   const h = fixture({
     inbox: [
       row(1, {
         structure,
-        parts: { 1: bodyHtml, 2: png.toString('base64'), 6: '<script>bad</script>' },
+        parts: {
+          1: bodyHtml,
+          2: png.toString('base64'),
+          6: '<script>bad</script>',
+          7: png.toString('base64'),
+          8: Buffer.from('not an image').toString('base64'),
+        },
       }),
     ],
     sentFolder: false,
@@ -694,6 +709,7 @@ test('CID reads only referenced supported image parts, validates signatures and 
   assert.equal(message.bodyHtml, bodyHtml);
   assert.deepEqual(message.inlineImages, [
     { cid: 'logo@brand', contentType: 'image/png', contentBase64: png.toString('base64') },
+    { cid: 'ali-logo', contentType: 'image/png', contentBase64: png.toString('base64') },
   ]);
   assert.deepEqual(message.attachments, [
     { name: 'catalogue.pdf', contentType: 'application/pdf', size: 1000 },
@@ -702,7 +718,7 @@ test('CID reads only referenced supported image parts, validates signatures and 
     h.calls
       .filter((call) => call[0] === 'fetch' && call[3].bodyParts)
       .flatMap((call) => call[3].bodyParts.map((part) => part.key)),
-    ['1', '2', '6'],
+    ['1', '2', '6', '7', '8'],
   );
 });
 

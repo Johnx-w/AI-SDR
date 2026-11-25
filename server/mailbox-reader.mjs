@@ -9,7 +9,7 @@ const MAX_MESSAGES = 50;
 const MAX_INLINE_IMAGE_BYTES = 512 * 1024;
 const MAX_INLINE_TOTAL_BYTES = 2 * 1024 * 1024;
 const MAX_INLINE_WIRE_BYTES = MAX_INLINE_IMAGE_BYTES * 3 + 4096;
-const INLINE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+const INLINE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 export class MailboxReadError extends Error {
   constructor(code = 'MAILBOX_READ_FAILED') {
     const failure = mailSyncFailure({ code });
@@ -84,7 +84,11 @@ function contentId(value) {
 function textParts(structure, parts = [], attachments = [], inlineParts = []) {
   if (!structure || typeof structure !== 'object') return { parts, attachments, inlineParts };
   const type = structure.type?.toLowerCase();
-  if (INLINE_TYPES.has(type) && contentId(structure.id)) inlineParts.push(structure);
+  // AliMail marks pasted and signature images as generic inline files.
+  const genericInline =
+    type === 'application/octet-stream' && structure.disposition?.toLowerCase() === 'inline';
+  if ((INLINE_TYPES.includes(type) || genericInline) && contentId(structure.id))
+    inlineParts.push(structure);
   if (String(structure.disposition).toLowerCase() === 'attachment') {
     attachments.push({
       name: clean(structure.dispositionParameters?.filename || structure.parameters?.name, 500),
@@ -258,11 +262,15 @@ export function createMailboxReader({
       if (
         !Buffer.isBuffer(content) ||
         content.length > MAX_INLINE_IMAGE_BYTES ||
-        inlineBytes + content.length > MAX_INLINE_TOTAL_BYTES ||
-        !imageSignature(type, content)
+        inlineBytes + content.length > MAX_INLINE_TOTAL_BYTES
       )
         continue;
-      inlineImages.push({ cid, contentType: type, contentBase64: content.toString('base64') });
+      const contentType =
+        type === 'application/octet-stream'
+          ? INLINE_TYPES.find((candidate) => imageSignature(candidate, content))
+          : imageSignature(type, content) && type;
+      if (!contentType) continue;
+      inlineImages.push({ cid, contentType, contentBase64: content.toString('base64') });
       inlineBytes += content.length;
       savedCids.add(cid);
     }
