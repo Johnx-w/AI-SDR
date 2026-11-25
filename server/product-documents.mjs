@@ -1,7 +1,8 @@
+import { markdownMaterial } from './markdown-material.mjs';
 import { WorkbookPhotos } from './workbook-photos.mjs';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { isPagedMaterial } from '../src/domain/material-upload.mjs';
-import { readDeepSeekMaterial, materialMode } from './deepseek-materials.mjs';
+import { readDeepSeekMaterial, readVisualAsset, materialMode } from './deepseek-materials.mjs';
 import sharp from 'sharp';
 import { extractParameters } from './parameter-extraction.mjs';
 import { parameterMode, mentionsModel } from './model-parameters.mjs';
@@ -109,7 +110,20 @@ function extracted(data, contentType) {
 }
 
 async function documentExtraction(file, options) {
+  if (
+    options.material &&
+    file.contentType === types.md &&
+    options.mode !== parameterMode &&
+    /!\[|^\s*\|/mu.test(file.bytes.toString('utf8'))
+  )
+    return markdownMaterial(file);
   if (options.material && options.mode === parameterMode) return extractParameters(file, options);
+  if (
+    options.material &&
+    options.mode === 'rich_layout_recognition' &&
+    /^(image|video)\//u.test(file.contentType)
+  )
+    return readVisualAsset(file, options);
   if (options.material && isPagedMaterial(file.contentType))
     return readDeepSeekMaterial(file, options);
   if (file.contentType.startsWith('image/')) {
@@ -119,7 +133,7 @@ async function documentExtraction(file, options) {
       throw fail(422, '无法读取图片，请检查原件。');
     }
   }
-  if (file.contentType === workbookType) return parseWorkbook(file.bytes);
+  if (file.contentType === workbookType) return parseWorkbook(file.bytes, options);
   const extraction =
     file.contentType.startsWith('video/') || file.contentType.startsWith('image/')
       ? {
@@ -279,10 +293,45 @@ export class ProductDocuments {
   prepareReplacement(file, options) {
     return this.runExtraction(file, () => documentExtraction(file, options));
   }
-  saveExtraction(id, { extraction, rows }, replace = false) {
+  saveExtraction(id, { extraction, rows, photos }, replace = false) {
     // Also used inside the transaction that switches the active version.
     this.db.exec('SAVEPOINT material_extraction');
     try {
+      if (replace && rows)
+        this.db.prepare('DELETE FROM product_workbook_rows WHERE document_id=?').run(id);
+      if (photos) {
+        const existing = this.db.prepare(
+          'SELECT id,active,origin,sha FROM workbook_image_assets WHERE document_id=? AND sheet=? AND item=? AND slot=? ORDER BY rowid DESC LIMIT 1',
+        );
+        const retained = new Set();
+        const insert = this.db.prepare(
+          'INSERT INTO workbook_image_assets(id,document_id,sheet,item,slot,origin,sha,jpeg) VALUES(?,?,?,?,?,?,?,?)',
+        );
+        const slots = new Map();
+        for (const { sheet, item, origin, jpeg } of photos) {
+          const k = JSON.stringify([sheet, item]),
+            n = (slots.get(k) ?? 0) + 1;
+          slots.set(k, n);
+          const slot = n === 1 ? '主图' : '附图 ' + n;
+          const prior = existing.get(id, sheet, item, slot),
+            sha = createHash('sha256').update(jpeg).digest('hex');
+          if (prior && (!prior.origin.startsWith('原件 · ') || prior.sha === sha)) {
+            retained.add(prior.id);
+            continue;
+          }
+          if (prior?.active)
+            this.db.prepare('UPDATE workbook_image_assets SET active=0 WHERE id=?').run(prior.id);
+          const photoId = 'kbphoto_' + randomUUID();
+          insert.run(photoId, id, sheet, item, slot, '原件 · ' + origin, sha, jpeg);
+          retained.add(photoId);
+        }
+        if (replace)
+          this.db
+            .prepare(
+              "UPDATE workbook_image_assets SET active=0 WHERE document_id=? AND active=1 AND origin LIKE '原件 · %' AND id NOT IN(SELECT value FROM json_each(?))",
+            )
+            .run(id, JSON.stringify([...retained]));
+      }
       if (rows) {
         const insert = this.db.prepare(
           'INSERT OR REPLACE INTO product_workbook_rows VALUES(?,?,?,?,?)',
@@ -324,7 +373,11 @@ export class ProductDocuments {
     const structured = material && file.parseMode === parameterMode;
     if (material && mode && (mode === parameterMode) !== structured)
       throw fail(400, '请以对应解析方式重新导入文件');
-    const paged = material && (structured || isPagedMaterial(file.contentType));
+    const paged =
+      material &&
+      (structured ||
+        isPagedMaterial(file.contentType) ||
+        file.parseMode === 'rich_layout_recognition');
     const chosen = structured
       ? parameterMode
       : paged

@@ -1,4 +1,7 @@
-import readWorkbook from 'read-excel-file/node';
+import { interpretSheet } from './workbook-layout.mjs';
+import { workbookPictures } from './material-pictures.mjs';
+import { hasModelHeader } from './model-parameters.mjs';
+import * as XLSX from 'xlsx/xlsx.mjs';
 
 export const workbookType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -34,27 +37,115 @@ export function checkOfficeArchive(bytes) {
   }
 }
 
-export async function parseWorkbook(bytes) {
+export async function parseWorkbook(bytes, options = {}) {
   checkOfficeArchive(bytes);
   let sheets;
   try {
-    // Excel displays numeric values to 15 significant digits. Text model codes stay verbatim.
-    sheets = await readWorkbook(bytes, {
-      parseNumber: (value) => String(Number(Number(value).toPrecision(15))),
+    const book = XLSX.read(bytes, {
+      type: 'buffer',
+      dense: true,
+      cellNF: true,
+      cellFormula: false,
     });
-  } catch {
+    sheets = book.SheetNames.map((sheet) => {
+      const ws = book.Sheets[sheet],
+        cells = ws['!data'] ?? [];
+      if (cells.length > 20000 || cells.some((row) => row && row.length > 150))
+        throw fail(413, '每张工作表最多 20000 行、150 列');
+      const data = Array.from(cells, (row) =>
+        Array.from(row ?? [], (cell) =>
+          cell?.v == null
+            ? null
+            : cell.t === 'n' && (!cell.z || cell.z === 'General')
+              ? String(Number(cell.v.toPrecision(15)))
+              : (cell.w ?? String(cell.v)),
+        ),
+      );
+      return { sheet, data, merges: ws['!merges'] ?? [] };
+    });
+  } catch (error) {
+    if (error.status) throw error;
     throw fail(400, '无法解析此 XLSX，请检查文件或用 Excel 另存为工作簿');
   }
   const summary = [],
-    rows = [];
-  for (const { sheet, data } of sheets) {
+    rows = [],
+    owners = new Map(),
+    warnings = [],
+    facts = [];
+  for (const { sheet, data, merges } of sheets) {
     const headerIndex = data.findIndex((row) => row.some((value) => value !== null));
     if (headerIndex < 0) continue;
-    const headers = data[headerIndex];
-    if (data.length > 20000 || headers.length > 150)
+    let headers = [],
+      ownerCol = -1,
+      acrossItems = null;
+    const sheetOwners = new Map();
+    owners.set(sheet, sheetOwners);
+    if (data.length > 20000 || data.some((row) => row.length > 150))
       throw fail(413, '每张工作表最多 20000 行、150 列');
+    const inherited = new Map();
+    for (const m of merges) {
+      if (m.s.c !== m.e.c || m.e.r >= data.length) continue;
+      for (let r = m.s.r + 1; r <= m.e.r; r++)
+        inherited.set(r + ',' + m.s.c, { row: m.s.r, value: data[m.s.r]?.[m.s.c] });
+    }
     const start = rows.length;
-    for (let index = headerIndex + 1; index < data.length; index++) {
+    for (let index = headerIndex; index < data.length; index++) {
+      const row = data[index],
+        filled = row.filter((v) => v != null && v !== '');
+      const code = row.findIndex(hasModelHeader);
+      const name = row.findIndex((v) =>
+        /^(产品名称|品名|系列|product name|product|item name|part name|名称)$/iu.test(
+          String(v ?? '').trim(),
+        ),
+      );
+      const generic = row.some((v) =>
+        /^(项目|问题|项目名称|参数名|字段|品类|category|question|description|规格|material)$/iu.test(
+          String(v ?? '').trim(),
+        ),
+      );
+      const next = data[index + 1] ?? [];
+      const across =
+        code === 0 &&
+        filled.length > 1 &&
+        hasModelHeader(row[0]) &&
+        (filled.length === 2 || next.slice(1).some((v) => v && /\d/u.test(v))) &&
+        !row
+          .slice(1)
+          .some((v) =>
+            /^(材质|宽度|型号|适用条件|规格|颜色|width|material|color)|来源|参数|厚度|宽度|单价/iu.test(
+              v ?? '',
+            ),
+          ) &&
+        row.slice(1).some((v) => /\d/u.test(v ?? ''));
+      if (across) {
+        acrossItems = row;
+        headers = [];
+        ownerCol = -1;
+      }
+      if (acrossItems && !across && filled.length && row[0]) {
+        for (let col = 1; col < row.length; col++)
+          if (row[col] && acrossItems[col]) {
+            facts.push({
+              page: 1,
+              location: sheet + '!' + columnName(col) + (index + 1),
+              text: acrossItems[col] + ' · ' + row[0] + ' · ' + row[col],
+            });
+          }
+      }
+      if (acrossItems)
+        for (let col = 1; col < acrossItems.length; col++)
+          if (acrossItems[col]) sheetOwners.set(index + 1 + ',' + col, acrossItems[col]);
+      if (
+        !across &&
+        filled.length > 1 &&
+        filled.every((v) => typeof v === 'string') &&
+        (code >= 0 || name >= 0 || generic)
+      ) {
+        headers = row;
+        ownerCol = code >= 0 ? code : name;
+        acrossItems = null;
+        continue;
+      }
       const cells = data[index].flatMap((value, col) =>
         value === null || value === ''
           ? []
@@ -74,20 +165,44 @@ export async function parseWorkbook(bytes) {
       ) {
         cells.splice(2, 0, { ref: 'C' + (index + 1), field: '参考价格', value: '' });
       }
+      const merged = inherited.get(index + ',' + ownerCol);
+      if (cells.length && !row[ownerCol] && merged?.value) {
+        cells.unshift({
+          ref: columnName(ownerCol) + (merged.row + 1),
+          field: headers[ownerCol],
+          value: merged.value,
+        });
+        sheetOwners.set(index + 1, merged.value);
+      }
+      if (ownerCol >= 0 && row[ownerCol] != null && row[ownerCol] !== '') {
+        const identity = cells.findIndex((c) => c.ref === columnName(ownerCol) + (index + 1));
+        if (identity >= 0) {
+          const [first] = cells.splice(identity, 1);
+          cells.unshift(first);
+          sheetOwners.set(index + 1, first.value);
+        }
+      }
       if (cells.length) rows.push([sheet, index + 1, cells[0].value, JSON.stringify(cells)]);
+    }
+    if (!headers.length && !acrossItems && rows.length > start && options.material && options.env) {
+      try {
+        facts.push(...(await interpretSheet(sheet, rows.slice(start), options)));
+      } catch {
+        warnings.push(sheet + ' · 已保留原始单元格，产品字段关系需核对。');
+      }
     }
     summary.push({ name: sheet, rows: rows.length - start });
   }
-  if (!rows.length || rows.length > 30000)
-    throw fail(400, '工作簿须包含表头及 1 至 30000 条资料行');
+  if (!rows.length || rows.length > 30000) throw fail(400, '工作簿须包含 1 至 30000 条非空资料行');
   const extraction = {
     sheets: summary,
-    facts: [],
-    warnings: [],
-    model: 'read-excel-file',
+    facts,
+    warnings,
+    model: 'SheetJS',
     extractedAt: new Date().toISOString(),
   };
-  return { extraction, rows };
+  const photos = await workbookPictures(bytes, owners, warnings);
+  return { extraction, rows, photos };
 }
 
 export function workbookPage(db, productId, documentId, { sheet, page = 1, q = '' }) {

@@ -239,7 +239,12 @@ export async function handleMaterials({
       onChange?.();
       return data;
     };
-    if ((isPagedMaterial(type) || q.mode === 'model_parameters') && respondAsync)
+    if (
+      (isPagedMaterial(type) ||
+        q.mode === 'model_parameters' ||
+        q.mode === 'rich_layout_recognition') &&
+      respondAsync
+    )
       return json(response, 202, processMaterial(jobs, save));
     return json(response, 201, await save());
   }

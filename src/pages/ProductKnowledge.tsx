@@ -92,7 +92,7 @@ export function ProductKnowledgePage() {
     [error, setError] = useState(''),
     [loading, setLoading] = useState(true),
     [tick, setTick] = useState(0);
-  const [parseMode, setParseMode] = useState<ParseMode>('model_parameters');
+  const [parseMode, setParseMode] = useState<ParseMode>('rich_layout_recognition');
   const [importing, setImporting] = useState(false),
     [busy, setBusy] = useState(false),
     [drag, setDrag] = useState(false),
@@ -777,10 +777,7 @@ export function ProductKnowledgePage() {
               </header>
               <MaterialParseMode value={parseMode} onChange={setParseMode} />
               {parseMode === 'model_parameters' && (
-                <p>
-                  Excel 第一列填型号，参数值带单位。来源列填写“文件名.pdf，第 4 页”，可同时选择该
-                  PDF。
-                </p>
+                <p>系统按表头识别型号和参数。可同时选择表中引用的来源 PDF。</p>
               )}
               <button
                 className="kb-picker"
@@ -802,7 +799,7 @@ export function ProductKnowledgePage() {
               />
               <p>
                 文档和图片每份最多 {documentLimitMiB} MiB，视频 {videoLimitMiB} MiB。PDF、DOCX、PPTX
-                由 DeepSeek 解析。独立图片和视频保存为附件素材。
+                由 DeepSeek 解析。图片和视频保留原件。
               </p>
             </dialog>
           )}

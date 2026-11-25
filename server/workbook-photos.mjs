@@ -258,6 +258,12 @@ export class WorkbookPhotos {
         ...sourceItems.filter((t) => typeof t === 'string' && mentionsModel(query, t)),
       ]),
     ];
+    for (const r of this.db
+      .prepare(
+        'SELECT DISTINCT item FROM workbook_image_assets WHERE active=1 AND document_id IN (SELECT value FROM json_each(?)) AND instr(lower(?),lower(item))>0',
+      )
+      .all(JSON.stringify(documents), query))
+      if (mentionsModel(query, r.item)) terms.push(r.item);
     if (!terms.length) return [];
     const rows = this.db
       .prepare(

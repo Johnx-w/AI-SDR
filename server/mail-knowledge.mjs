@@ -181,7 +181,12 @@ export function answerMailQuestion(
     const priorHits = hits.length;
     const documents = knowledge.documents
       .list(product.id)
-      .filter((d) => d.parseMode !== 'model_parameters' && !d.referencePages);
+      .filter(
+        (d) =>
+          (d.parseMode !== 'model_parameters' ||
+            (d.extraction?.sheets && !d.extraction?.parameters)) &&
+          !d.referencePages,
+      );
     // Human-reviewed passages keep their source document and original locator.
     for (const fact of product.sourceFacts || []) {
       const doc = documents.find(

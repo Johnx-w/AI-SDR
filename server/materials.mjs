@@ -232,7 +232,8 @@ export class MaterialLibrary {
     const chosen =
       mode === parameterMode && !contentType.startsWith('video/')
         ? parameterMode
-        : isPagedMaterial(contentType)
+        : isPagedMaterial(contentType) ||
+            (/^(image|video)\//u.test(contentType) && mode === 'rich_layout_recognition')
           ? materialMode(mode)
           : undefined;
     const fingerprint = createHash('sha256')
@@ -282,14 +283,18 @@ export class MaterialLibrary {
         const digest = createHash('sha256').update(bytes).digest('hex');
         const matches = this.db
           .prepare(
-            "SELECT id,product_id,json_extract(metadata,'$.parseMode') parseMode FROM product_documents WHERE json_extract(metadata,'$.sha256')=? AND json_extract(metadata,'$.contentType')=? AND json_type(metadata,'$.referencePages') IS NULL ORDER BY rowid",
+            "SELECT id,product_id,json_extract(metadata,'$.parseMode') parseMode,json_extract(extraction,'$.model') model FROM product_documents WHERE json_extract(metadata,'$.sha256')=? AND json_extract(metadata,'$.contentType')=? AND json_type(metadata,'$.referencePages') IS NULL ORDER BY rowid",
           )
           .all(digest, contentType);
         for (const d of matches) {
           const p = this.get(d.product_id),
             sites = scoped(p, this.sites);
           if (
-            (chosen === parameterMode) !== (d.parseMode === parameterMode) ||
+            ((chosen === parameterMode) !== (d.parseMode === parameterMode) &&
+              !(formats[contentType] === 'Excel' && d.model === 'failed')) ||
+            (chosen === 'rich_layout_recognition' &&
+              /^(image|video)\//u.test(contentType) &&
+              !d.parseMode) ||
             !p.documentIds?.includes(d.id) ||
             (site ? !sites.includes(site) : p.sourceUrl || p.brands?.length)
           )
@@ -352,7 +357,9 @@ export class MaterialLibrary {
           env,
           fetchImpl,
           material: true,
-          mode: chosen,
+          mode:
+            this.k.documents.list(record.id).find((d) => d.id === record.documentId)?.parseMode ??
+            chosen,
           onPage,
         });
     } catch (e) {
@@ -451,7 +458,12 @@ export class MaterialLibrary {
       !p.parameterSet &&
       this.k.documents
         .list(id)
-        .some((d) => d.id === p.documentIds?.[0] && d.parseMode === parameterMode)
+        .some(
+          (d) =>
+            d.id === p.documentIds?.[0] &&
+            d.parseMode === parameterMode &&
+            (!d.extraction?.sheets || d.extraction?.parameters),
+        )
     )
       throw fail(400, '请先选择并确认型号参数');
     if (value.adoptDocumentId) {

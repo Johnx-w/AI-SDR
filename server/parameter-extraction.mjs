@@ -36,7 +36,7 @@ function parseXml(xml, onOpen, onText, onClose) {
   });
   parser.parse(xml);
 }
-async function officeBlocks(file) {
+export async function officeBlocks(file) {
   checkOfficeArchive(file.bytes);
   const zip = await Open.buffer(file.bytes);
   const files = new Map(zip.files.map((entry) => [entry.path, entry]));
@@ -93,10 +93,16 @@ async function officeBlocks(file) {
       for (const p of paragraphs) emit(p.text, p.ref);
       paragraphs = [];
     };
+    const placements = [];
     parseXml(
       await xml(path),
-      (tag) => {
+      (tag, attributes) => {
         const t = tag.split(':').at(-1);
+        if (t === 'blip') {
+          const rid = attributes()['r:embed'];
+          if (rid)
+            placements.push({ rid, at: paragraph, row: inCell ? row : null, headers: table[0] });
+        }
         if (t === 'tbl') {
           flush();
           table = [];
@@ -108,6 +114,7 @@ async function officeBlocks(file) {
           inCell = true;
         }
         if (t === 'p') para = '';
+        if (t === 'br') para += '\n';
         if (t === 't') reading = true;
       },
       (s) => {
@@ -134,8 +141,8 @@ async function officeBlocks(file) {
               ref = locator + ' · 表 ' + tableNo + ' 第 ' + (n + 1) + ' 行',
               text = headers.join(' | ') + '\n' + row.join(' | ');
             if (
-              hasModelHeader(headers[0]) &&
-              row[0] &&
+              headers.some(hasModelHeader) &&
+              row[headers.findIndex(hasModelHeader)] &&
               row.length === headers.length &&
               headers.every(Boolean)
             ) {
@@ -167,14 +174,42 @@ async function officeBlocks(file) {
             a.Type?.endsWith('/image') &&
             a.TargetMode !== 'External'
           )
-            images.push(posix.normalize(posix.join(posix.dirname(path), a.Target)));
+            for (const p of placements.filter((p) => p.rid === a.Id))
+              images.push({
+                ...p,
+                key: posix.resolve('/', posix.dirname(path), a.Target).slice(1),
+              });
         },
         () => {},
         () => {},
       );
-      for (const [i, key] of images.entries()) {
+      for (const [i, { key, at, row, headers }] of images.entries()) {
         const entry = files.get(key);
-        if (entry) blocks.push({ imageEntry: entry, ref: locator + ' · 插图 ' + (i + 1), page });
+        if (entry && at !== undefined) {
+          const item =
+            row?.[headers?.findIndex(hasModelHeader)] ||
+            row?.[headers?.findIndex((h) => /^(产品名称|品名|product name)$/iu.test(h))];
+          const context = row
+            ? row.join(' · ')
+            : blocks
+                .filter(
+                  (b) =>
+                    b.page === page &&
+                    b.text &&
+                    (!word ||
+                      [at, at + 1, at + 2].some((n) => b.ref === locator + ' · 第 ' + n + ' 段')),
+                )
+                .map((b) => b.text)
+                .join('\n')
+                .slice(0, 1800);
+          blocks.push({
+            imageEntry: entry,
+            item,
+            text: context,
+            ref: locator + ' · 插图 ' + (i + 1),
+            page,
+          });
+        }
       }
     }
   }
@@ -345,9 +380,25 @@ export async function extractParameters(file, { env = {}, fetchImpl = fetch, onP
     if (batch.length) await recognize(batch);
   }
   if (file.contentType === workbookType) {
-    const book = await parseWorkbook(file.bytes);
+    const book = await parseWorkbook(file.bytes, { material: true, env, fetchImpl });
     rows = book.rows;
     items = workbookParameters(rows);
+    if (
+      !items.length ||
+      book.rows.some((r) => {
+        const cells = JSON.parse(r[3]);
+        return (
+          cells.length > 1 &&
+          !hasModelHeader(cells[0].field) &&
+          !/^(产品名称|品名|product name)$/iu.test(cells[0].field)
+        );
+      })
+    )
+      return book;
+    return {
+      ...book,
+      extraction: { ...book.extraction, parameters: prepareParameters(items), mode: parameterMode },
+    };
   } else if (file.contentType === types.pdf) {
     await withPdf(file.bytes, async (doc) => {
       pageCount = doc.getPageCount();
@@ -417,7 +468,7 @@ export async function extractParameters(file, { env = {}, fetchImpl = fetch, onP
       warnings,
       pageCount,
       mode: parameterMode,
-      model: file.contentType === workbookType ? 'read-excel-file' : 'DeepSeek',
+      model: 'DeepSeek',
       extractedAt: new Date().toISOString(),
     },
   };

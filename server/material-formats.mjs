@@ -100,11 +100,11 @@ export async function extractText(file) {
     }
   } else paragraphs = textParagraphs(file.bytes);
   const facts = [];
-  let truncated = false,
+  let extractedBytes = 0,
     number = 0;
   const headings = [];
   let fence = '';
-  paragraphsLoop: for (const p of paragraphs) {
+  for (const p of paragraphs) {
     number++;
     const text = p.trim();
     if (!text) continue;
@@ -121,10 +121,9 @@ export async function extractText(file) {
     const context = headings.filter(Boolean).join(' / ').slice(0, 160);
     let part = 0;
     for (const chunk of splitMaterialText(text)) {
-      if (facts.length >= 200) {
-        truncated = true;
-        break paragraphsLoop;
-      }
+      extractedBytes += Buffer.byteLength(chunk) + 200;
+      if (extractedBytes > 4 * 1024 * 1024)
+        throw fail('正文超过单份可解析容量，请按章节拆分导入。');
       const location = '第 ' + number + ' 段' + (text.length > 1600 ? ' · 分块 ' + ++part : '');
       facts.push({
         text: chunk,
@@ -136,7 +135,7 @@ export async function extractText(file) {
   if (!facts.length) throw fail('正文没有可读文字，请检查原件。');
   return {
     facts,
-    warnings: truncated ? ['正文超过预览上限，仅显示前 200 个片段。完整内容可下载原件。'] : [],
+    warnings: [],
     model: 'local-text',
     extractedAt: new Date().toISOString(),
   };
