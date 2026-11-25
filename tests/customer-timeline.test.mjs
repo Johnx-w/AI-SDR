@@ -34,9 +34,39 @@ test('each customer timeline returns exactly the replies from its own customer',
     });
   }
 
-  for (const [customerId, expectedSenders] of [
-    ['north', ['north@client.example']],
-    ['south', ['south@client.example']],
+  svc.conversations.putMessage(box, {
+    direction: 'outbound',
+    source: 'imap',
+    from: box.email,
+    to: 'north@client.example',
+    subject: 'Supplier enquiry',
+    bodyText: 'Are you accepting new suppliers?',
+    messageId: '<enquiry@brand.example>',
+    occurredAt: '2026-11-24T10:20:00Z',
+    deliveryStatus: 'sent',
+  });
+  svc.conversations.putMessage(box, {
+    direction: 'inbound',
+    source: 'imap',
+    from: 'north@client.example',
+    to: box.email,
+    subject: 'Request received',
+    bodyText: 'Automatic reply: we received your message.',
+    messageId: '<receipt@client.example>',
+    inReplyTo: '<enquiry@brand.example>',
+    occurredAt: '2026-11-24T11:00:00Z',
+    deliveryStatus: 'received',
+  });
+
+  for (const [customerId, expectedReplies] of [
+    [
+      'north',
+      [
+        ['north@client.example', 'notification'],
+        ['north@client.example', 'received'],
+      ],
+    ],
+    ['south', [['south@client.example', 'received']]],
     ['quiet', []],
   ]) {
     const url = new URL(
@@ -48,10 +78,20 @@ test('each customer timeline returns exactly the replies from its own customer',
     const { items } = await response.json();
     const replies = items.filter((event) => event.kind === 'received');
     assert.deepEqual(
-      replies.map((event) => event.note),
-      expectedSenders,
+      replies.map((event) => [event.note, event.state]),
+      expectedReplies,
       customerId,
     );
+    for (const reply of replies) {
+      const original = svc.conversations
+        .detail(reply.thread)
+        .messages.find((m) => m.id === reply.id);
+      assert.equal(original?.subject, reply.title);
+    }
+    if (customerId === 'north') {
+      const sent = items.find((event) => event.kind === 'mail');
+      assert.equal(replies[0].thread, sent?.thread);
+    }
   }
 });
 
