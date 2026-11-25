@@ -21,7 +21,7 @@ const renderAt = (Component, path) =>
 
 test('任务页只读且状态筛选可直达，不展示采购需求、沟通录入或完成按钮', () => {
   const html = renderAt(CustomerBusiness, '/business?tab=tasks&state=skipped');
-  assert.match(html, /<option value="skipped" selected="">跳过<\/option>/);
+  assert.match(html, /<button aria-pressed="true">已跳过<\/button>/);
   assert.match(html, /所属发送计划/);
   assert.doesNotMatch(html, /新增任务|录入沟通|新增需求|标记完成/);
 });

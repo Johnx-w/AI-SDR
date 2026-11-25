@@ -189,6 +189,7 @@ export interface FollowupTaskSummary {
   campaignId: string;
   campaignName: string;
   status:
+    | 'bounced'
     | 'candidate'
     | 'pending'
     | 'sending'
@@ -249,4 +250,40 @@ export const customerBusinessApi = {
     return request<BusinessWorkspace>(query.size ? '?' + query : '', { signal });
   },
   sync: () => request<{ feishu?: BusinessFeishu; status?: string }>('/sync', { method: 'POST' }),
+};
+export interface DeskRow {
+  id: string;
+  thread?: string;
+  customerId: string;
+  name: string;
+  title: string;
+  note: string;
+  owner: string;
+  stamp: string;
+}
+export interface DeskPage {
+  counts: Record<string, number>;
+  items?: DeskRow[];
+  total?: number;
+  page?: number;
+  pageSize?: number;
+}
+export const followupDeskApi = {
+  list: (params: URLSearchParams, signal: AbortSignal) =>
+    request<DeskPage>('/followup-desk?' + params, { signal }),
+  priority: (id: string, marked: boolean) =>
+    request('/followup-desk/priority/' + encodeURIComponent(id), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ marked }),
+    }),
+  plan: (
+    id: string,
+    plan: { owner: string; nextStep: string; dueAt: string; completed: boolean },
+  ) =>
+    request('/followup-desk/assigned/' + encodeURIComponent(id), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(plan),
+    }),
 };

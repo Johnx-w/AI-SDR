@@ -113,7 +113,7 @@ test('追信任务按业务来源分页，详情核对客户、原会话和邮�
   }
   task('north-next', north, { step: 2 });
   const list = await read();
-  assert.deepEqual(list.value.counts, { all: 7, upcoming: 1, review: 3, responded: 1 });
+  assert.deepEqual(list.value.counts, { all: 8, upcoming: 1, review: 3, responded: 1 });
   assert.equal(
     list.value.items.some((row) => Object.hasOwn(row, 'bodyText')),
     false,
@@ -129,7 +129,7 @@ test('追信任务按业务来源分页，详情核对客户、原会话和邮�
     ['north-next', 'north-sent'],
   );
   for (const id of ['quiet', 'west']) {
-    const scoped = (await read('?queue=review&customerId=' + id)).value;
+    const scoped = (await read('?customerId=' + id)).value;
     assert.deepEqual(
       scoped.items.map((r) => [r.customerId, r.status, r.dueAt]),
       [[id, 'candidate', null]],
@@ -141,10 +141,19 @@ test('追信任务按业务来源分页，详情核对客户、原会话和邮�
     );
     assert.ok(detail.thread);
   }
-  for (const id of ['answered', 'blocked', 'bounced', 'missing']) {
+  for (const id of ['answered', 'blocked', 'missing']) {
     assert.equal((await read('?customerId=' + id)).value.total, 0);
     assert.equal((await fetch(base + '/candidate-first-' + id)).status, 404);
   }
+  assert.deepEqual((await read('?queue=review')).value.items.map((r) => r.id).sort(), [
+    'bounce-first-bounced',
+    'south-not-reply',
+    'south-review',
+  ]);
+  assert.equal(
+    (await read('/bounce-first-bounced')).value.messages[0].bodyText,
+    'Original bounced',
+  );
   assert.equal((await read('?queue=upcoming&customerId=quiet')).value.total, 0);
   assert.equal(svc.db.prepare('SELECT count(*) AS n FROM outreach_followups').get().n, 6);
   const sent = (await read('/north-sent')).value,
@@ -216,14 +225,14 @@ test('追信任务按业务来源分页，详情核对客户、原会话和邮�
   const reviewTimes = [];
   for (let i = 0; i < 7; i++) {
     const at = performance.now();
-    const result = await read('?queue=review&page=27');
+    const result = await read('?state=candidate&page=27');
     reviewTimes.push(performance.now() - at);
-    assert.equal(result.value.total, 663);
-    assert.equal(result.value.items.length, 13);
+    assert.equal(result.value.total, 662);
+    assert.equal(result.value.items.length, 12);
   }
   reviewTimes.sort((a, b) => a - b);
   t.diagnostic(
-    '661 封额外首封，待核实末页中位 ' +
+    '661 封额外首封，首封待评估末页中位 ' +
       reviewTimes[3].toFixed(1) +
       ' ms，最慢 ' +
       reviewTimes.at(-1).toFixed(1) +
