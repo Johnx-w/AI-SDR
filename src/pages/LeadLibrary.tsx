@@ -1,3 +1,5 @@
+import { countryFilters } from '../domain/country-catalog';
+import { SearchableLocation } from '../components/SearchableLocation';
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -85,10 +87,12 @@ export function LeadLibrary({
   const [supplement, setSupplement] = useState<SupplementContext | undefined>(undefined);
   const detailBody = useRef<HTMLDivElement>(null);
   const mounted = useRef(false);
+  const [region, setRegion] = useState('');
   const listKey = new URLSearchParams({
     page: String(page),
     q: query,
     market,
+    ...(region ? { region } : {}),
     grade,
     product,
     status,
@@ -340,13 +344,32 @@ export function LeadLibrary({
           </div>
         </div>
         <div className="library-filters">
+          <SearchableLocation
+            id="library-country"
+            label="国家筛选"
+            options={countryFilters}
+            value={market}
+            onChange={(value) => {
+              setMarket(value);
+              setRegion('');
+              setPage(1);
+            }}
+          />
+          <SearchableLocation
+            id="library-region"
+            label="州／地区筛选"
+            options={[
+              { label: '全部州／地区', value: '' },
+              { label: '待核实', value: '待核实' },
+              ...(remote?.facets?.regions || []).map((value) => ({ label: value, value })),
+            ]}
+            value={region}
+            onChange={(value) => {
+              setRegion(value);
+              setPage(1);
+            }}
+          />
           {[
-            {
-              label: '市场',
-              val: market,
-              set: setMarket,
-              options: [...new Set([...(remote?.facets?.markets || []), '待核实'])],
-            },
             {
               label: '评级',
               val: grade,
@@ -390,6 +413,7 @@ export function LeadLibrary({
             title="清空搜索词和全部筛选条件，不修改客户资料"
             onClick={() => {
               setMarket('');
+              setRegion('');
               setGrade('');
               setProduct('');
               setStatus('');
@@ -466,6 +490,7 @@ export function LeadLibrary({
                                 ? '🇦🇪'
                                 : '◎'}{' '}
                         {marketLabel(l.market)}
+                        {l.regionLabel && l.regionLabel !== '待核实' ? ' · ' + l.regionLabel : ''}
                       </span>
                       <span className="subtext">
                         {typeNames[l.type] || l.type}

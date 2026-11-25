@@ -31,7 +31,7 @@ test('国家空值和未知市场统一显示待核实，已知市场保持原�
   ])
     assert.equal(marketLabel(market), '待核实');
   assert.equal(marketLabel(' Canada '), '加拿大');
-  assert.equal(marketLabel('France'), 'France');
+  assert.equal(marketLabel('France'), '法国');
 });
 
 test('客户库固定展示五类产品，按英文（中文）命名并沿用业务品类定义', () => {

@@ -1,3 +1,4 @@
+import { addressRegion, regionChoices } from './library-regions.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -100,6 +101,7 @@ export function summarizeLead(lead) {
     'updatedAt',
   ];
   return {
+    regionLabel: addressRegion(lead),
     version: contentVersion(lead),
     ...Object.fromEntries(
       fields.map((key) => [
@@ -218,7 +220,9 @@ export class LeadLibrary {
         "ALTER TABLE lead_library_customers ADD COLUMN version TEXT NOT NULL DEFAULT ''",
       );
     const rows = this.db
-      .prepare("SELECT scope,record_id,detail FROM lead_library_customers WHERE version=''")
+      .prepare(
+        "SELECT scope,record_id,detail FROM lead_library_customers WHERE version='' OR json_extract(summary,'$.regionLabel') IS NULL",
+      )
       .all();
     if (!rows.length) return;
     const backfill = rows.map((row) => {
@@ -370,20 +374,28 @@ export class LeadLibrary {
     if (this.pageDecorator !== decorate || this.facetRevision !== revision) {
       this.pageDecorator = decorate;
       const grades = Object.create(null),
+        regions = new Set(),
         markets = new Set(),
         statuses = new Set();
       let total = 0;
       for (const row of this.db
         .prepare(
-          `SELECT json_extract(summary,'$.grade') AS grade,lead_market(json_extract(summary,'$.market')) AS market,lead_status(record_id,json_extract(summary,'$.status')) AS status,count(*) AS count ${base} GROUP BY grade,market,status`,
+          `SELECT json_extract(summary,'$.grade') AS grade,lead_market(json_extract(summary,'$.market')) AS market,json_extract(summary,'$.regionLabel') AS region,lead_status(record_id,json_extract(summary,'$.status')) AS status,count(*) AS count ${base} GROUP BY grade,market,region,status`,
         )
         .all(this.scope)) {
         grades[row.grade] = (grades[row.grade] || 0) + row.count;
         markets.add(row.market);
+        regions.add(row.region);
         statuses.add(row.status);
         total += row.count;
       }
-      this.facets = { grades, markets: [...markets], statuses: [...statuses], total };
+      this.facets = {
+        grades,
+        regions: regionChoices('', regions),
+        markets: [...markets],
+        statuses: [...statuses],
+        total,
+      };
       this.facetRevision = revision;
     }
     const where = [],
@@ -391,6 +403,7 @@ export class LeadLibrary {
     for (const [key, condition] of Object.entries({
       q: 'lead_search(summary,?)',
       market: "lead_market(json_extract(summary,'$.market'))=?",
+      region: "json_extract(summary,'$.regionLabel')=?",
       grade: "json_extract(summary,'$.grade')=?",
       product: "lead_has_product(json_extract(summary,'$.product'),?)",
       status: "lead_status(record_id,json_extract(summary,'$.status'))=?",
@@ -429,7 +442,9 @@ export class LeadLibrary {
       total: this.facets.total,
       filteredTotal,
       page,
-      facets: this.facets,
+      facets: filters.get('market')
+        ? { ...this.facets, regions: regionChoices(filters.get('market'), []) }
+        : this.facets,
     };
   }
 

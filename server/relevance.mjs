@@ -1,3 +1,4 @@
+import { countryFor } from '../src/domain/country-catalog.ts';
 // Product-relevance gating shared by the pre-AI page screen and the post-AI audit.
 import { isAllProductScope, productTerms } from '../src/domain/acquisition-products.mjs';
 // The broad page screen saves model calls; the final audit must match the target category.
@@ -404,7 +405,7 @@ export function normalizeCountry(value) {
     .trim()
     .toLowerCase();
   if (!key) return '';
-  return countryAliases[key] || key;
+  return countryFor(key)?.name.toLowerCase() || countryAliases[key] || key;
 }
 export function countryMatches(actual, marketCountries = []) {
   const normalized = normalizeCountry(actual);

@@ -1,12 +1,7 @@
-// Acquisition markets; actual company countries remain evidence-based.
-export const markets = [
-  ['United States', '🇺🇸 美国 · United States'],
-  ['Australia', '🇦🇺 澳大利亚 · Australia'],
-  ['Canada', '🇨🇦 加拿大 · Canada'],
-  ['United Kingdom', '🇬🇧 英国 · United Kingdom'],
-  ['Europe', '🇪🇺 欧洲（不含英国）· Europe'],
-].map(([value, label]) => ({ value, label }));
+import { acquisitionMarkets } from '../src/domain/country-catalog.ts';
+export const markets = acquisitionMarkets;
 export const groupedMarkets = {
+  Dubai: ['United Arab Emirates'],
   Europe: [
     'Germany',
     'France',

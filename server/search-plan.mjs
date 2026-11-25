@@ -5,11 +5,11 @@ import { automaticSearchPlan } from '../src/domain/search-query.mjs';
 import { isAllProductScope } from '../src/domain/acquisition-products.mjs';
 
 export function searchPlan(input) {
-  return webSearchPlan(input);
+  locationOptions(input.country, input.region);
+  return webSearchPlan(input.country === 'Dubai' ? { ...input, region: 'Dubai' } : input);
 }
 
 function webSearchPlan(input) {
-  locationOptions(input.country, input.region);
   const countries = groupedMarkets[input.country] || [input.country];
   if (input.query_mode === 'auto' || isAllProductScope(input))
     return automaticSearchPlan(input, countries);
@@ -42,6 +42,7 @@ function webSearchPlan(input) {
             .slice(0, 395),
         });
       }
-  if (countries.length === 1) result.unshift({ country: input.country, query: input.search_query });
+  if (countries.length === 1 && input.country !== 'Dubai')
+    result.unshift({ country: countries[0], query: input.search_query });
   return [...new Map(result.map((p) => [p.query, p])).values()];
 }

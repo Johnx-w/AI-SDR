@@ -13,11 +13,13 @@ test('加拿大省区和欧洲有效；移除的市场和分组下的州不可�
   assert.equal(locationOptions('Canada').regions.length, 13);
   assert.ok(validateTarget(target).market_countries.length > 30);
   assert.throws(() => locationOptions('Southeast Asia'), /支持的国家/);
-  assert.throws(() => validateTarget({ ...target, country: 'Singapore' }), /支持的国家/);
+  assert.deepEqual(validateTarget({ ...target, country: 'Singapore' }).market_countries, [
+    'Singapore',
+  ]);
   assert.equal(locationOptions('Europe').regions.length, 0);
   assert.ok(locationOptions('Europe').countries.includes('Germany'));
   assert.ok(!locationOptions('Europe').countries.includes('United Kingdom'));
-  assert.throws(() => locationOptions('Germany'));
+  assert.deepEqual(locationOptions('Germany').countries, ['Germany']);
   assert.throws(() => validateTarget({ ...target, region: 'Florida' }));
   assert.throws(() => validateTarget({ ...target, audience: 'both' }));
 });

@@ -20,7 +20,8 @@ import { PageHeading } from '../components/PageHeading';
 import { ProductPicker } from '../components/ProductPicker';
 import { useWorkspace } from '../app/WorkspaceProvider';
 import { acquisitionApi } from '../services/acquisition';
-import type { LocationOptions } from '../services/acquisition';
+import { acquisitionMarkets } from '../domain/country-catalog';
+import { SearchableLocation } from '../components/SearchableLocation';
 import type {
   AcquisitionJob,
   AcquisitionSchedule,
@@ -129,9 +130,6 @@ export function Automation() {
   const [catalogError, setCatalogError] = useState('');
   const [status, setStatus] = useState<IntegrationStatus | null>(null);
   const [statusError, setStatusError] = useState('');
-  const [locations, setLocations] = useState<LocationOptions | null>(null);
-  const [locationError, setLocationError] = useState('');
-  const [locationsLoading, setLocationsLoading] = useState(true);
   const [revision, setRevision] = useState(0);
   const [preview, setPreview] = useState<DiscoveryQuery[]>([]);
   const [previewError, setPreviewError] = useState('');
@@ -198,7 +196,7 @@ export function Automation() {
         if (!plan || !['enabled', 'paused'].includes(plan.status))
           throw new Error('该计划已结束或不存在');
         setEditing(plan);
-        setInput(plan.input);
+        setInput({ ...plan.input, region: '' });
         setTargetCount(plan.input.target_count);
         setName(plan.name);
         setTiming(plan.timing);
@@ -261,23 +259,6 @@ export function Automation() {
   }, []);
   useEffect(() => {
     const controller = new AbortController();
-    setLocationsLoading(true);
-    setLocationError('');
-    acquisitionApi
-      .locations(input.country, input.region, controller.signal)
-      .then((value) => {
-        if (!controller.signal.aborted) setLocations(value);
-      })
-      .catch((e) => {
-        if (!controller.signal.aborted) setLocationError(e.message);
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLocationsLoading(false);
-      });
-    return () => controller.abort();
-  }, [input.country, input.region, revision]);
-  useEffect(() => {
-    const controller = new AbortController();
     setPreview([]);
     setPreviewError('');
     if (!hasProductSelection) {
@@ -310,14 +291,7 @@ export function Automation() {
       80,
     );
   const marketLabel =
-    locations?.markets.find((m) => m.value === input.country)?.label || input.country;
-  const selectedRegion =
-    locations?.country === input.country
-      ? locations.regions.find((region) => region.name === input.region)
-      : undefined;
-  const regionLabel = selectedRegion?.label
-    ? `${selectedRegion.label} · ${selectedRegion.name}`
-    : input.region;
+    acquisitionMarkets.find((m) => m.value === input.country)?.label || input.country;
   let timingError = '';
   let nextRunAt: string | null = null;
   const effectiveTiming =
@@ -333,8 +307,6 @@ export function Automation() {
   const canSubmit =
     status?.configured &&
     !statusError &&
-    !locationError &&
-    !locationsLoading &&
     !previewError &&
     !previewLoading &&
     hasProductSelection &&
@@ -436,7 +408,7 @@ export function Automation() {
         <h3>目标客户</h3>
         <p>
           <strong>{marketLabel}</strong>
-          <small>{regionLabel || '全部地区'}</small>
+          {input.region && <small>{input.region}</small>}
         </p>
         {allProductScope ? (
           <p>
@@ -647,54 +619,18 @@ export function Automation() {
                       </div>
                     </header>
                     <div className="acq-form-grid">
-                      <label>
-                        目标国家／市场
-                        <select
-                          aria-label="任务国家"
+                      <div>
+                        <label htmlFor="acquisition-market">目标国家／市场</label>
+                        <SearchableLocation
+                          id="acquisition-market"
+                          label="任务国家"
                           value={input.country}
-                          onChange={(e) => patch({ country: e.target.value, region: '' })}
-                        >
-                          {(
-                            locations?.markets || [
-                              { value: 'United States', label: '美国 · United States' },
-                              { value: 'Australia', label: '澳大利亚 · Australia' },
-                            ]
-                          ).map((m) => (
-                            <option value={m.value} key={m.value}>
-                              {m.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        州／地区
-                        <select
-                          aria-label="州 / 地区"
-                          value={input.region}
-                          disabled={locationsLoading || !!locationError}
-                          onChange={(e) => patch({ region: e.target.value })}
-                        >
-                          <option value="">全部州／地区</option>
-                          {(locations?.country === input.country ? locations.regions : []).map(
-                            (r) => (
-                              <option key={r.code} value={r.name}>
-                                {r.label ? r.label + ' · ' : ''}
-                                {r.name}
-                              </option>
-                            ),
-                          )}
-                        </select>
-                        {locationsLoading && <small>正在读取地区…</small>}
-                      </label>
+                          options={acquisitionMarkets}
+                          disabled={locked}
+                          onChange={(country) => patch({ country, region: '' })}
+                        />
+                      </div>
                     </div>
-                    {locationError && (
-                      <p className="error-message" role="alert">
-                        {locationError}
-                        <button type="button" onClick={() => setRevision((n) => n + 1)}>
-                          重新读取
-                        </button>
-                      </p>
-                    )}
                     <div className="acq-field-label">产品范围</div>
                     <div className="acq-scope-options" role="radiogroup" aria-label="产品范围">
                       <label className={allProductScope ? 'selected' : ''}>
