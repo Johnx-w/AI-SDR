@@ -213,6 +213,9 @@ export class OutreachService {
       },
       now,
     });
+    this.db
+      .exec(`CREATE INDEX IF NOT EXISTS mailbox_followup_sender ON mailbox_reply_headers(sender,account_key,stamp)
+      WHERE direction='inbound' AND source='imap'`);
     initializeCustomerTimeline(this.db);
     this.transaction(() => initializeOutreachBounces(this.db));
     this.replies = new MailReplies({

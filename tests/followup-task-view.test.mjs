@@ -49,7 +49,15 @@ test('追信任务按业务来源分页，详情核对客户、原会话和邮�
   }
   const north = first('first-north', people[0]),
     south = first('first-south', people[1]);
-  first('first-quiet', people[2]);
+  const quiet = first('first-quiet', people[2]);
+  first('first-west', { id: 'west', email: 'west@buyer.example' });
+  const returned = first('first-bounced', { id: 'bounced', email: 'bounce@buyer.example' });
+  svc.db
+    .prepare('INSERT INTO outreach_delivery_bounces(delivery_id,received_at) VALUES(?,?)')
+    .run(returned.id, quiet.sentAt);
+  const blocked = first('first-blocked', { id: 'blocked', email: 'blocked@buyer.example' });
+  svc.db.prepare('INSERT INTO outreach_suppression VALUES(?,?)').run('email:' + blocked.to, '退订');
+  const answered = first('first-answered', { id: 'answered', email: 'answered@buyer.example' });
   const baseTask = {
     step: 1,
     dueAt: '2026-11-25T09:00:00.000Z',
@@ -88,7 +96,7 @@ test('追信任务按业务来源分页，详情核对客户、原会话和邮�
   task('south-not-reply', south, { status: 'cancelled', reason: '原邮件已确认退信' });
   task('foreign', first('foreign-first', people[1], 'other-plan'));
   svc.conversations.importDeliveries();
-  for (const letter of [north, south]) {
+  for (const letter of [north, south, answered]) {
     svc.conversations.putMessage(box, {
       direction: 'inbound',
       source: 'imap',
@@ -105,7 +113,7 @@ test('追信任务按业务来源分页，详情核对客户、原会话和邮�
   }
   task('north-next', north, { step: 2 });
   const list = await read();
-  assert.deepEqual(list.value.counts, { all: 5, upcoming: 1, review: 1, responded: 1 });
+  assert.deepEqual(list.value.counts, { all: 7, upcoming: 1, review: 3, responded: 1 });
   assert.equal(
     list.value.items.some((row) => Object.hasOwn(row, 'bodyText')),
     false,
@@ -120,7 +128,25 @@ test('追信任务按业务来源分页，详情核对客户、原会话和邮�
     (await read('?customerId=north&q=NORTH')).value.items.map((t) => t.id),
     ['north-next', 'north-sent'],
   );
-  assert.equal((await read('?customerId=quiet')).value.total, 0);
+  for (const id of ['quiet', 'west']) {
+    const scoped = (await read('?queue=review&customerId=' + id)).value;
+    assert.deepEqual(
+      scoped.items.map((r) => [r.customerId, r.status, r.dueAt]),
+      [[id, 'candidate', null]],
+    );
+    const detail = (await read('/' + scoped.items[0].id)).value;
+    assert.deepEqual(
+      detail.messages.map((m) => [m.kind, m.bodyText]),
+      [['first', 'Original ' + id]],
+    );
+    assert.ok(detail.thread);
+  }
+  for (const id of ['answered', 'blocked', 'bounced', 'missing']) {
+    assert.equal((await read('?customerId=' + id)).value.total, 0);
+    assert.equal((await fetch(base + '/candidate-first-' + id)).status, 404);
+  }
+  assert.equal((await read('?queue=upcoming&customerId=quiet')).value.total, 0);
+  assert.equal(svc.db.prepare('SELECT count(*) AS n FROM outreach_followups').get().n, 6);
   const sent = (await read('/north-sent')).value,
     stopped = (await read('/south-stopped')).value;
   assert.deepEqual(
@@ -155,6 +181,54 @@ test('追信任务按业务来源分页，详情核对客户、原会话和邮�
       false,
     );
   }
+  const later = await read('?customerId=quiet');
+  svc.conversations.putMessage(box, {
+    direction: 'inbound',
+    source: 'imap',
+    classification: 'auto_reply',
+    from: quiet.to,
+    to: quiet.from,
+    subject: 'Automatic reply',
+    bodyText: 'Out of office',
+    messageId: '<auto@buyer.example>',
+    inReplyTo: quiet.messageId,
+    occurredAt: '2026-11-24T09:00:00Z',
+    deliveryStatus: 'received',
+  });
+  assert.equal((await read('?customerId=quiet')).value.total, later.value.total);
+  svc.conversations.putMessage(box, {
+    direction: 'outbound',
+    source: 'imap',
+    from: quiet.from,
+    to: quiet.to,
+    subject: 'Re: First quiet',
+    bodyText: 'Personal follow-up',
+    messageId: '<manual@brand.example>',
+    inReplyTo: quiet.messageId,
+    occurredAt: '2026-11-24T10:00:00Z',
+    deliveryStatus: 'sent',
+  });
+  assert.equal((await read('?customerId=quiet')).value.total, 0);
+  for (let i = 0; i < 661; i++) {
+    const id = 'buyer-' + i;
+    first('letter-' + id, { id, email: id + '@buyer.example' });
+  }
+  const reviewTimes = [];
+  for (let i = 0; i < 7; i++) {
+    const at = performance.now();
+    const result = await read('?queue=review&page=27');
+    reviewTimes.push(performance.now() - at);
+    assert.equal(result.value.total, 663);
+    assert.equal(result.value.items.length, 13);
+  }
+  reviewTimes.sort((a, b) => a - b);
+  t.diagnostic(
+    '661 封额外首封，待核实末页中位 ' +
+      reviewTimes[3].toFixed(1) +
+      ' ms，最慢 ' +
+      reviewTimes.at(-1).toFixed(1) +
+      ' ms',
+  );
   times.sort((a, b) => a - b);
   t.diagnostic(
     '1,208 条追信，含 1,203 条 8 KiB 正文；末页 HTTP 中位 ' +

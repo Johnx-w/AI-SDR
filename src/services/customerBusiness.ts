@@ -181,13 +181,22 @@ export interface FollowupTaskSummary {
   customerName: string;
   recipient: string;
   account: string;
-  dueAt: string;
-  step: number;
+  dueAt: string | null;
+  firstSentAt?: string;
+  step: number | null;
   day?: number;
   reason?: string;
   campaignId: string;
   campaignName: string;
-  status: 'pending' | 'sending' | 'accepted' | 'unknown' | 'failed' | 'skipped' | 'cancelled';
+  status:
+    | 'candidate'
+    | 'pending'
+    | 'sending'
+    | 'accepted'
+    | 'unknown'
+    | 'failed'
+    | 'skipped'
+    | 'cancelled';
   replied: boolean;
 }
 export interface FollowupTaskPage {

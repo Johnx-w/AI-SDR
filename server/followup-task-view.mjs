@@ -4,7 +4,7 @@ import { legacyFollowUpStep } from './outreach-sequence-policy.mjs';
 const replyReason = '收到客户来信，结束本轮追信';
 const replied = "status='cancelled' AND reason=$received";
 const attention =
-  "(status='unknown' OR (status='pending' AND (reason LIKE '%待核实%' OR reason LIKE '%核对后%')))";
+  "(status IN ('unknown','candidate') OR (status='pending' AND (reason LIKE '%待核实%' OR reason LIKE '%核对后%')))";
 const queues = {
   upcoming: "status='pending' AND dueAt >= $now AND dueAt < $until",
   review: attention,
@@ -14,13 +14,42 @@ const taskSource = `SELECT f.id, f.state AS status, f.data->>'customerId' AS cus
   coalesce(nullif(f.data->>'companyName',''), d.data->>'companyName', f.data->>'to') AS customerName,
   f.data->>'to' AS recipient, f.data->>'from' AS account, f.data->>'dueAt' AS dueAt,
   f.data->>'step' AS step, f.data->>'day' AS day, f.data->>'reason' AS reason,
-  c.id AS campaignId, c.data->>'name' AS campaignName
+  c.id AS campaignId, c.data->>'name' AS campaignName,NULL AS firstSentAt
   FROM outreach_followups f
-  JOIN outreach_deliveries d ON d.id=json_extract(f.data,'$.firstId') AND d.state='accepted'
+  CROSS JOIN outreach_deliveries d ON d.id=json_extract(f.data,'$.firstId') AND d.state='accepted'
   JOIN outreach_campaigns c ON c.id=d.campaign_id AND c.id=json_extract(f.data,'$.campaignId')
   WHERE c.data->>'mode'='production' AND c.data->>'scope'=$scope
     AND f.data->>'customerId'=d.data->>'customerId'
     AND f.data->>'mailboxId'=d.data->>'mailboxId'`;
+// Unary + removes column affinity so SQLite can use the firstId JSON expression index.
+// A candidate is a read-only view of an accepted first email.
+const candidateSource = `SELECT 'candidate-'||d.id AS id,'candidate' AS status,
+  d.data->>'customerId' AS customerId,coalesce(nullif(d.data->>'companyName',''),d.data->>'to') AS customerName,
+  d.data->>'to' AS recipient,d.data->>'from' AS account,NULL AS dueAt,NULL AS step,NULL AS day,
+  '首封已获服务商接受，尚无追信排期。请核对原会话和客户联系意愿。' AS reason,
+  c.id AS campaignId,c.data->>'name' AS campaignName,d.data->>'sentAt' AS firstSentAt
+  FROM outreach_campaigns c JOIN outreach_deliveries d ON d.campaign_id=c.id AND d.state='accepted'
+  WHERE c.data->>'mode'='production' AND c.data->>'scope'=$scope
+    AND coalesce(c.data->>'status','')!='cancelled' AND d.data->>'mode'='production'
+    AND d.data->>'customerId' > '' AND d.data->>'to' > '' AND d.data->>'mailboxId' > ''
+    AND d.data->>'sentAt' > ''
+    AND NOT EXISTS (SELECT 1 FROM outreach_followups f WHERE json_extract(f.data,'$.firstId')=+d.id)
+    AND NOT EXISTS (SELECT 1 FROM outreach_delivery_bounces b WHERE b.delivery_id=d.id)
+    AND NOT EXISTS (SELECT 1 FROM outreach_suppression s WHERE s.identity IN (
+      'company:'||(d.data->>'customerId'),'domain:'||lower(d.data->>'$.candidate.companyDomain'),
+      'email:'||lower(d.data->>'to')))
+    AND NOT EXISTS (SELECT 1 FROM mailbox_reply_headers h
+      WHERE h.account_key=mail_account_key(d.data->>'mailboxId',d.data->>'from')
+        AND h.sender=lower(d.data->>'to') AND h.direction='inbound' AND h.source='imap'
+        AND h.classification!='auto_reply' AND h.stamp>=d.data->>'sentAt')
+    AND NOT EXISTS (SELECT 1 FROM mailbox_thread_links l JOIN mailbox_reply_headers h
+      ON h.account_key=l.account_key AND h.thread_id=l.thread_id
+      WHERE l.account_key=mail_account_key(d.data->>'mailboxId',d.data->>'from')
+        AND l.external_id=d.data->>'messageId' AND h.stamp>=d.data->>'sentAt'
+        AND ((h.direction='inbound' AND h.source='imap' AND h.classification!='auto_reply')
+          OR (h.direction='outbound' AND coalesce(h.external_id,'')!=coalesce(d.data->>'messageId','')
+            AND EXISTS (SELECT 1 FROM mailbox_thread_messages m WHERE m.id=h.id
+              AND m.data->>'deliveryStatus' IN ('sent','accepted')))))`;
 const fail = () => Object.assign(new Error('追信任务不存在'), { status: 404 });
 
 export function listFollowupTasks(service, params) {
@@ -40,7 +69,8 @@ export function listFollowupTasks(service, params) {
     end: range.todayEnd,
     start: range.asOf,
   };
-  const base = `WITH tasks AS (${taskSource}), scoped AS (
+  const base = `WITH tasks AS (${taskSource}
+    UNION ALL ${candidateSource}), scoped AS (
     SELECT * FROM tasks WHERE ($customer='' OR customerId=$customer)
       AND ($campaign='' OR campaignId=$campaign)), matched AS (
     SELECT * FROM scoped WHERE ($id='' OR id=$id)
@@ -81,7 +111,7 @@ export function listFollowupTasks(service, params) {
       Math.min(Math.ceil(total / pageSize), Math.trunc(Number(params.get('page'))) || 1),
     );
   const rows = service.db.prepare(`${sql} SELECT *, (${replied}) AS replied FROM filtered
-    ORDER BY dueAt ${queue === 'upcoming' ? 'ASC' : 'DESC'},id LIMIT $limit OFFSET $offset`);
+    ORDER BY coalesce(dueAt,firstSentAt) ${queue === 'upcoming' ? 'ASC' : 'DESC'},id LIMIT $limit OFFSET $offset`);
   rows.setAllowUnknownNamedParameters(true);
   return {
     total,
@@ -96,10 +126,13 @@ export function listFollowupTasks(service, params) {
 
 export function readFollowupTask(service, id) {
   const { db } = service;
-  const row = db.prepare(taskSource + ' AND f.id=$id').get({ scope: service.getScope(), id });
+  const candidate = id.startsWith('candidate-');
+  const sourceId = candidate ? id.slice('candidate-'.length) : id;
+  const source = candidate ? candidateSource + ' AND d.id=$id' : taskSource + ' AND f.id=$id';
+  const row = db.prepare(source).get({ scope: service.getScope(), id: sourceId });
   if (!row) throw fail();
-  const task = service.followUps.get(id),
-    first = service.deliveryRecord(task.firstId);
+  const task = candidate ? null : service.followUps.get(id);
+  const first = service.deliveryRecord(candidate ? sourceId : task.firstId);
   if (!first) throw fail();
   const thread = db
     .prepare(
@@ -125,6 +158,7 @@ export function readFollowupTask(service, id) {
     bodyUnavailable: item.bodyUnavailable,
   });
   messages.push(mail(first, 'first', first.sentAt));
+  if (candidate) return { thread, messages };
   if (task.subject || task.bodyText || task.bodyHtml)
     messages.push(
       mail(task, task.status === 'accepted' ? 'sent' : 'prepared', task.sentAt || task.attemptedAt),
