@@ -8,8 +8,10 @@ for (const country of countries) {
     ...(subdivisions[country.code] || []),
     ...(marketRegions[country.name] || []).map((r) => [r.code, r.name, r.label]),
   ];
+  // Keep older spellings searchable while displaying one preferred label per subdivision.
+  const labels = new Map(rows.map(([code, en, zh]) => [code, zh + '.' + en]));
   for (const [code, en, zh] of rows) {
-    const label = zh + '.' + en;
+    const label = labels.get(code);
     for (const key of [code, en, zh, country.code + '-' + code])
       lookup.set(key.toLowerCase(), label);
   }

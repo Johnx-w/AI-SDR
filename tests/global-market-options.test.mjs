@@ -57,6 +57,10 @@ test('国家、双语州名及待核实在分页和导出时使用相同筛选',
       page: '2',
     });
     const page = library.page(query, (x) => x);
+    assert.deepEqual(
+      page.facets.regions.filter((label) => label.endsWith('.Alabama')),
+      ['阿拉巴马州.Alabama'],
+    );
     assert.equal(page.filteredTotal, 10);
     assert.equal(page.leads.length, 2);
     assert.equal(library.page(query, (x) => x, { exportDetails: true }).leads.length, 10);
