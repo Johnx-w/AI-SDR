@@ -15,6 +15,33 @@ const sameFields = (record, fields) =>
     ([name, value]) => fieldText(fieldValue(record.fields, name)) === fieldText(value),
   );
 
+const companyName = (record) => fieldText(record.fields.公司名称 || record.fields.客户名称).trim();
+const reportColumns = new Set(['评级依据摘要', '最近联系时间', '最近回复时间', '邮箱有效性']);
+
+function firstLinkPatch(local, saved, fields) {
+  const name = companyName(local);
+  const conflict = (reason) =>
+    fail(409, `客户「${name}」与飞书同官网记录冲突（${reason}），请核对`);
+  if (!name || companyName(saved) !== name) throw conflict('公司名称');
+  if (customerWebsite(local) !== customerWebsite(saved)) throw conflict('官网地址');
+  const patch = {};
+  const blocked = [];
+  const progressTime = { 已回复: local.fields.最近回复时间, 已联系: local.fields.最近联系时间 };
+  for (const [key, value] of Object.entries(fields)) {
+    const current = fieldValue(saved.fields, key);
+    if (fieldText(current) === fieldText(value)) continue;
+    const empty = current == null || current === '' || (Array.isArray(current) && !current.length);
+    if (
+      (reportColumns.has(key) && empty) ||
+      (key === '开发状态' && fieldText(current) === '待开发' && Number(progressTime[value]) > 0)
+    )
+      patch[key] = value;
+    else blocked.push(key);
+  }
+  if (blocked.length) throw conflict(blocked.join('、'));
+  return patch;
+}
+
 // Native acquisition uses local records; only this boundary knows Feishu record IDs.
 export class CustomerArchive {
   constructor({ library, remote, decorate = (data) => data }) {
@@ -159,9 +186,8 @@ export class CustomerArchive {
           const matches = (await this.remote.records()).filter(
             (record) => domainKey(customerWebsite(record)) === domain,
           );
-          if (matches.length > 1) throw fail(409, '飞书存在相同官网的重复客户，请核对');
-          if (matches.length && !sameFields(matches[0], fields))
-            throw fail(409, '飞书已有相同官网但内容不同的客户，本地档案已保留，请核对后再同步');
+          if (matches.length > 1)
+            throw fail(409, `客户「${companyName(queued.record)}」在飞书有多条同官网记录，请核对`);
           remoteId = matches[0]?.record_id;
         }
         let saved = remoteId ? await this.remote.record(remoteId) : null;
@@ -171,10 +197,29 @@ export class CustomerArchive {
           domainKey(customerWebsite(saved)) !== domainKey(customerWebsite(queued.record))
         )
           throw fail(409, '飞书客户官网已变更，本地档案已保留，请核对客户身份');
+        let patch = fields;
+        if (!queued.remoteId && remoteId) {
+          if (!saved) throw fail(409, '飞书候选记录已不存在，请重新核对');
+          const owner = this.library.db
+            .prepare(
+              `
+            SELECT 1 FROM lead_library_customers WHERE scope=? AND record_id=?
+            UNION ALL SELECT 1 FROM customer_archive_sync
+            WHERE scope=? AND json_extract(data, '$.remoteId')=? AND record_id<>? LIMIT 1
+          `,
+            )
+            .get(this.library.scope, remoteId, this.library.scope, remoteId, id);
+          if (owner)
+            throw fail(
+              409,
+              `客户「${companyName(queued.record)}」的飞书记录已属于另一份本地档案，请核对`,
+            );
+          patch = firstLinkPatch(queued.record, saved, fields);
+        }
         if (!saved || !sameFields(saved, fields)) {
           const written = await this.remote.write(
             remoteId ? 'update' : 'insert',
-            fields,
+            patch,
             remoteId,
             queued.clientToken,
           );
