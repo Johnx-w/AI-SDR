@@ -30,7 +30,7 @@ import { answerMailQuestion } from './mail-knowledge.mjs';
 import { MAX_PRODUCT_DOCUMENT_BYTES } from './product-documents.mjs';
 import { ProductKnowledgeFeishu } from './product-knowledge-feishu.mjs';
 import { CustomerBusinessApi } from './customer-business-api.mjs';
-import { followupDesk, setFollowupPriority, saveFollowupPlan } from './followup-desk.mjs';
+import { followupDesk, setFollowupPriority } from './followup-desk.mjs';
 import { listFollowupTasks, readFollowupTask } from './followup-task-view.mjs';
 import { readCustomerTimeline, timelineOriginal } from './customer-timeline.mjs';
 import { searchPlan } from './search-plan.mjs';
@@ -562,24 +562,13 @@ export function createApp({
           );
         }
         if (url.pathname === '/api/v1/business/followup-desk' && request.method === 'GET')
-          return json(
-            response,
-            200,
-            followupDesk(outreach(), business.state().store, library(), url.searchParams),
-          );
-        const deskAction =
-          /^\/api\/v1\/business\/followup-desk\/(priority|assigned)\/([\w-]{1,160})$/.exec(
-            url.pathname,
-          );
+          return json(response, 200, followupDesk(outreach(), library(), url.searchParams));
+        const deskAction = /^\/api\/v1\/business\/followup-desk\/priority\/([\w-]{1,160})$/.exec(
+          url.pathname,
+        );
         if (deskAction && request.method === 'PUT') {
           const input = await readJson(request);
-          return json(
-            response,
-            200,
-            deskAction[1] === 'priority'
-              ? setFollowupPriority(library(), deskAction[2], input.marked)
-              : saveFollowupPlan(business.state().store, deskAction[2], input),
-          );
+          return json(response, 200, setFollowupPriority(library(), deskAction[1], input.marked));
         }
         const followup = /^\/api\/v1\/business\/followups(?:\/([\w-]+))?$/.exec(url.pathname);
         if (followup && request.method === 'GET')

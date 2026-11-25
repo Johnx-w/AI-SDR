@@ -23,6 +23,7 @@ test('任务页只读且状态筛选可直达，不展示采购需求、沟通�
   const html = renderAt(CustomerBusiness, '/business?tab=tasks&state=skipped');
   assert.match(html, /aria-current="page"[^>]*>[\s\S]*?<span>已跳过<\/span>/);
   assert.match(html, /所属计划及原始原因/);
+  assert.doesNotMatch(html, /section-caption|已接手/);
   assert.doesNotMatch(html, /待评估|追信状态/);
   assert.doesNotMatch(html, /新增任务|录入沟通|新增需求|标记完成/);
 });

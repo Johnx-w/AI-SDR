@@ -11,12 +11,6 @@ const approvals = `SELECT r.source_id id,r.thread_id thread,r.info->>'customerId
   WHERE d.data->>'$.provenance.generator'='model' AND t.data->>'customerId' IS NOT NULL
   AND NOT EXISTS(SELECT 1 FROM mail_reception r WHERE r.source_id=d.data->>'replyToMessageId')
   AND EXISTS(SELECT 1 FROM json_each($customers) WHERE value=t.data->>'customerId')`;
-const assigned = `SELECT e.id,e.data->>'$.audit[0].mailboxThreadId' thread,e.data->>'customerId' customerId,
-  e.data->>'participant' name,e.data->>'title' title,coalesce(p.next_step,'') note,
-  coalesce(p.owner,e.data->>'owner') owner,coalesce(p.due_at,e.data->>'updatedAt') stamp
-  FROM customer_business_entities e LEFT JOIN followup_assignment_plans p ON p.scope=e.scope AND p.id=e.id
-  WHERE e.scope=$scope AND e.kind='conversations' AND e.data->>'channel'='email'
-  AND e.data->>'ownership'='human' AND e.data->>'status'='active' AND coalesce(p.completed,0)=$completed`;
 const priority = `SELECT c.record_id id,NULL thread,c.record_id customerId,c.summary->>'name' name,
   c.summary->>'email' title,'' note,'' owner,p.marked_at stamp FROM followup_priority p
   JOIN lead_library_customers c ON c.scope=p.scope AND c.record_id=p.customer_id WHERE p.scope=$scope`;
@@ -25,12 +19,11 @@ function statement(db, sql) {
   stmt.setAllowUnknownNamedParameters(true);
   return stmt;
 }
-export function followupDesk(service, store, library, params) {
+export function followupDesk(service, library, params) {
   const queue = params.get('queue');
   const args = {
     q: (params.get('q') || '').trim().toLowerCase().slice(0, 160),
     customer: params.get('customerId') || '',
-    completed: Number(params.get('completed') === '1'),
   };
   if (queue === 'lookup') {
     const items = args.q
@@ -65,7 +58,6 @@ export function followupDesk(service, store, library, params) {
       approvals,
       { scope: service.getScope(), customers: JSON.stringify(customers) },
     ],
-    assigned: [store.db, assigned, { scope: store.scope }],
     priority: [library.db, priority, { scope: library.scope }],
   };
   const counts = {};
@@ -73,7 +65,7 @@ export function followupDesk(service, store, library, params) {
     counts[key] = statement(
       db,
       `SELECT count(*) n FROM (${sql}) WHERE ($customer='' OR customerId=$customer)`,
-    ).get({ ...bindings, ...args, completed: 0 }).n;
+    ).get({ ...bindings, ...args }).n;
   }
   if (!Object.hasOwn(sources, queue)) return { counts };
   const [db, sql, bindings] = sources[queue];
@@ -109,28 +101,4 @@ export function setFollowupPriority(library, id, marked) {
       .prepare('DELETE FROM followup_priority WHERE scope=? AND customer_id=?')
       .run(library.scope, id);
   return { marked };
-}
-export function saveFollowupPlan(store, id, input) {
-  const row = store.get('conversations', id);
-  if (row?.ownership !== 'human' || row.channel !== 'email' || row.status !== 'active')
-    throw fail(409, '当前会话未由人工接手');
-  const owner = String(input.owner || '').trim(),
-    step = String(input.nextStep || '').trim(),
-    due = Date.parse(input.dueAt);
-  if (
-    !owner ||
-    owner.length > 120 ||
-    !step ||
-    step.length > 1000 ||
-    !Number.isFinite(due) ||
-    typeof input.completed !== 'boolean'
-  )
-    throw fail(400, '请填写负责人、下一步和有效的跟进时间');
-  store.db
-    .prepare(
-      `INSERT INTO followup_assignment_plans VALUES(?,?,?,?,?,?)
-  ON CONFLICT(scope,id) DO UPDATE SET owner=excluded.owner,next_step=excluded.next_step,due_at=excluded.due_at,completed=excluded.completed`,
-    )
-    .run(store.scope, id, owner, step, new Date(due).toISOString(), Number(input.completed));
-  return { saved: true };
 }

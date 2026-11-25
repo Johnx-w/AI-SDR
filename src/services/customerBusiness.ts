@@ -279,13 +279,4 @@ export const followupDeskApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ marked }),
     }),
-  plan: (
-    id: string,
-    plan: { owner: string; nextStep: string; dueAt: string; completed: boolean },
-  ) =>
-    request('/followup-desk/assigned/' + encodeURIComponent(id), {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(plan),
-    }),
 };
