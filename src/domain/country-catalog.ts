@@ -1,13 +1,32 @@
 import codes from 'i18n-iso-countries/codes.json' with { type: 'json' };
 import gdpOrder from '../data/country-gdp-order.json' with { type: 'json' };
 
+import englishNames from 'i18n-iso-countries/langs/en.json' with { type: 'json' };
+import chineseNames from 'i18n-iso-countries/langs/zh.json' with { type: 'json' };
+
+const targetCodes = new Set(
+  'US AU CA GB SG MY NZ TH VN AE ZA GH PH PL NL DE IT BE BR CL AR CO MX KR JP'.split(' '),
+);
+function catalogName(names: Record<string, string | string[]>, code: string) {
+  const value = names[code];
+  return Array.isArray(value) ? value[0] : value;
+}
+
 const english = new Intl.DisplayNames('en', { type: 'region' });
 const chinese = new Intl.DisplayNames('zh-CN', { type: 'region' });
 const rank = new Map(gdpOrder.map((code, i) => [code, i]));
 export const countries = codes
   .map(([code, iso3]) => {
-    const name = english.of(code) || code;
-    const zh = code === 'AE' ? '阿联酋' : chinese.of(code) || code;
+    // Task values cross browser, API and storage boundaries. Use the bundled
+    // names for supported countries so a browser's ICU version cannot change them.
+    const target = targetCodes.has(code);
+    const name =
+      code === 'US'
+        ? 'United States'
+        : target
+          ? catalogName(englishNames.countries, code)
+          : english.of(code) || code;
+    const zh = target ? catalogName(chineseNames.countries, code) : chinese.of(code) || code;
     return { code, iso3, name, zh, label: zh + '.' + name };
   })
   .sort(
@@ -35,9 +54,6 @@ const byName = new Map(
   ),
 );
 export const countryFor = (value?: string | null) => byName.get(value?.trim().toLowerCase() || '');
-const targetCodes = new Set(
-  'US AU CA GB SG MY NZ TH VN AE ZA GH PH PL NL DE IT BE BR CL AR CO MX KR JP'.split(' '),
-);
 const targetCountries = countries.filter((country) => targetCodes.has(country.code));
 export const acquisitionMarkets = targetCountries.map((c) => ({
   label: c.code === 'AE' ? c.label + '（迪拜）' : c.label,

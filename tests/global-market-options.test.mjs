@@ -30,6 +30,11 @@ test('指定的 25 国单选目录使用中英文名、代码和 GDP 排序，�
     countryFilters.slice(1, -1).map((item) => item.label),
     acquisitionMarkets.map((item) => item.label),
   );
+  assert.ok(
+    acquisitionMarkets.some(
+      (option) => option.value === 'South Korea' && option.label === '韩国.South Korea',
+    ),
+  );
   assert.equal(countryFor('迪拜').code, 'AE');
   const uae = acquisitionMarkets.find((item) => item.value === 'United Arab Emirates');
   assert.match(uae.keywords, /迪拜/);
