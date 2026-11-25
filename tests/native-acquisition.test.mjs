@@ -22,11 +22,11 @@ const env = {
 };
 const input = {
   country: 'United States',
-  region: 'Florida',
+  region: '',
   product: 'zip screens',
   customer_type: '',
   customer_profile: 'all',
-  search_query: 'zip screens Florida',
+  search_query: 'zip screens United States',
   acquisition_channel: 'tavily_web',
 };
 const sourceText =
@@ -602,7 +602,7 @@ test('已移除市场不能绕过 API 直接搜索、研究或使用旧搜索计
   const f = fixture(),
     svc = f.make();
   try {
-    for (const country of ['Southeast Asia', 'Singapore', 'Thailand']) {
+    for (const country of ['Southeast Asia', 'Unsupported market']) {
       await assert.rejects(
         svc.discover({ ...input, country }, { country, query: 'zip screens' }),
         /支持的国家/,

@@ -51,11 +51,10 @@ test('室内外偏好增加早期覆盖，仍保留另一方向与材料零件',
   }
 });
 
-test('全范围多市场查询保留搜索上限，同时覆盖各供货方向及市场', () => {
-  const countries = Array.from({ length: 30 }, (_, index) => `Market ${index + 1}`);
-  const queries = automaticSearchPlan({ ...allProducts, country: countries[0] }, countries);
-  assert.equal(queries.length, MAX_AUTO_SEARCH_QUERIES);
-  assert.equal(new Set(queries.map(({ country }) => country)).size, countries.length);
+test('全范围查询覆盖各供货方向且仅搜索所选国家', () => {
+  const queries = automaticSearchPlan({ ...allProducts, country: 'Japan' });
+  assert.ok(queries.length > 0 && queries.length <= MAX_AUTO_SEARCH_QUERIES);
+  assert.ok(queries.every(({ country }) => country === 'Japan'));
   const initial = queries
     .slice(0, 20)
     .map(({ query }) => query)
@@ -75,7 +74,7 @@ test('指定产品保留精确产品与别名、角色、地区，旧任务保�
     query_mode: 'auto',
     environment_preference: 'outdoor',
     customer_types: ['distributor'],
-    region: 'Texas',
+    region: '',
     products: [{ value: 'cellular blinds', aliases: ['honeycomb shades'] }],
     product: 'cellular blinds',
   };
@@ -85,7 +84,9 @@ test('指定产品保留精确产品与别名、角色、地区，旧任务保�
   assert.ok(
     queries.every(
       ({ query }) =>
-        query.includes('distributor dealer') && query.includes('Texas') && !outdoor.test(query),
+        query.includes('distributor dealer') &&
+        query.includes('United States') &&
+        !outdoor.test(query),
     ),
   );
   const legacy = {

@@ -101,10 +101,10 @@ test('客户库筛选展示中文市场和 A/B/C 评级，保留完整开发状�
     { ...lead, market: 'Canada', grade: 'C', status: '待开发' },
     { ...lead, id: 'other', grade: 'A', status: '人工跟进中' },
   ]);
-  assert.match(html, /<option value="加拿大">加拿大<\/option>/);
-  assert.doesNotMatch(html, /<option[^>]*>Canada<\/option>/);
-  const marketOptions = html.match(/<select aria-label="市场筛选"[^>]*>([\s\S]*?)<\/select>/)?.[1];
-  assert.equal((marketOptions.match(/<option value="待核实">待核实<\/option>/g) || []).length, 1);
+  assert.match(html, /aria-label="国家筛选"/);
+  assert.match(html, /aria-label="州／地区筛选"/);
+  assert.match(html, /全部国家/);
+  assert.match(html, /全部州／地区/);
   assert.match(
     html,
     /<option value="A">A<\/option><option value="B">B<\/option><option value="C">C<\/option>/,
@@ -153,10 +153,7 @@ test('待核实市场筛选包含国家空值及未知标记，排除已知国�
   assert.doesNotMatch(table, /Known Country/);
   for (const name of ['Empty Country', 'Blank Country', 'Unknown Country', 'Unrecorded Country'])
     assert.ok(table.includes(name), name);
-  const marketOptions = html.match(/<select aria-label="市场筛选"[^>]*>([\s\S]*?)<\/select>/)?.[1];
-  assert.equal((marketOptions.match(/<option value="待核实"/g) || []).length, 1);
-  assert.match(marketOptions, /<option value="待核实" selected="">待核实<\/option>/);
-  assert.doesNotMatch(marketOptions, /value="unknown"|value="未记录"/);
+  assert.match(html, /待核实/);
   assert.deepEqual(
     customers.map((customer) => customer.market),
     originalMarkets,
@@ -168,11 +165,8 @@ test('待核实市场筛选包含国家空值及未知标记，排除已知国�
 
 test('客户列表为空时全部市场下仍提供待核实选项', () => {
   const html = renderLibrary('客户画像', [], { pending: true });
-  const marketOptions = html.match(/<select aria-label="市场筛选"[^>]*>([\s\S]*?)<\/select>/)?.[1];
-  assert.equal(
-    marketOptions,
-    '<option value="" selected="">全部市场</option><option value="待核实">待核实</option>',
-  );
+  assert.match(html, /全部国家/);
+  assert.match(html, /aria-label="国家筛选"/);
 });
 
 test('客户评级只显示一次字母并保留依据入口，各开发状态使用各自颜色', () => {

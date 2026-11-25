@@ -40,7 +40,7 @@ const greatestCommonDivisor = (left, right) => {
   return left;
 };
 
-function broadSearchPlan(input, countries, roleVariants) {
+function broadSearchPlan(input, roleVariants) {
   const cycle =
     input.environment_preference === 'indoor'
       ? ['indoor', 'general', 'outdoor', 'semifinished', 'indoor', 'components']
@@ -50,8 +50,8 @@ function broadSearchPlan(input, countries, roleVariants) {
   const suffixes = ['', 'company contact', 'showroom'];
   const lanes = Object.fromEntries(
     Object.entries(broadProductLanes).map(([name, terms]) => {
-      const total = terms.length * countries.length * roleVariants.length * suffixes.length;
-      // A coprime stride visits every combination once. It also varies markets,
+      const total = terms.length * roleVariants.length * suffixes.length;
+      // A coprime stride visits every combination once. It also varies
       // product families and roles before a short run consumes its search budget.
       let stride = Math.max(1, Math.round(total * 0.618));
       while (greatestCommonDivisor(stride, total) !== 1) stride++;
@@ -66,43 +66,38 @@ function broadSearchPlan(input, countries, roleVariants) {
     if (lane.cursor >= lane.total) continue;
     let index = (lane.cursor++ * lane.stride) % lane.total;
     remaining--;
-    const country = countries[index % countries.length];
-    index = Math.floor(index / countries.length);
+    const country = input.country;
     const term = lane.terms[index % lane.terms.length];
     index = Math.floor(index / lane.terms.length);
     const role = roleVariants[index % roleVariants.length];
     index = Math.floor(index / roleVariants.length);
     const suffix = suffixes[index % suffixes.length];
-    const query = [quote(term), role, input.region, country, suffix]
-      .filter(Boolean)
-      .join(' ')
-      .slice(0, 395);
+    const query = [quote(term), role, country, suffix].filter(Boolean).join(' ').slice(0, 395);
     queries.set(query, { country, query });
   }
   return [...queries.values()];
 }
 
-export function automaticSearchPlan(input, countries = [input.country]) {
+export function automaticSearchPlan(input) {
   const roles = input.customer_types || (input.customer_type ? [input.customer_type] : []);
   const selected = acquisition.customerTypes.filter((type) => roles.includes(type.value));
   const roleVariants = selected.length
     ? selected.map((type) => type.terms)
     : ['supplier', 'dealer', 'manufacturer', ''];
-  if (isAllProductScope(input)) return broadSearchPlan(input, countries, roleVariants);
+  if (isAllProductScope(input)) return broadSearchPlan(input, roleVariants);
   const suffixes = ['', 'company contact', 'showroom'];
   const products = productTerms(input);
-  const total = suffixes.length * roleVariants.length * products.length * countries.length;
+  const total = suffixes.length * roleVariants.length * products.length;
   const sampleSize = Math.min(total, MAX_AUTO_SEARCH_QUERIES);
   let stride = Math.max(1, Math.ceil(total / sampleSize));
   while (total > sampleSize && greatestCommonDivisor(stride, total) !== 1) stride++;
   const queries = [];
   // The worker can execute at most 600 searches. For larger Cartesian products,
-  // sample evenly across suffix, role, product and country instead of letting the
+  // sample evenly across suffix, role and product instead of letting the
   // first outer dimension consume the whole budget.
   for (let sample = 0; sample < sampleSize; sample++) {
     let index = total <= sampleSize ? sample : (sample * stride) % total;
-    const country = countries[index % countries.length];
-    index = Math.floor(index / countries.length);
+    const country = input.country;
     const product = products[index % products.length];
     index = Math.floor(index / products.length);
     const role = roleVariants[index % roleVariants.length];
@@ -110,10 +105,7 @@ export function automaticSearchPlan(input, countries = [input.country]) {
     const suffix = suffixes[index % suffixes.length];
     queries.push({
       country,
-      query: [quote(product), role, input.region, country, suffix]
-        .filter(Boolean)
-        .join(' ')
-        .slice(0, 395),
+      query: [quote(product), role, country, suffix].filter(Boolean).join(' ').slice(0, 395),
     });
   }
   return [...new Map(queries.map((q) => [q.query, q])).values()];
@@ -132,7 +124,6 @@ export function buildSearchQuery(input) {
     productQuery,
     acquisition.customerTypes.find((t) => t.value === input.customer_type)?.terms,
     acquisition.profiles.find((p) => p.value === input.customer_profile)?.terms,
-    input.region,
     input.country,
   ]
     .filter(Boolean)

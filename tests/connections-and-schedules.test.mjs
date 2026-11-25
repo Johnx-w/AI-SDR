@@ -12,16 +12,17 @@ import {
   validateTiming,
   nextOccurrence,
 } from '../server/acquisition-schedules.mjs';
+import { validateTarget } from '../server/search-target.mjs';
 import { BatchJobs } from '../server/batch-jobs.mjs';
 import { withApp } from './helpers/http.mjs';
 import { scheduleRepeatLabel } from '../src/domain/schedule-timing.mjs';
 
 const input = {
   country: 'United States',
-  region: 'Florida',
+  region: '',
   product: 'outdoor zip screens',
   acquisition_channel: 'tavily_web',
-  search_query: 'outdoor zip screens Florida United States',
+  search_query: 'outdoor zip screens United States',
   target_count: 1,
 };
 const timing = {
@@ -147,6 +148,32 @@ function harness(extra = {}) {
     },
   };
 }
+
+test('旧州计划到期时暂停，重新选择国家并恢复后按该国执行', () => {
+  const h = harness({ checkInput: validateTarget });
+  try {
+    const plan = h.schedules.create({ name: '旧计划', input, timing }, 'legacy-scope-plan');
+    h.schedules.save({ ...plan, input: { ...input, region: 'California' } });
+    h.advance('2030-01-01T09:00:00+08:00');
+    h.schedules.tick();
+    assert.equal(h.jobs.list().length, 0);
+    assert.equal(h.schedules.get(plan.id).status, 'paused');
+    assert.equal(h.schedules.get(plan.id).input.region, 'California');
+    assert.throws(() => h.schedules.control(plan.id, 'resume'), /重新选择国家/);
+    h.schedules.update(plan.id, {
+      name: plan.name,
+      input: { ...input, country: 'United Kingdom', query_mode: 'auto', search_query: '' },
+      timing,
+    });
+    h.schedules.control(plan.id, 'resume');
+    h.advance('2030-01-01T14:30:00+08:00');
+    h.schedules.tick();
+    assert.equal(h.jobs.list()[0].input.country, 'United Kingdom');
+  } finally {
+    h.schedules.close();
+    h.jobs.close();
+  }
+});
 
 test('发布维护不改计划或启动新轮次，解除后跳过错过时点且不补跑', () => {
   let maintaining = true;

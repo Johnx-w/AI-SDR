@@ -207,7 +207,9 @@ export class AcquisitionSchedules {
             job = manager.create(plan.input, key, { scheduleId: plan.id });
           } catch (error) {
             const reason = error.status ? error.message : '计划启动失败，请检查本机服务';
-            if (plan.lastError !== reason) this.save({ ...plan, lastError: reason });
+            if (error.code === 'INVALID_COUNTRY_SCOPE') {
+              this.save({ ...plan, status: 'paused', nextRunAt: null, lastError: reason });
+            } else if (plan.lastError !== reason) this.save({ ...plan, lastError: reason });
             break;
           }
         }

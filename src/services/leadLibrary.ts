@@ -79,6 +79,7 @@ export type LeadSummary = Pick<
   version: string;
   companyIdentity?: Omit<NonNullable<Prospect['companyIdentity']>, 'evidence' | 'notes'> | null;
   matchLevel?: string;
+  regionLabel: string;
   ratingSummary: string;
   contactSummary: { label: string; detail: string };
 };
@@ -123,7 +124,13 @@ export interface LeadList extends LeadMetadata {
   leads: LeadSummary[];
   page?: number;
   filteredTotal?: number;
-  facets?: { grades: Record<string, number>; markets: string[]; statuses: string[] };
+  facets?: {
+    grades: Record<string, number>;
+    markets: string[];
+    regions?: string[];
+    regionKeywords?: Record<string, string>;
+    statuses: string[];
+  };
 }
 export interface LeadDetail extends LeadMetadata {
   lead: Prospect;

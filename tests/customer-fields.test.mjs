@@ -68,17 +68,17 @@ test('选择类型或画像后不符合条件、无法核实的企业不能计�
     false,
   );
 });
-test('欧洲搜索不含英国，客户类型与画像贯穿校验、搜索计划和飞书读回', () => {
+test('英国任务仅搜索英国，客户类型与画像贯穿校验、搜索计划和飞书读回', () => {
   const t = validateTarget({
-    country: 'Europe',
+    country: 'United Kingdom',
     product: 'shades',
     customer_type: 'wholesaler',
     customer_profile: 'trade',
   });
   assert.equal(t.customer_type, 'wholesaler');
-  assert.ok(!t.market_countries.includes('United Kingdom'));
+  assert.deepEqual(t.market_countries, ['United Kingdom']);
   assert.ok(
-    searchPlan(t).every((p) => p.country !== 'United Kingdom' && p.query.includes('wholesaler')),
+    searchPlan(t).every((p) => p.country === 'United Kingdom' && p.query.includes('wholesaler')),
   );
   assert.throws(() => validateTarget({ ...t, customer_type: 'invalid' }));
   assert.throws(() => validateTarget({ ...t, customer_profile: 'invalid' }));

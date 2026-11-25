@@ -1,20 +1,7 @@
+import { countryFor } from './country-catalog.ts';
 export const developmentStatuses = ['待开发', '已联系', '已回复', '跟进中', '已成交', '停止开发'];
 
-const marketNames: Record<string, string> = {
-  'United States': '美国',
-  Australia: '澳大利亚',
-  Canada: '加拿大',
-  'United Kingdom': '英国',
-  Europe: '欧洲',
-  'United Arab Emirates': '阿联酋',
-  'New Zealand': '新西兰',
-};
-export const marketLabel = (value?: string | null) => {
-  const market = value?.trim() || '';
-  return !market || /^(unknown|未知|未记录|待核实)$/i.test(market)
-    ? '待核实'
-    : marketNames[market] || market;
-};
+export const marketLabel = (value?: string | null) => countryFor(value)?.zh || '待核实';
 
 export const leadProductCategoryLabels = {
   plantation: 'Plantation Shutters（透气窗）',

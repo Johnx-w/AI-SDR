@@ -11,7 +11,8 @@ test('客户库支持的市场使用中文显示，中文原值保持不变', ()
     ['Australia', '澳大利亚'],
     ['Canada', '加拿大'],
     ['United Kingdom', '英国'],
-    ['Europe', '欧洲'],
+    ['Europe', '待核实'],
+    ['Turkey', '土耳其'],
     ['加拿大', '加拿大'],
   ])
     assert.equal(marketLabel(value), label);
@@ -31,7 +32,7 @@ test('国家空值和未知市场统一显示待核实，已知市场保持原�
   ])
     assert.equal(marketLabel(market), '待核实');
   assert.equal(marketLabel(' Canada '), '加拿大');
-  assert.equal(marketLabel('France'), 'France');
+  assert.equal(marketLabel('France'), '法国');
 });
 
 test('客户库固定展示五类产品，按英文（中文）命名并沿用业务品类定义', () => {

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateTarget, locationOptions } from '../server/search-target.mjs';
+import { validateTarget } from '../server/search-target.mjs';
 import { parseCompanyResearch, researchFields } from '../server/company-research.mjs';
 import {
   extractWebsiteMetadata,
@@ -8,16 +8,10 @@ import {
   planWebsitePages,
 } from '../server/website-metadata.mjs';
 import { extractContacts } from '../server/contact-extractor.mjs';
-const target = { country: 'Europe', region: '', product: 'screens' };
-test('加拿大省区和欧洲有效；移除的市场和分组下的州不可使用', () => {
-  assert.equal(locationOptions('Canada').regions.length, 13);
-  assert.ok(validateTarget(target).market_countries.length > 30);
-  assert.throws(() => locationOptions('Southeast Asia'), /支持的国家/);
-  assert.throws(() => validateTarget({ ...target, country: 'Singapore' }), /支持的国家/);
-  assert.equal(locationOptions('Europe').regions.length, 0);
-  assert.ok(locationOptions('Europe').countries.includes('Germany'));
-  assert.ok(!locationOptions('Europe').countries.includes('United Kingdom'));
-  assert.throws(() => locationOptions('Germany'));
+const target = { country: 'Germany', region: '', product: 'screens' };
+test('获客条件仅接受一个国家', () => {
+  assert.deepEqual(validateTarget(target).market_countries, ['Germany']);
+  assert.throws(() => validateTarget({ ...target, country: 'Southeast Asia' }), /支持的国家/);
   assert.throws(() => validateTarget({ ...target, region: 'Florida' }));
   assert.throws(() => validateTarget({ ...target, audience: 'both' }));
 });
@@ -188,6 +182,8 @@ test('加拿大本地格式电话可提取，欧洲和东南亚地址国家代�
     ['DE', 'Germany'],
     ['SG', 'Singapore'],
     ['FR', 'France'],
+    ['TR', 'Türkiye'],
+    ['BR', 'Brazil'],
     ['VN', 'Vietnam'],
   ]) {
     const content =

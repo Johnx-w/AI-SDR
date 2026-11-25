@@ -1,0 +1,35 @@
+.location-select {
+  min-width: 0;
+  font-size: inherit;
+  font-weight: 400;
+  color: var(--color-text);
+}
+.location-select .geo__control {
+  min-height: 34px;
+  background: var(--color-surface);
+  border-color: var(--color-border-strong);
+  border-radius: 6px;
+}
+.location-select .geo__input-container input {
+  height: auto;
+  width: auto;
+  min-height: 0;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+}
+.location-select .geo__menu {
+  z-index: 12;
+  min-width: min(260px, 80vw);
+}
+.location-select .geo__dropdown-indicator {
+  padding: 5px;
+}
+.location-select .geo__indicator-separator {
+  display: none;
+}
+.library-filters > .location-select {
+  flex: 1 1 130px;
+  max-width: 220px;
+  font-size: 12px;
+}

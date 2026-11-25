@@ -11,7 +11,7 @@ import { pageRenderer } from './initial-page.mjs';
 import { decorateLeadDevelopment } from './lead-development.mjs';
 import { isDevelopmentCustomer } from './customer-eligibility.mjs';
 import { BrandingCache } from './branding-cache.mjs';
-import { validateTarget, locationOptions } from './search-target.mjs';
+import { validateTarget } from './search-target.mjs';
 import {
   BatchJobs,
   validateCount,
@@ -832,15 +832,6 @@ export function createApp({
             return json(response, 200, reviewPlan(manager.control(suffix[0], suffix[1])));
           throw new ApiError(404, '定时计划接口不存在');
         }
-        if (url.pathname === `${prefix}/locations` && request.method === 'GET')
-          return json(
-            response,
-            200,
-            locationOptions(
-              url.searchParams.get('country') || 'United States',
-              url.searchParams.get('region') || '',
-            ),
-          );
         if (url.pathname === '/api/v1/leads/real/metrics' && request.method === 'GET')
           return json(response, 200, {
             scope: library().scope,

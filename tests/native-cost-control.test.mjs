@@ -269,9 +269,9 @@ test('正文、目标条件或模型身份变化触发新研究，而不是沿�
     await f.research('change-first');
     f.state.text += ' We also supply roller blinds.';
     await f.research('change-page');
-    await f.research('change-target', { ...input, region: 'Florida' });
+    await f.research('change-target', { ...input, customer_types: ['distributor'] });
     f.providers.model.cacheIdentity = { provider: 'fixture', model: 'text-v2' };
-    await f.research('change-model', { ...input, region: 'Florida' });
+    await f.research('change-model', { ...input, customer_types: ['distributor'] });
     assert.equal(f.state.calls, 4);
     assert.equal(f.state.writes, 0);
   } finally {

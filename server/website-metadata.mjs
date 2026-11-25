@@ -1,3 +1,4 @@
+import { countryFor } from '../src/domain/country-catalog.ts';
 import { extractContacts } from './contact-extractor.mjs';
 import { normalizePhoneLines } from './phone-format.mjs';
 export function websiteTextExcerpt(content, limit = 12000) {
@@ -86,49 +87,8 @@ export function extractWebsiteMetadata({ content, sourceUrl }) {
   };
   const countryName = (value) => {
     const raw = typeof value === 'object' ? value?.name || value?.['@id'] : value;
-    const code = String(raw || '')
-      .trim()
-      .toUpperCase();
-    if (
-      'DE FR IT ES NL BE CH AT SE NO DK FI IE PT PL CZ GR HU RO UA RU TR AL AD BY BA BG HR CY EE IS XK LV LI LT LU MT MD MC ME MK SM RS SK SI VA BN KH ID LA MY MM PH SG TH TL VN'
-        .split(' ')
-        .includes(code)
-    ) {
-      if (code === 'TR') return 'Turkey';
-      try {
-        return new Intl.DisplayNames(['en'], { type: 'region' }).of(code);
-      } catch {
-        return null;
-      }
-    }
-    const countries = {
-      US: 'United States',
-      USA: 'United States',
-      'UNITED STATES': 'United States',
-      'UNITED STATES OF AMERICA': 'United States',
-      AU: 'Australia',
-      AUS: 'Australia',
-      AUSTRALIA: 'Australia',
-      GB: 'United Kingdom',
-      UK: 'United Kingdom',
-      'UNITED KINGDOM': 'United Kingdom',
-      CA: 'Canada',
-      CANADA: 'Canada',
-      AE: 'United Arab Emirates',
-      UAE: 'United Arab Emirates',
-      'UNITED ARAB EMIRATES': 'United Arab Emirates',
-      NZ: 'New Zealand',
-      'NEW ZEALAND': 'New Zealand',
-    };
-    return (
-      countries[
-        String(raw || '')
-          .trim()
-          .toUpperCase()
-      ] ||
-      String(raw || '').trim() ||
-      null
-    );
+    const valueText = String(raw || '').trim();
+    return countryFor(valueText)?.name || valueText || null;
   };
   const addSocial = (raw, method, quote) => {
     const u = websiteScope(decode(raw).replace(/^http:\/\//i, 'https://'), sourceUrl);
