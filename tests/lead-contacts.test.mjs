@@ -1,3 +1,4 @@
+import { seedCustomers } from './helpers/customer-library.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../server/app.mjs';
@@ -60,12 +61,13 @@ async function withApp(
       return Response.json({ code: 0, tenant_access_token: 'test-token', expire: 3600 });
     if (path.endsWith('/fields'))
       return ok({
-        items: (simplified ? ['邮箱', '电话'] : ['联系人', '邮箱', '电话', '画像JSON']).map(
-          (field_name) => ({
-            field_name,
-            type: 1,
-          }),
-        ),
+        items: (simplified
+          ? ['邮箱', '电话']
+          : ['联系人', '邮箱', '电话', '画像JSON', '开发状态']
+        ).map((field_name) => ({
+          field_name,
+          type: 1,
+        })),
         has_more: false,
       });
     if (path.endsWith('/records/rec-test')) {
@@ -80,7 +82,10 @@ async function withApp(
     if (path.endsWith('/records')) return ok({ items: [record], has_more: false });
     throw new Error('Unexpected request: ' + path);
   };
-  const app = createApp({ env, fetchImpl });
+  const folder = await mkdtemp(join(tmpdir(), 'local-contacts-'));
+  const localEnv = { ...env, LEAD_LIBRARY_DB_PATH: join(folder, 'library.sqlite') };
+  seedCustomers(localEnv, [record]);
+  const app = createApp({ env: localEnv, fetchImpl });
   await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${app.address().port}`;
   const edit = (contacts, expected = current(), extra = {}) =>
@@ -104,6 +109,7 @@ async function withApp(
     });
   } finally {
     await new Promise((resolve) => app.close(resolve));
+    await rm(folder, { recursive: true, force: true });
   }
 }
 

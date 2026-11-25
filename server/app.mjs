@@ -135,21 +135,13 @@ export function createApp({
     customerLibrary: () => library(),
   });
   const brandingCache = new BrandingCache({ path: env.BRANDING_CACHE_PATH, ...brandingOptions });
-  let readingLeads;
-  const readLeads = () => {
-    if (!readingLeads)
-      readingLeads = provider.readLeads({ raw: true }).finally(() => {
-        readingLeads = undefined;
-      });
-    return readingLeads;
-  };
   let leadLibrary;
   let leadPerformance = new LeadPerformance();
   const library = () => {
     if (!leadLibrary) {
       const current = connections.environment();
       leadLibrary = new LeadLibrary({
-        isMaintaining,
+        isSyncing: () => provider.syncing,
         path: env.LEAD_LIBRARY_DB_PATH || env.BATCH_DB_PATH || ':memory:',
         scope: createHash('sha256')
           .update(
@@ -162,22 +154,12 @@ export function createApp({
             ]),
           )
           .digest('hex'),
-        readLeads,
-        decorateImported: (lead) => provider.decorateLeads({ leads: [lead] }).leads[0],
-        ...(env.LEAD_LIBRARY_TTL_MS !== undefined
-          ? { ttlMs: Number(env.LEAD_LIBRARY_TTL_MS) }
-          : {}),
       });
-      leadLibrary.start();
     }
     return leadLibrary;
   };
   const loadLeads = () => library().all();
-  // Bootstrap history once; subsequent deduplication uses the local master.
-  const verifiedLeads = async () => {
-    if (!library().meta) await library().refresh({ afterCurrent: true });
-    return (await loadLeads()).leads;
-  };
+  const verifiedLeads = async () => (await loadLeads()).leads;
   let running = 0;
   const acquisitionScope = () =>
     createHash('sha256')
@@ -467,10 +449,7 @@ export function createApp({
             replies: outbound?.replies?.pending.size || 0,
             mail: outbound?.conversations?.pending.size || 0,
             business: business.active + (business.syncing || 0),
-            customers:
-              Number(Boolean(readingLeads)) +
-              Number(Boolean(leadLibrary?.refreshing)) +
-              Number(Boolean(provider.syncing)),
+            customers: Number(Boolean(provider.syncing)),
             documents: productKnowledge?.documents.running.size || 0,
             branding: brandingCache.pending.size,
             mirrors: Number(Boolean(operationalSync)),
@@ -622,8 +601,6 @@ export function createApp({
               running ||
               business.active ||
               business.syncing ||
-              readingLeads ||
-              leadLibrary?.refreshing ||
               provider.syncing ||
               operationalSync ||
               productKnowledge?.documents.running.size ||
@@ -673,7 +650,7 @@ export function createApp({
             return json(response, 200, {
               products: knowledge().list(),
               source: 'local',
-              feishu: await productMirror().info(),
+              feishu: productMirror().connectionStatus(),
             });
           if (request.method === 'POST' || request.method === 'PUT') {
             const body = await readJson(request);
@@ -835,15 +812,10 @@ export function createApp({
         if (url.pathname === '/api/v1/leads/real/metrics' && request.method === 'GET')
           return json(response, 200, {
             scope: library().scope,
-            sync: {
-              ...library().metrics(),
-              mode: library().mode,
-              intervalMs: library().intervalMs,
-            },
+            sync: library().mirrorStatus(),
             performance: leadPerformance.snapshot(),
           });
         if (url.pathname === '/api/v1/leads/real/list' && request.method === 'GET') {
-          if (request.headers['x-lead-library-activity'] === 'active') library().touch();
           if (url.searchParams.has('page'))
             return await leadJson(response, 'list', () =>
               library().page(url.searchParams, business.state().store.development(), {
@@ -858,10 +830,9 @@ export function createApp({
         if (url.pathname === '/api/v1/leads/real/refresh' && request.method === 'POST')
           return await leadJson(response, 'refresh', async () => {
             await provider.syncCustomers?.();
-            const snapshot = await library().refresh();
             return url.searchParams.has('page')
               ? library().page(url.searchParams, business.state().store.development())
-              : snapshot;
+              : library().snapshot();
           });
         if (url.pathname === '/api/v1/leads/real' && request.method === 'GET')
           return await leadJson(
@@ -872,7 +843,7 @@ export function createApp({
                   library().page(url.searchParams, business.state().store.development(), {
                     exportDetails: true,
                   })
-              : loadLeads,
+              : async () => provider.decorateLeads(await loadLeads()),
           );
         const leadRoute = url.pathname.match(/^\/api\/v1\/leads\/real\/([\w-]{1,100})$/);
         if (leadRoute && request.method === 'GET')
@@ -915,14 +886,6 @@ export function createApp({
         if (contactRoute && request.method === 'PATCH') {
           const input = validateContactEdit(await readJson(request));
           if (!provider.updateContacts) throw new ApiError(503, '修改联系方式需要后端直连引擎');
-          const directEnv = connections.environment();
-          if (
-            !directEnv.FEISHU_APP_ID ||
-            !directEnv.FEISHU_APP_SECRET ||
-            !directEnv.FEISHU_APP_TOKEN ||
-            !directEnv.FEISHU_TABLE_ID
-          )
-            throw new ApiError(503, '请先配置飞书应用直连，以保存联系方式');
           if (running || jobs().active())
             throw new ApiError(409, '请先完成当前获客任务，再修改联系方式');
           running++;
@@ -970,10 +933,6 @@ export function createApp({
             running++;
             try {
               const output = await provider.assessRecord(recordId, body, 'rating-' + key);
-              library().invalidate();
-              void library()
-                .refresh({ afterCurrent: true })
-                .catch(() => {});
               return json(response, 200, output);
             } finally {
               running--;
@@ -1085,7 +1044,6 @@ export function createApp({
               const result = await provider.status(attempt.operation_id);
               if (result?.settled) {
                 const resolution = reviews().settle(job.id, index, result.output);
-                if (['inserted', 'updated'].includes(resolution.status)) library().invalidate();
                 return json(response, 200, { resolution });
               }
               if (result?.missing === true)
@@ -1110,7 +1068,6 @@ export function createApp({
                 { bypassExclusion: true },
               );
               const resolution = reviews().settle(job.id, index, output);
-              if (['inserted', 'updated'].includes(resolution.status)) library().invalidate();
               return json(response, 200, { resolution });
             } catch {
               reviews().uncertain(job.id, index);
@@ -1263,10 +1220,6 @@ export function createApp({
   const startBackground = () => {
     if (backgroundStarted || isMaintaining()) return;
     backgroundStarted = true;
-    if (env.LEAD_LIBRARY_DB_PATH && !library().meta && connections.environment().FEISHU_TABLE_ID)
-      void library()
-        .refresh()
-        .catch(() => {});
     plans().start();
     if (env.CUSTOMER_BUSINESS_DB_PATH || env.BATCH_DB_PATH) business.start();
     if (env.OUTREACH_DB_PATH || jobs().outreachJobs().length) outreach().start();

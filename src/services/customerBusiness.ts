@@ -77,7 +77,6 @@ export interface BusinessTask extends BusinessRecord {
   origin?: string;
   campaignId?: string;
   deliveryStatus?: string;
-  displayId?: string;
   ownerIds: string[];
   templateIds: string[];
   conversationId?: string;

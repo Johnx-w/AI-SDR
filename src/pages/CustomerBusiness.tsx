@@ -185,10 +185,7 @@ export function CustomerBusiness() {
                           {names.get(task.customerId) || task.customerId}
                         </Link>
                       </td>
-                      <td>
-                        {task.title}
-                        {task.displayId && <small> · {task.displayId}</small>}
-                      </td>
+                      <td>{task.title}</td>
                       <td>{formatBeijingTime(task.dueAt)}</td>
                       <td>{statusNames[task.status]}</td>
                       <td>{task.notes || task.completionNotes || '按计划等待执行'}</td>

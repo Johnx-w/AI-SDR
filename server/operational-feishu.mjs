@@ -206,40 +206,37 @@ export async function syncOperationalFeishu({
       return fields ? [{ key: job.id, fields }] : [];
     }),
   };
-  const plans = await Promise.all(
-    ['T11', 'T7', 'T8', 'T10'].map(async (kind) => {
-      const matches = tables.filter((table) => table.name.startsWith(`${kind}｜`));
-      assert(matches.length === 1, `未找到唯一的 ${kind} 数据表`);
-      const table = matches[0];
-      if (env.FEISHU_APP_TOKEN === 'Xat4bgUFuaL6tBsXqRccnYaknEf')
-        assert.equal(table.table_id, formalTables[kind], `${kind} 不是正式 Base 原表`);
-      const [fields, records] = await Promise.all([
-        mirror.client.fields(table.table_id),
-        mirror.client.records(table.table_id),
-      ]);
-      assertFields(fields, kind);
-      if (kind === 'T7') {
-        const relation = fields.find((field) => field.field_name === '关联关键词组');
-        assert(
-          relation.property?.table_id ===
-            tables.find((item) => item.name.startsWith('T11｜'))?.table_id &&
-            relation.property?.multiple === true,
-          'T7 关联关键词组目标不符',
-        );
+  const plans = [];
+  for (const kind of ['T11', 'T7', 'T8', 'T10']) {
+    const matches = tables.filter((table) => table.name.startsWith(`${kind}｜`));
+    assert(matches.length === 1, `未找到唯一的 ${kind} 数据表`);
+    const table = matches[0];
+    if (env.FEISHU_APP_TOKEN === 'Xat4bgUFuaL6tBsXqRccnYaknEf')
+      assert.equal(table.table_id, formalTables[kind], `${kind} 不是正式 Base 原表`);
+    const fields = await mirror.client.fields(table.table_id);
+    const records = await mirror.client.records(table.table_id);
+    assertFields(fields, kind);
+    if (kind === 'T7') {
+      const relation = fields.find((field) => field.field_name === '关联关键词组');
+      assert(
+        relation.property?.table_id ===
+          tables.find((item) => item.name.startsWith('T11｜'))?.table_id &&
+          relation.property?.multiple === true,
+        'T7 关联关键词组目标不符',
+      );
+    }
+    for (const source of sources[kind])
+      for (const [name, value] of Object.entries(source.fields)) {
+        const field = fields.find((item) => item.field_name === name);
+        assert(field, `${kind} 缺少字段：${name}`);
+        if (field.type === 3 && value !== null)
+          assert(
+            field.property?.options?.some((option) => option.name === value),
+            `${kind} 缺少选项：${value}`,
+          );
       }
-      for (const source of sources[kind])
-        for (const [name, value] of Object.entries(source.fields)) {
-          const field = fields.find((item) => item.field_name === name);
-          assert(field, `${kind} 缺少字段：${name}`);
-          if (field.type === 3 && value !== null)
-            assert(
-              field.property?.options?.some((option) => option.name === value),
-              `${kind} 缺少选项：${value}`,
-            );
-        }
-      return { kind, table, fields, records };
-    }),
-  );
+    plans.push({ kind, table, fields, records });
+  }
   const counts = {};
   const keywordIds = new Map();
   for (const { kind, table, fields, records } of plans) {
@@ -264,6 +261,7 @@ export async function syncOperationalFeishu({
     for (const source of sources[kind]) {
       let record = index.get(source.key);
       const key = `${mirror.scope}:${kind}:${table.table_id}:${source.key}`;
+      let attempted = false;
       await safeWrite(
         {
           journal: mirror.journal,
@@ -272,6 +270,7 @@ export async function syncOperationalFeishu({
         },
         key,
         async () => {
+          attempted = true;
           record = await mirror.client.write(
             record ? 'update' : 'insert',
             source.fields,
@@ -281,6 +280,7 @@ export async function syncOperationalFeishu({
           );
         },
         async () => {
+          if (!attempted && record && sameFields(record, source.fields, fields)) return true;
           const matches = record
             ? [await mirror.client.record(record.record_id, table.table_id)]
             : (await mirror.client.records(table.table_id)).filter(

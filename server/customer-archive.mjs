@@ -1,6 +1,12 @@
 import { createHash } from 'node:crypto';
 import { fieldText, mapFeishuRecord } from './feishu.mjs';
-import { fieldValue, customerWebsite, encodeCustomerFields } from './customer-fields.mjs';
+import {
+  fieldValue,
+  customerWebsite,
+  encodeCustomerFields,
+  resolveCustomerField,
+  CUSTOMER_FIELD_ALIASES,
+} from './customer-fields.mjs';
 import { domainKey } from './website-identity.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -37,25 +43,24 @@ export class CustomerArchive {
       .prepare('INSERT OR REPLACE INTO customer_archive_sync VALUES(?,?,?)')
       .run(this.library.scope, entry.record.record_id, JSON.stringify(entry));
   }
-  async ready() {
+  assertOpen() {
     if (this.closed) throw fail(503, '客户档案正在关闭');
-    if (!this.library.meta) await this.library.refresh();
   }
-  async fields(tableId) {
-    if (tableId) return this.remote.fields(tableId);
-    const row = this.library.db
-      .prepare('SELECT data FROM customer_archive_schema WHERE scope=?')
-      .get(this.library.scope);
-    if (row) return JSON.parse(row.data);
-    const fields = await this.remote.fields();
-    this.library.db
-      .prepare('INSERT OR REPLACE INTO customer_archive_schema VALUES(?,?)')
-      .run(this.library.scope, JSON.stringify(fields));
-    return fields;
+  fields() {
+    // The local dossier keeps its complete fields even when the report has fewer columns.
+    return [
+      ...Object.values(CUSTOMER_FIELD_ALIASES)
+        .filter((name) => name !== '初评结果')
+        .map((field_name) => ({ field_name, type: 1 })),
+      ...['联系人', '邮箱', '电话', '画像JSON', '评级依据', '主要供货机会', '待确认事项'].map(
+        (field_name) => ({ field_name, type: 1 }),
+      ),
+      { field_name: '初评结果', type: 3 },
+      { field_name: '最近研究时间', type: 5 },
+    ];
   }
-  async records(tableId, filter) {
-    if (tableId || filter) return this.remote.records(tableId, filter);
-    await this.ready();
+  async records() {
+    this.assertOpen();
     const entries = new Map(this.entries().map((entry) => [entry.record.record_id, entry.record]));
     return this.library.snapshot(true).leads.map(
       (lead) =>
@@ -66,9 +71,8 @@ export class CustomerArchive {
         },
     );
   }
-  async record(id, tableId) {
-    if (tableId) return this.remote.record(id, tableId);
-    await this.ready();
+  async record(id) {
+    this.assertOpen();
     const { lead } = await this.library.detail(id);
     return (
       this.entry(id)?.record || { record_id: id, fields: lead.fields, created_time: lead.createdAt }
@@ -79,9 +83,8 @@ export class CustomerArchive {
     if (entry)
       this.library.upsert(this.decorate({ leads: [mapFeishuRecord(entry.record)] }).leads[0]);
   }
-  async write(action, fields, recordId, clientToken, tableId) {
-    if (tableId) return this.remote.write(action, fields, recordId, clientToken, tableId);
-    await this.ready();
+  async write(action, fields, recordId, clientToken) {
+    this.assertOpen();
     if (
       !['insert', 'update'].includes(action) ||
       !fields ||
@@ -102,6 +105,8 @@ export class CustomerArchive {
       fields: { ...old?.fields, ...fields },
     };
     const domain = domainKey(customerWebsite(record));
+    if (action === 'insert' && !fieldText(record.fields.公司名称 || record.fields.客户名称).trim())
+      throw fail(400, '客户档案缺少公司名称');
     if (action === 'insert' && !domain) throw fail(400, '客户档案缺少有效官网');
     if (
       action === 'insert' &&
@@ -141,9 +146,14 @@ export class CustomerArchive {
       const id = queued.record.record_id;
       try {
         definitions ??= await this.remote.fields();
-        const fields = encodeCustomerFields(queued.fields, definitions);
+        const projected = Object.fromEntries(
+          Object.entries(queued.fields).filter(([name]) => resolveCustomerField(definitions, name)),
+        );
+        const fields = encodeCustomerFields(projected, definitions);
         let remoteId = queued.remoteId;
         if (!remoteId) {
+          if (!customerWebsite(fields))
+            throw fail(409, '飞书客户表缺少可写的官网字段，无法核对新增记录');
           // Reconcile every insert before creating, including responses lost across a restart.
           const domain = domainKey(customerWebsite(queued.record));
           const matches = (await this.remote.records()).filter(

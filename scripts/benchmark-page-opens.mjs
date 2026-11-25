@@ -22,7 +22,7 @@ const scope = createHash('sha256')
 const offline = () => {
   throw new Error('Unexpected external service call');
 };
-const leads = new LeadLibrary({ path: env.LEAD_LIBRARY_DB_PATH, scope, readLeads: offline });
+const leads = new LeadLibrary({ path: env.LEAD_LIBRARY_DB_PATH, scope });
 const mailbox = {
   id: 'bench-sales',
   email: 'sales@bench.example',

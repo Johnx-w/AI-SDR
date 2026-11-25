@@ -4,7 +4,6 @@ import { createHash } from 'node:crypto';
 import { CustomerBusiness } from './customer-business.mjs';
 import { CustomerBusinessFeishu } from './customer-business-feishu.mjs';
 import { isOriginalT5, ProductKnowledgeFeishu } from './product-knowledge-feishu.mjs';
-import { FeishuClient } from './feishu-direct.mjs';
 import { fieldText } from './feishu.mjs';
 import { decorateLeadDevelopment } from './lead-development.mjs';
 import { customerMirrorFields } from './customer-mirror.mjs';
@@ -81,11 +80,10 @@ export class CustomerBusinessApi {
       .digest('hex');
     if (this.current?.fingerprint === fingerprint) return this.current;
     this.reset();
-    const client = new FeishuClient({ env, fetchImpl: this.fetch });
     const store = new CustomerBusiness({
       path,
       scope,
-      customer: async (id) => this.customerRecord?.(id) || client.record(id),
+      customer: this.customerRecord,
       product: async (id) => this.knowledge().get(id),
     });
     const tasksOnly = Boolean(env.FOLLOWUP_FEISHU_APP_TOKEN);
@@ -226,7 +224,7 @@ export class CustomerBusinessApi {
     return operation;
   }
   async workspace(url) {
-    const { store, mirror, env, tasksOnly } = this.state();
+    const { store, mirror, env } = this.state();
     const data = store.view({
       customerId: url.searchParams.get('customerId') || undefined,
       productId: url.searchParams.get('productId') || undefined,
@@ -256,22 +254,6 @@ export class CustomerBusinessApi {
       schemaVersion: CUSTOMER_BUSINESS_VERSION,
       ...data,
       tasks: data.tasks.filter((task) => task.origin === 'automatic-followup'),
-      ...(tasksOnly
-        ? {
-            tasks: data.tasks
-              .filter((task) => task.origin === 'automatic-followup')
-              .map((task) => ({
-                ...task,
-                displayId:
-                  mirror.journal.findLast(
-                    (r) =>
-                      r.key ===
-                        `${mirror.scope}:task-record:${mirror.env.FEISHU_TASKS_TABLE_ID}:${task.id}` &&
-                      r.state === 'mapped',
-                  )?.displayId || '',
-              })),
-          }
-        : {}),
       customers,
       products,
       customerError,

@@ -5,6 +5,8 @@ import { FeishuClient } from '../server/feishu-direct.mjs';
 import { feishuEnv, withFeishuAuth } from './helpers/feishu.mjs';
 import { createApp } from '../server/app.mjs';
 
+import { safeWrite } from '../server/customer-business-feishu.mjs';
+
 const env = feishuEnv;
 const record = {
   record_id: 'rec-test',
@@ -172,7 +174,7 @@ test('真实客户接口只读，响应不泄露服务端认证', async () => {
     const response = await fetch(url);
     assert.equal(response.status, 200);
     const body = await response.json();
-    assert.equal(body.total, 1);
+    assert.equal(body.total, 0);
     assert.equal(JSON.stringify(body).includes(env.FEISHU_APP_SECRET), false);
     assert.equal((await fetch(url, { method: 'POST' })).status, 404);
     assert.equal(
@@ -182,4 +184,51 @@ test('真实客户接口只读，响应不泄露服务端认证', async () => {
   } finally {
     await new Promise((resolve) => app.close(resolve));
   }
+});
+
+test('数据尚未就绪只重试 GET，其他 HTTP 400 立即报告错误码', async () => {
+  for (const code of [1254607, 123456]) {
+    let reads = 0;
+    const client = new FeishuClient({
+      env,
+      fetchImpl: withFeishuAuth(async () =>
+        ++reads === 1
+          ? Response.json({ code }, { status: 400 })
+          : Response.json({ code: 0, data: { items: [record], has_more: false } }),
+      ),
+    });
+    if (code === 1254607) {
+      assert.deepEqual(await client.records(), [record]);
+      assert.equal(reads, 2);
+    } else {
+      await assert.rejects(client.records(), { remoteCode: code });
+      assert.equal(reads, 1);
+    }
+  }
+});
+test('明确拒绝写入后保留权限原因并允许修权后重试', async () => {
+  const journal = [];
+  let writes = 0,
+    saved = false;
+  const client = new FeishuClient({
+    env,
+    fetchImpl: withFeishuAuth(async () => {
+      if (++writes === 1) return Response.json({ code: 91403 }, { status: 403 });
+      saved = true;
+      return Response.json({ code: 0, data: { record } });
+    }),
+  });
+  const sync = () =>
+    safeWrite(
+      { journal },
+      'T8:test',
+      () => client.write('insert', {}, null, 'test', 'tbl-test'),
+      () => saved,
+    );
+  await assert.rejects(sync(), /91403.*T8:test/);
+  assert.equal(journal.at(-1).state, 'rejected');
+  await sync();
+  await sync();
+  assert.equal(journal.at(-1).state, 'done');
+  assert.equal(writes, 2);
 });

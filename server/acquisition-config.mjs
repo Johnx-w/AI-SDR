@@ -1,11 +1,4 @@
-export const nativeRequirements = [
-  'TAVILY_API_KEY',
-  'DEEPSEEK_API_KEY',
-  'FEISHU_APP_ID',
-  'FEISHU_APP_SECRET',
-  'FEISHU_APP_TOKEN',
-  'FEISHU_TABLE_ID',
-];
+export const nativeRequirements = ['TAVILY_API_KEY', 'DEEPSEEK_API_KEY'];
 
 const configured = (value) => typeof value === 'string' && Boolean(value.trim());
 const configError = (message) => Object.assign(new Error(message), { status: 503 });
@@ -98,11 +91,7 @@ export function researchProviderConfig(env = {}) {
 
 export function acquisitionConfig(env = {}) {
   const research = researchProviderConfig(env);
-  const requirements = [
-    ...research.web.requirements,
-    ...research.model.requirements,
-    ...nativeRequirements.filter((name) => name.startsWith('FEISHU_')),
-  ];
+  const requirements = [...research.web.requirements, ...research.model.requirements];
   const missing = requirements.filter((name) => !configured(env[name]));
   return {
     provider: 'native',
@@ -125,11 +114,16 @@ export async function platformJson(fetchImpl, url, options, service) {
   } catch {
     throw Object.assign(new Error(service + '连接中断或超时'), { status: 502 });
   }
-  if (!response.ok)
-    throw Object.assign(new Error(service + '请求失败（HTTP ' + response.status + '）'), {
+  if (!response.ok) {
+    const body = service === '飞书' ? await response.json().catch(() => null) : null;
+    const remoteCode = Number.isSafeInteger(body?.code) ? body.code : undefined;
+    const detail = remoteCode === undefined ? '' : '，代码 ' + remoteCode;
+    throw Object.assign(new Error(service + '请求失败（HTTP ' + response.status + detail + '）'), {
+      ...(remoteCode === undefined ? {} : { remoteCode }),
       status: 502,
       upstreamStatus: response.status,
     });
+  }
   try {
     return await response.json();
   } catch {

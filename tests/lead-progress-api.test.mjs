@@ -1,3 +1,4 @@
+import { seedCustomers } from './helpers/customer-library.mjs';
 import { withFeishuAuth } from './helpers/feishu.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -35,6 +36,8 @@ test('已有真实发送、来信和需求推进即时联动列表、详情、�
     FEISHU_TABLE_ID: 't2',
     CUSTOMER_BUSINESS_DB_PATH: path,
   };
+  env.LEAD_LIBRARY_DB_PATH = join(folder, 'customers.sqlite');
+  seedCustomers(env, [customer]);
   await withApp(
     {
       env,
