@@ -10,14 +10,10 @@ const { CustomerBusinessSummary } = loadModule(
   new URL('../src/components/CustomerBusinessSummary.tsx', import.meta.url),
 );
 
-test('客户邮件入口保留客户编号并包括只有发信的会话', () => {
-  const html = render(React.createElement(CustomerBusinessSummary, { customerId: 'buyer/a b' }));
-  const href = html.match(/<a\b[^>]*href="([^"]+)"[^>]*>客户邮件/)[1].replaceAll('&amp;', '&');
-  const url = new URL(href, 'http://example.test');
-  assert.equal(url.pathname, '/inbox');
-  assert.equal(url.searchParams.get('tab'), 'inbox');
-  assert.equal(url.searchParams.get('customerId'), 'buyer/a b');
-  assert.equal(url.searchParams.has('inboundOnly'), false);
+test('时间线直接展示沟通记录并移除重复入口', () => {
+  const html = render(React.createElement(CustomerBusinessSummary, { customerId: 'buyer' }));
+  assert.match(html, /沟通与任务时间线/);
+  assert.doesNotMatch(html, />客户邮件<|>自动跟进任务</);
 });
 
 function inbox(list, { error = '', loading = false } = {}) {

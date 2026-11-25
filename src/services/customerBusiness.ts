@@ -148,7 +148,7 @@ async function request<T>(path = '', options: RequestInit = {}): Promise<T> {
 }
 export interface TimelineItem {
   id: string;
-  kind: 'mail' | 'first' | 'auto' | 'manual' | 'reply';
+  kind: 'received' | 'mail' | 'first' | 'auto' | 'manual' | 'reply';
   title: string | null;
   state: string;
   stamp: string | null;

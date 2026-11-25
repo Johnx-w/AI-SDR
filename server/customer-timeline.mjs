@@ -1,5 +1,5 @@
 import { mailboxAccountKey } from './mail-conversations.mjs';
-import { classifyInboundReply } from './communication-rounds.mjs';
+import { replyToInboundSql } from './mail-reply-history.mjs';
 
 const pageSize = 25;
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -11,6 +11,8 @@ function businessRows(store, customerId) {
   const columns = [
     'title',
     'subject',
+    'direction',
+    'from',
     'account',
     'externalId',
     'mailboxMessageId',
@@ -25,12 +27,14 @@ function businessRows(store, customerId) {
   ];
   return store.db
     .prepare(
-      `SELECT kind,id,${columns.map((name) => field(name) + ' AS ' + name).join(',')}
+      `SELECT kind,id,${columns.map((name) => field(name) + ' AS "' + name + '"').join(',')}
     FROM customer_business_entities WHERE scope=? AND kind IN ('tasks','messages')
     AND json_extract(data,'$.customerId')=? AND coalesce(json_extract(data,'$.origin'),'')!='mock'
     AND NOT (kind='tasks' AND upper(coalesce(json_extract(data,'$.notes'),'')) LIKE 'MOCK%')
-    AND (kind='tasks' OR (json_extract(data,'$.channel')='email' AND json_extract(data,'$.direction')='outbound'
-    AND json_extract(data,'$.deliveryStatus') IN ('sent','accepted')))`,
+    AND (kind='tasks' OR (json_extract(data,'$.channel')='email' AND ((json_extract(data,'$.direction')='outbound' AND json_extract(data,'$.deliveryStatus') IN ('sent','accepted'))
+      OR (json_extract(data,'$.direction')='inbound' AND json_extract(data,'$.deliveryStatus')='received'
+      AND coalesce(json_extract(data,'$.classification'),'normal') NOT IN ('hard_bounce','auto_reply','unverified')
+      AND coalesce(json_extract(data,'$.businessKind'),'other') NOT IN ('bounce','notification','unverified')))))`,
     )
     .all(store.scope, customerId);
 }
@@ -41,11 +45,6 @@ export function initializeCustomerTimeline(db) {
     CREATE INDEX IF NOT EXISTS timeline_customer_thread ON mailbox_threads(json_extract(data,'$.customerId'));
     CREATE INDEX IF NOT EXISTS timeline_participant ON mailbox_threads(json_extract(data,'$.participant'));
     CREATE INDEX IF NOT EXISTS timeline_headers ON mailbox_reply_headers(thread_id,direction)`);
-  db.function(
-    'timeline_request',
-    { deterministic: true },
-    (data) => classifyInboundReply(JSON.parse(data)).requestType,
-  );
 }
 
 export function readCustomerTimeline(store, service, customerId, requestedPage = 1) {
@@ -64,10 +63,6 @@ export function readCustomerTimeline(store, service, customerId, requestedPage =
   ]
     .flatMap((s) => (s || '').toLowerCase().split(/[\s,;；、]+/u))
     .filter((s) => s && lookup(s)?.id === customerId);
-  const offline = db.prepare("SELECT 1 FROM sqlite_schema WHERE name='mail_offline_handled'").get();
-  const closed = offline
-    ? 'EXISTS(SELECT 1 FROM mail_offline_handled WHERE message_id=h.id)'
-    : "EXISTS(SELECT 1 FROM mail_thread_workflow WHERE thread_id=h.thread_id AND state='done' AND updated_at>=h.stamp)";
   const result = db
     .prepare(
       `WITH accounts AS (SELECT value->>'key' AS key,value->>'email' AS email FROM json_each($accounts)),
@@ -79,20 +74,18 @@ export function readCustomerTimeline(store, service, customerId, requestedPage =
       WHERE json_extract(d.data,'$.customerId')=$id AND c.data->>'mode'='production' AND c.data->>'scope'=$scope),
     follow AS MATERIALIZED (SELECT f.id,f.state,f.data FROM outreach_followups f JOIN firsts d ON d.id=f.data->>'firstId'
       WHERE json_extract(f.data,'$.customerId')=$id),
-    inbound AS MATERIALIZED (SELECT h.id,h.subject,h.thread_id,h.stamp,timeline_request(m.data) AS request
-      FROM threads t JOIN mailbox_reply_headers h ON h.thread_id=t.id JOIN mailbox_thread_messages m ON m.id=h.id
-      JOIN accounts a ON a.key=h.account_key
-      WHERE h.direction='inbound' AND h.source='imap' AND h.sender NOT IN (SELECT email FROM accounts)
-      AND NOT ${closed} AND NOT EXISTS (SELECT 1 FROM mailbox_reply_headers o WHERE o.direction='outbound'
-        AND o.account_key=h.account_key AND o.parent_id=h.external_id AND o.sender=a.email AND o.stamp>=h.stamp
-        AND EXISTS(SELECT 1 FROM json_each(o.recipients) WHERE lower(value)=h.sender))),
+    received AS MATERIALIZED (SELECT h.*,a.email AS account FROM threads t JOIN mailbox_reply_headers h ON h.thread_id=t.id
+      JOIN accounts a ON a.key=h.account_key WHERE h.direction='inbound' AND h.source='imap'
+      AND h.sender NOT IN (SELECT email FROM accounts)
+      AND coalesce(h.business_kind,'other') NOT IN ('bounce','notification','unverified')
+      AND coalesce(h.classification,'normal') NOT IN ('hard_bounce','auto_reply','unverified')),
     events(kind,id,title,state,stamp,clock,note,thread,campaign,source,identity,priority) AS (
       SELECT 'mail',h.id,h.subject,'sent',m.data->>'occurredAt','发送',NULL,h.thread_id,NULL,'thread',
         coalesce(nullif(h.external_id,''),h.id)||':'||lower(h.sender),1
         FROM threads t JOIN mailbox_reply_headers h ON h.thread_id=t.id JOIN mailbox_thread_messages m ON m.id=h.id
         WHERE h.direction='outbound' AND m.data->>'deliveryStatus' IN ('sent','accepted')
       UNION ALL SELECT 'mail',data->>'id',data->>'subject','sent',data->>'occurredAt','发送',NULL,NULL,NULL,'message',
-        coalesce(nullif(data->>'externalId',''),data->>'mailboxMessageId',data->>'id')||':'||lower(coalesce(data->>'account','')),3 FROM crm WHERE data->>'kind'='messages'
+        coalesce(nullif(data->>'externalId',''),data->>'mailboxMessageId',data->>'id')||':'||lower(coalesce(data->>'account','')),3 FROM crm WHERE data->>'kind'='messages' AND data->>'direction'='outbound'
       UNION ALL SELECT CASE state WHEN 'accepted' THEN 'mail' ELSE 'first' END,id,
         CASE state WHEN 'accepted' THEN data->>'subject' ELSE '首封开发信' END,
         CASE WHEN state='accepted' THEN 'sent' WHEN state='failed' AND data->>'$.resolution.outcome'='failed' THEN 'verifiedFailed'
@@ -108,8 +101,17 @@ export function readCustomerTimeline(store, service, customerId, requestedPage =
       UNION ALL SELECT CASE WHEN data->>'origin'='automatic-followup' THEN 'auto' ELSE 'manual' END,data->>'id',data->>'title',
         coalesce(nullif(data->>'deliveryStatus',''),data->>'status'),data->>'dueAt','计划',
         coalesce(nullif(data->>'notes',''),data->>'completionNotes'),NULL,data->>'campaignId','task',data->>'id',2 FROM crm WHERE data->>'kind'='tasks'
-      UNION ALL SELECT 'reply',id,subject,request,stamp,'收到',NULL,thread_id,NULL,'thread',id,1 FROM inbound WHERE request IS NOT NULL
-    ), ranked AS (SELECT *,row_number() OVER (PARTITION BY kind,CASE WHEN kind IN ('mail','auto') THEN identity ELSE id END ORDER BY priority,id) AS rank FROM events),
+      UNION ALL SELECT 'received',h.id,h.subject,'received',h.stamp,'收到',h.sender,h.thread_id,NULL,'thread',
+        coalesce(nullif(h.external_id,''),h.id)||':'||h.account,1 FROM received h
+      UNION ALL SELECT 'received',data->>'id',data->>'subject','received',data->>'occurredAt','收到',data->>'from',NULL,NULL,'message',
+        coalesce(nullif(data->>'externalId',''),data->>'mailboxMessageId',data->>'id')||':'||lower(coalesce(data->>'account','')),3
+        FROM crm WHERE data->>'kind'='messages' AND data->>'direction'='inbound'
+        AND lower(coalesce(data->>'from','')) NOT IN (SELECT email FROM accounts)
+      UNION ALL SELECT 'reply',h.id,h.subject,h.request_type,h.stamp,'收到',NULL,h.thread_id,NULL,'thread',h.id,1 FROM received h
+        WHERE h.business_kind='positive' AND h.request_type IS NOT NULL
+        AND NOT EXISTS(SELECT 1 FROM mail_offline_handled WHERE message_id=h.id)
+        AND NOT EXISTS(SELECT 1 FROM mailbox_reply_headers o WHERE ${replyToInboundSql('h.account')})
+    ), ranked AS (SELECT *,row_number() OVER (PARTITION BY kind,CASE WHEN kind IN ('mail','auto','received') THEN identity ELSE id END ORDER BY priority,id) AS rank FROM events),
     selected AS MATERIALIZED (SELECT * FROM ranked WHERE rank=1),
     slice AS (SELECT * FROM selected ORDER BY (stamp IS NULL OR stamp='') DESC,julianday(stamp) DESC,kind,id LIMIT $size OFFSET $offset)
     SELECT (SELECT count(*) FROM selected) AS total,(SELECT count(*) FROM selected WHERE kind='mail') AS sentCount,
@@ -152,8 +154,8 @@ export function timelineOriginal(store, service, customerId, source, id) {
     (source === 'message'
       ? !(
           item.channel === 'email' &&
-          item.direction === 'outbound' &&
-          ['accepted', 'sent'].includes(item.deliveryStatus)
+          ((item.direction === 'outbound' && ['accepted', 'sent'].includes(item.deliveryStatus)) ||
+            (item.direction === 'inbound' && item.deliveryStatus === 'received'))
         )
       : !(
           item.status === 'accepted' &&
@@ -161,7 +163,7 @@ export function timelineOriginal(store, service, customerId, source, id) {
           service.campaign(item.campaignId).mode === 'production'
         ))
   )
-    throw fail(404, '未找到该客户的已发送邮件');
+    throw fail(404, '未找到该客户的邮件');
   return {
     subject: item.subject,
     from: item.from,
