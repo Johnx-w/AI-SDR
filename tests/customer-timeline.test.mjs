@@ -5,6 +5,56 @@ import { OutreachService } from '../server/outreach-service.mjs';
 import { readCustomerTimeline, timelineOriginal } from '../server/customer-timeline.mjs';
 import { createApp } from '../server/app.mjs';
 
+test('each customer timeline returns exactly the replies from its own customer', async (t) => {
+  const box = { id: 'sales', email: 'sales@brand.example' };
+  const customers = [
+    { id: 'north', email: 'north@client.example' },
+    { id: 'south', email: 'south@client.example' },
+    { id: 'quiet', email: 'quiet@client.example' },
+  ];
+  const svc = new OutreachService({
+    mailboxes: { list: () => [box] },
+    customers: () => customers,
+  });
+  const app = createApp({ env: {}, outreachServiceFactory: () => svc });
+  await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => app.close(resolve)));
+
+  for (const from of ['north@client.example', 'south@client.example']) {
+    svc.conversations.putMessage(box, {
+      direction: 'inbound',
+      source: 'imap',
+      from,
+      to: box.email,
+      subject: 'Re: Samples',
+      bodyText: 'Thanks for sending the samples.',
+      messageId: '<samples-' + from + '>',
+      occurredAt: '2026-11-24T10:00:00Z',
+      deliveryStatus: 'received',
+    });
+  }
+
+  for (const [customerId, expectedSenders] of [
+    ['north', ['north@client.example']],
+    ['south', ['south@client.example']],
+    ['quiet', []],
+  ]) {
+    const url = new URL(
+      '/api/v1/business/timeline/' + customerId,
+      'http://127.0.0.1:' + app.address().port,
+    );
+    const response = await fetch(url);
+    assert.equal(response.status, 200);
+    const { items } = await response.json();
+    const replies = items.filter((event) => event.kind === 'received');
+    assert.deepEqual(
+      replies.map((event) => event.note),
+      expectedSenders,
+      customerId,
+    );
+  }
+});
+
 test('customer timeline reads actual sent messages, pending and historical work with scoped paging and originals', async (t) => {
   const store = new CustomerBusiness({ scope: 'test' });
   const box = { id: 'one', email: 'sales@brand.example' };
