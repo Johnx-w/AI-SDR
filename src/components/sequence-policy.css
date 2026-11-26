@@ -219,8 +219,7 @@
   cursor: default;
   opacity: 0.48;
 }
-.sequence-studio header button,
-.device-switch button {
+.sequence-studio header button {
   background: transparent;
   border: 0;
   display: inline-flex;
@@ -254,8 +253,7 @@
   gap: 6px;
 }
 .compose-tools div,
-.chip-row,
-.device-switch {
+.chip-row {
   display: flex;
   gap: 5px;
   flex-wrap: wrap;
@@ -286,12 +284,6 @@
 .compose-tools div:last-child button {
   color: #6941a5;
 }
-.device-switch {
-  border: 1px solid var(--color-border);
-  padding: 2px;
-  border-radius: 5px;
-}
-.device-switch button[aria-pressed='true'],
 .chip-row button[aria-pressed='true'] {
   background: #29282e;
   color: white;
@@ -308,10 +300,6 @@
   color: #27272a;
   border-radius: 6px;
   overflow-wrap: anywhere;
-}
-.preview-paper.narrow {
-  width: min(100%, 260px);
-  align-self: center;
 }
 .preview-paper article strong,
 .suggestion b {
@@ -420,11 +408,6 @@
   justify-content: center;
   gap: 6px;
   font-weight: 600;
-}
-.sequence-form .modal-footer .btn.primary {
-  background: #e9ed59;
-  color: #242419;
-  border-color: #d7db4c;
 }
 @media (max-width: 960px) {
   .sequence-studio {

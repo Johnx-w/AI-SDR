@@ -4,12 +4,10 @@ import {
   Braces,
   ChevronRight,
   Mail,
-  Monitor,
   PanelRightClose,
   PencilLine,
   Plus,
   RefreshCw,
-  Smartphone,
   Sparkles,
   WandSparkles,
 } from 'lucide-react';
@@ -84,7 +82,6 @@ export function SequenceEmailComposer({
   const [contacts, setContacts] = useState<Contact[]>([]),
     [cursor, setCursor] = useState<string | null>(null),
     [contactError, setContactError] = useState('');
-  const [phone, setPhone] = useState(false);
   const previewKey = JSON.stringify([customer, previewInput, template.variables]);
   const previewRequest = useRef(0);
   useEffect(() => {
@@ -338,27 +335,17 @@ export function SequenceEmailComposer({
       <section className="compose-preview" aria-label="英文样信">
         <header>
           <h3>联系人预览</h3>
-          <div className="device-switch">
-            {(
-              [
-                [false, Monitor, '桌面'],
-                [true, Smartphone, '手机'],
-              ] as const
-            ).map(([mobile, Icon, label]) => {
-              const Device = Icon;
-              return (
-                <button
-                  type="button"
-                  key={String(label)}
-                  aria-label={String(label) + '预览'}
-                  aria-pressed={phone === mobile}
-                  onClick={() => setPhone(Boolean(mobile))}
-                >
-                  <Device size={15} />
-                </button>
-              );
-            })}
-          </div>
+          {!panel && (
+            <button
+              type="button"
+              className="assist-toggle"
+              aria-label="打开 AI 写作助手"
+              aria-expanded={false}
+              onClick={() => open('menu')}
+            >
+              <Sparkles size={14} /> 打开 AI 助手
+            </button>
+          )}
         </header>
         <label>
           预览联系人
@@ -406,7 +393,7 @@ export function SequenceEmailComposer({
           <RefreshCw size={13} />
           {loading ? '生成中…' : sample ? '刷新预览' : '生成预览'}
         </button>
-        <div className={'preview-paper' + (phone ? ' narrow' : '')}>
+        <div className="preview-paper">
           {sample && !expansionError ? (
             <article>
               <small>收件人　{sample.to}</small>
