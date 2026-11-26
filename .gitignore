@@ -14,3 +14,7 @@ docs/acquisition-calibration-20261021.md
 docs/acquisition-customer-calibration.md
 docs/customs-sample-findings.md
 docs/research/customer-calibration-*.md
+
+.venv/
+__pycache__/
+server/docling/reader-linux

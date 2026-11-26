@@ -1,8 +1,12 @@
-import { markdownMaterial } from './markdown-material.mjs';
 import { WorkbookPhotos } from './workbook-photos.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { isPagedMaterial } from '../src/domain/material-upload.mjs';
-import { readDeepSeekMaterial, readVisualAsset, materialMode } from './deepseek-materials.mjs';
+import {
+  readOfficeMaterial,
+  readDeepSeekMaterial,
+  readVisualAsset,
+  materialMode,
+} from './deepseek-materials.mjs';
 import sharp from 'sharp';
 import { extractParameters } from './parameter-extraction.mjs';
 import { parameterMode, mentionsModel } from './model-parameters.mjs';
@@ -116,7 +120,7 @@ async function documentExtraction(file, options) {
     options.mode !== parameterMode &&
     /!\[|^\s*\|/mu.test(file.bytes.toString('utf8'))
   )
-    return markdownMaterial(file);
+    return readOfficeMaterial(file, options);
   if (options.material && options.mode === parameterMode) return extractParameters(file, options);
   if (
     options.material &&
@@ -124,6 +128,7 @@ async function documentExtraction(file, options) {
     /^(image|video)\//u.test(file.contentType)
   )
     return readVisualAsset(file, options);
+  if ([types.docx, types.pptx].includes(file.contentType)) return readOfficeMaterial(file, options);
   if (options.material && isPagedMaterial(file.contentType))
     return readDeepSeekMaterial(file, options);
   if (file.contentType.startsWith('image/')) {
@@ -376,6 +381,7 @@ export class ProductDocuments {
     const paged =
       material &&
       (structured ||
+        [workbookType, types.md].includes(file.contentType) ||
         isPagedMaterial(file.contentType) ||
         file.parseMode === 'rich_layout_recognition');
     const chosen = structured
@@ -477,7 +483,7 @@ export class ProductDocuments {
           .run(JSON.stringify(extraction), id);
         return this.list(productId).find((item) => item.id === id);
       } catch (error) {
-        if (!reparse || (!file.extraction?.facts.length && !file.extraction?.parameters))
+        if (!reparse || !file.extraction || file.extraction.model === 'failed')
           this.saveExtractionFailure(
             id,
             error instanceof Error ? error.message : '原件提取失败，请重试。',

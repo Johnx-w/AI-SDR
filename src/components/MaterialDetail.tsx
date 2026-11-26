@@ -113,6 +113,8 @@ export function MaterialDocument({
   const visual =
     !doc?.referencePages &&
     (structured ||
+      doc?.contentType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+      doc?.contentType === 'text/markdown' ||
       isPagedMaterial(doc?.contentType) ||
       doc?.parseMode === 'rich_layout_recognition');
   const storedMode = doc?.extraction?.mode ?? doc?.parseMode ?? 'rich_layout_recognition';
@@ -772,7 +774,7 @@ export function MaterialDocument({
                             disabled={busy || !!ocrDocument}
                             onClick={() =>
                               void perform(async () => {
-                                setNotice('正在使用 DeepSeek 解析…');
+                                setNotice('正在解析原文件…');
                                 return materialsRequest(
                                   '/' + id + '/extract/' + doc.id + '?reparse=1&mode=' + parseMode,
                                   { method: 'POST', headers: { Prefer: 'respond-async' } },

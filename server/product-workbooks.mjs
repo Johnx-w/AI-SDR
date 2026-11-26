@@ -1,6 +1,7 @@
 import { interpretSheet } from './workbook-layout.mjs';
 import { workbookPictures } from './material-pictures.mjs';
 import { hasModelHeader } from './model-parameters.mjs';
+import { convertDocument } from './docling.mjs';
 import * as XLSX from 'xlsx/xlsx.mjs';
 
 export const workbookType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -39,33 +40,28 @@ export function checkOfficeArchive(bytes) {
 
 export async function parseWorkbook(bytes, options = {}) {
   checkOfficeArchive(bytes);
-  let sheets;
-  try {
-    const book = XLSX.read(bytes, {
-      type: 'buffer',
-      dense: true,
-      cellNF: true,
-      cellFormula: false,
-    });
-    sheets = book.SheetNames.map((sheet) => {
-      const ws = book.Sheets[sheet],
-        cells = ws['!data'] ?? [];
-      if (cells.length > 20000 || cells.some((row) => row && row.length > 150))
-        throw fail(413, '每张工作表最多 20000 行、150 列');
-      const data = Array.from(cells, (row) =>
-        Array.from(row ?? [], (cell) =>
-          cell?.v == null
-            ? null
-            : cell.t === 'n' && (!cell.z || cell.z === 'General')
-              ? String(Number(cell.v.toPrecision(15)))
-              : (cell.w ?? String(cell.v)),
-        ),
-      );
-      return { sheet, data, merges: ws['!merges'] ?? [] };
-    });
-  } catch (error) {
-    if (error.status) throw error;
-    throw fail(400, '无法解析此 XLSX，请检查文件或用 Excel 另存为工作簿');
+  const { sheets, pictures } = await convertDocument(bytes, 'xlsx');
+  // Docling supplies layout and cells. Excel number masks carry significant printed
+  // precision, leading zeros and units that are absent from Docling's text.
+  const formatted = XLSX.read(bytes, {
+    type: 'buffer',
+    dense: true,
+    cellNF: true,
+    cellFormula: false,
+  });
+  for (const { sheet, data } of sheets) {
+    const original = formatted.Sheets[sheet]?.['!data'];
+    for (const [r, row] of data.entries()) {
+      for (const [c, value] of row.entries()) {
+        const cell = original?.[r]?.[c];
+        if (value != null && cell?.t === 'n') {
+          row[c] =
+            cell.z && cell.z !== 'General'
+              ? (cell.w ?? value)
+              : String(Number(cell.v.toPrecision(15)));
+        }
+      }
+    }
   }
   const summary = [],
     rows = [],
@@ -198,10 +194,10 @@ export async function parseWorkbook(bytes, options = {}) {
     sheets: summary,
     facts,
     warnings,
-    model: 'SheetJS',
+    model: 'Docling',
     extractedAt: new Date().toISOString(),
   };
-  const photos = await workbookPictures(bytes, owners, warnings);
+  const photos = await workbookPictures(pictures, owners, warnings);
   return { extraction, rows, photos };
 }
 

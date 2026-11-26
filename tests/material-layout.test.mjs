@@ -8,7 +8,7 @@ import { MaterialLibrary } from '../server/materials.mjs';
 import { ProductKnowledge } from '../server/product-knowledge.mjs';
 import { answerMailQuestion } from '../server/mail-knowledge.mjs';
 
-test('版面服务拒绝 PPTX 时回读幻灯片原文', async (t) => {
+test('Docling 离线读取原生 PPTX 表格与幻灯片位置', async (t) => {
   const k = new ProductKnowledge();
   t.after(() => k.close());
   const lib = new MaterialLibrary(k);
@@ -17,12 +17,11 @@ test('版面服务拒绝 PPTX 时回读幻灯片原文', async (t) => {
     bytes: readFileSync(new URL('./fixtures/model-parameters.pptx', import.meta.url)),
     key: randomUUID(),
     mode: 'rich_layout_recognition',
-    env: { MATERIAL_DEEPSEEK_API_KEY: 'fixture' },
-    fetchImpl: async () => Response.json({ error: { message: 'unsupported document' } }),
+    fetchImpl: () => assert.fail('原生表格不需要远程服务'),
   });
   assert.equal(r.warning, '');
   const doc = lib.detail(r.id).documents[0];
-  assert.equal(doc.extraction.model, 'Office XML');
+  assert.equal(doc.extraction.model, 'Docling');
   assert.ok(
     doc.extraction.facts.some(
       (f) => f.text.includes('0128') && f.text.includes('152 mm') && f.location.includes('幻灯片'),
@@ -53,6 +52,11 @@ test('上传有标题和非首列编码的目录，两个产品、空对照和�
     ]),
     '横向',
   );
+  const catalog = book.Sheets['图册'];
+  catalog.D3 = { t: 's', v: '出厂价格' };
+  catalog.D4 = { t: 'n', v: 1.25, z: '0.000' };
+  catalog.D5 = { t: 'n', v: 6000, z: '#,##0' };
+  catalog['!ref'] = 'A1:D5';
   const r = await lib.upload({
     name: '目录.xlsx',
     bytes: XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }),
@@ -84,6 +88,15 @@ test('上传有标题和非首列编码的目录，两个产品、空对照和�
         .map((s) => [s.item, s.ref, s.value]),
       [[item, ref, val]],
     );
+  for (const [item, value] of [
+    ['QA-01', '1.250'],
+    ['QA-02', '6,000'],
+  ]) {
+    const row = k.db
+      .prepare('SELECT data FROM product_workbook_rows WHERE document_id=? AND label=?')
+      .get(r.documentId, item);
+    assert.equal(JSON.parse(row.data).find((c) => c.field === '出厂价格').value, value);
+  }
   assert.deepEqual(ask('QA-03'), []);
 });
 test('产品行内嵌图片经过上传、重试和审核后，两种回复入口按产品取图', async (t) => {
