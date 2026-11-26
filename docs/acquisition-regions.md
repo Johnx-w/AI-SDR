@@ -40,16 +40,4 @@
 - 越南以政府公布的 34 个省市英文名为准，采用英文文本中的不带声调拼写；菲律宾用统计局的 18 个大区，搜索词省略罗马序号和括号简称。[越南政府 34 省市名单](https://en.baochinhphu.vn/party-secretaries-of-23-newly-merged-cities-and-provinces-111250630182358086.htm) · [菲律宾统计局 PSGC](https://psa.gov.ph/classification/psgc/regions) · [菲律宾卫生部转载的逐项代码和名称](https://fhir.doh.gov.ph/phcore/en/ValueSet-regions.html)
 - 按 GeoNames 的国家前缀和一级区划数量交叉检查了加纳、泰国、荷兰、比利时和意大利。既有地址词表另含加纳旧区 Brong-Ahafo、泰国城市 Pattaya、荷兰加勒比特别市，以及比利时和意大利的下属省。这些词仍可用于历史地址识别。[GeoNames 一级区划](https://download.geonames.org/export/dump/admin1CodesASCII.txt)
 
-## 实际执行样本
-
-公开搜索每条取前 10 个网页结果，按查询使用的国家、地区和产品核对企业网站。下表四家进入验收样本。另一次德国关键词试搜中，`Rollos` 返回了劳斯莱斯等无关结果；地区名称正确仍需要核实企业业务。
-
-| 任务样本                             | 首个地区及企业                                                          | 第二个地区及企业                                                               | 本地结果                      |
-| ------------------------------------ | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ----------------------------- |
-| 马来西亚，立即执行，窗帘             | Johor · [HS Curtains](https://www.jbcurtains.com.my/)                   | Kedah · [Amanjaya Decor](https://www.amanjayadecor.com/)                       | 4 次查询，新增 2/2            |
-| 新西兰，定时到期，卷帘               | Auckland · [mr blinds](https://mrblinds.co.nz/about-us/auckland-blinds) | Bay of Plenty · [Spencers Blinds](https://spencersblindsbop.co.nz/contact-us/) | 4 次查询，新增 2/2            |
-| 新加坡，立即执行，仅返回库内同一官网 | 实际触发地区补搜                                                        | 后续查询仍返回该官网                                                           | 20 次查询，新增 0/2，部分完成 |
-
-回归通过本地 HTTP 创建立即任务及定时计划，推进测试时钟到触发点，再从任务 API 和 SQLite 客户档案读回。全国查询回放已存在的官网以稳定触发补搜，地区查询回放对应样本。搜索和模型研究使用替身，任务执行、计划触发、域名去重、客户档案写入与读回使用项目实现。初始 1 家已有企业，结束后共 5 家。四家企业的“新增”仅指独立测试库。
-
-`node --test tests/acquisition-regions.test.mjs tests/batch-api.test.mjs tests/batch-jobs.test.mjs` 可复核目录轮换、两个入口及重复对照。正式部署后，还需依据各国的实际搜索词、重复数、通过官网核验数及新增入库数评估连续多轮的达标率。
+运行 `node --test tests/acquisition-regions.test.mjs tests/batch-api.test.mjs tests/batch-jobs.test.mjs` 可复核全集轮换、立即任务、计划到期触发及重复对照。

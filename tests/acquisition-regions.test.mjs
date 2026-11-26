@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { acquisitionMarkets, countryFor } from '../src/domain/country-catalog.ts';
@@ -37,6 +38,7 @@ test('各支持国家按核对过的地区数轮换一圈，每条补搜均保�
     acquisitionMarkets.map(({ value }) => countryFor(value).code).sort(),
     Object.keys(expected).sort(),
   );
+  const pairs = [];
   for (const { value: country } of acquisitionMarkets) {
     const [count, knownRegion] = expected[countryFor(country).code];
     const query = 'blinds supplier ' + country;
@@ -54,5 +56,11 @@ test('各支持国家按核对过的地区数轮换一圈，每条补搜均保�
     assert.equal(regions.pop(), regions[0], country);
     assert.equal(new Set(regions).size, count, country);
     assert.ok(regions.includes(knownRegion), country);
+    for (const region of regions) pairs.push(countryFor(country).code + '|' + region);
   }
+  // Fingerprint of the complete verified country/name pairs, independent of rotation order.
+  assert.equal(
+    createHash('sha256').update(JSON.stringify(pairs.sort())).digest('hex'),
+    '5b47a60fd8e00f569d83605a68cbf5bdcfe8946a558a00f37e5729ba7cdf35c4',
+  );
 });
