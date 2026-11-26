@@ -149,10 +149,54 @@ const sampleProductDescriptions =
 const windowMaterialsPattern =
   /\b(?:semi[- ]?finished|materials?|components?|parts?|motors?|brackets?|headrails?|springs?|slats?|tubes?|(?<!zip[- ]|panel\s)tracks?|rails?|profiles?|extrusions?|hardware|accessories|mechanisms?|clutch(?:es)?|chains?|cords?|strings?)\b|\b(?:curtain|blind|blinds|shade|shades|awning|awnings)\s+fabrics?\b|\bfabrics?\s+for\s+(?:curtains?|blinds?|shades?|awnings?)\b|半成品|材料|配件|零件|电机|制头|弹簧|安装码|叶片|型材|轨道|面料|卷管|绳线|拉绳/i;
 
+// A blind used to isolate a pipe is also called a "blind" in supplier catalogs.
+export const pipeBlindTerms =
+  /\b(?:(?:spectacle|paddle|spade|pipeline|line|figure[- ]?(?:8|eight))[- ]+blinds?|blind[- ]+flanges?|flanges?,\s*blinds?)\b/gi;
+
+// Discovery can use broad terms. Admission and scoring need evidence about the
+// product's application in the supplier's own quotation.
+export function supportsWindowUse({ value, quote, window_use }) {
+  if (window_use && window_use !== 'window_covering') return false;
+  const ambiguous = /\b(?:blinds?|shutters?|curtains?|shades?|screens?)\b/i;
+  if (!ambiguous.test(value) && !ambiguous.test(quote)) return true;
+  const clean = (s) => String(s).replace(pipeBlindTerms, ' ').replace(unrelatedWindowProducts, ' ');
+  const label = clean(value);
+  if (label !== value && !windowIndustryPattern.test(label)) return false;
+  const clauses = clean(quote)
+    .split(/[.;!?\n。；！？]|\bwhereas\b/i)
+    .filter((clause) => clause.trim());
+  // Use the clause containing this product when the source names several.
+  const ownClauses = clauses.filter((clause) =>
+    clause.toLowerCase().includes(label.trim().toLowerCase()),
+  );
+  return (ownClauses.length ? ownClauses : clauses.length === 1 ? clauses : []).some(
+    hasWindowApplication,
+  );
+}
+
+function hasWindowApplication(evidence) {
+  const ambiguous = /\b(?:blinds?|shutters?|curtains?|shades?|screens?)\b/i;
+  if (!ambiguous.test(evidence) && !windowIndustryPattern.test(evidence)) return false;
+  if (
+    /\b(?:(?:pvc|timber|wood(?:en)?|composite|alumin(?:um|ium)) shutters?|horizontal blinds?)\b/i.test(
+      evidence,
+    )
+  )
+    return true;
+  if (
+    strongPhrases.some((pattern) => pattern.test(evidence)) ||
+    dedicatedWindowMaterialsPattern.test(evidence)
+  )
+    return true;
+  return /\b(?:window\s+treatments?|(?:bedroom|living room|residential|blackout|blockout|pleated|woven wood|bamboo|panel track|sheer|fabric|day and night|solar|honeycomb|plantation|rolling|roller)[ -]+(?:blinds?|shades?|curtains?|shutters?)|(?:blinds?|shades?|curtains?|shutters?)\s+for\s+(?:[\w-]+\s+){0,2}windows?|(?:blinds?|shades?|curtains?)\s*(?:,|&|and)\s*(?:blinds?|shades?|curtains?|drapes?))\b/i.test(
+    evidence,
+  );
+}
+
 function broadWindowProductStatus(text, allowSampleMentions = false) {
   const original = String(text || '').trim();
   if (!original) return 'unknown';
-  let cleaned = original.replace(unrelatedWindowProducts, ' ');
+  let cleaned = original.replace(pipeBlindTerms, ' ').replace(unrelatedWindowProducts, ' ');
   // A sample book may contain curtain fabric without being a material supplier.
   const mentionsSamples = sampleProductPattern.test(cleaned);
   if (!allowSampleMentions && mentionsSamples)
@@ -173,6 +217,7 @@ function broadWindowProductStatus(text, allowSampleMentions = false) {
 export function windowProductDirections(text) {
   if (broadWindowProductStatus(text) !== 'matched') return [];
   const cleaned = String(text)
+    .replace(pipeBlindTerms, ' ')
     .replace(unrelatedWindowProducts, ' ')
     .replace(sampleProductDescriptions, ' ')
     // Keep a shared Chinese accessory suffix attached to all of its uses.
@@ -288,7 +333,8 @@ export function productsRelevant(products, target = {}) {
     const needsParts = windowMaterialsPattern.test(term);
     const outdoorParts = needsParts && /outdoor|室外|户外/i.test(term);
     const indoorParts = needsParts && /indoor|室内/i.test(term);
-    for (const product of list) {
+    for (const rawProduct of list) {
+      const product = rawProduct.replace(pipeBlindTerms, ' ');
       if (
         /\b(?:vehicle|caravan|4x4|camping|marine|boat|rv)\b|房车|车载|汽车/i.test(product) &&
         !/\b(?:vehicle|caravan|4x4|camping|marine|boat|rv)\b|房车|车载|汽车/i.test(term)

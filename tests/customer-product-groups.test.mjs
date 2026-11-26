@@ -3,6 +3,13 @@ import assert from 'node:assert/strict';
 import { groupCustomerProducts, formatRelatedProducts } from '../server/product-format.mjs';
 import { encodeCustomerFields } from '../server/customer-fields.mjs';
 
+test('管道八字盲板保留原名且不显示为窗饰', () => {
+  const product = 'Line Blanks (Spectacle Blinds, Spades, Spacers)';
+  assert.equal(groupCustomerProducts(product), '其他经营产品｜' + product);
+  assert.match(formatRelatedProducts(product), /管道盲板/);
+  assert.doesNotMatch(formatRelatedProducts(product), /窗帘/);
+});
+
 test('经营产品按类分行，保留品牌系列和产品差异，只合并大小写及空白重复', () => {
   const raw = [
     'E ZIP Blinds',

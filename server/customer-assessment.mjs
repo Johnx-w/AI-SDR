@@ -1,7 +1,11 @@
 import { createHash } from 'node:crypto';
 import { domainKey } from './website-identity.mjs';
 import { customerWebsite } from './customer-fields.mjs';
-import { businessProductRelation, windowProductDirections } from './relevance.mjs';
+import {
+  businessProductRelation,
+  supportsWindowUse,
+  windowProductDirections,
+} from './relevance.mjs';
 
 export const ASSESSMENT_RULE_VERSION = 'acquisition-v5.0';
 export const directionNames = { finished: '成品', materials: '材料配件', samples: '样本展示' };
@@ -208,6 +212,7 @@ export function assessCompany({ research, target, at = Date.now(), id }) {
         fact.field === 'products' &&
         typeof fact.value === 'string' &&
         fact.quote &&
+        supportsWindowUse(fact) &&
         domainKey(fact.source_url) === domainKey(research.source_url) &&
         businessProductRelation([fact.value], target).status === 'matched' &&
         windowProductDirections(fact.value).length === 1,

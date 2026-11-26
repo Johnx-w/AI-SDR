@@ -1,6 +1,7 @@
 import {
   productsRelevant,
   businessProductRelation,
+  supportsWindowUse,
   windowProductDirections,
   targetProductTerms,
 } from './relevance.mjs';
@@ -227,6 +228,14 @@ export function verifiedAssessmentOpportunities(
     )
       continue;
     const product = opportunity.product.trim().slice(0, 160);
+    if (
+      !supportsWindowUse({ value: product, quote: product }) &&
+      !verifiedProductFacts.some(
+        (f) =>
+          normalizedProductName(f.value) === normalizedProductName(product) && supportsWindowUse(f),
+      )
+    )
+      continue;
     const relation = businessProductRelation([product], target);
     const potentialInput =
       relation.kind === 'potential_input' && opportunity.direction === 'finished';

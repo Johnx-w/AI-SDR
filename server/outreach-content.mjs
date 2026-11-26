@@ -4,7 +4,12 @@ import { isIP } from 'node:net';
 import { domainKey } from './website-identity.mjs';
 import { siteAllowsProduct } from '../src/domain/mail-site.mjs';
 import { assessmentSummaryFields } from './customer-fields.mjs';
-import { businessProductRelation, countryMatches, windowProductDirections } from './relevance.mjs';
+import {
+  businessProductRelation,
+  countryMatches,
+  supportsWindowUse,
+  windowProductDirections,
+} from './relevance.mjs';
 import { researchProviderConfig } from './acquisition-config.mjs';
 import { createResearchProviders } from './research-providers.mjs';
 
@@ -81,6 +86,7 @@ function ownSource(sourceUrl, domain) {
 }
 
 function sourceEvidence(fact, companyDomain) {
+  if (productFields.has(fact?.field) && !supportsWindowUse(fact)) return null;
   const sourceUrl = publicUrl(fact?.source_url || fact?.sourceUrl);
   const quote = compact(fact?.quote);
   const value = typeof fact?.value === 'string' ? compact(fact.value) : '';

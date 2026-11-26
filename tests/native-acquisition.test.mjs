@@ -181,6 +181,82 @@ function fixture({
 
 const policyFact = (value, quote) => ({ value, quote, source_url: site });
 
+for (const [name, catalog, expected] of [
+  [
+    'Mumtaz Energy',
+    [
+      [
+        'Line Blanks (Spectacle Blinds, Spades, Spacers)',
+        'We offer a comprehensive range of line blanks, including Spectacle Blinds (Figure-8 Blanks), Spades and Spacers.',
+      ],
+    ],
+    null,
+  ],
+  [
+    'Wildlife Supply',
+    [
+      [
+        'Observation blinds',
+        'We supply observation blinds for wildlife photographers and professional ornithologists.',
+      ],
+    ],
+    null,
+  ],
+  [
+    'Optical Supply',
+    [['Shutters', 'Our beam shutters control exposure in laboratory instruments.']],
+    null,
+  ],
+  ['Room Decor', [['Blinds', 'We fit made-to-measure blinds for bedroom windows.']], 'Blinds'],
+  [
+    'Mixed Supply',
+    [
+      ['Spectacle Blinds', 'We supply spectacle blinds for industrial piping.'],
+      ['Roman blinds', 'We install Roman blinds for residential windows.'],
+    ],
+    'Roman blinds',
+  ],
+]) {
+  test('按产品用途核实获客并读回客户档案：' + name, async () => {
+    const identity = name + ' is an independent distributor serving customers across Malaysia.';
+    const f = fixture({
+      pageText: [identity, ...catalog.map(([, quote]) => quote)].join(' '),
+      automaticAssessment: true,
+      modelOverrides: {
+        company_name: policyFact(name, identity),
+        entity_type: policyFact('business', identity),
+        products: catalog.map(([value, quote]) => policyFact(value, quote)),
+      },
+    });
+    const svc = f.make();
+    try {
+      const output = await svc.research(
+        {
+          ...input,
+          country: 'Malaysia',
+          market_countries: ['Malaysia'],
+          product_scope: 'all',
+          product: 'window coverings',
+          query_mode: 'auto',
+        },
+        { source_url: site, operation_id: 'verify-window-application' },
+      );
+      assert.equal(f.records.length, expected ? 1 : 0, output.reason);
+      if (expected) {
+        assert.equal(f.records[0].fields.客户名称, name);
+        assert.deepEqual(
+          svc
+            .assessmentHistory(f.records[0].record_id)
+            .assessment.opportunities.map((o) => o.product),
+          [expected],
+        );
+      }
+    } finally {
+      svc.close();
+    }
+  });
+}
+
 test('独立企业保留，目录的根域名及子域名在研究前过滤', () => {
   const hosts = [
     'cdn.canpages.ca',

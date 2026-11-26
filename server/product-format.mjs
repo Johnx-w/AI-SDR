@@ -1,3 +1,5 @@
+import { pipeBlindTerms } from './relevance.mjs';
+
 const customerProductGroups = [
   '户外遮阳',
   '室内窗饰',
@@ -49,7 +51,9 @@ export function groupCustomerProducts(value) {
     seen.add(key);
     const group = grouped
       ? existingGroup
-      : customerProductRules.find(([, pattern]) => pattern.test(product))?.[0] || '其他经营产品';
+      : customerProductRules.find(([, pattern]) =>
+          pattern.test(product.replace(pipeBlindTerms, ' ')),
+        )?.[0] || '其他经营产品';
     groups.get(group).push(product);
   }
   return [...groups]
@@ -243,7 +247,7 @@ export function formatRelatedProducts(value) {
       }
     } else {
       english = row;
-      let translated = row;
+      let translated = row.replace(pipeBlindTerms, '管道盲板');
       for (const [pattern, zh] of [...nouns, ...modifiers])
         translated = translated.replace(new RegExp('\\b(?:' + pattern.source + ')\\b', 'gi'), zh);
       chinese = translated.replace(/\s+/g, '').replace(/[-/]/g, '');
