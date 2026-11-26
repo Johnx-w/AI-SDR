@@ -38,8 +38,23 @@ test('历史配件目录恢复用途后正常入库、读回并保留待核实�
         search: async () => assert.fail('不允许搜索服务请求'),
       },
       model: {
-        research: async () => {
+        research: async (request) => {
           calls.model++;
+          if (request.schema.properties.sources)
+            return {
+              choices: [
+                {
+                  finish_reason: 'stop',
+                  message: {
+                    content: JSON.stringify({
+                      result: 'relevant',
+                      sources: JSON.parse(request.messages[1].content).sources.map((s) => s.i),
+                      reason: '制造窗饰配件',
+                    }),
+                  },
+                },
+              ],
+            };
           return {
             choices: [
               {
@@ -136,7 +151,7 @@ test('历史配件目录恢复用途后正常入库、读回并保留待核实�
     assert.ok(calls.readback > 0);
     assert.deepEqual(await service.research(target, item), output);
     assert.equal(calls.write, 1);
-    assert.equal(calls.model, 1);
+    assert.equal(calls.model, 2);
   } finally {
     service.close();
   }

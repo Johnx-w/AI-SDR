@@ -66,6 +66,7 @@ function fixture({
   tavilyError = false,
   pageText = sourceText,
   modelOverrides = {},
+  activityDecision,
   companyNameField = '客户名称',
   automaticAssessment = false,
 } = {}) {
@@ -139,6 +140,18 @@ function fixture({
     }
     if (url === 'https://api.tavily.com/extract') return json({ results: [] });
     if (url === 'https://api.deepseek.com/responses') {
+      if (body.text?.format?.schema?.properties?.sources) {
+        const { sources } = JSON.parse(body.input[1].content);
+        const decision = activityDecision ?? {
+          result: 'relevant',
+          sources: sources.map((s) => s.i),
+          reason: '官网经营证据',
+        };
+        return json({
+          status: 'completed',
+          output: [{ content: [{ type: 'output_text', text: JSON.stringify(decision) }] }],
+        });
+      }
       const evidence = (value, quote) => ({ value, quote, source_url: site });
       const data = {
         company_name: evidence('Acme Screens', sourceText),
@@ -180,6 +193,52 @@ function fixture({
 }
 
 const policyFact = (value, quote) => ({ value, quote, source_url: site });
+
+for (const [name, quote, result] of [
+  ['Simulation Studio', 'We sell a Roller Blinds asset pack for virtual worlds.', 'unrelated'],
+  [
+    'Exhibit Studio',
+    'Our Pergola collection is a line of scale models for tabletop games.',
+    'unrelated',
+  ],
+  ['Catalog Studio', 'Our new collection is called Pergola.', 'uncertain'],
+]) {
+  test('独立模型复核阻止入库：' + name, async () => {
+    const identity = name + ' is a distributor serving clients in Malaysia.';
+    const f = fixture({
+      pageText: identity + ' ' + quote,
+      automaticAssessment: true,
+      modelOverrides: {
+        company_name: policyFact(name, identity),
+        entity_type: policyFact('business', identity),
+        products: [policyFact(quote.includes('Roller') ? 'Roller Blinds' : 'Pergola', quote)],
+      },
+      activityDecision: {
+        result,
+        sources: result === 'uncertain' ? [] : [0],
+        reason: '未证实经营建筑窗饰',
+      },
+    });
+    const svc = f.make();
+    try {
+      await svc.research(
+        {
+          ...input,
+          country: 'Malaysia',
+          market_countries: ['Malaysia'],
+          product_scope: 'all',
+          product: 'window coverings',
+          query_mode: 'auto',
+        },
+        { source_url: site, operation_id: 'activity-proof' },
+      );
+      assert.equal(f.records.length, 0);
+      assert.ok(f.calls.some((c) => c.body?.text?.format?.schema?.properties?.sources));
+    } finally {
+      svc.close();
+    }
+  });
+}
 
 for (const [name, catalog, expected, pageContext = ''] of [
   [
@@ -410,7 +469,7 @@ test('两个市场同时遇到同一官网时，只有一个写入和一次新�
     assert.equal(first.新增, 1);
     assert.equal(second.outcome, 'no_new_candidates');
     assert.equal(f.records.length, 1);
-    assert.equal(f.calls.filter((call) => call.url.endsWith('/responses')).length, 1);
+    assert.equal(f.calls.filter((call) => call.url.endsWith('/responses')).length, 2);
   } finally {
     svc.close();
   }
@@ -435,7 +494,7 @@ test('客户已入库但最新评估保存失败时可恢复，恢复不重复�
     assert.equal(settled.settled, true);
     assert.equal(settled.output.新增, 1);
     assert.equal(svc.assessmentHistory('rec-native').assessments.length, 1);
-    assert.equal(f.calls.filter((call) => call.url.endsWith('/responses')).length, 1);
+    assert.equal(f.calls.filter((call) => call.url.endsWith('/responses')).length, 2);
     assert.equal(
       f.calls.filter((call) => call.method === 'POST' && call.url.includes('/records')).length,
       1,

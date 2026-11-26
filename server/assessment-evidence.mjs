@@ -213,6 +213,7 @@ export function verifiedAssessmentOpportunities(
   target = {},
   verifiedProducts = [],
   verifiedProductFacts = [],
+  requireVerifiedProduct = false,
 ) {
   if (!Array.isArray(raw)) return [];
   pages = researchEvidencePages(pages);
@@ -281,6 +282,7 @@ export function verifiedAssessmentOpportunities(
       : verifiedProducts.some((value) =>
           supportsProductEvidence(value, product, opportunity.direction),
         );
+    if (requireVerifiedProduct && !related) continue;
     const key = opportunity.direction + ':' + compact(product).toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
