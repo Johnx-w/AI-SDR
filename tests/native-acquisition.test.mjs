@@ -181,7 +181,7 @@ function fixture({
 
 const policyFact = (value, quote) => ({ value, quote, source_url: site });
 
-for (const [name, catalog, expected] of [
+for (const [name, catalog, expected, pageContext = ''] of [
   [
     'Mumtaz Energy',
     [
@@ -207,7 +207,51 @@ for (const [name, catalog, expected] of [
     [['Shutters', 'Our beam shutters control exposure in laboratory instruments.']],
     null,
   ],
+  [
+    'Caravan Awning Supplier',
+    [
+      [
+        'Caravan and RV awnings, including rollout awnings and cassette awnings',
+        'Specialising in Awnings, Annexes, and a comprehensive range of Caravan and RV components and accessories',
+      ],
+    ],
+    null,
+  ],
+  [
+    'Industrial Track Supplier',
+    [
+      [
+        'Industrial curtain tracks',
+        'We supply industrial curtain tracks and hardware for factory partitions.',
+      ],
+    ],
+    null,
+  ],
+  [
+    'Mixed Awning Supplier',
+    [
+      ['Cassette awnings', 'Our cassette awnings are made for caravans and motorhomes.'],
+      ['Patio awnings', 'We install folding arm patio awnings for residential patios.'],
+    ],
+    'Patio awnings',
+  ],
   ['Room Decor', [['Blinds', 'We fit made-to-measure blinds for bedroom windows.']], 'Blinds'],
+  [
+    'Accessory Dealer',
+    [['Awning spare parts', 'Awning Spare Parts 43 Products']],
+    null,
+    'We specialise in equipment for caravans and motorhomes.',
+  ],
+  [
+    'Healthcare Window Supplier',
+    [
+      [
+        'Window treatments and window draperies',
+        'We supply hospital cubicle curtains, window treatments and other textile decorative products.',
+      ],
+    ],
+    'Window treatments and window draperies',
+  ],
   [
     'Mixed Supply',
     [
@@ -220,7 +264,7 @@ for (const [name, catalog, expected] of [
   test('按产品用途核实获客并读回客户档案：' + name, async () => {
     const identity = name + ' is an independent distributor serving customers across Malaysia.';
     const f = fixture({
-      pageText: [identity, ...catalog.map(([, quote]) => quote)].join(' '),
+      pageText: [identity, pageContext, ...catalog.map(([, quote]) => quote)].join(' '),
       automaticAssessment: true,
       modelOverrides: {
         company_name: policyFact(name, identity),

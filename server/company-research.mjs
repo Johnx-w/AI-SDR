@@ -3,6 +3,7 @@ import { normalizePhoneLines, selectBusinessPhones } from './phone-format.mjs';
 import {
   businessProductRelation,
   countryMatches,
+  hasConflictingProductUse,
   supportsWindowUse,
   windowProductDirections,
 } from './relevance.mjs';
@@ -192,7 +193,14 @@ export function parseCompanyResearch(response, page, target = {}) {
           quote = locate(line);
           if (quote) break;
         }
-      if (quote) return [{ ...f, quote }];
+      if (quote) {
+        if (
+          ['products', 'manufactured_products', 'demand_products'].includes(f.field) &&
+          hasConflictingProductUse(f.value, quote, p.text)
+        )
+          return [{ ...f, quote, window_use: f.window_use === 'other' ? 'other' : 'unknown' }];
+        return [{ ...f, quote }];
+      }
     }
     return [];
   });
@@ -309,6 +317,11 @@ export function parseCompanyResearch(response, page, target = {}) {
         if (
           !value ||
           value.length > 300 ||
+          hasConflictingProductUse(
+            value,
+            quote,
+            pages.find((p) => p.source_url === fact.source_url && p.text.includes(quote))?.text,
+          ) ||
           recovered.some((f) => compact(f.value).toLowerCase() === compact(value).toLowerCase())
         )
           continue;
