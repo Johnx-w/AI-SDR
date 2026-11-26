@@ -148,7 +148,7 @@ export function SequenceEmailComposer({
   async function loadSample(after = '', signal?: AbortSignal) {
     const id = ++sampleRequest.current;
     setSampling(true);
-    setRepresentative(null);
+    if (!after) setRepresentative(null);
     setSampleError('');
     if (!mailboxId || !customer) {
       setSampling(false);

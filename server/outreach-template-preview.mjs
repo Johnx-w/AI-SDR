@@ -92,6 +92,7 @@ async function previewContext(service, input) {
         wrapped = true;
         continue;
       }
+      if (input.after) throw fail('未找到其他合格样本；可保留当前样本，或重新取样核对最新资料');
       throw fail(
         '该类别在当前邮箱及产品范围内没有合格样本；需有同源角色、产品及商务联系依据' +
           (rejected.size ? '：' + [...rejected].join('；') : ''),

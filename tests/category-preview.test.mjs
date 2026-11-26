@@ -141,7 +141,7 @@ test('固定发件邮箱不跨品牌，角色取样不越过作用域，单样�
   );
   await assert.rejects(
     previewSample(h.service, { category: 'distributor', mailboxId: 'box-0', after: only }),
-    /没有合格样本/,
+    /其他合格样本/,
   );
 });
 

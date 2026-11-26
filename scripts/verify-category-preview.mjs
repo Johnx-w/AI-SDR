@@ -164,6 +164,20 @@ try {
         .all('preview-qa', ''),
     }),
   );
+  // Exhausting alternatives must keep the one real sample instead of calling the category empty.
+  h.library.db
+    .prepare('DELETE FROM lead_library_customers WHERE record_id!=?')
+    .run('z0-distributor-0');
+  await category.selectOption('contractor');
+  await dialog.getByRole('alert').filter({ hasText: '没有合格样本' }).waitFor();
+  await page.getByRole('button', { name: '首封开发信', exact: true }).click();
+  await category.selectOption('distributor');
+  const only = dialog.getByRole('region', { name: '代表客户' });
+  await only.locator('strong').getByText('QA z0-dealer-0', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '更换同类样本', exact: true }).click();
+  await dialog.getByRole('alert').filter({ hasText: '其他合格样本' }).waitFor();
+  assert.equal(await only.locator('strong').innerText(), 'QA z0-dealer-0');
+  assert.ok(await page.getByRole('button', { name: /^(生成预览|刷新预览)$/ }).isEnabled());
   assert.deepEqual(errors, []);
   assert.ok(requests.every((r) => /\/sequence-policy\/(preview|assist)$/.test(r.url)));
   assert.equal(h.sends, 0);
