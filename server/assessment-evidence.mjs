@@ -1,6 +1,7 @@
 import {
   productsRelevant,
   businessProductRelation,
+  hasConflictingProductUse,
   supportsWindowUse,
   windowProductDirections,
   targetProductTerms,
@@ -299,6 +300,11 @@ export function verifiedAssessmentOpportunities(
       // Only whitespace is normalized. Partial lines, summaries and joined quotes are rejected.
       const quote = compact(fact.quote);
       if (!compact(page.text).includes(quote)) continue;
+      if (
+        positiveProductKinds.has(fact.kind) &&
+        hasConflictingProductUse(product, quote, page.text)
+      )
+        continue;
       if (
         directionFactKinds.has(fact.kind) &&
         !supportsScopedFact(

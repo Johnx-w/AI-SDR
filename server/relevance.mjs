@@ -155,8 +155,40 @@ export const pipeBlindTerms =
 
 // Discovery can use broad terms. Admission and scoring need evidence about the
 // product's application in the supplier's own quotation.
+const specialistApplication =
+  /\b(?:caravans?|motorhomes?|campervans?|rvs?|recreational vehicles?|travel trailers?|truck curtains?|industrial (?:divider |partition )?curtains?|industrial (?:divider|partition) tracks?|(?:factory|warehouse) (?:partitions?|dividers?)|stage curtains?|theat(?:re|er) curtains?|cubicle curtains?|hospital (?:privacy |cubicle )?curtains?|shower curtains?)\b|房车|车载|舞台幕布|工业隔断|医用隔帘|淋浴帘/i;
+
+export function hasConflictingProductUse(value, quote, sourceText = '') {
+  if (specialistApplication.test(value)) return true;
+  if (!specialistApplication.test(quote)) {
+    // A bare catalog heading on a specialist's page cannot establish architectural use.
+    return (
+      specialistApplication.test(sourceText) &&
+      !/\b(?:residential|buildings?|bedrooms?|homes?|house windows?|patios?|pergolas?|window (?:furnishings?|treatments?|coverings?))\b|住宅|建筑|家居|庭院|阳台|窗饰/i.test(
+        quote,
+      )
+    );
+  }
+  // Mixed catalogs can still establish this product with a separate, explicit statement.
+  const label = String(value).trim().toLowerCase();
+  const namedWindowProduct = label.match(
+    /\bwindow (?:treatments?|furnishings?|coverings?|draperies|curtains?|blinds?|shades?|shutters?)\b/i,
+  )?.[0];
+  return !String(quote)
+    .split(/[.,;!?\n。，；！？]/)
+    .some(
+      (clause) =>
+        label &&
+        (clause.toLowerCase().includes(label) ||
+          (namedWindowProduct && clause.toLowerCase().includes(namedWindowProduct))) &&
+        !specialistApplication.test(clause) &&
+        hasWindowApplication(clause),
+    );
+}
+
 export function supportsWindowUse({ value, quote, window_use }) {
   if (window_use && window_use !== 'window_covering') return false;
+  if (hasConflictingProductUse(value, quote)) return false;
   const ambiguous = /\b(?:blinds?|shutters?|curtains?|shades?|screens?)\b/i;
   if (!ambiguous.test(value) && !ambiguous.test(quote)) return true;
   const clean = (s) => String(s).replace(pipeBlindTerms, ' ').replace(unrelatedWindowProducts, ' ');
