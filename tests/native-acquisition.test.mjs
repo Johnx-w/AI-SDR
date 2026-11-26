@@ -201,6 +201,16 @@ for (const [name, quote, result] of [
     'Our Pergola collection is a line of scale models for tabletop games.',
     'unrelated',
   ],
+  [
+    'East Shades',
+    'The Guild lists East Shades among member suppliers of Roller Blinds.',
+    'unrelated',
+  ],
+  [
+    'Vista Studio',
+    'A portfolio site showcases Vista Studio and its Roller Blinds work.',
+    'unrelated',
+  ],
   ['Catalog Studio', 'Our new collection is called Pergola.', 'uncertain'],
 ]) {
   test('独立模型复核阻止入库：' + name, async () => {
@@ -233,7 +243,12 @@ for (const [name, quote, result] of [
         { source_url: site, operation_id: 'activity-proof' },
       );
       assert.equal(f.records.length, 0);
-      assert.ok(f.calls.some((c) => c.body?.text?.format?.schema?.properties?.sources));
+      const check = f.calls.find((c) => c.body?.text?.format?.schema?.properties?.sources);
+      const { company } = JSON.parse(check.body.input[1].content);
+      assert.equal(company.name, name);
+      assert.equal(company.website, site);
+      assert.ok(company.identity_evidence.some((e) => e.quote === identity));
+      assert.ok(company.homepage.includes(quote));
     } finally {
       svc.close();
     }
@@ -410,7 +425,9 @@ test('精简后的中部经营证据贯通研究、初评、模拟写入及读�
     assert.deepEqual(sent, op.research_pages);
     assert.ok(result.research_usage.original_chars > 30000);
     assert.ok(result.research_usage.compacted_chars > 30000);
-    assert.ok(result.research_usage.input_chars < 1500);
+    const review = f.calls.find((call) => call.body?.text?.format?.schema?.properties?.sources);
+    assert.ok(result.research_usage.input_chars - review.body.input[1].content.length < 1500);
+    assert.ok(result.research_usage.input_chars < result.research_usage.original_chars / 10);
     assert.ok(result.assessment || op.assessment);
   } finally {
     svc.close();

@@ -902,6 +902,19 @@ export class NativeAcquisition {
               op.research_usage,
               sources,
               input,
+              {
+                name: parsed.company_identity.name,
+                website: item.source_url,
+                identity_evidence: parsed.company_identity.evidence
+                  .slice(0, 6)
+                  .map(({ value, quote, source_url }) => ({ value, quote, source_url })),
+                homepage: page.research_pages
+                  .find(
+                    (p) =>
+                      domainKey(p.source_url) === domain && new URL(p.source_url).pathname === '/',
+                  )
+                  ?.text?.slice(0, 1200),
+              },
             );
           } catch {
             verdict.reason = '官网业务独立模型复核未完成，待重新核实';
