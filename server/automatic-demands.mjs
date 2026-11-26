@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { checkMirrorMaintenance } from './mirror-maintenance.mjs';
 import { createHash } from 'node:crypto';
 import { createResearchProviders } from './research-providers.mjs';
 import { customerReplyText, knownReplyType } from './communication-rounds.mjs';
@@ -33,7 +34,10 @@ const schema = {
 const digest = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
 // Runs before mirror I/O: a Feishu outage cannot prevent saving customer facts.
-export async function extractAutomaticDemands(store, { env = {}, fetchImpl = fetch, model } = {}) {
+export async function extractAutomaticDemands(
+  store,
+  { env = {}, fetchImpl = fetch, model, isMaintaining = () => false } = {},
+) {
   const messages = store
     .all('messages')
     .filter(
@@ -42,6 +46,7 @@ export async function extractAutomaticDemands(store, { env = {}, fetchImpl = fet
     .sort((a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt));
   let analyzer = model;
   for (const source of messages) {
+    checkMirrorMaintenance(isMaintaining);
     const fingerprint = digest([
       'automatic-demands-v1',
       source.body,

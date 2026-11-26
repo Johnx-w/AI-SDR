@@ -268,6 +268,30 @@ function workspace() {
   };
 }
 
+test('业务图维护完成当前写入读回后让出，两遍关联可恢复且不重复建行', async () => {
+  const f = fixture();
+  let maintaining = false;
+  f.bridge.isMaintaining = () => maintaining;
+  const write = f.client.write;
+  f.client.write = async (...args) => {
+    const result = await write(...args);
+    maintaining = true;
+    return result;
+  };
+  const products = [{ id: 'product-1', version: 2 }];
+  const paused = await f.bridge.sync(workspace(), { products });
+  assert.equal(paused.status, 'pending');
+  assert.match(paused.error, /发布维护/);
+  assert.equal(f.writes.length, 1);
+  maintaining = false;
+  f.client.write = write;
+  const resumed = await f.bridge.sync(workspace(), { products });
+  assert.equal(resumed.status, 'synced', resumed.error);
+  assert.equal(f.records.get('t3').length, 1);
+  assert.equal(f.records.get('t1').length, 2);
+  assert.equal(f.records.get('t4').length, 1);
+});
+
 function originalMessageTable(f) {
   const options = (names) => ({ options: names.map((name) => ({ name })) });
   f.fields.set('t3', [

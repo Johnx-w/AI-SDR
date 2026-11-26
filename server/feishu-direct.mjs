@@ -1,16 +1,18 @@
 import { platformJson } from './acquisition-config.mjs';
 import { fieldText, mapFeishuRecord } from './feishu.mjs';
 import { domainKey } from './website-identity.mjs';
+import { checkMirrorMaintenance } from './mirror-maintenance.mjs';
 import { customerWebsite, resolveCustomerField, encodeCustomerFields } from './customer-fields.mjs';
 
 const base = 'https://open.feishu.cn/open-apis';
 const fail = (message) => Object.assign(new Error(message), { status: 502 });
 
 export class FeishuClient {
-  constructor({ env, fetchImpl = fetch }) {
+  constructor({ env, fetchImpl = fetch, isMaintaining = () => false }) {
     this.env = env;
     this.fetch = fetchImpl;
     this.token = null;
+    this.isMaintaining = isMaintaining;
   }
   tablePath(table = this.env.FEISHU_TABLE_ID) {
     const { FEISHU_APP_TOKEN: app } = this.env;
@@ -98,6 +100,7 @@ export class FeishuClient {
       seen = new Set();
     let cursor = '';
     for (let page = 0; page < 10000; page++) {
+      checkMirrorMaintenance(this.isMaintaining);
       const query = new URLSearchParams({
         page_size: String(pageSize ?? (resource === 'fields' ? 100 : 500)),
       });
@@ -125,6 +128,7 @@ export class FeishuClient {
       seen = new Set();
     let cursor = '';
     for (let page = 0; page < 1000; page++) {
+      checkMirrorMaintenance(this.isMaintaining);
       const query = new URLSearchParams({ page_size: '100' });
       if (cursor) query.set('page_token', cursor);
       const data = await this.request(this.tablePath().split('/tables/')[0] + '/tables?' + query);

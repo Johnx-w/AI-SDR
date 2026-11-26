@@ -126,6 +126,25 @@ test('T12 以客户关联保存最新评估，检查模式只读，复跑不重�
   assert.equal(f.calls.writes.length, 3, '评级冲突在任何写入前阻止同步');
 });
 
+test('T12维护完成当前写入核对后停止下一客户，解除后恢复且不重复新增', async () => {
+  const f = fixture();
+  let maintaining = false;
+  const write = f.input.client.write;
+  f.input.client.write = async (...args) => {
+    const result = await write(...args);
+    maintaining = true;
+    return result;
+  };
+  const input = { ...f.input, apply: true, isMaintaining: () => maintaining };
+  await assert.rejects(syncAssessmentFeishu(input), { maintenance: true });
+  assert.equal(f.records.t12.length, 1);
+  maintaining = false;
+  f.input.client.write = write;
+  await syncAssessmentFeishu(input);
+  assert.equal(f.records.t12.length, 2);
+  assert.equal(f.calls.writes.length, 2);
+});
+
 test('T12 新增响应丢失时按客户关系重新读表确认，不重复新增', async () => {
   const f = fixture();
   f.input.assessments = f.input.assessments.slice(0, 1);

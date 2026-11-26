@@ -8,6 +8,7 @@ import {
   CUSTOMER_FIELD_ALIASES,
 } from './customer-fields.mjs';
 import { domainKey } from './website-identity.mjs';
+import { checkMirrorMaintenance } from './mirror-maintenance.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const sameFields = (record, fields) =>
@@ -44,11 +45,12 @@ function firstLinkPatch(local, saved, fields) {
 
 // Native acquisition uses local records; only this boundary knows Feishu record IDs.
 export class CustomerArchive {
-  constructor({ library, remote, decorate = (data) => data }) {
+  constructor({ library, remote, decorate = (data) => data, isMaintaining = () => false }) {
     this.getLibrary = library;
     this.remote = remote;
     this.decorate = decorate;
     this.localFirst = true;
+    this.isMaintaining = isMaintaining;
   }
   get library() {
     return (this.currentLibrary ??= this.getLibrary());
@@ -170,6 +172,7 @@ export class CustomerArchive {
   async synchronize() {
     let definitions;
     for (const queued of this.entries().filter((entry) => entry.revision > entry.syncedRevision)) {
+      checkMirrorMaintenance(this.isMaintaining);
       const id = queued.record.record_id;
       try {
         definitions ??= await this.remote.fields();

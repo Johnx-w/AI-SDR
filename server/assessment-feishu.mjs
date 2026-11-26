@@ -6,6 +6,7 @@ import { formatAssessmentEvidence, ASSESSMENT_RULE_VERSION } from './customer-as
 import { fieldValue, customerWebsite } from './customer-fields.mjs';
 import { fieldText } from './feishu.mjs';
 import { domainKey } from './website-identity.mjs';
+import { checkMirrorMaintenance } from './mirror-maintenance.mjs';
 
 const formalBase = 'Xat4bgUFuaL6tBsXqRccnYaknEf';
 const formalT2 = 'tbloekB1ocuwmfuG';
@@ -36,9 +37,11 @@ export async function syncAssessmentFeishu({
   client,
   journalPath,
   apply = false,
+  isMaintaining = () => false,
 } = {}) {
   const mirror = new CustomerBusinessFeishu({
     env,
+    isMaintaining,
     client,
     journalPath:
       journalPath ||
@@ -158,6 +161,7 @@ export async function syncAssessmentFeishu({
   };
   if (!apply) return result;
   for (const item of pending) {
+    checkMirrorMaintenance(isMaintaining);
     let record = item.record;
     let attempted = false;
     const key = `${mirror.scope}:T12:${t12.table_id}:${item.remoteId}`;
