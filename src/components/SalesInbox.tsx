@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Archive,
@@ -122,6 +122,7 @@ export function SalesInbox({
   onMailboxChange,
   review = false,
   reviewCount,
+  refreshButton,
   refreshToken = 0,
   onExitReview,
 }: {
@@ -136,6 +137,7 @@ export function SalesInbox({
   onMailboxChange: (mailboxId: string, query: string) => void;
   review?: boolean;
   reviewCount?: number;
+  refreshButton: ReactNode;
   refreshToken?: number;
   onExitReview: () => void;
 }) {
@@ -464,14 +466,15 @@ export function SalesInbox({
 
       <div
         ref={workspace}
-        className={`mail-conversations-workspace panel ${selectedId ? 'has-selection' : 'no-selection'}`}
+        className={`mail-conversations-workspace ${selectedId ? 'has-selection' : 'no-selection'}`}
       >
         <aside className="mail-conversation-list" aria-label="邮件会话列表" aria-busy={loading}>
           <div className="inbox-list-title">
-            <strong>{review ? '待审草稿' : '邮件会话'}</strong>
+            <h1>{review ? '待审草稿' : '邮件会话'}</h1>
             <span aria-live="polite" aria-label={`共 ${list?.total ?? '…'} 段会话`}>
               {list ? `${list.total} 个` : '更新中'}
             </span>
+            {refreshButton}
           </div>
           <div className="inbox-list-head">
             <Inbox size={16} />

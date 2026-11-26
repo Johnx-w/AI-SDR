@@ -1554,6 +1554,25 @@ export function OutreachCommunication({
   const selected = settingsId ? 'agent' : review ? 'review' : tab;
   const section = sections.find((group) => group.items.some((item) => item.id === selected))!;
   const title = section.items.find((item) => item.id === selected)!.label;
+  const refreshButton = (
+    <button
+      className={tab === 'inbox' ? 'inbox-refresh' : 'btn secondary'}
+      disabled={!!busy || loading}
+      onClick={() => {
+        setError(null);
+        setLoading(true);
+        setSignatureRefresh((current) => current + 1);
+        setInboxRefresh((value) => value + 1);
+        setTagRefresh((v) => v + 1);
+        void refresh()
+          .catch((reason: unknown) => setError(message(reason)))
+          .finally(() => setLoading(false));
+      }}
+    >
+      <RefreshCw size={15} className={loading ? 'outreach-spin' : ''} />
+      刷新
+    </button>
+  );
   function openSection(id: string) {
     if (id === 'review') setSearchParams({ tab: 'inbox', folder: 'review' });
     else if (id === 'agent')
@@ -1588,12 +1607,16 @@ export function OutreachCommunication({
         )
       }
     >
-      <div className="outreach-page fin-body">
-        <div className="fin-crumb">
-          {section.group}
-          <ChevronRight size={13} />
-          <strong>{title}</strong>
-        </div>
+      <div
+        className={tab === 'inbox' ? 'outreach-page fin-body fin-inbox' : 'outreach-page fin-body'}
+      >
+        {tab !== 'inbox' && (
+          <div className="fin-crumb">
+            {section.group}
+            <ChevronRight size={13} />
+            <strong>{title}</strong>
+          </div>
+        )}
         {settingsId ? (
           settingsBox ? (
             <MailReplySettings
@@ -1611,51 +1634,38 @@ export function OutreachCommunication({
           )
         ) : (
           <>
-            <header className="fin-heading page-heading">
-              <h1>{title}</h1>
-              <div className="fin-actions">
-                <button
-                  className="btn secondary"
-                  disabled={!!busy || loading}
-                  onClick={() => {
-                    setError(null);
-                    setLoading(true);
-                    setSignatureRefresh((current) => current + 1);
-                    setInboxRefresh((value) => value + 1);
-                    setTagRefresh((v) => v + 1);
-                    void refresh()
-                      .catch((reason: unknown) => setError(message(reason)))
-                      .finally(() => setLoading(false));
-                  }}
-                >
-                  <RefreshCw size={15} className={loading ? 'outreach-spin' : ''} />
-                  刷新
-                </button>
-                {tab === 'mailboxes' && (
-                  <button
-                    type="button"
-                    className="btn secondary"
-                    onClick={() => setShowLabels(true)}
-                  >
-                    邮箱标签
-                  </button>
-                )}
-                {['mailboxes', 'campaigns'].includes(tab) && (
-                  <button
-                    className="btn primary"
-                    disabled={!!busy}
-                    onClick={() =>
-                      tab === 'mailboxes'
-                        ? setMailboxEditor({ value: null })
-                        : setCampaignEditor({ value: null })
-                    }
-                  >
-                    <Plus size={16} />
-                    {tab === 'mailboxes' ? '添加邮箱' : '新建计划'}
-                  </button>
-                )}
-              </div>
-            </header>
+            {tab !== 'inbox' && (
+              <header className="fin-heading page-heading">
+                <h1>{title}</h1>
+                <div className="fin-actions">
+                  {refreshButton}
+                  {tab === 'mailboxes' && (
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      onClick={() => setShowLabels(true)}
+                    >
+                      邮箱标签
+                    </button>
+                  )}
+                  {['mailboxes', 'campaigns'].includes(tab) && (
+                    <button
+                      className="btn primary"
+                      disabled={!!busy}
+                      onClick={() =>
+                        tab === 'mailboxes'
+                          ? setMailboxEditor({ value: null })
+                          : setCampaignEditor({ value: null })
+                      }
+                    >
+                      <Plus size={16} />
+                      {tab === 'mailboxes' ? '添加邮箱' : '新建计划'}
+                    </button>
+                  )}
+                </div>
+              </header>
+            )}
+            {tab === 'inbox' && !state && !loading && refreshButton}
             <InlineError value={error} />
             {notice && (
               <div className="outreach-alert success" role="status">
@@ -1684,6 +1694,7 @@ export function OutreachCommunication({
                 >
                   {tab === 'inbox' && (
                     <SalesInbox
+                      refreshButton={refreshButton}
                       key={JSON.stringify([
                         conversationMailboxId,
                         searchParams.get('thread'),

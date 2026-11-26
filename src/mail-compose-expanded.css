@@ -19,7 +19,8 @@ dialog.inbox-compose {
 dialog.inbox-compose:not(:modal):has(.mail-reply-panel:not([data-empty])) {
   display: flex;
   flex-direction: column;
-  max-height: min(74%, 400px);
+  /* Leave half of the space below the thread header for reading the original. */
+  max-height: min(40%, 400px);
   overflow: hidden;
 }
 .inbox-compose:not(:modal)

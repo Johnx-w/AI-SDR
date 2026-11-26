@@ -89,9 +89,34 @@
   --inbox-canvas: var(--color-bg);
   --inbox-lavender: var(--color-primary-soft);
 }
+.fin-center .fin-inbox {
+  padding: 0;
+}
 .fin-center .mail-conversations-workspace {
-  border-radius: 10px;
-  height: max(550px, calc(100dvh - 186px));
+  border: 0;
+  border-radius: 0;
+  height: max(460px, calc(100dvh - 52px));
+}
+.fin-inbox .inbox-list-title {
+  justify-content: flex-start;
+  gap: 8px;
+}
+.inbox-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+.inbox-refresh:hover {
+  background: var(--color-surface-hover);
+}
+.inbox-refresh:disabled {
+  opacity: 0.55;
 }
 .fin-center .mail-conversation-row.selected {
   background: var(--color-primary-soft);
