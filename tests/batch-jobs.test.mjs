@@ -1229,3 +1229,81 @@ test('不确定写入和重复读阶段中断均不无限重试', async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('全国查询遇到重复且没有新增时按本国地区补搜，只有核实入库才计入目标', async () => {
+  for (const [country, regions] of [
+    ['Canada', ['Alberta', 'British Columbia']],
+    ['Australia', ['Australian Capital Territory', 'New South Wales']],
+    ['United States', ['Alabama', 'Alaska']],
+    ['Japan', []],
+  ]) {
+    const queries = [];
+    const { manager, leads } = harness({
+      discover: async (target, search) => {
+        assert.equal(target.country, country);
+        assert.equal(target.region, '');
+        assert.equal(search.country, country);
+        queries.push(search.query);
+        const index = regions.findIndex((region) => search.query.endsWith(' ' + region));
+        return index < 0
+          ? { skipped_existing: [{ url: 'https://known.example/' }] }
+          : {
+              candidates: Array.from({ length: index === 0 ? 20 : 15 }, (_, n) => ({
+                source_url: 'https://regional-' + index + '-' + n + '.example.org/',
+              })),
+            };
+      },
+    });
+    try {
+      const job = manager.create(
+        { ...input, country, query_mode: 'auto', target_count: 35 },
+        'region-replenish',
+      );
+      await manager.work(job.id);
+      const result = manager.get(job.id);
+      const expected = regions.length ? 35 : 0;
+      assert.equal(result.inserted, expected);
+      assert.equal(new Set(leads.map((row) => row.website)).size, expected);
+      if (regions.length) {
+        assert.deepEqual(queries, [
+          job.queryPlan[0].query,
+          job.queryPlan[0].query + ' ' + regions[0],
+          job.queryPlan[1].query,
+          job.queryPlan[1].query + ' ' + regions[1],
+        ]);
+        assert.equal(result.cursor, 2);
+      } else {
+        assert.ok(result.searchStats.some((stat) => stat.searchRegion === 'Hokkaidō'));
+      }
+    } finally {
+      manager.close();
+    }
+  }
+});
+
+test('地区补搜中断后停止，下一轮从下一条全国词继续', async () => {
+  const calls = [];
+  const { manager } = harness({
+    discover: async (_target, search) => {
+      calls.push(search.query);
+      if (calls.length === 2) throw new Error('搜索中断');
+      return { skipped_existing: [{ url: 'https://known.example/' }] };
+    },
+  });
+  try {
+    const target = { ...input, country: 'Canada', query_mode: 'auto' };
+    const first = manager.create(target, 'region-interrupted', { scheduleId: 'weekly' });
+    await manager.work(first.id);
+    assert.equal(manager.get(first.id).pendingSearch.query, first.queryPlan[0].query + ' Alberta');
+    manager.stop(first.id);
+    const second = manager.create(target, 'region-continued', { scheduleId: 'weekly' });
+    second.limits.searches = 1;
+    manager.save(second);
+    await manager.work(second.id);
+    assert.equal(calls[2], first.queryPlan[1].query);
+    assert.equal(calls.length, 3);
+    assert.equal(manager.get(second.id).reason, 'search_limit');
+  } finally {
+    manager.close();
+  }
+});

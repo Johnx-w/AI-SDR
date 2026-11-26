@@ -3,6 +3,27 @@ import acquisition from '../src/data/acquisition.json' with { type: 'json' };
 import { automaticSearchPlan } from '../src/domain/search-query.mjs';
 import { isAllProductScope } from '../src/domain/acquisition-products.mjs';
 
+import { searchRegions } from './search-regions.mjs';
+
+export function regionalSearchAfter(job) {
+  if (job.input.query_mode !== 'auto' && !isAllProductScope(job.input)) return;
+  const previous = job.searchStats?.at(-1);
+  const regions = searchRegions.get(job.input.country);
+  if (
+    !regions?.length ||
+    previous?.status !== 'completed' ||
+    previous.searchRegion ||
+    !previous.duplicates ||
+    previous.inserted !== 0 ||
+    job.cursor < 1
+  )
+    return;
+  const region = regions[(job.cursor - 1) % regions.length];
+  const query = previous.query + ' ' + region;
+  // Both supported providers must receive the complete product, country and region.
+  if (query.length <= 128) return { country: job.input.country, query, searchRegion: region };
+}
+
 export function searchPlan(input) {
   validateCountryScope(input);
   const country = input.country;

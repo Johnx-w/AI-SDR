@@ -27,7 +27,16 @@ const day = 86400000;
 const defaultZone = 'Asia/Shanghai';
 
 export function scheduleZoneLabel(timezone = defaultZone) {
-  return timezone === defaultZone ? '北京时间' : timezone;
+  if (timezone === defaultZone) return '北京时间';
+  try {
+    return (
+      new Intl.DateTimeFormat('zh-CN', { timeZone: timezone, timeZoneName: 'longGeneric' })
+        .formatToParts()
+        .find((part) => part.type === 'timeZoneName')?.value || timezone
+    );
+  } catch {
+    return timezone;
+  }
 }
 
 export function scheduleDate(timezone = defaultZone, now = Date.now()) {

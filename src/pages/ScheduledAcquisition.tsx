@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CalendarDays, Pause, Pencil, Play, X } from 'lucide-react';
 import { Badge, Empty } from '../components/ui';
+import { countryFor, isCountryScope } from '../domain/country-catalog';
 import { BatchProgress } from '../components/BatchProgress';
 import { acquisitionApi } from '../services/acquisition';
 import type { AcquisitionSchedule } from '../domain/types';
@@ -181,7 +182,8 @@ export function ScheduledAcquisition() {
             </header>
             <div className="schedule-target">
               <span>
-                {plan.input.country}
+                获客范围：{countryFor(plan.input.country)?.zh || plan.input.country}
+                {isCountryScope(plan.input) ? '全境' : ''}
                 {plan.input.region ? ` / ${plan.input.region}` : ''}
               </span>
               <span>每次新增 {plan.input.target_count} 家</span>

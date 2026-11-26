@@ -50,7 +50,13 @@ test('已关闭计划独立筛选并复用恢复操作', async () => {
     name: '已关闭每日计划',
   };
   const ended = { ...plan('completed'), id: 'ended', name: '已结束单次计划', lastJob: null };
-  const states = [[plan('enabled'), closedPlan, ended], false];
+  const canada = plan('enabled');
+  canada.input.country = 'Canada';
+  canada.timing.timezone = 'America/Toronto';
+  closedPlan.input.country = 'Australia';
+  closedPlan.timing.timezone = 'Australia/Sydney';
+  ended.input.region = 'Texas';
+  const states = [[canada, closedPlan, ended], false];
   const actions = [];
   let index = 0;
   const load = createModuleLoader((specifier, path) => {
@@ -88,6 +94,7 @@ test('已关闭计划独立筛选并复用恢复操作', async () => {
   };
   const cards = (tree) => elements(tree).filter((element) => element.type === 'section');
   assert.equal(cards(render()).length, 1, '进行中列表不混入已关闭计划，即使旧轮次仍在运行');
+  assert.match(words(cards(render())[0]), /北美东部时间.*获客范围：加拿大全境/);
   const history = elements(render()).find(
     (element) => element.type === 'button' && words(element) === '已关闭计划',
   );
@@ -95,6 +102,8 @@ test('已关闭计划独立筛选并复用恢复操作', async () => {
   const closed = render();
   assert.equal(words(history), '已关闭计划');
   assert.equal(cards(closed).length, 2, '历史入口保留关闭计划及已结束单次计划');
+  assert.match(words(cards(closed)[0]), /澳大利亚东部.*获客范围：澳大利亚全境/);
+  assert.match(words(cards(closed)[1]), /北京时间.*获客范围：美国 \/ Texas/);
   assert.ok(words(closed).includes('每天'));
   const restore = elements(closed).find(
     (element) => element.type === 'button' && words(element).includes('恢复计划'),

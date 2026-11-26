@@ -427,7 +427,8 @@ export class NativeAcquisition {
     this.ensureConfigured();
     const records = await this.feishu.records();
     const known = records.map((r) => domainKey(customerWebsite(r))).filter(Boolean);
-    const excluded = [...new Set([...known, ...seen])];
+    const recent = new Set(seen);
+    const excluded = [...new Set(known.filter((domain) => !recent.has(domain))), ...recent];
     const data = await this.providers.web.search({
       query: search.query.slice(0, 395),
       search_depth: 'basic',
