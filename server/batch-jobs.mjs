@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { domainKey } from './website-identity.mjs';
-import { searchPlan } from './search-plan.mjs';
+import { regionalSearchAfter, searchPlan } from './search-plan.mjs';
 import { exclusionConditionsKey } from './exclusion-conditions.mjs';
 import { validateCountryScope } from './search-target.mjs';
 
@@ -370,7 +370,10 @@ export class BatchJobs {
             job.provider,
             job.scheduleId || '',
             planKey,
-            Math.max(0, job.cursor - (job.pendingSearch ? 1 : 0)),
+            Math.max(
+              0,
+              job.cursor - (job.pendingSearch && !job.pendingSearch.searchRegion ? 1 : 0),
+            ),
             JSON.stringify(job.queue),
           );
       }
@@ -716,19 +719,20 @@ export class BatchJobs {
           }
           const plan = j.queryPlan || searchPlan(j.input);
           j.searchSignatures ||= [];
-          let search = j.pendingSearch;
-          // Revisit a query only when excluded domains have changed. This can
-          // discover >100 companies without repeating an identical paid search.
-          for (let i = 0; !search && i < plan.length; i++) {
-            const candidate = plan[j.cursor++ % plan.length];
+          const unusedSearch = (candidate) => {
+            if (!candidate) return;
             const signature = createHash('sha256')
               .update(JSON.stringify([candidate, j.seen.slice(-150)]))
               .digest('hex');
-            if (!j.searchSignatures.includes(signature)) {
-              j.searchSignatures.push(signature);
-              search = candidate;
-              break;
-            }
+            if (j.searchSignatures.includes(signature)) return;
+            j.searchSignatures.push(signature);
+            return candidate;
+          };
+          let search = j.pendingSearch || unusedSearch(regionalSearchAfter(j));
+          // Revisit a query only when excluded domains have changed. This can
+          // discover >100 companies without repeating an identical paid search.
+          for (let i = 0; !search && i < plan.length; i++) {
+            search = unusedSearch(plan[j.cursor++ % plan.length]);
           }
           if (!search) {
             this.finish(j, 'exhausted');
@@ -741,6 +745,7 @@ export class BatchJobs {
             id: `${j.id}:search:${j.searches}`,
             query: search.query,
             country: search.country,
+            ...(search.searchRegion ? { searchRegion: search.searchRegion } : {}),
             source_kind: search.source_kind || 'web',
             family: search.family,
             startedAt: new Date(this.now()).toISOString(),
