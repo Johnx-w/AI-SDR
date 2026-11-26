@@ -1,3 +1,4 @@
+import { MaterialModels } from './MaterialModels';
 import { useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft,
@@ -115,6 +116,7 @@ export function MaterialDocument({
     (structured ||
       doc?.contentType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
       doc?.contentType === 'text/markdown' ||
+      doc?.contentType === 'text/plain' ||
       isPagedMaterial(doc?.contentType) ||
       doc?.parseMode === 'rich_layout_recognition');
   const storedMode = doc?.extraction?.mode ?? doc?.parseMode ?? 'rich_layout_recognition';
@@ -221,6 +223,19 @@ export function MaterialDocument({
   const writable = active && p?.status !== 'archived' && !busy;
   const original = doc ? sourceUrl(id, doc.id) : '';
   const facts = p?.sourceFacts || [];
+  const modelFields = doc?.extraction?.productFields?.length
+    ? doc.extraction.productFields
+    : (doc?.extraction?.parameters ?? [])
+        .filter((p) => p.item && !p.issue)
+        .map((p) => ({
+          item: p.item,
+          sheet: p.sheet,
+          field: p.field,
+          value: p.value,
+          ref: [p.sheet || (p.page ? '第 ' + p.page + ' 页' : ''), p.ref, p.conditions]
+            .filter(Boolean)
+            .join(' · '),
+        }));
   const reviewFields = { adoptDocumentId: docId, cellEdits: edits, sourceFacts: facts };
   const incompleteFact = facts.some((f) => !f.text.trim() || !f.location.trim());
   const firstPage = Math.min(initialPage, doc?.extraction?.pageCount || 1);
@@ -496,6 +511,15 @@ export function MaterialDocument({
                         </button>
                       )
                     )}
+                    {!!modelFields.length && (
+                      <MaterialModels
+                        key={doc.id + revision}
+                        fields={modelFields}
+                        url={original}
+                        file={doc.name}
+                        pdf={doc.contentType === 'application/pdf'}
+                      />
+                    )}
                     {doc.referencePages ? (
                       <MaterialOriginal doc={doc} url={original} page={sourcePage} />
                     ) : structured && doc.extraction?.parameters ? (
@@ -573,6 +597,7 @@ export function MaterialDocument({
                             <WorkbookPreview
                               key={doc.id}
                               url={original}
+                              file={doc.name}
                               id={doc.id}
                               sheets={doc.extraction.sheets}
                               edits={edits}

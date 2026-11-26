@@ -72,6 +72,23 @@ export class WorkbookPhotos {
       if (current.status === 'archived' || current.documentIds?.[0] !== doc) throw conflict();
     }
   }
+  forItem(product, doc, sheet, item, row) {
+    this.owned(product, doc);
+    const images = this.db
+      .prepare(
+        "SELECT id,slot,origin FROM workbook_image_assets WHERE document_id=? AND sheet=? AND item=? AND active=1 ORDER BY slot!='主图',slot,id",
+      )
+      .all(doc, sheet, item);
+    if (!row || !images.length) return images;
+    const duplicate = this.db
+      .prepare(
+        'SELECT 1 FROM product_workbook_rows WHERE document_id=? AND sheet=? AND label=? LIMIT 1 OFFSET 1',
+      )
+      .get(doc, sheet, item);
+    return duplicate
+      ? images.filter((p) => p.origin === '原件 · ' + sheet + ' · 第 ' + row + ' 行')
+      : images;
+  }
   list(product, doc, q) {
     this.owned(product, doc);
     const filter = ['r.document_id=?', "r.sheet!='品类索引'"],

@@ -67,6 +67,7 @@ export async function parseWorkbook(bytes, options = {}) {
     rows = [],
     owners = new Map(),
     warnings = [],
+    productFields = [],
     facts = [];
   for (const { sheet, data, merges } of sheets) {
     const headerIndex = data.findIndex((row) => row.some((value) => value !== null));
@@ -121,6 +122,13 @@ export async function parseWorkbook(bytes, options = {}) {
       if (acrossItems && !across && filled.length && row[0]) {
         for (let col = 1; col < row.length; col++)
           if (row[col] && acrossItems[col]) {
+            productFields.push({
+              sheet,
+              item: acrossItems[col],
+              field: row[0],
+              value: row[col],
+              ref: sheet + '!' + columnName(col) + (index + 1),
+            });
             facts.push({
               page: 1,
               location: sheet + '!' + columnName(col) + (index + 1),
@@ -180,18 +188,28 @@ export async function parseWorkbook(bytes, options = {}) {
       }
       if (cells.length) rows.push([sheet, index + 1, cells[0].value, JSON.stringify(cells)]);
     }
-    if (!headers.length && !acrossItems && rows.length > start && options.material && options.env) {
+    if (ownerCol < 0 && !acrossItems && rows.length > start && options.material && options.env) {
       try {
-        facts.push(...(await interpretSheet(sheet, rows.slice(start), options)));
+        facts.push(...(await interpretSheet(sheet, rows.slice(start), options, productFields)));
       } catch {
         warnings.push(sheet + ' · 已保留原始单元格，产品字段关系需核对。');
       }
     }
+    const rowItems = new Map();
+    for (const f of productFields.filter((f) => f.sheet === sheet && f.itemRef)) {
+      const row = Number(f.itemRef.match(/\d+$/u)?.[0]);
+      if (row !== Number(f.valueRef.match(/\d+$/u)?.[0])) continue;
+      if (!rowItems.has(row)) rowItems.set(row, new Set());
+      rowItems.get(row).add(f.item);
+    }
+    for (const [row, items] of rowItems)
+      if (items.size === 1 && !sheetOwners.has(row)) sheetOwners.set(row, [...items][0]);
     summary.push({ name: sheet, rows: rows.length - start });
   }
   if (!rows.length || rows.length > 30000) throw fail(400, '工作簿须包含 1 至 30000 条非空资料行');
   const extraction = {
     sheets: summary,
+    productFields,
     facts,
     warnings,
     model: 'Docling',

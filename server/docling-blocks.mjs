@@ -50,7 +50,19 @@ export async function officeBlocks(file) {
       for (const [index, row] of rows.entries()) {
         const ref = locator + ' · 表 ' + n + ' 第 ' + (index + 2) + ' 行';
         const text = headers.join(' | ') + '\n' + row.join(' | ');
-        const block = { page: b.page, ref, text };
+        const item = tableProduct(headers, row);
+        const block = {
+          page: b.page,
+          ref,
+          text,
+          productFields: item
+            ? row.flatMap((value, col) =>
+                value && headers[col]
+                  ? [{ item, field: headers[col], value, ref: ref + ' · 第 ' + (col + 1) + ' 列' }]
+                  : [],
+              )
+            : [],
+        };
         if (model >= 0 && row[model] && headers.every(Boolean) && row.length === headers.length) {
           const cells = row
             .map((value, col) => ({

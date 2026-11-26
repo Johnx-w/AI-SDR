@@ -137,6 +137,9 @@ test('产品行内嵌图片经过上传、重试和审核后，两种回复入�
     const reply = stored.automaticMatch(stored.options(docs, item), item).attachments;
     const draft = k.documents.draftPhotos([], item, docs);
     assert.deepEqual(reply, draft);
+    const inline = k.documents.photos.forItem(r.id, r.documentId, '产品图片', item);
+    assert.equal(inline.length, i === 2 ? 0 : 1);
+    if (inline.length) assert.equal(inline[0].slot, '主图');
     if (i === 2) {
       assert.deepEqual(reply, []);
       continue;
@@ -148,4 +151,43 @@ test('产品行内嵌图片经过上传、重试和审核后，两种回复入�
     const rgb = await sharp(Buffer.from(reply[0].contentBase64, 'base64')).raw().toBuffer();
     assert.ok(i === 0 ? rgb[0] > 240 && rgb[2] < 10 : rgb[2] > 240 && rgb[0] < 10);
   }
+});
+
+test('自由文本按原文定位两款产品并排除缺少证据的型号', async (t) => {
+  const k = new ProductKnowledge();
+  t.after(() => k.close());
+  const lib = new MaterialLibrary(k);
+  const result = await lib.upload({
+    name: '产品手记.txt',
+    key: randomUUID(),
+    bytes: Buffer.from('R-10 为白色导轨，长度十米。\n蓝色支架 R-20，包装十二件。'),
+    env: { MATERIAL_DEEPSEEK_API_KEY: 'fixture' },
+    fetchImpl: async () =>
+      Response.json({
+        choices: [
+          {
+            finish_reason: 'stop',
+            message: {
+              content: JSON.stringify({
+                fields: [
+                  { item: 'R-10', field: '名称', value: '白色导轨', owner: 0, source: 0 },
+                  { item: 'R-20', field: '包装', value: '十二件', owner: 1, source: 1 },
+                  { item: 'R-1', field: '长度', value: '十米', owner: 0, source: 0 },
+                  { item: 'R-20', field: '重量', value: '五公斤', owner: 1, source: 1 },
+                ],
+              }),
+            },
+          },
+        ],
+      }),
+  });
+  assert.deepEqual(
+    lib
+      .detail(result.id)
+      .documents[0].extraction.productFields.map((f) => [f.item, f.value, f.ref]),
+    [
+      ['R-10', '白色导轨', '第 1 页 · 第 1 段'],
+      ['R-20', '十二件', '第 1 页 · 第 2 段'],
+    ],
+  );
 });

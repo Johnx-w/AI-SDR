@@ -163,6 +163,8 @@ export async function handleMaterials({
           .all(doc),
       );
     }
+    if (!action && method === 'GET' && typeof q.item === 'string' && typeof q.sheet === 'string')
+      return json(response, 200, { photos: store.forItem(product, doc, q.sheet, q.item, q.row) });
     if (!action && method === 'GET') return json(response, 200, store.list(product, doc, q));
     if (!action && method === 'POST')
       return json(

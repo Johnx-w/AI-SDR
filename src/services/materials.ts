@@ -56,6 +56,14 @@ export type ModelParameter = {
   box?: number[];
   upstream?: { documentId: string; file: string; page: number };
 };
+export type ProductField = {
+  item: string;
+  field: string;
+  value: string;
+  ref: string;
+  sheet?: string;
+  ownerRef?: string;
+};
 export type StoredDocument = {
   referencePages?: number;
   id: string;
@@ -67,6 +75,7 @@ export type StoredDocument = {
   createdAt: string;
   extraction: null | {
     photoCount?: number;
+    productFields?: ProductField[];
     parameters?: ModelParameter[];
     facts: { text: string; page: number; location: string }[];
     warnings: string[];

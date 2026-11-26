@@ -1,3 +1,4 @@
+import { interpretProductText } from './material-product-fields.mjs';
 import { WorkbookPhotos } from './workbook-photos.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { isPagedMaterial } from '../src/domain/material-upload.mjs';
@@ -114,6 +115,28 @@ function extracted(data, contentType) {
 }
 
 async function documentExtraction(file, options) {
+  const result = await readDocument(file, options);
+  const data = result.extraction;
+  if (
+    options.material &&
+    !data.sheets &&
+    !data.parameters &&
+    data.facts.length &&
+    !data.productFields?.length
+  ) {
+    try {
+      data.productFields = await interpretProductText(
+        data.facts,
+        options.env ?? {},
+        options.fetchImpl ?? fetch,
+      );
+    } catch {
+      data.warnings.push('型号字段辅助识别未完成，可对照原文或重新解析。');
+    }
+  }
+  return result;
+}
+async function readDocument(file, options) {
   if (
     options.material &&
     file.contentType === types.md &&
@@ -381,7 +404,7 @@ export class ProductDocuments {
     const paged =
       material &&
       (structured ||
-        [workbookType, types.md].includes(file.contentType) ||
+        [workbookType, types.md, types.txt].includes(file.contentType) ||
         isPagedMaterial(file.contentType) ||
         file.parseMode === 'rich_layout_recognition');
     const chosen = structured

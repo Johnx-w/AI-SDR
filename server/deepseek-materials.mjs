@@ -288,6 +288,7 @@ export async function readOfficeMaterial(file, options) {
     rows: photoRows(photos),
     extraction: {
       model: 'Docling',
+      productFields: blocks.flatMap((b) => b.productFields ?? []),
       mode: materialMode(options.mode),
       pageCount,
       facts,
@@ -336,6 +337,7 @@ export async function readDeepSeekMaterial(file, { env = {}, fetchImpl = fetch, 
   )
     throw fail(502, 'DeepSeek 返回的页码或内容不完整，请重试。');
   const facts = [],
+    productFields = [],
     photos = [];
   let library,
     pdf,
@@ -429,7 +431,18 @@ export async function readDeepSeekMaterial(file, { env = {}, fetchImpl = fetch, 
           }
         }
         for (const cell of Object.values(layout[number].cells ?? {})) {
-          if (tableProduct(cell.headers, cell.row))
+          const item = tableProduct(cell.headers, cell.row);
+          if (item)
+            cell.row.forEach((value, i) => {
+              if (value && cell.headers[i])
+                productFields.push({
+                  item,
+                  field: cell.headers[i],
+                  value,
+                  ref: '第 ' + number + ' 页 · 原生表格',
+                });
+            });
+          if (item)
             add(
               cell.headers
                 .map((h, i) => (h && cell.row[i] ? h + ' · ' + cell.row[i] : ''))
@@ -485,6 +498,7 @@ export async function readDeepSeekMaterial(file, { env = {}, fetchImpl = fetch, 
     photos,
     rows: photoRows(photos),
     extraction: {
+      productFields,
       model: key ? (rich ? 'Docling + DeepSeek' : 'DeepSeek') : 'Docling',
       photoCount: photos.length,
       mode: purpose,
