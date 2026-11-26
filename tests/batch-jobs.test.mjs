@@ -1273,7 +1273,7 @@ test('全国查询遇到重复且没有新增时按本国地区补搜，只有�
         ]);
         assert.equal(result.cursor, 2);
       } else {
-        assert.ok(queries.every((query) => job.queryPlan.some((item) => item.query === query)));
+        assert.ok(result.searchStats.some((stat) => stat.searchRegion === 'Hokkaidō'));
       }
     } finally {
       manager.close();

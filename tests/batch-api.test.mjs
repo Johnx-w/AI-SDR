@@ -1,6 +1,7 @@
 import { feishuEnv, withFeishuAuth } from './helpers/feishu.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { NativeAcquisition } from '../server/native-acquisition.mjs';
 import { createApp } from '../server/app.mjs';
 const env = { ...feishuEnv, TAVILY_API_KEY: 'test', DEEPSEEK_API_KEY: 'test' };
 const input = {
@@ -156,5 +157,146 @@ test('批量接口持久、幂等且活跃任务保护共享连接，允许独�
   } finally {
     release();
     await new Promise((r) => app.close(r));
+  }
+});
+
+test('立即与到期计划按本国两地补搜并读回新增企业，仅返回已有官网时为零', async (t) => {
+  t.mock.timers.enable({
+    apis: ['Date', 'setInterval'],
+    now: Date.parse('2030-01-01T08:59:50+08:00'),
+  });
+  // Captured company websites, keyed by the actual public searches that returned them.
+  const samples = [
+    ['Malaysia', 'Johor', 'curtains', 'supplier', 'HS Curtains', 'https://www.jbcurtains.com.my/'],
+    ['Malaysia', 'Kedah', 'curtains', 'dealer', 'Amanjaya Decor', 'https://www.amanjayadecor.com/'],
+    [
+      'New Zealand',
+      'Auckland',
+      'roller blinds',
+      'supplier',
+      'mr blinds',
+      'https://mrblinds.co.nz/about-us/auckland-blinds',
+    ],
+    [
+      'New Zealand',
+      'Bay of Plenty',
+      'roller blinds',
+      'dealer',
+      'Spencers Blinds',
+      'https://spencersblindsbop.co.nz/',
+    ],
+  ];
+  const known = 'https://known-curtains.com/';
+  const native = new NativeAcquisition({ env });
+  native.providers.web.search = async ({ query }) => {
+    const match = samples.find(
+      ([country, region, product, role]) =>
+        query === '"' + product + '" ' + role + ' ' + country + ' ' + region,
+    );
+    return { results: [{ url: known }, ...(match ? [{ url: match[5] }] : [])] };
+  };
+  native.research = async (target, item) => {
+    const [country, region, , , name, url] = samples.find(
+      (sample) => sample[5] === item.source_url,
+    );
+    assert.equal(country, target.country);
+    const record = await native.feishu.write(
+      'insert',
+      { 客户名称: name, 来源链接: url, 国家: country, '州 / 城市': region },
+      null,
+      item.operation_id,
+    );
+    return {
+      新增: 1,
+      明细: [{ source_url: url, record_id: record.record_id, result: 'inserted' }],
+    };
+  };
+  const app = createApp({
+    env,
+    nativeImpl: native,
+    fetchImpl: async () => {
+      throw Error('unexpected external request');
+    },
+  });
+  await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
+  try {
+    await native.feishu.write('insert', { 客户名称: 'Known', 来源链接: known }, null, 'seed');
+    const base = 'http://127.0.0.1:' + app.address().port + '/api/v1/acquisition';
+    async function api(path, body, key) {
+      const res = await fetch(
+        base + path,
+        body
+          ? {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+              body: JSON.stringify(body),
+            }
+          : undefined,
+      );
+      const data = await res.json();
+      assert.ok(res.ok, JSON.stringify(data));
+      return data;
+    }
+    for (const [country, product, scheduled] of [
+      ['Malaysia', 'curtains', false],
+      ['New Zealand', 'roller blinds', true],
+      ['Singapore', 'curtains', false],
+    ]) {
+      const target = { ...input, country, product, query_mode: 'auto', target_count: 2 };
+      let jobId;
+      if (scheduled) {
+        const plan = await api(
+          '/schedules',
+          {
+            name: country,
+            input: target,
+            timing: { repeat: 'once', startDate: '2030-01-01', times: ['09:00'] },
+          },
+          'region-scheduled',
+        );
+        t.mock.timers.tick(15000);
+        const triggered = (await api('/schedules')).schedules.find((row) => row.id === plan.id);
+        assert.equal(triggered.runs, 1);
+        jobId = triggered.lastJobId;
+      } else {
+        jobId = (await api('/jobs', target, 'region-now-' + country)).id;
+      }
+      let job;
+      for (let i = 0; i < 150; i++) {
+        job = await api('/jobs/' + jobId);
+        if (job.status !== 'running') break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      const expected = samples.filter((sample) => sample[0] === country);
+      assert.equal(job.status, expected.length ? 'completed' : 'partial', job.reason);
+      assert.equal(job.inserted, expected.length);
+      assert.equal(job.searches, expected.length ? 4 : 20);
+      const regional = job.searchStats.filter((stat) => stat.searchRegion);
+      if (expected.length)
+        assert.deepEqual(
+          regional.map((stat) => stat.searchRegion),
+          expected.map((sample) => sample[1]),
+        );
+      else
+        assert.ok(
+          regional.some((stat) => stat.searchRegion === 'Central Singapore' && stat.duplicates > 0),
+        );
+      assert.ok(job.searchStats.every((stat) => stat.country === country));
+      assert.deepEqual(
+        job.rows.filter((r) => r.inserted_new).map((r) => r.name),
+        expected.map((sample) => sample[4]),
+      );
+      const records = await native.feishu.records();
+      assert.deepEqual(
+        records
+          .filter((r) => r.fields.国家 === country)
+          .map((r) => r.fields.来源链接)
+          .sort(),
+        expected.map((sample) => sample[5]).sort(),
+      );
+    }
+    assert.equal((await native.feishu.records()).length, 5);
+  } finally {
+    await new Promise((resolve) => app.close(resolve));
   }
 });
