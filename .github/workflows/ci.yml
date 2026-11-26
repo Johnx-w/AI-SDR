@@ -45,7 +45,10 @@ jobs:
       - name: Bundle and verify the offline Linux document reader
         run: |
           python -m pip install pex==2.107.1
-          pex -r server/docling/requirements.txt -D server/docling -m material_reader --python python3.12 --scie eager --scie-python-version 3.12 --venv -o server/docling/reader-linux
+          python -m pip wheel --no-deps -w "$RUNNER_TEMP/docling-wheel" ./vendor/docling
+          wheel=$(find "$RUNNER_TEMP/docling-wheel" -name 'docling_slim-*.whl')
+          sed "s|^\./vendor/docling$|docling-slim @ file://$wheel|" server/docling/requirements.txt > "$RUNNER_TEMP/docling-requirements.txt"
+          pex -r "$RUNNER_TEMP/docling-requirements.txt" -D server/docling -m material_reader --python python3.12 --scie eager --scie-python-version 3.12 --venv -o server/docling/reader-linux
           node scripts/check-docling.mjs
           tar -cf docling-runtime.tar server/docling/reader-linux
       - uses: actions/upload-artifact@v4
