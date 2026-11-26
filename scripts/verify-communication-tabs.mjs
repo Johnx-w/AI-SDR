@@ -174,26 +174,11 @@ try {
   const tab = (name) => page.getByRole('tab', { name: new RegExp(name) });
   const button = (name) => page.getByRole('button', { name, exact: true });
   const close = () => button('关闭弹窗').click();
-  const headingStyle = () =>
-    page.locator('.page-heading').evaluate((heading) => {
-      const title = heading.querySelector('h1');
-      const description = heading.querySelector('p');
-      const headingBox = heading.getBoundingClientRect();
-      const titleBox = title.getBoundingClientRect();
-      const descriptionBox = description?.getBoundingClientRect();
-      return {
-        titleSize: getComputedStyle(title).fontSize,
-        titleWeight: getComputedStyle(title).fontWeight,
-        titleTop: Math.round(titleBox.top - headingBox.top),
-        descriptionTop: descriptionBox ? Math.round(descriptionBox.top - headingBox.top) : null,
-        stacked: !!descriptionBox && descriptionBox.top >= titleBox.bottom - 1,
-      };
-    });
   const label = (name) => page.getByLabel(name, { exact: true });
   await page.goto(base + '/inbox');
   await page.getByRole('heading', { name: box.email, exact: true }).waitFor();
-  assert.equal(await page.getByRole('tab').count(), 4);
-  const mailboxesHeading = await headingStyle();
+  for (const name of ['收件箱', '待审草稿', '邮箱管理', '自动回复', '触达计划', '跟进序列'])
+    await tab(name).waitFor();
   await tab('跟进序列').click();
   const rules = page.getByRole('region', { name: '未回复跟进规则' });
   await rules.getByRole('button', { name: '编辑序列' }).waitFor();
@@ -289,8 +274,7 @@ try {
     .getByRole('button', { name: '查看邮件' })
     .click();
   assert.equal(await label('筛选会话邮箱').inputValue(), box.id);
-  assert.deepEqual(await headingStyle(), mailboxesHeading);
-  assert.equal(mailboxesHeading.stacked, true);
+  await page.getByRole('heading', { name: '邮件会话', exact: true }).waitFor();
   await button('未读').click();
   assert.equal(await label('筛选会话邮箱').inputValue(), box.id);
   await button('全部').click();
@@ -695,7 +679,9 @@ try {
     assert.equal(await label('其他处理状态').inputValue(), '');
     assert.equal(await page.locator('.mail-sync-summary').getAttribute('open'), null);
     const narrow = width === 541;
-    const pageTitle = page.locator('.page-heading h1');
+    const pageTitle = page.getByRole('heading', { name: '邮件会话', exact: true });
+    assert.equal(await page.locator('.fin-inbox .page-heading').count(), 0);
+    await page.locator('.inbox-list-title').getByRole('button', { name: '刷新' }).waitFor();
     if (narrow) {
       await pageTitle.waitFor();
       await tab('收件箱').waitFor();
@@ -820,7 +806,7 @@ try {
     .waitFor();
   assert.deepEqual(failures, []);
   console.log(
-    'PASS 沟通中心四栏、邮箱配置、标签持久化与批量操作、筛选与刷新、三步序列、首封原文、外链图片自动加载、所属计划、统一字重、窄屏邮件往返、全部/未读/有回复与真实回信深链、草稿签名、分页、内部备注与稍后/完成/重开',
+    'PASS 沟通中心栏目、邮箱配置、标签持久化与批量操作、筛选与刷新、三步序列、首封原文、外链图片自动加载、所属计划、窄屏邮件往返、全部/未读/有回复与真实回信深链、草稿签名、分页、内部备注与稍后/完成/重开',
   );
 } finally {
   await browser?.close();

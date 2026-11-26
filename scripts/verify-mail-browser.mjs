@@ -276,6 +276,7 @@ try {
   await label('品牌邮箱筛选').selectOption('honeybadgerblinds.com');
   await page.getByLabel('筛选文件').click();
   await button('新建 / 导入').click();
+  await label('文档解析方式').selectOption('model_parameters');
   await page.getByLabel('选择本地文件').setInputFiles([
     {
       name: 'clean-parameters.xlsx',
@@ -531,6 +532,14 @@ try {
     '/inbox?' +
     new URLSearchParams({ tab: 'inbox', thread: thread.id, mailboxId: mailbox.id });
   await page.goto(threadUrl);
+  assert.equal(await page.locator('.fin-inbox .page-heading').count(), 0);
+  await page.locator('.inbox-list-title').getByRole('button', { name: '刷新' }).click();
+  assert.equal(
+    await page
+      .locator('.mail-conversations-workspace')
+      .evaluate((el) => getComputedStyle(el).borderTopWidth),
+    '0px',
+  );
   const editor = label('回复正文'),
     assist = button('AI起草');
   await editor.waitFor();
@@ -542,6 +551,16 @@ try {
     await assist.waitFor();
     assert.equal(await assist.innerText(), 'AI起草');
   }
+  async function assertReadingSpace() {
+    const sizes = await page.locator('.inbox-thread-scroll').evaluate((reader) => {
+      const draft = reader.parentElement.querySelector('.inbox-compose');
+      return { reader: reader.clientHeight, draft: draft.offsetHeight };
+    });
+    assert.ok(sizes.reader >= sizes.draft, JSON.stringify(sizes));
+    return sizes;
+  }
+  await page.setViewportSize({ width: 1100, height: 713 });
+  const empty = await assertReadingSpace();
   const draftMeta = page.locator('.inbox-draft-meta');
   assert.equal(await draftMeta.isVisible(), false);
   await editor.focus();
@@ -584,8 +603,8 @@ try {
     'Kind regards,',
     'Jordan',
   ];
-  for (const width of [1397, 390]) {
-    await page.setViewportSize({ width, height: width === 390 ? 667 : 773 });
+  for (const width of [1100, 1397, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 667 : width === 1100 ? 713 : 773 });
     const heading = width === 390 ? 'Hello Jordan,' : 'Hello Morgan,';
     await editor.fill([heading, ...paragraphs].join('\n'));
     const inline = await editor.evaluate((node) => {
@@ -602,7 +621,8 @@ try {
           actions.bottom <= shell.getBoundingClientRect().bottom + 1,
       };
     });
-    if (width > 390) assert.ok(inline.height >= inline.line * 9, JSON.stringify(inline));
+    await assertReadingSpace();
+    assert.ok(inline.height >= inline.line * 2.5, JSON.stringify(inline));
     assert.ok(
       inline.actionsVisible && inline.shellScroll <= 2 && inline.panelScroll <= 2,
       '普通长草稿只需滚动正文，操作栏应一直可见：' + JSON.stringify(inline),
@@ -692,11 +712,13 @@ try {
   assert.equal(modelCalls, 0);
   await button('丢弃草稿').click();
   const sentBefore = sent.length;
+  await page.setViewportSize({ width: 1100, height: 713 });
   await assist.click();
   await page.locator('.inbox-draft-assist[aria-busy="true"]').waitFor();
   assert.equal(await editor.isEditable(), false);
   finishModel();
   await page.getByText('AI草稿 · 待审核', { exact: true }).waitFor();
+  await assertReadingSpace();
   assert.match(await editor.innerText(), /Aluminium alloy/);
   await page.getByText('查看回复依据 · 1', { exact: true }).click();
   await page.getByText(/mail-specimen.xlsx.*规格!B2/).waitFor();
@@ -710,6 +732,7 @@ try {
   assert.equal(generated.provenance.sources[0].value, 'Aluminium alloy');
   await page.reload();
   await page.getByText('AI草稿 · 待审核', { exact: true }).waitFor();
+  await assertReadingSpace();
   assert.match(await editor.innerText(), /Aluminium alloy/);
   assert.ok(await assist.isDisabled());
   assert.equal(modelCalls, 1);
@@ -743,6 +766,8 @@ try {
   );
   await assist.click();
   await page.getByText('AI草稿 · 待审核', { exact: true }).waitFor();
+  const intro = await assertReadingSpace();
+  assert.ok(empty.reader > intro.reader);
   assert.match(await editor.innerText(), /colleague responsible/);
   assert.deepEqual(service.replies.draft(introThread.id).provenance.sources, []);
   assert.equal(sent.length, sentBefore);
@@ -836,7 +861,7 @@ try {
   await page.setViewportSize({ width: 1440, height: 900 });
   for (const [module, view] of [
     ['获客任务', '定时计划'],
-    ['跟进任务', '邮箱来信跟进'],
+    ['跟进任务', /^待审核(?:\s*\d+)?$/u],
     ['素材库', '搜索测试'],
   ]) {
     await page.locator('.sidebar').getByRole('link', { name: module, exact: true }).click();
