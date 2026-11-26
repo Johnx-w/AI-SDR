@@ -23,7 +23,11 @@ export function UploadedQuote({
 }: {
   product: string;
   doc: string;
-  sheets: { name: string; rows: number }[];
+  sheets: {
+    name: string;
+    rows: number;
+    fields?: { price?: string; model?: string; photo?: string };
+  }[];
   terms: string[];
   figures: { label: string; source: string; index: number }[];
   edits: Correction[];
@@ -126,16 +130,29 @@ export function UploadedQuote({
         <>
           <section className="pc-group">
             <div className="pc-column-head">
-              <span>产品与配图</span>
+              <span>
+                {data.rows.some((r) => r.photos?.length) ||
+                sheets.find((s) => s.name === sheet)?.fields?.photo
+                  ? '产品与配图'
+                  : '产品'}
+              </span>
               <span>规格与来源</span>
               <span>参考价格</span>
             </div>
             {data.rows.map((row) => {
-              const amount = row.cells.find((c) => c.field === '参考价格')!;
+              const amount = row.cells.find(
+                (c) =>
+                  c.field === '参考价格' ||
+                  c.field === sheets.find((s) => s.name === sheet)?.fields?.price,
+              );
               const effective = (cell: Cell) =>
                 edits.find((e) => e.documentId === doc && e.sheet === sheet && e.ref === cell.ref)
                   ?.value ?? cell.value;
-              const label = effective(row.cells[0]);
+              const label = effective(
+                row.cells.find(
+                  (c) => c.field === sheets.find((s) => s.name === sheet)?.fields?.model,
+                ) ?? row.cells[0],
+              );
               const original = row.cells.find((c) => c.field === '来源')?.value;
               const pageNumber = Number(/^PDF p\.(\d+)/u.exec(sheet)?.[1]);
               return (
@@ -143,28 +160,28 @@ export function UploadedQuote({
                   <div className="pc-identity">
                     <h3>{label}</h3>
                     <div className="pc-photos">
-                      {row.photos.length && label === row.cells[0].value ? (
-                        row.photos.map((p) => (
-                          <div key={p.id} className="pc-shared">
-                            <a
-                              className="pc-photo"
-                              href={sourceUrl(product, doc) + '/photos/' + p.id}
-                              target="_blank"
-                              rel="noreferrer"
-                              title={p.origin}
-                            >
-                              <img
-                                loading="lazy"
-                                alt={label + ' ' + p.slot}
-                                src={sourceUrl(product, doc) + '/photos/' + p.id}
-                              />
-                            </a>
-                            {row.photos.length > 1 && <small>{p.slot}</small>}
-                          </div>
-                        ))
-                      ) : (
-                        <small className="pc-no-photo">暂无已归属配图</small>
-                      )}
+                      {row.photos?.length && label === row.cells[0].value
+                        ? row.photos.map((p) => (
+                            <div key={p.id} className="pc-shared">
+                              <a
+                                className="pc-photo"
+                                href={sourceUrl(product, doc) + '/photos/' + p.id}
+                                target="_blank"
+                                rel="noreferrer"
+                                title={p.origin}
+                              >
+                                <img
+                                  loading="lazy"
+                                  alt={label + ' ' + p.slot}
+                                  src={sourceUrl(product, doc) + '/photos/' + p.id}
+                                />
+                              </a>
+                              {row.photos.length > 1 && <small>{p.slot}</small>}
+                            </div>
+                          ))
+                        : sheets.find((s) => s.name === sheet)?.fields?.photo && (
+                            <small className="pc-no-photo">暂无已归属配图</small>
+                          )}
                     </div>
                   </div>
                   <div>
@@ -189,7 +206,7 @@ export function UploadedQuote({
                         {original} · 查看原页
                       </button>
                     ) : (
-                      <small>{original}</small>
+                      <small>{original || sheet + ' · 行 ' + row.number}</small>
                     )}
                   </div>
                   <div className="pc-quote">
@@ -199,17 +216,19 @@ export function UploadedQuote({
                         .filter(Boolean)
                         .join(' / ')}
                     </small>
-                    <label>
-                      <span>单价</span>
-                      <PriceAmount
-                        value={effective(amount)}
-                        label={label + ' 参考价格'}
-                        writable={writable}
-                        notify={setError}
-                        commit={(v) => void onSave(sheet, amount.ref, v, amount.value)}
-                      />
-                    </label>
-                    {effective(amount) !== amount.value && (
+                    {amount && (
+                      <label>
+                        <span>单价</span>
+                        <PriceAmount
+                          value={effective(amount)}
+                          label={label + ' 参考价格'}
+                          writable={writable}
+                          notify={setError}
+                          commit={(v) => void onSave(sheet, amount.ref, v, amount.value)}
+                        />
+                      </label>
+                    )}
+                    {amount && effective(amount) !== amount.value && (
                       <small>原值 {amount.value || '空白'}</small>
                     )}
                   </div>

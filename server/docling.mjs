@@ -16,7 +16,7 @@ const projectPython = fileURLToPath(
 let pending = Promise.resolve();
 
 // The conversion can materialize all embedded images. Run one conversion per server at a time.
-export function convertDocument(bytes, extension) {
+export function convertDocument(bytes, extension, { quote = false } = {}) {
   const job = pending.then(
     () =>
       new Promise((resolve, reject) => {
@@ -32,7 +32,7 @@ export function convertDocument(bytes, extension) {
         const cache = join(tmpdir(), 'shadeflow-docling-' + (process.getuid?.() ?? 'local'));
         const worker = execFile(
           command,
-          packaged ? [extension] : [source, extension],
+          [...(packaged ? [] : [source]), extension, ...(quote ? ['quote'] : [])],
           {
             windowsHide: true,
             timeout: 150000,
@@ -49,16 +49,21 @@ export function convertDocument(bytes, extension) {
           (error, stdout, stderr) => {
             if (error) {
               const limit = stderr?.toString().includes('每张工作表最多');
+              const missing = error.code === 'ENOENT';
               return reject(
                 Object.assign(
                   new Error(
-                    limit
-                      ? '每张工作表最多 20000 行、150 列'
-                      : 'Docling 无法完整解析 ' +
-                        extension.toUpperCase() +
-                        ' 原件，请检查文件后重试。',
+                    missing
+                      ? '请配置素材库文档解析的 Python 环境。'
+                      : limit
+                        ? '每张工作表最多 20000 行、150 列'
+                        : quote
+                          ? '报价清单读取失败或超过处理上限，请核对原件或分册导入。'
+                          : 'Docling 无法完整解析 ' +
+                            extension.toUpperCase() +
+                            ' 原件，请检查文件后重试。',
                   ),
-                  { status: limit ? 413 : 422, cause: error },
+                  { status: missing ? 503 : limit ? 413 : 422, cause: error },
                 ),
               );
             }

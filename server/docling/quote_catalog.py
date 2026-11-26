@@ -4,7 +4,6 @@ import base64
 import io
 import json
 import re
-import sys
 from collections import Counter
 
 
@@ -520,57 +519,61 @@ def excel_catalog(data, cat):
                         }
                 if record and "photo" in loc:
                     assigned[n - 1, loc["photo"]] = record
-        for image in sheet._images:
-            a = image.anchor
-            start = getattr(a, "_from", None)
-            end = getattr(a, "to", None)
-            if not start:
-                continue
-            row = assigned.get((start.row, start.col))
-            height = (
-                sheet.row_dimensions[start.row + 1].height
-                or sheet.sheet_format.defaultRowHeight
-                or 15
+        sheet_photos(sheet, assigned, cat)
+    book.close()
+
+
+def sheet_photos(sheet, assigned, cat):
+    for image in sheet._images:
+        a = image.anchor
+        start = getattr(a, "_from", None)
+        end = getattr(a, "to", None)
+        if not start:
+            continue
+        row = assigned.get((start.row, start.col))
+        height = (
+            sheet.row_dimensions[start.row + 1].height
+            or sheet.sheet_format.defaultRowHeight
+            or 15
+        )
+        fits = (
+            end
+            and (
+                end.row == start.row or end.row == start.row + 1 and end.rowOff == 0
+            )
+            and (
+                end.col == start.col or end.col == start.col + 1 and end.colOff == 0
+            )
+        )
+        if end is None and getattr(a, "ext", None):
+            from openpyxl.utils import get_column_letter
+
+            letter = get_column_letter(start.col + 1)
+            dimension = sheet.column_dimensions.get(letter)
+            width = (
+                dimension.width
+                if dimension and dimension.width
+                else sheet.sheet_format.defaultColWidth or 8.43
             )
             fits = (
-                end
-                and (
-                    end.row == start.row or end.row == start.row + 1 and end.rowOff == 0
-                )
-                and (
-                    end.col == start.col or end.col == start.col + 1 and end.colOff == 0
-                )
+                start.rowOff + a.ext.cy <= (height + 1) * 12700
+                and start.colOff + a.ext.cx <= (7 * width + 6) * 9525
             )
-            if end is None and getattr(a, "ext", None):
-                from openpyxl.utils import get_column_letter
-
-                letter = get_column_letter(start.col + 1)
-                dimension = sheet.column_dimensions.get(letter)
-                width = (
-                    dimension.width
-                    if dimension and dimension.width
-                    else sheet.sheet_format.defaultColWidth or 8.43
-                )
-                fits = (
-                    start.rowOff + a.ext.cy <= (height + 1) * 12700
-                    and start.colOff + a.ext.cx <= (7 * width + 6) * 9525
-                )
-            if (
-                sheet.cell(start.row + 1, start.col + 1).coordinate
-                in sheet.merged_cells
-            ):
-                fits = False
-            if row and fits:
-                cat.photo(
-                    row,
-                    f"{sheet.title} · 行 {start.row + 1} 同格嵌图",
-                    lambda image=image: picture(image._data()),
-                )
-            elif row:
-                cat.warnings.append(
-                    f"{sheet.title} · 行 {start.row + 1} 图片跨行，请核对。"
-                )
-    book.close()
+        if (
+            sheet.cell(start.row + 1, start.col + 1).coordinate
+            in sheet.merged_cells
+        ):
+            fits = False
+        if row and fits:
+            cat.photo(
+                row,
+                f"{sheet.title} · 行 {start.row + 1} 同格嵌图",
+                lambda image=image: picture(image._data()),
+            )
+        elif row:
+            cat.warnings.append(
+                f"{sheet.title} · 行 {start.row + 1} 图片跨行，请核对。"
+            )
 
 
 def markdown_catalog(data, cat):
@@ -646,15 +649,10 @@ def read_catalog(data, kind):
     return cat.result()
 
 
-if __name__ == "__main__":
+def parse_quote(source, kind):
     try:
-        output = read_catalog(io.BytesIO(sys.stdin.buffer.read()), sys.argv[1])
+        return read_catalog(io.BytesIO(source), kind)
     except ImportError as e:
-        output = {
-            "error": "本机报价解析环境缺少 "
-            + str(e.name)
-            + "，请安装 server/quote-requirements.txt 中的依赖。"
-        }
+        return {"error": f"本机报价解析环境缺少 {e.name}，请安装文档解析依赖。"}
     except (ValueError, OSError) as e:
-        output = {"error": str(e)[:500]}
-    print(json.dumps(output, ensure_ascii=True))
+        return {"error": str(e)[:500]}

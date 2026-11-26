@@ -134,3 +134,42 @@ test('Markdown 清单保存多图、原位改价、版本校对及历史，重�
     0,
   );
 });
+
+test('文件级报价条件保留复核，逐型号引用仅使用本行明确条件', async (t) => {
+  const { k, lib, upload } = setup(t);
+  const table = (model, condition) =>
+    '| Model | Unit Price | Unit | Currency | 适用条件 |\n' +
+    '|---|---|---|---|---|\n' +
+    `| ${model} | 2.75 | PC | USD | ${condition} |\n`;
+  const terms = ['XA 系列单独条款：定金 30%。', 'XB 系列单独条款：定金 50%。'];
+  const { id, documentId } = await upload(
+    'separate-terms.md',
+    Buffer.from(
+      table('XA-01', 'XA 原行：最低 100 件') +
+        '\n> 报价条件 · ' +
+        terms[0] +
+        '\n\n' +
+        table('XB-01', 'XB 原行：最低 200 件') +
+        '\n> 报价条件 · ' +
+        terms[1],
+    ),
+  );
+  const extraction = lib.detail(id).documents[0].extraction;
+  assert.deepEqual(extraction.terms, terms);
+  assert.match(extraction.warnings.join(' '), /适用型号尚未确认/u);
+  lib.edit(id, { version: lib.get(id).version, status: 'approved', approvedBy: 'QA' });
+  for (const [model, condition, sheet] of [
+    ['XA-01', 'XA 原行：最低 100 件', '表 1'],
+    ['XB-01', 'XB 原行：最低 200 件', '表 2'],
+  ]) {
+    const row = workbookPage(k.db, id, documentId, { sheet }).rows[0];
+    assert.equal(row.cells.find((cell) => cell.field === '适用条件').value, condition);
+    const answer = answerMailQuestion(
+      k,
+      { ...box, knowledgeProductIds: [id] },
+      `请报 ${model} 的价格`,
+    );
+    assert.equal(answer.sources.find((source) => source.field === '适用条件').value, condition);
+    assert.ok(!answer.sources.some((source) => /定金|30%|50%/u.test(source.value)));
+  }
+});

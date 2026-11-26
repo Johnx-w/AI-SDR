@@ -20,6 +20,7 @@ import { MaterialPassages } from './MaterialPassages';
 import { ParameterReview } from './ParameterReview';
 import { lazy, Suspense } from 'react';
 import { WorkbookPhotos } from './WorkbookPhotos';
+import { KnowledgeSheet } from './KnowledgeSheet';
 import { WorkbookPreview } from './WorkbookPreview';
 import { UploadedQuote } from './price-catalog/UploadedQuote';
 import {
@@ -110,6 +111,13 @@ export function MaterialDocument({
   const p = data?.product,
     doc = data?.documents.find((d) => d.id === docId),
     active = p?.version === data?.currentVersion;
+  const [sheetName, setSheetName] = useState('');
+  const sheets = doc?.extraction?.sheets || [];
+  const activeSheet = sheets.find((s) => s.name === sheetName) || sheets[0];
+  const automatic = !!activeSheet?.kind;
+  const selectedSheets = automatic ? [activeSheet] : sheets;
+  const showQuote = activeSheet?.kind === 'quote' || doc?.parseMode === 'quote_catalog';
+  const knowledge = activeSheet?.kind === 'knowledge';
   const structured = doc?.parseMode === 'model_parameters';
   const quote = doc?.parseMode === 'quote_catalog';
   const parameterReview = structured && !(!doc?.extraction?.parameters && doc?.extraction?.sheets);
@@ -571,15 +579,34 @@ export function MaterialDocument({
                       </Suspense>
                     ) : doc.extraction?.sheets ? (
                       <>
+                        {automatic && sheets.length > 1 && (
+                          <label>
+                            工作表
+                            <select
+                              aria-label="切换工作表"
+                              value={activeSheet.name}
+                              onChange={(e) => {
+                                setSheetName(e.target.value);
+                                setWorkbookView('rows');
+                              }}
+                            >
+                              {sheets.map((s) => (
+                                <option key={s.name} value={s.name}>
+                                  {s.name}（{s.rows} 行）
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
                         <div className="photo-controls" aria-label="工作簿视图">
                           <button
                             className="kb-text"
                             aria-pressed={workbookView === 'rows'}
                             onClick={() => setWorkbookView('rows')}
                           >
-                            {quote ? '图文清单' : '表格数据'}
+                            {showQuote ? '图文清单' : knowledge ? '答复规则' : '工作表数据'}
                           </button>
-                          {quote && (
+                          {(showQuote || knowledge) && (
                             <button
                               className="kb-text"
                               aria-pressed={workbookView === 'fields'}
@@ -588,28 +615,38 @@ export function MaterialDocument({
                               校对字段
                             </button>
                           )}
-                          <button
-                            className="kb-text"
-                            aria-pressed={workbookView === 'photos'}
-                            onClick={() => setWorkbookView('photos')}
-                          >
-                            产品图片
-                          </button>
+                          {!knowledge && (
+                            <button
+                              className="kb-text"
+                              aria-pressed={workbookView === 'photos'}
+                              onClick={() => setWorkbookView('photos')}
+                            >
+                              产品图片
+                            </button>
+                          )}
                         </div>
-                        {workbookView === 'photos' ? (
+                        {knowledge && workbookView !== 'fields' ? (
+                          <KnowledgeSheet
+                            key={doc.id + activeSheet.name}
+                            product={id}
+                            doc={doc.id}
+                            sheet={activeSheet.name}
+                            revision={p.version}
+                          />
+                        ) : workbookView === 'photos' ? (
                           <WorkbookPhotos
                             key={doc.id + revision}
                             product={id}
                             doc={doc.id}
-                            sheets={doc.extraction.sheets}
+                            sheets={selectedSheets}
                             writable={!!writable && p.documentIds?.[0] === doc.id}
                           />
-                        ) : quote && workbookView !== 'fields' ? (
+                        ) : showQuote && workbookView !== 'fields' ? (
                           <UploadedQuote
-                            key={doc.id}
+                            key={doc.id + '!' + activeSheet.name}
                             product={id}
                             doc={doc.id}
-                            sheets={doc.extraction.sheets}
+                            sheets={selectedSheets}
                             terms={doc.extraction.terms || []}
                             figures={doc.extraction.figures || []}
                             edits={edits}
@@ -621,11 +658,11 @@ export function MaterialDocument({
                         ) : (
                           <>
                             <WorkbookPreview
-                              key={doc.id}
+                              key={doc.id + '!' + activeSheet.name}
                               url={original}
                               file={doc.name}
                               id={doc.id}
-                              sheets={doc.extraction.sheets}
+                              sheets={selectedSheets}
                               edits={edits}
                               onEdit={changeCell}
                               linked={!!writable}
@@ -684,7 +721,9 @@ export function MaterialDocument({
                         />
                       </details>
                     )}
-                    {quote && doc.extraction?.sheets && doc.extraction.warnings.length ? (
+                    {(quote || automatic) &&
+                    doc.extraction?.sheets &&
+                    doc.extraction.warnings.length ? (
                       <details className="kb-notice">
                         <summary>待核对项目（{doc.extraction.warnings.length}）</summary>
                         <ul>

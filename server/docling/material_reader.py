@@ -229,6 +229,12 @@ def pdf_table_images(pages, source):
 
 def main():
     ext = sys.argv[1]
+    if len(sys.argv) == 3 and sys.argv[2] == "quote":
+        from quote_catalog import parse_quote
+
+        output = parse_quote(sys.stdin.buffer.read(), ext)
+        sys.stdout.buffer.write(json.dumps(output, ensure_ascii=False).encode("utf-8"))
+        return
     fmt = {
         "xlsx": InputFormat.XLSX,
         "docx": InputFormat.DOCX,

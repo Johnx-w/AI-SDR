@@ -138,6 +138,7 @@ async function documentExtraction(file, options) {
   return result;
 }
 async function readDocument(file, options) {
+  if (options.material && options.mode === quoteMode) return readQuoteCatalog(file);
   if (
     options.material &&
     file.contentType === types.md &&
@@ -162,7 +163,8 @@ async function readDocument(file, options) {
       throw fail(422, '无法读取图片，请检查原件。');
     }
   }
-  if (file.contentType === workbookType) return parseWorkbook(file.bytes, options);
+  if (file.contentType === workbookType)
+    return parseWorkbook(file.bytes, { ...options, mappings: file.workbookMappings });
   const extraction =
     file.contentType.startsWith('video/') || file.contentType.startsWith('image/')
       ? {
@@ -298,6 +300,7 @@ export class ProductDocuments {
       productId,
       name: file.name,
       ...(file.mode ? { parseMode: file.mode } : {}),
+      ...(file.workbookMappings ? { workbookMappings: file.workbookMappings } : {}),
       contentType: file.contentType,
       ...(file.referencePages ? { referencePages: file.referencePages } : {}),
       size: file.bytes.length,
@@ -338,11 +341,11 @@ export class ProductDocuments {
           'INSERT INTO workbook_image_assets(id,document_id,sheet,item,slot,origin,sha,jpeg) VALUES(?,?,?,?,?,?,?,?)',
         );
         const slots = new Map();
-        for (const { sheet, item, origin, jpeg } of photos) {
+        for (const { sheet, item, origin, jpeg, slot: explicitSlot } of photos) {
           const k = JSON.stringify([sheet, item]),
             n = (slots.get(k) ?? 0) + 1;
           slots.set(k, n);
-          const slot = n === 1 ? '主图' : '附图 ' + n;
+          const slot = explicitSlot ?? (n === 1 ? '主图' : '附图 ' + n);
           const prior = existing.get(id, sheet, item, slot),
             sha = createHash('sha256').update(jpeg).digest('hex');
           if (prior && (!prior.origin.startsWith('原件 · ') || prior.sha === sha)) {
@@ -368,7 +371,6 @@ export class ProductDocuments {
         );
         for (const row of rows) insert.run(id, ...row);
       }
-      if (photos) this.photos.importRows(id, photos);
       if (figures) {
         this.db.prepare('DELETE FROM product_quote_figures WHERE document_id=?').run(id);
         const insert = this.db.prepare('INSERT INTO product_quote_figures VALUES(?,?,?)');

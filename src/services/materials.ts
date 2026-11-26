@@ -1,3 +1,5 @@
+import type { Layout } from '../domain/workbook-layout.mjs';
+export type WorkbookMapping = Pick<Layout, 'kind' | 'fields'>;
 export type ParseMode =
   | 'rich_layout_recognition'
   | 'text_recognition'
@@ -84,7 +86,13 @@ export type StoredDocument = {
     parameters?: ModelParameter[];
     facts: { text: string; page: number; location: string }[];
     warnings: string[];
-    sheets?: { name: string; rows: number }[];
+    sheets?: {
+      name: string;
+      rows: number;
+      kind?: Layout['kind'];
+      fields?: Layout['fields'];
+      headers?: string[];
+    }[];
     terms?: string[];
     figures?: { label: string; source: string; index: number }[];
     model: string;
@@ -155,7 +163,14 @@ export const sendJson = <T>(path: string, method: string, body: unknown) =>
   });
 export async function uploadMaterial(
   file: File,
-  options: { site?: string; category?: string; id?: string; version?: number; mode?: ParseMode },
+  options: {
+    site?: string;
+    category?: string;
+    id?: string;
+    version?: number;
+    mappings?: Record<string, WorkbookMapping>;
+    mode?: ParseMode;
+  },
   key: string,
   onPage?: ExtractionProgress,
 ) {
@@ -163,19 +178,31 @@ export async function uploadMaterial(
   const q = new URLSearchParams({ name: file.name });
   const paged = /\.(?:pdf|docx|pptx)$/iu.test(file.name);
   const structured =
-    (options.mode === 'model_parameters' || options.mode === 'quote_catalog') && !/\.(?:webm|mp4|mov)$/iu.test(file.name);
+    (options.mode === 'model_parameters' || options.mode === 'quote_catalog') &&
+    !/\.(?:webm|mp4|mov)$/iu.test(file.name);
   const media = /\.(?:png|jpe?g|webp|gif|mp4|mov|webm)$/iu.test(file.name);
   if (
-    (paged || structured || (media && ['rich_layout_recognition', 'asset_only'].includes(options.mode ?? ''))) &&
+    (paged ||
+      structured ||
+      (media && ['rich_layout_recognition', 'asset_only'].includes(options.mode ?? ''))) &&
     options.mode
   )
     q.set('mode', options.mode);
+  if (options.mappings) q.set('mappings', JSON.stringify(options.mappings));
   if (options.site) q.set('site', options.site);
   if (options.category) q.set('category', options.category);
   if (options.version) q.set('version', String(options.version));
   const path = options.id ? '/' + options.id + '/versions' : '';
   type Result = { id: string; documentId: string; warning: string; reused: boolean };
-  return uploadBytes<Result>(file, path, q, key, paged || structured || media, onPage);
+  const workbookOrMarkdown = /\.(?:xlsx|md|markdown)$/iu.test(file.name);
+  return uploadBytes<Result>(
+    file,
+    path,
+    q,
+    key,
+    paged || workbookOrMarkdown || structured || media,
+    onPage,
+  );
 }
 async function uploadBytes<Result>(
   file: File,

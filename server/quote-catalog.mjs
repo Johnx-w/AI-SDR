@@ -1,21 +1,11 @@
-import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { extname } from 'node:path';
+import { convertDocument } from './docling.mjs';
 import { checkOfficeArchive, columnName } from './product-workbooks.mjs';
 
 export const quoteMode = 'quote_catalog';
-const windows = process.platform === 'win32';
-const local = fileURLToPath(
-  new URL(
-    '../.data/quote-python/' + (windows ? 'Scripts/python.exe' : 'bin/python'),
-    import.meta.url,
-  ),
-);
-const script = fileURLToPath(new URL('./quote_catalog.py', import.meta.url));
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
-export async function readQuoteCatalog(file, env = {}) {
+export async function readQuoteCatalog(file) {
   const kind = extname(file.name)
     .slice(1)
     .toLowerCase()
@@ -23,43 +13,12 @@ export async function readQuoteCatalog(file, env = {}) {
   if (!['pdf', 'docx', 'xlsx', 'md'].includes(kind))
     throw fail(400, '报价清单支持 PDF、Excel、Word 和 Markdown。');
   if (['docx', 'xlsx'].includes(kind)) checkOfficeArchive(file.bytes);
-  const executable =
-    env.MATERIAL_PYTHON ||
-    process.env.MATERIAL_PYTHON ||
-    (existsSync(local) ? local : windows ? 'python' : 'python3');
-  const data = await new Promise((resolve, reject) => {
-    const child = execFile(
-      executable,
-      ['-I', '-B', script, kind],
-      { windowsHide: true, timeout: 120000, maxBuffer: 46 * 1024 ** 2, encoding: 'utf8' },
-      (err, stdout) => {
-        if (err)
-          return reject(
-            fail(
-              err.code === 'ENOENT' ? 503 : 422,
-              err.code === 'ENOENT'
-                ? '请配置素材库报价解析的 Python 环境。'
-                : '报价清单读取失败或超过处理上限，请核对原件或分册导入。',
-            ),
-          );
-        try {
-          const result = JSON.parse(stdout);
-          if (result.error) return reject(fail(422, result.error));
-          resolve(result);
-        } catch {
-          reject(fail(422, '本机未返回有效的报价清单，请检查解析环境。'));
-        }
-      },
-    );
-    child.stdin.on('error', () => {}); // An early reader exit is reported by execFile.
-    child.stdin.end(file.bytes);
-  });
+  const data = await convertDocument(file.bytes, kind, { quote: true });
+  if (data.error) throw fail(422, data.error);
   const sheets = new Map(),
     rows = [],
     photos = [];
   for (const { sheet, number, fields, images, columns, width = 0, sourceRefs } of data.rows) {
-    if (data.terms.length)
-      fields['适用条件'] = [fields['适用条件'], ...data.terms].filter(Boolean).join('\n');
     const cells = Object.entries(fields).map(([field, value], i) => ({
       field,
       value,
@@ -100,7 +59,13 @@ export async function readQuoteCatalog(file, env = {}) {
       figures: figures.map(({ label, source }, index) => ({ label, source, index })),
       pageCount: data.pageCount || undefined,
       facts: [],
-      warnings: data.warnings,
+      // File-level footnotes have no verified product scope; keep them out of reply evidence.
+      warnings: data.terms.length
+        ? [
+            ...data.warnings,
+            '文件级报价条件的适用型号尚未确认，仅供原件复核，未计入逐型号回信依据。',
+          ]
+        : data.warnings,
       extractedAt: new Date().toISOString(),
     },
   };
@@ -114,8 +79,8 @@ export function carryQuoteEdits(db, product, prior, next) {
   const old = JSON.parse(extract.get(prior)?.extraction ?? 'null'),
     current = JSON.parse(extract.get(next)?.extraction ?? 'null');
   if (
-    old?.mode !== quoteMode ||
-    current?.mode !== quoteMode ||
+    !old?.sheets ||
+    !current?.sheets ||
     JSON.stringify(old.terms) !== JSON.stringify(current.terms)
   )
     return [];
