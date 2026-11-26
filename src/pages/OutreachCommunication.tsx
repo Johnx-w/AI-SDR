@@ -27,7 +27,7 @@ import {
 import { Bot, ChevronRight, MessagesSquare } from 'lucide-react';
 import './FinCenter.css';
 import { SalesInbox, type InboxView } from '../components/SalesInbox';
-import { FollowUpSequences } from '../components/FollowUpSequences';
+import { FollowUpSequences, CampaignFollowUps } from '../components/FollowUpSequences';
 import { MailboxLabels } from '../components/MailboxLabels';
 import { MailReplySettings } from '../components/MailReplySettings';
 import { MailMessageBody } from '../components/MailMessageBody';
@@ -1194,12 +1194,14 @@ export function OutreachCommunication({
   const [importOpen, setImportOpen] = useState(false);
   const [testOpen, setTestOpen] = useState(false);
   const [testMailboxes, setTestMailboxes] = useState<OutreachMailbox[]>([]);
+  const campaignTab = searchParams.get('campaignTab') === 'followups' ? 'followups' : 'overview';
   const detailId = tab === 'campaigns' ? searchParams.get('campaignId') : null;
   function setDetailId(id: string | null) {
     setSearchParams((current) => {
       const params = new URLSearchParams(current);
       if (id) params.set('campaignId', id);
       else params.delete('campaignId');
+      params.delete('campaignTab');
       return params;
     });
   }
@@ -1717,18 +1719,7 @@ export function OutreachCommunication({
                       onExitReview={() => setSearchParams({ tab: 'inbox' })}
                     />
                   )}
-                  {tab === 'sequences' && (
-                    <FollowUpSequences
-                      mailboxes={mailboxes}
-                      sequenceId={searchParams.get('sequenceId') || ''}
-                      refreshToken={inboxRefresh}
-                      onSelect={(id) =>
-                        setSearchParams(
-                          id ? { tab: 'sequences', sequenceId: id } : { tab: 'sequences' },
-                        )
-                      }
-                    />
-                  )}
+                  {tab === 'sequences' && <FollowUpSequences refreshToken={inboxRefresh} />}
                   {tab === 'campaigns' && state && (
                     <>
                       <div className="outreach-metrics">
@@ -2443,165 +2434,208 @@ export function OutreachCommunication({
                             )}
                           </div>
                         )}
-                      {shownDetail.campaign.status === 'cancelled' && (
-                        <p className="outreach-hint" role="status">
-                          此计划已取消
-                          {shownDetail.campaign.cancelledAt
-                            ? `（${formatTime(shownDetail.campaign.cancelledAt)}）`
-                            : ''}
-                          ，不会继续准备邮件或安排发送。已提交的邮件及其实际结果保留在计划详情。
-                        </p>
-                      )}
                       {shownDetail.campaign.mode === 'production' && (
+                        <nav className="sequence-picker" aria-label="计划详情页签">
+                          {(
+                            [
+                              ['overview', '计划概况'],
+                              ['followups', '客户跟进'],
+                            ] as const
+                          ).map(([key, label]) => (
+                            <button
+                              key={key}
+                              type="button"
+                              aria-pressed={campaignTab === key}
+                              onClick={() =>
+                                setSearchParams((current) => {
+                                  const params = new URLSearchParams(current);
+                                  params.set('campaignTab', key);
+                                  return params;
+                                })
+                              }
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </nav>
+                      )}
+                      {shownDetail.campaign.mode === 'production' && campaignTab === 'followups' ? (
+                        <CampaignFollowUps
+                          key={shownDetail.campaign.id}
+                          id={shownDetail.campaign.id}
+                          refreshToken={
+                            inboxRefresh +
+                            (shownDetail.campaign.followUpPaused ? 1 : 0) +
+                            (shownDetail.campaign.followUpEnabled ? 2 : 0)
+                          }
+                          mailboxes={mailboxes}
+                        />
+                      ) : (
                         <>
-                          {canCancelCampaign(shownDetail.campaign) && (
-                            <p className="outreach-hint">
-                              启动后，系统从客户库筛选合适客户，生成开发信、附上固定签名并自动发送。可在此查看实际邮件与执行结果。
+                          {shownDetail.campaign.status === 'cancelled' && (
+                            <p className="outreach-hint" role="status">
+                              此计划已取消
+                              {shownDetail.campaign.cancelledAt
+                                ? `（${formatTime(shownDetail.campaign.cancelledAt)}）`
+                                : ''}
+                              ，不会继续准备邮件或安排发送。已提交的邮件及其实际结果保留在计划详情。
                             </p>
                           )}
-                          <details className="outreach-plan-rules" open>
-                            <summary>本次计划的客户范围与产品内容</summary>
-                            <dl>
-                              <div>
-                                <dt>市场</dt>
-                                <dd>
-                                  {shownDetail.campaign.filters?.markets.join('、') || '全部市场'}
-                                </dd>
-                              </div>
-                              <div>
-                                <dt>客户评级</dt>
-                                <dd>
-                                  {shownDetail.campaign.filters?.grades.join('、') ||
-                                    '不限制优先级，仍须具备匹配与联系依据'}
-                                </dd>
-                              </div>
-                              <div>
-                                <dt>产品品类</dt>
-                                <dd>
-                                  {shownDetail.campaign.filters?.categories?.length
-                                    ? shownDetail.campaign.filters.categories
+                          {shownDetail.campaign.mode === 'production' && (
+                            <>
+                              {canCancelCampaign(shownDetail.campaign) && (
+                                <p className="outreach-hint">
+                                  启动后，系统从客户库筛选合适客户，生成开发信、附上固定签名并自动发送。可在此查看实际邮件与执行结果。
+                                </p>
+                              )}
+                              <details className="outreach-plan-rules" open>
+                                <summary>本次计划的客户范围与产品内容</summary>
+                                <dl>
+                                  <div>
+                                    <dt>市场</dt>
+                                    <dd>
+                                      {shownDetail.campaign.filters?.markets.join('、') ||
+                                        '全部市场'}
+                                    </dd>
+                                  </div>
+                                  <div>
+                                    <dt>客户评级</dt>
+                                    <dd>
+                                      {shownDetail.campaign.filters?.grades.join('、') ||
+                                        '不限制优先级，仍须具备匹配与联系依据'}
+                                    </dd>
+                                  </div>
+                                  <div>
+                                    <dt>产品品类</dt>
+                                    <dd>
+                                      {shownDetail.campaign.filters?.categories?.length
+                                        ? shownDetail.campaign.filters.categories
+                                            .map(
+                                              (id) =>
+                                                productCategories.find(
+                                                  (category) => category.id === id,
+                                                )?.label || id,
+                                            )
+                                            .join('、')
+                                        : '在所选邮箱负责的产品范围内按客户情况匹配'}
+                                    </dd>
+                                  </div>
+                                  <div>
+                                    <dt>客户来源</dt>
+                                    <dd>
+                                      {shownDetail.campaign.acquisitionSource
+                                        ? '仅本轮新增和更新的未首发客户'
+                                        : shownDetail.campaign.includeExisting
+                                          ? '包含现有未开发客户'
+                                          : '仅计划创建后新增客户'}
+                                      {shownDetail.campaign.acquisitionSource
+                                        ? '；客户首发条件不足时跳过本次，旧计划不恢复发送'
+                                        : shownDetail.campaign.continuous
+                                          ? '；持续加入符合条件的新客户'
+                                          : '；固定批次'}
+                                    </dd>
+                                  </div>
+                                  <div>
+                                    <dt>发件邮箱</dt>
+                                    <dd>
+                                      {shownDetail.campaign.mailboxIds
                                         .map(
                                           (id) =>
-                                            productCategories.find((category) => category.id === id)
-                                              ?.label || id,
+                                            mailboxes.find((mailbox) => mailbox.id === id)?.email ||
+                                            id,
                                         )
-                                        .join('、')
-                                    : '在所选邮箱负责的产品范围内按客户情况匹配'}
-                                </dd>
-                              </div>
-                              <div>
-                                <dt>客户来源</dt>
-                                <dd>
-                                  {shownDetail.campaign.acquisitionSource
-                                    ? '仅本轮新增和更新的未首发客户'
-                                    : shownDetail.campaign.includeExisting
-                                      ? '包含现有未开发客户'
-                                      : '仅计划创建后新增客户'}
-                                  {shownDetail.campaign.acquisitionSource
-                                    ? '；客户首发条件不足时跳过本次，旧计划不恢复发送'
-                                    : shownDetail.campaign.continuous
-                                      ? '；持续加入符合条件的新客户'
-                                      : '；固定批次'}
-                                </dd>
-                              </div>
-                              <div>
-                                <dt>发件邮箱</dt>
-                                <dd>
-                                  {shownDetail.campaign.mailboxIds
-                                    .map(
-                                      (id) =>
-                                        mailboxes.find((mailbox) => mailbox.id === id)?.email || id,
-                                    )
-                                    .join('、')}
-                                </dd>
-                              </div>
-                              <div>
-                                <dt>分配方式</dt>
-                                <dd>
-                                  先按客户产品匹配负责邮箱，同产品范围内再按连接状态、额度和间隔安排
-                                </dd>
-                              </div>
-                              <div>
-                                <dt>发送节奏</dt>
-                                <dd>
-                                  间隔 {shownDetail.campaign.intervalSeconds}{' '}
-                                  秒，同时遵守各邮箱每日上限
-                                </dd>
-                              </div>
-                            </dl>
-                            <p className="outreach-hint">
-                              根据客户资料和邮箱负责的已确认产品范围生成基础介绍，使用该邮箱的固定签名。
-                            </p>
-                          </details>
-                        </>
-                      )}
-                      {shownDetail.deliveries.length ? (
-                        <div className="outreach-preview-layout">
-                          <div className="outreach-preview-list">
-                            {shownDetail.deliveries.map((delivery) => (
-                              <button
-                                key={delivery.id}
-                                className={sample?.id === delivery.id ? 'selected' : ''}
-                                onClick={() => setSampleId(delivery.id)}
-                              >
-                                <strong>{delivery.companyName || delivery.to}</strong>
-                                <span>
-                                  {delivery.status === 'skipped'
-                                    ? delivery.reason
-                                    : delivery.subject || '尚未生成'}
-                                </span>
-                                <small>{deliveryDetailLabel(delivery)}</small>
-                              </button>
-                            ))}
-                          </div>
-                          {samplePreview?.delivery ? (
-                            <>
-                              <InlineError value={verificationError} />
-                              <MessagePreview
-                                key={samplePreview.delivery.id}
-                                delivery={samplePreview.delivery}
-                                campaignName={shownDetail.campaign.name}
-                                onReconcile={(delivery) => void verifyDelivery(delivery)}
-                                onResolve={(delivery) => {
-                                  setResolutionTarget(delivery);
-                                  setResolutionOutcome('accepted');
-                                  setResolutionEvidence('');
-                                  setResolutionOperator('');
-                                  setVerificationError(null);
-                                }}
-                                verifying={busy === `verify-${samplePreview.delivery.id}`}
-                                onSuppress={(delivery) => {
-                                  setSuppressionReason('人工标记不再联系');
-                                  setSuppressionTarget(delivery);
-                                }}
-                              />
+                                        .join('、')}
+                                    </dd>
+                                  </div>
+                                  <div>
+                                    <dt>分配方式</dt>
+                                    <dd>
+                                      先按客户产品匹配负责邮箱，同产品范围内再按连接状态、额度和间隔安排
+                                    </dd>
+                                  </div>
+                                  <div>
+                                    <dt>发送节奏</dt>
+                                    <dd>
+                                      间隔 {shownDetail.campaign.intervalSeconds}{' '}
+                                      秒，同时遵守各邮箱每日上限
+                                    </dd>
+                                  </div>
+                                </dl>
+                                <p className="outreach-hint">
+                                  根据客户资料和邮箱负责的已确认产品范围生成基础介绍，使用该邮箱的固定签名。
+                                </p>
+                              </details>
                             </>
-                          ) : samplePreview?.error ? (
-                            <div>
-                              <InlineError value={samplePreview.error} />
-                              <button
-                                className="btn secondary"
-                                onClick={() => setSampleRetry((value) => value + 1)}
-                              >
-                                重试读取正文
-                              </button>
+                          )}
+                          {shownDetail.deliveries.length ? (
+                            <div className="outreach-preview-layout">
+                              <div className="outreach-preview-list">
+                                {shownDetail.deliveries.map((delivery) => (
+                                  <button
+                                    key={delivery.id}
+                                    className={sample?.id === delivery.id ? 'selected' : ''}
+                                    onClick={() => setSampleId(delivery.id)}
+                                  >
+                                    <strong>{delivery.companyName || delivery.to}</strong>
+                                    <span>
+                                      {delivery.status === 'skipped'
+                                        ? delivery.reason
+                                        : delivery.subject || '尚未生成'}
+                                    </span>
+                                    <small>{deliveryDetailLabel(delivery)}</small>
+                                  </button>
+                                ))}
+                              </div>
+                              {samplePreview?.delivery ? (
+                                <>
+                                  <InlineError value={verificationError} />
+                                  <MessagePreview
+                                    key={samplePreview.delivery.id}
+                                    delivery={samplePreview.delivery}
+                                    campaignName={shownDetail.campaign.name}
+                                    onReconcile={(delivery) => void verifyDelivery(delivery)}
+                                    onResolve={(delivery) => {
+                                      setResolutionTarget(delivery);
+                                      setResolutionOutcome('accepted');
+                                      setResolutionEvidence('');
+                                      setResolutionOperator('');
+                                      setVerificationError(null);
+                                    }}
+                                    verifying={busy === `verify-${samplePreview.delivery.id}`}
+                                    onSuppress={(delivery) => {
+                                      setSuppressionReason('人工标记不再联系');
+                                      setSuppressionTarget(delivery);
+                                    }}
+                                  />
+                                </>
+                              ) : samplePreview?.error ? (
+                                <div>
+                                  <InlineError value={samplePreview.error} />
+                                  <button
+                                    className="btn secondary"
+                                    onClick={() => setSampleRetry((value) => value + 1)}
+                                  >
+                                    重试读取正文
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="outreach-loading" role="status">
+                                  <LoaderCircle className="outreach-spin" size={20} />
+                                  正在读取邮件正文…
+                                </div>
+                              )}
                             </div>
                           ) : (
-                            <div className="outreach-loading" role="status">
-                              <LoaderCircle className="outreach-spin" size={20} />
-                              正在读取邮件正文…
-                            </div>
+                            <Empty
+                              title="还没有执行邮件"
+                              detail={
+                                shownDetail.campaign.status === 'cancelled'
+                                  ? '此计划已取消，不会再生成样稿或发送邮件。'
+                                  : '启动计划后自动生成并发送，可在此查看执行结果。'
+                              }
+                            />
                           )}
-                        </div>
-                      ) : (
-                        <Empty
-                          title="还没有执行邮件"
-                          detail={
-                            shownDetail.campaign.status === 'cancelled'
-                              ? '此计划已取消，不会再生成样稿或发送邮件。'
-                              : '启动计划后自动生成并发送，可在此查看执行结果。'
-                          }
-                        />
+                        </>
                       )}
                       <div className="outreach-detail-actions">
                         {shownDetail.campaign.acquisitionSource && (

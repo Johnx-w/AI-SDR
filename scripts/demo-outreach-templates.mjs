@@ -342,8 +342,7 @@ function summary(plan) {
     '<section><h3>' +
     esc(plan.name) +
     '</h3><a href="' +
-    templates +
-    '&sequenceId=' +
+    '/inbox?tab=campaigns&campaignTab=followups&campaignId=' +
     plan.id +
     '">查看沟通中心执行记录</a>' +
     rows(plan.id)
@@ -446,6 +445,9 @@ const server = createServer(async (req, res) => {
     }
     if (
       !['GET', 'HEAD'].includes(req.method) &&
+      !(
+        /^\/api\/v1\/outreach\/campaigns\/[\w-]+\/follow-ups$/.test(path) && req.method === 'POST'
+      ) &&
       ![
         '/api/v1/outreach/sequence-policy',
         '/api/v1/outreach/sequence-policy/preview',

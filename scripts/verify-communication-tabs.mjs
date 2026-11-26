@@ -173,7 +173,7 @@ try {
   page.setDefaultTimeout(10000);
   const tab = (name) => page.getByRole('tab', { name: new RegExp(name) });
   const button = (name) => page.getByRole('button', { name, exact: true });
-  const close = () => button('关闭弹窗').click();
+  const close = () => button('关闭弹窗').last().click();
   const label = (name) => page.getByLabel(name, { exact: true });
   await page.goto(base + '/inbox');
   await page.getByRole('heading', { name: box.email, exact: true }).waitFor();
@@ -208,6 +208,12 @@ try {
     followUpEnabled: true,
   });
   service.putCampaign({ ...campaign, status: 'completed' });
+  await page.goto(
+    base + '/inbox?tab=campaigns&campaignId=' + campaign.id + '&campaignTab=followups',
+  );
+  await page.getByRole('heading', { name: '暂无已发首封', exact: true }).waitFor();
+  assert.equal(await page.locator('.sequence-recipients tbody tr').count(), 0);
+  await close();
   const first = service.putDelivery({
     id: 'fixture-first',
     campaignId: campaign.id,
@@ -302,10 +308,18 @@ try {
   await button('新建计划').click();
   await close();
   await tab('跟进序列').click();
-  await button(campaign.name).click();
-  await button('暂停跟进').click();
-  await button('恢复跟进').click();
-  await button('暂停跟进').waitFor();
+  assert.equal(await page.getByRole('heading', { name: '计划执行情况' }).count(), 0);
+  await tab('触达计划').click();
+  await button('历史计划').click();
+  await page
+    .getByRole('row')
+    .filter({ hasText: campaign.name })
+    .getByRole('button', { name: '执行详情', exact: true })
+    .click();
+  await button('客户跟进').click();
+  await button('暂停追信').click();
+  await button('已核对来信，恢复追信').click();
+  await button('暂停追信').waitFor();
   await page.getByRole('button', { name: /首封发出后第 3 天/ }).waitFor();
   await page.getByRole('button', { name: /首封发出后第 7 天/ }).click();
   await page.getByRole('cell', { name: /待跟进/ }).waitFor();
@@ -319,7 +333,7 @@ try {
   await button('查看首封').click();
   await page.getByRole('dialog').getByText(first.bodyText, { exact: true }).waitFor();
   await close();
-  await page.getByRole('link', { name: '所属计划' }).click();
+  await button('计划概况').click();
   await page.getByRole('dialog').getByText(campaign.name, { exact: true }).first().waitFor();
   await close();
   await page.setViewportSize({ width: 390, height: 844 });
@@ -470,6 +484,9 @@ try {
   await editor.fill(draftBody);
   await pager.getByRole('button', { name: '下一页' }).click();
   await pager.getByText('共 32 段 · 2 / 2').waitFor();
+  await page.waitForFunction(
+    () => document.querySelectorAll('.mail-conversation-row').length === 7,
+  );
   assert.equal(await page.locator('.mail-conversation-row').count(), 7);
   assert.equal(await editor.innerText(), draftBody);
   await button('刷新').click();
