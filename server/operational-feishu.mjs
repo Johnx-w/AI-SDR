@@ -1,5 +1,6 @@
 import { countryFor } from '../src/domain/country-catalog.ts';
 import assert from 'node:assert/strict';
+import { checkMirrorMaintenance } from './mirror-maintenance.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -179,10 +180,12 @@ export async function syncOperationalFeishu({
   deliveries,
   client,
   journalPath,
+  isMaintaining = () => false,
 } = {}) {
   const mirror = new CustomerBusinessFeishu({
     env,
     client,
+    isMaintaining,
     journalPath:
       journalPath ||
       join(
@@ -259,6 +262,7 @@ export async function syncOperationalFeishu({
       index.set(key, record);
     }
     for (const source of sources[kind]) {
+      checkMirrorMaintenance(isMaintaining);
       let record = index.get(source.key);
       const key = `${mirror.scope}:${kind}:${table.table_id}:${source.key}`;
       let attempted = false;

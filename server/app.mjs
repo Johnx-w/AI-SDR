@@ -131,6 +131,7 @@ export function createApp({
   let apiRequests = 0;
   const connections = new ApiConnections({ env, path: env.CONNECTIONS_PATH });
   let provider = createAcquisitionProvider({
+    isMaintaining,
     env: connections.environment(),
     fetchImpl,
     nativeImpl,
@@ -304,21 +305,27 @@ export function createApp({
     const service = outreach();
     operationalSync = Promise.all([
       syncOperationalFeishu({
+        isMaintaining,
         env: current,
         jobs: acquisitionJobs(jobs().db, acquisitionScope()),
         mailboxes: service.mailboxes.list(),
         deliveries: service.deliveryActivity('accepted'),
-      }).catch((error) => console.error('T7/T8/T10 飞书同步失败：' + error.message)),
+      }).catch((error) => {
+        if (!error.maintenance) console.error('T7/T8/T10 飞书同步失败：' + error.message);
+      }),
       (async () => {
         await provider.syncCustomers?.();
         return syncAssessmentFeishu({
+          isMaintaining,
           env: current,
           assessments: provider.currentAssessments(),
           customers: library().snapshot(true).leads,
           customerRemoteId: (id) => provider.customerRemoteId(id),
           apply: true,
         });
-      })().catch((error) => console.error('T12 飞书同步失败：' + error.message)),
+      })().catch((error) => {
+        if (!error.maintenance) console.error('T12 飞书同步失败：' + error.message);
+      }),
     ]).finally(() => {
       operationalSync = null;
     });
@@ -642,6 +649,7 @@ export function createApp({
             batch = undefined;
             acquisitionReviews = undefined;
             provider = createAcquisitionProvider({
+              isMaintaining,
               env: connections.environment(),
               fetchImpl,
               nativeImpl,

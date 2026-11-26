@@ -52,12 +52,12 @@ function fixture(t) {
       return structuredClone(row);
     },
   };
-  function open() {
+  function open(options = {}) {
     const library = new LeadLibrary({
       path: join(path, 'customers.sqlite'),
       scope: 'table-a',
     });
-    const archive = new CustomerArchive({ library: () => library, remote });
+    const archive = new CustomerArchive({ library: () => library, remote, ...options });
     const instance = {
       library,
       archive,
@@ -76,6 +76,35 @@ function fixture(t) {
   });
   return { remote, open };
 }
+
+test('维护完成当前客户读回后让出，剩余客户持久化并可恢复，不重复新增', async (t) => {
+  const { remote, open } = fixture(t);
+  let maintaining = false;
+  const { library, archive } = open({ isMaintaining: () => maintaining });
+  for (const suffix of ['a', 'b'])
+    await archive.write(
+      'insert',
+      { ...fields, 企业官网: `https://${suffix}.example/` },
+      undefined,
+      suffix,
+    );
+  const write = remote.write.bind(remote);
+  remote.write = async (...args) => {
+    const row = await write(...args);
+    maintaining = true;
+    return row;
+  };
+  await assert.rejects(archive.sync(), { maintenance: true });
+  assert.equal(remote.writes, 1);
+  assert.equal(library.metadata().sync.pendingWrites, 1);
+  assert.equal(archive.syncing, null);
+  maintaining = false;
+  remote.write = write;
+  await archive.sync();
+  assert.equal(remote.writes, 2);
+  assert.equal(remote.rows.length, 2);
+  assert.equal(library.metadata().sync.pendingWrites, 0);
+});
 
 test('先事务保存完整档案与待同步操作，飞书尚未响应时本地就能读取', async (t) => {
   const { remote, open } = fixture(t);

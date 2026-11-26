@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { checkMirrorMaintenance } from './mirror-maintenance.mjs';
 import { createHash } from 'node:crypto';
 import { CustomerBusinessFeishu, safeWrite, sameFields } from './customer-business-feishu.mjs';
 import { fieldText } from './feishu.mjs';
@@ -113,6 +114,7 @@ export class FollowUpFeishu extends CustomerBusinessFeishu {
   }
   async syncCurrent(workspace, _products, customers) {
     try {
+      checkMirrorMaintenance(this.isMaintaining);
       const definition = await this.definition();
       const { table, fields, related } = definition;
       if (!workspace.tasks.length)
@@ -125,6 +127,7 @@ export class FollowUpFeishu extends CustomerBusinessFeishu {
       ]);
       const mappedKey = (id) => `${this.scope}:task-record:${table}:${id}`;
       for (const task of workspace.tasks) {
+        checkMirrorMaintenance(this.isMaintaining);
         assert(
           Object.hasOwn(statuses, task.status) && Object.hasOwn(followUpChannels, task.channel),
           '任务状态或类型无效',

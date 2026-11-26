@@ -10,6 +10,7 @@ import { customerMirrorFields } from './customer-mirror.mjs';
 import { enrichCommunicationMessages } from './communication-analysis.mjs';
 import { BUSINESS_TABLE_ID_ENV } from './feishu-business-client.mjs';
 import { FollowUpFeishu, followUpEnvironment } from './follow-up-feishu.mjs';
+import { checkMirrorMaintenance } from './mirror-maintenance.mjs';
 
 export const CUSTOMER_BUSINESS_VERSION = 't1-t3-t4-v2';
 const kinds = new Set(['conversations', 'messages', 'demands', 'tasks']);
@@ -90,6 +91,7 @@ export class CustomerBusinessApi {
     const mirrorEnv = tasksOnly ? followUpEnvironment(env) : env;
     const Mirror = tasksOnly ? FollowUpFeishu : CustomerBusinessFeishu;
     const mirror = new Mirror({
+      isMaintaining: this.isMaintaining,
       env: mirrorEnv,
       customerRemoteId: this.customerRemoteId,
       fetchImpl: this.fetch,
@@ -99,6 +101,7 @@ export class CustomerBusinessApi {
     // Both destinations share the journal in memory as well as on disk.
     const businessMirror = tasksOnly
       ? new CustomerBusinessFeishu({
+          isMaintaining: this.isMaintaining,
           env,
           customerRemoteId: this.customerRemoteId,
           fetchImpl: this.fetch,
@@ -133,14 +136,38 @@ export class CustomerBusinessApi {
       .catch(() => {})
       .then(async () => {
         try {
+          checkMirrorMaintenance(this.isMaintaining);
           await extractAutomaticDemands(state.store, {
             env: state.env,
             fetchImpl: this.fetch,
             model: this.communicationModel,
+            isMaintaining: this.isMaintaining,
           });
           const workspace = state.store.view();
           workspace.tasks = workspace.tasks.filter((task) => task.origin === 'automatic-followup');
           const customers = await this.loadCustomers();
+          checkMirrorMaintenance(this.isMaintaining);
+          // Historical communication may outlive a local dossier; retain it in SQLite.
+          const knownCustomers = new Set(customers.map((customer) => customer.id));
+          const missingCustomers = new Set(
+            ['conversations', 'messages', 'demands', 'tasks']
+              .flatMap((kind) => workspace[kind] || [])
+              .map((entry) => entry.customerId)
+              .filter(
+                (id) =>
+                  id &&
+                  !knownCustomers.has(id) &&
+                  this.customerRemoteId &&
+                  !this.customerRemoteId(id),
+              ),
+          );
+          for (const kind of ['conversations', 'messages', 'demands', 'tasks'])
+            workspace[kind] = (workspace[kind] || []).filter(
+              (entry) => !missingCustomers.has(entry.customerId),
+            );
+          const missingCustomerError = missingCustomers.size
+            ? `${missingCustomers.size} 个客户档案已不在客户库，相关业务历史保留在后台，其余记录正常同步`
+            : '';
           const taskResult = state.tasksOnly
             ? await state.mirror
                 .sync(workspace, { customers })
@@ -151,6 +178,7 @@ export class CustomerBusinessApi {
             for (const { id, fields } of customerMirrorFields(customers, workspace, {
               emailValidity: Boolean(state.env.FEISHU_MESSAGES_TABLE_ID?.trim()),
             })) {
+              checkMirrorMaintenance(this.isMaintaining);
               const changed = Object.fromEntries(
                 Object.entries(fields).filter(
                   ([key, value]) => fieldText(byId.get(id).fields?.[key]) !== fieldText(value),
@@ -160,6 +188,7 @@ export class CustomerBusinessApi {
             }
           }
           await this.syncCustomers?.();
+          checkMirrorMaintenance(this.isMaintaining);
           const products = this.knowledge().list();
           const hash = mirrorHash(workspace, products, state.env);
           const prior = state.store.db
@@ -168,16 +197,19 @@ export class CustomerBusinessApi {
           if (
             !force &&
             prior?.hash === hash &&
-            !prior.error &&
+            (!prior.error || prior.error === missingCustomerError) &&
             (!taskResult || taskResult.status === 'synced')
           )
-            return { status: 'synced' };
+            return missingCustomerError
+              ? { status: 'pending', error: missingCustomerError }
+              : { status: 'synced' };
           const productIds = new Set(products.map((product) => product.id));
           const productMirror = new ProductKnowledgeFeishu({
             env: state.env,
             fetchImpl: this.fetch,
           });
           for (const id of isOriginalT5(state.env) ? [] : productIds) {
+            checkMirrorMaintenance(this.isMaintaining);
             const product = this.knowledge().get(id);
             if (!product) throw new Error('关联产品资料不存在，请核对后重新同步');
             const result = await productMirror.sync(product);
@@ -191,6 +223,7 @@ export class CustomerBusinessApi {
                   env: state.env,
                   fetchImpl: this.fetch,
                   model: this.communicationModel,
+                  isMaintaining: this.isMaintaining,
                 }),
               }
             : workspace;
@@ -198,16 +231,21 @@ export class CustomerBusinessApi {
             state.tasksOnly ? { ...mirrorWorkspace, tasks: [] } : mirrorWorkspace,
             { products },
           );
+          checkMirrorMaintenance(this.isMaintaining);
           const result = taskResult && taskResult.status !== 'synced' ? taskResult : mainResult;
           state.store.db
             .prepare('INSERT OR REPLACE INTO customer_business_sync VALUES(?,?,?)')
             .run(
               state.store.scope,
               result.status === 'synced' ? hash : prior?.hash || '',
-              result.error || (result.status === 'synced' ? '' : '飞书同步未完成'),
+              result.error ||
+                (result.status === 'synced' ? missingCustomerError : '飞书同步未完成'),
             );
-          return result;
+          return result.status === 'synced' && missingCustomerError
+            ? { ...result, status: 'pending', error: missingCustomerError }
+            : result;
         } catch (error) {
+          if (error.maintenance) return { status: 'pending', error: error.message };
           state.store.db
             .prepare('INSERT OR REPLACE INTO customer_business_sync VALUES(?,?,?)')
             .run(state.store.scope, '', error.message);

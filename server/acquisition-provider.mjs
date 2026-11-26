@@ -9,13 +9,15 @@ export function createAcquisitionProvider({
   fetchImpl = fetch,
   nativeImpl,
   customerLibrary,
+  isMaintaining = () => false,
 } = {}) {
   const config = acquisitionConfig(env);
-  const feishu = new FeishuClient({ env, fetchImpl });
+  const feishu = new FeishuClient({ env, fetchImpl, isMaintaining });
   let native;
   const customers = customerLibrary
     ? new CustomerArchive({
         library: customerLibrary,
+        isMaintaining,
         remote: nativeImpl instanceof NativeAcquisition ? nativeImpl.feishu : feishu,
         decorate: (data) => (service().decorateLeads ? service().decorateLeads(data) : data),
       })

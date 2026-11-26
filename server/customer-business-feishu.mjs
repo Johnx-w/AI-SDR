@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { checkMirrorMaintenance } from './mirror-maintenance.mjs';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -375,10 +376,15 @@ export class CustomerBusinessFeishu {
     checkpoint,
     journalPath,
     customerRemoteId = (id) => id,
+    isMaintaining = () => false,
   } = {}) {
     this.customerRemoteId = customerRemoteId;
     this.env = env;
-    this.client = mapBusinessFeishuClient(client || new FeishuClient({ env, fetchImpl }), env);
+    this.isMaintaining = isMaintaining;
+    this.client = mapBusinessFeishuClient(
+      client || new FeishuClient({ env, fetchImpl, isMaintaining }),
+      env,
+    );
     this.configured =
       Boolean(client) ||
       ['FEISHU_APP_ID', 'FEISHU_APP_SECRET', 'FEISHU_APP_TOKEN', 'FEISHU_TABLE_ID'].every(
@@ -445,6 +451,7 @@ export class CustomerBusinessFeishu {
     return ids;
   }
   async info() {
+    checkMirrorMaintenance(this.isMaintaining);
     if (!this.configured)
       return {
         configured: false,
@@ -469,6 +476,7 @@ export class CustomerBusinessFeishu {
       });
       let replyFields = [];
       for (const key of Object.keys(BUSINESS_TABLES)) {
+        checkMirrorMaintenance(this.isMaintaining);
         const fields = await this.client.fields(ids[key]);
         if (key === 'messages') {
           replyFields = fields
@@ -651,6 +659,7 @@ export class CustomerBusinessFeishu {
     }
   }
   async syncCurrent(workspace, products) {
+    checkMirrorMaintenance(this.isMaintaining);
     const config = await this.info();
     if (!config.configured)
       return { ...config, status: config.status === 'pending' ? 'pending' : 'not_configured' };
@@ -696,6 +705,7 @@ export class CustomerBusinessFeishu {
         index = {},
         local = {};
       for (const key of Object.keys(BUSINESS_TABLES)) {
+        checkMirrorMaintenance(this.isMaintaining);
         remote[key] = await this.client.records(tableIds[key]);
         index[key] = new Map();
         local[key] = new Map();
@@ -1003,6 +1013,7 @@ export class CustomerBusinessFeishu {
         }
       const claimedMessageRecords = new Map();
       const upsert = async (key, entry, expected, pass) => {
+        checkMirrorMaintenance(this.isMaintaining);
         const compactRecord = Boolean(compactKinds[key]);
         let cached = index[key].get(entry.id);
         const saveMapping = async (source, record) => {

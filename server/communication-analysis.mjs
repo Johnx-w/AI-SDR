@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { checkMirrorMaintenance } from './mirror-maintenance.mjs';
 import { createHash } from 'node:crypto';
 import { createResearchProviders } from './research-providers.mjs';
 import { customerReplyText, knownReplyType, REPLY_TYPES } from './communication-rounds.mjs';
@@ -129,7 +130,7 @@ export async function analyzeCommunication(message, model) {
 export async function enrichCommunicationMessages(
   store,
   messages,
-  { env = {}, fetchImpl = fetch, model } = {},
+  { env = {}, fetchImpl = fetch, model, isMaintaining = () => false } = {},
 ) {
   store.db.exec(`CREATE TABLE IF NOT EXISTS customer_business_message_analysis(
     scope TEXT NOT NULL,message_id TEXT NOT NULL,input_hash TEXT NOT NULL,data TEXT NOT NULL,
@@ -137,6 +138,7 @@ export async function enrichCommunicationMessages(
   const analyzer = model || createResearchProviders({ env, fetchImpl }).model;
   const result = [];
   for (const message of messages) {
+    checkMirrorMaintenance(isMaintaining);
     if (message.direction !== 'inbound') {
       result.push(message);
       continue;
