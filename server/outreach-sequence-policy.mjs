@@ -1,3 +1,4 @@
+import { normalizeTemplate } from '../src/domain/sequence-email.mjs';
 import { normalizeWritingOptions } from './mail-writing-options.mjs';
 const defaults = {
   name: '首封未回复跟进',
@@ -73,15 +74,23 @@ export function saveSequencePolicy(service, input) {
         const existing = current.steps.find((step) => step.day === day);
         const writing =
           item.writing === undefined ? existing?.writing : normalizeWritingOptions(item.writing);
+        const template =
+          item.template === undefined
+            ? existing?.template
+            : normalizeTemplate(item.template, false);
         const instruction = writingInstruction(
           item.instruction,
-          !!(writing?.angle || writing?.reply),
+          !!(template || writing?.angle || writing?.reply),
         );
-        return { day, instruction, ...(writing && { writing }) };
+        return { day, instruction, ...(writing && { writing }), ...(template && { template }) };
       })
       .sort((a, b) => a.day - b.day);
     if (new Set(steps.map((item) => item.day)).size !== steps.length)
       throw fail(400, '同一天只能安排一个跟进步骤');
+    const firstTemplate =
+      input.firstTemplate === undefined
+        ? current.firstTemplate
+        : normalizeTemplate(input.firstTemplate, true);
     const firstWriting =
       input.firstWriting === undefined
         ? current.firstWriting
@@ -95,6 +104,7 @@ export function saveSequencePolicy(service, input) {
         ? current.firstBodyInstruction
         : writingInstruction(input.firstBodyInstruction, true);
     if (
+      JSON.stringify(firstTemplate) === JSON.stringify(current.firstTemplate) &&
       JSON.stringify(firstWriting) === JSON.stringify(current.firstWriting) &&
       firstBodyInstruction === current.firstBodyInstruction &&
       firstInstruction === current.firstInstruction &&
@@ -110,6 +120,7 @@ export function saveSequencePolicy(service, input) {
       name,
       firstInstruction,
       firstBodyInstruction,
+      ...(firstTemplate && { firstTemplate }),
       ...(firstWriting && { firstWriting }),
       steps,
     };

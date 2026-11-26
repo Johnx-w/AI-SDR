@@ -1,3 +1,9 @@
+import { expandTemplate, mailVariables } from '../src/domain/sequence-email.mjs';
+import {
+  addPersonalizedFields,
+  personalizedValues,
+  personalizationPolicy,
+} from './sequence-personalization.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { isIP } from 'node:net';
@@ -634,7 +640,7 @@ export function selectOutreachCandidates({
   return { eligible, blocked };
 }
 
-function parseGenerated(response, schema) {
+export function parseGenerated(response, schema) {
   const choice = response?.choices?.[0];
   let content;
   if (choice?.finish_reason === 'stop') content = choice.message?.content;
@@ -687,6 +693,8 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
       mailbox,
       product,
       campaign,
+      template,
+      includeVariables = false,
       firstInstruction = '',
       firstBodyInstruction = '',
       now = new Date(),
@@ -729,6 +737,29 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
             ),
           )
         : [];
+      function verifyClaims(subject, bodyText) {
+        if (
+          /https?:\/\/|\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b|[$€£¥]|\b(?:USD|EUR|MOQ|stock|certif\w*|guarantee\w*|lead[ -]?time|pricing|prices?|discounts?|delivery|freight|payment|attached|attachments?)\b/iu.test(
+            subject + '\n' + bodyText,
+          ) ||
+          (!manufacturingConfirmed &&
+            /\b(?:manufactur\w*|factor(?:y|ies))\b|\bfrom China\b/iu.test(
+              subject + '\n' + bodyText,
+            )) ||
+          confirmedSupply.brands.some(
+            (brand) =>
+              brand.name !== mailbox.brandName &&
+              (subject + '\n' + bodyText).toLowerCase().includes(brand.name.toLowerCase()),
+          ) ||
+          /\b(?:we\s+(?:focus|speciali[sz]e)\s+on|our\s+(?:focus|specialt(?:y|ies)|speciali[sz]ation))\b/iu.test(
+            bodyText,
+          ) ||
+          /\b(?:you(?:'re| are)?\s+(?:looking\s+for|seeking|ready\s+to\s+buy)|your\s+(?:purchase\s+request|inquiry|enquiry|order))\b/iu.test(
+            bodyText,
+          )
+        )
+          throw fail(502, '开发信包含未确认的商务信息，请重试', 'outreach_unsupported_claim');
+      }
       const schema = {
         type: 'object',
         additionalProperties: false,
@@ -743,7 +774,10 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
           source_ids: { type: 'array', items: { type: 'string' } },
         },
       };
+      const custom = template?.variables || [];
+      addPersonalizedFields(schema, custom);
       const input = {
+        ...(custom.length && { personalization_rules: custom }),
         ...(firstBodyInstruction ? { body_instruction: firstBodyInstruction } : {}),
         ...(firstInstruction ? { closing_instruction: firstInstruction } : {}),
         customer: {
@@ -769,7 +803,9 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
       const messages = [
         {
           role: 'system',
-          content: firstInstruction || firstBodyInstruction ? writerPolicy : writerPrompt,
+          content:
+            (firstInstruction || firstBodyInstruction ? writerPolicy : writerPrompt) +
+            (custom.length ? personalizationPolicy : ''),
         },
         { role: 'user', content: JSON.stringify(input) },
       ];
@@ -796,27 +832,7 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
           draft.source_ids.some((id) => !evidence.some((e) => e.id === id))
         )
           throw fail(502, '开发信内容或客户依据不完整，请重试', 'outreach_generation_invalid');
-        if (
-          /https?:\/\/|\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b|[$€£¥]|\b(?:USD|EUR|MOQ|stock|certif\w*|guarantee\w*|lead[ -]?time|pricing|prices?|discounts?|delivery|freight|payment|attached|attachments?)\b/iu.test(
-            subject + '\n' + bodyText,
-          ) ||
-          (!manufacturingConfirmed &&
-            /\b(?:manufactur\w*|factor(?:y|ies))\b|\bfrom China\b/iu.test(
-              subject + '\n' + bodyText,
-            )) ||
-          confirmedSupply.brands.some(
-            (brand) =>
-              brand.name !== mailbox.brandName &&
-              (subject + '\n' + bodyText).toLowerCase().includes(brand.name.toLowerCase()),
-          ) ||
-          /\b(?:we\s+(?:focus|speciali[sz]e)\s+on|our\s+(?:focus|specialt(?:y|ies)|speciali[sz]ation))\b/iu.test(
-            bodyText,
-          ) ||
-          /\b(?:you(?:'re| are)?\s+(?:looking\s+for|seeking|ready\s+to\s+buy)|your\s+(?:purchase\s+request|inquiry|enquiry|order))\b/iu.test(
-            bodyText,
-          )
-        )
-          throw fail(502, '开发信包含未确认的商务信息，请重试', 'outreach_unsupported_claim');
+        verifyClaims(subject, bodyText);
         const wordCount = bodyText.split(/\s+/u).length;
         const paragraphs = bodyText.split(/\n\s*\n/u);
         if (
@@ -851,9 +867,30 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
             'outreach_generation_invalid',
           );
         }
-        return {
+        const variables = mailVariables({
+          company: candidate.companyName,
+          product: product.englishName,
+          brand: mailbox.brandName,
           subject,
-          bodyText: `Hi ${candidate.companyName} team,\n\n${bodyText}`,
+          body: bodyText,
+        });
+        Object.assign(variables, personalizedValues(draft, custom));
+        const finalSubject = template ? expandTemplate(template.subject, variables) : subject;
+        const finalBody = template ? expandTemplate(template.body, variables) : bodyText;
+        if (template) {
+          if (
+            finalSubject.length > 150 ||
+            /[\r\n]/u.test(finalSubject) ||
+            /^\s*(?:re|fwd?)\s*:/iu.test(finalSubject) ||
+            finalBody.length > 6000
+          )
+            throw fail(422, '展开后的主题或正文超出邮件限制');
+          verifyClaims(finalSubject, finalBody);
+        }
+        return {
+          ...(includeVariables && { variables }),
+          subject: finalSubject,
+          bodyText: `Hi ${candidate.companyName} team,\n\n${finalBody}`,
           sourceIds: draft.source_ids,
           factIds: writerFacts.map((f) => f.id),
           materialVersion,

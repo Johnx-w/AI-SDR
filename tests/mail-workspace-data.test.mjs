@@ -48,6 +48,67 @@ test('邮箱标签批量增删可重试，合并保留关联，冲突整批回�
   const empty = await call('/mailbox-tags/' + b.id, 'DELETE');
   assert.equal(empty.tags.length + empty.assignments.length, 0);
 });
+
+test('预览联系人只列当前数据源正式已发首封，跨页不漏项且不读取外部连接', async (t) => {
+  const { service, call } = api(t);
+  service.fetchImpl = () => assert.fail('列表不应访问外部服务');
+  for (const [id, mode, scope] of [
+    ['active', 'production', 'local'],
+    ['other', 'production', 'other'],
+    ['internal', 'internal_test', 'local'],
+  ])
+    service.putCampaign({ id, mode, scope, status: 'completed' });
+  for (let i = 0; i < 29; i++) {
+    const id = String(i).padStart(2, '0');
+    service.putDelivery({
+      id,
+      campaignId: i === 26 ? 'other' : i === 27 ? 'internal' : 'active',
+      status: i === 28 ? 'failed' : 'accepted',
+      companyName: 'Company ' + id,
+      to: id + '@test.example',
+      bodyText: 'private body',
+    });
+  }
+  const page = await call('/sequence-policy/contacts'),
+    next = await call('/sequence-policy/contacts?after=' + page.next);
+  assert.equal(page.items.length, 25);
+  assert.equal(next.next, null);
+  assert.deepEqual(
+    [...page.items, ...next.items].map((row) => ({ ...row })),
+    Array.from({ length: 26 }, (_, i) => {
+      const id = String(i).padStart(2, '0');
+      return { id, company: 'Company ' + id, email: id + '@test.example' };
+    }),
+  );
+});
+test('保存、重读及重试均保留模板和自定义变量，步骤之间独立', async (t) => {
+  const { call } = api(t);
+  const initial = await call('/sequence-policy');
+  const custom = {
+    key: 'custom_Opening',
+    label: 'Opening',
+    instruction: 'Describe the public product range.',
+  };
+  const input = {
+    ...initial,
+    firstTemplate: { subject: '{{company}}', body: '{{custom_Opening}}', variables: [custom] },
+    steps: [
+      { day: 2, instruction: '', template: { subject: '', body: '{{product}} for {{company}}?' } },
+      { day: 5, instruction: 'Ask one new question.' },
+    ],
+  };
+  const saved = await call('/sequence-policy', 'PUT', input);
+  assert.deepEqual(saved.steps, input.steps);
+  assert.deepEqual((await call('/sequence-policy')).firstTemplate, input.firstTemplate);
+  assert.deepEqual(await call('/sequence-policy', 'PUT', input), saved);
+  await assert.rejects(
+    call('/sequence-policy', 'PUT', {
+      ...saved,
+      firstTemplate: { subject: '{{unknown}}', body: 'Draft' },
+    }),
+    { status: 400 },
+  );
+});
 test('跟进序列分页读取正式首封与该客户的两次跟进，不取正文或混入测试计划', async (t) => {
   const { service, call } = api(t);
   service.putCampaign({

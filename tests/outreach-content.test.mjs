@@ -91,6 +91,59 @@ test('首封按有来源的经营产品及当前审核版本匹配，不把评�
   assert.equal(chosen.leadSnapshot.status, '待开发');
 });
 
+test('序列模板按本客户资料展开自定义变量，资料不足或有未经批准承诺时阻止起草', async () => {
+  const input = generationInput();
+  const variable = {
+    key: 'custom_产品切入点',
+    label: '产品切入点',
+    instruction: 'Describe one documented product in one sentence.',
+  };
+  const template = {
+    subject: '{{product}} for {{company}}',
+    body: '{{custom_产品切入点}}\n\n{{ai_question}}',
+    variables: [variable],
+  };
+  let fragment;
+  const generator = createOutreachGenerator({
+    env: modelEnv,
+    fetchImpl: async (_url, options) => {
+      const request = JSON.parse(options.body);
+      assert.deepEqual(JSON.parse(request.messages[1].content).personalization_rules, [variable]);
+      return Response.json({
+        choices: [
+          {
+            finish_reason: 'stop',
+            message: { content: JSON.stringify({ ...generated(input), [variable.key]: fragment }) },
+          },
+        ],
+      });
+    },
+  });
+  for (const [company, observation] of [
+    ['East Shade', 'Your range includes roller blinds.'],
+    ['West Blinds', 'Your workshop assembles roller blinds.'],
+  ]) {
+    input.candidate.companyName = company;
+    fragment = observation;
+    const result = await generator.generate({ ...input, template });
+    assert.equal(result.subject, input.product.englishName + ' for ' + company);
+    assert.equal(
+      result.bodyText,
+      'Hi ' +
+        company +
+        ' team,\n\n' +
+        observation +
+        '\n\nWould a short product introduction be useful to your team?',
+    );
+  }
+  fragment = '';
+  await assert.rejects(generator.generate({ ...input, template }), { status: 422 });
+  fragment = 'We guarantee delivery.';
+  await assert.rejects(generator.generate({ ...input, template }), {
+    code: 'outreach_unsupported_claim',
+  });
+});
+
 test('C 级资料缺项可进入首封候选，事实冲突仍单独阻断', () => {
   const input = fixture();
   input.leads[0].grade = 'C';

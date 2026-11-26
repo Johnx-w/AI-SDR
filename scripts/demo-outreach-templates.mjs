@@ -26,6 +26,31 @@ async function model(url, request) {
   assert.equal(String(url), 'https://offline.invalid/v1/chat/completions');
   const { messages } = JSON.parse(request.body);
   const data = JSON.parse(messages[1].content);
+  if (data.mode) {
+    const text =
+      {
+        email: '{{ai_opener}}\n\nAt {{brand}}, we supply {{product}}.\n\n{{ai_question}}',
+        opener: '{{ai_opener}}',
+        ps: 'P.S. {{ai_question}}',
+        rewrite: data.selection.includes('{{') ? data.selection : 'Would a brief overview help?',
+      }[data.mode] || '';
+    return Response.json({
+      choices: [
+        {
+          finish_reason: 'stop',
+          message: {
+            content: JSON.stringify({
+              subject:
+                data.first && ['email', 'subject'].includes(data.mode)
+                  ? '{{product}} for {{company}}'
+                  : '',
+              text,
+            }),
+          },
+        },
+      ],
+    });
+  }
   const requirement = (data.closing_instruction ?? data.writingInstruction ?? '').trim();
   const explicitQuestion = requirement.split('\n').find((line) => /^[A-Za-z][^?\n]*\?$/.test(line));
   let question;
@@ -65,6 +90,12 @@ async function model(url, request) {
         source_ids: [data.customer.evidence[0].id],
       }
     : { body_text: 'I wanted to follow up on my note about roller blinds. ' + question };
+  for (const rule of data.personalization_rules || []) {
+    draft[rule.key] =
+      data.customer?.business === 'manufacturer'
+        ? 'Your workshop assembles roller blinds.'
+        : 'Your range includes roller blinds.';
+  }
   return Response.json({
     choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(draft) } }],
   });
@@ -157,6 +188,7 @@ const service = new OutreachService({
   customers: () => leads,
   products: () => [product],
   getEnv: () => modelEnv,
+  fetchImpl: model,
   generator: {
     ...createOutreachGenerator({ env: modelEnv, fetchImpl: model }),
     generateFollowUp: (input) => generateFollowUp({ ...input, fetchImpl: model }),
@@ -414,9 +446,11 @@ const server = createServer(async (req, res) => {
     }
     if (
       !['GET', 'HEAD'].includes(req.method) &&
-      !['/api/v1/outreach/sequence-policy', '/api/v1/outreach/sequence-policy/preview'].includes(
-        path,
-      )
+      ![
+        '/api/v1/outreach/sequence-policy',
+        '/api/v1/outreach/sequence-policy/preview',
+        '/api/v1/outreach/sequence-policy/assist',
+      ].includes(path)
     ) {
       res.writeHead(403).end('Local template demo');
       return;

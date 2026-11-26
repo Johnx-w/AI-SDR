@@ -187,6 +187,7 @@ try {
   await label('序列名称').fill('QA 自定义跟进');
   await button('添加步骤').click();
   await label('跟进 3 天数').fill('7');
+  await page.getByRole('button', { name: /个性化设置/ }).click();
   await label('跟进 3 写作要求').fill('询问是否需要样品。');
   await button('保存序列').click();
   await page.getByRole('alert').filter({ hasText: '同一天' }).waitFor();

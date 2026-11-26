@@ -1167,6 +1167,7 @@ export class OutreachService {
         }
         try {
           const generated = await this.generatorClient().generate({
+            template: template.firstTemplate,
             ...firstWritingRequirements(
               template.firstBodyInstruction,
               template.firstInstruction,
