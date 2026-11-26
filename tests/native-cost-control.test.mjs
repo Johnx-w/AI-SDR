@@ -73,6 +73,21 @@ function fixture({
       cacheIdentity: identity,
       async research(request) {
         state.calls++;
+        if (request.schema.properties.sources)
+          return {
+            choices: [
+              {
+                finish_reason: 'stop',
+                message: {
+                  content: JSON.stringify({
+                    result: 'relevant',
+                    sources: [0],
+                    reason: '官网产品目录',
+                  }),
+                },
+              },
+            ],
+          };
         state.request = request;
         return {
           status: state.invalid ? 'incomplete' : 'completed',
@@ -152,8 +167,8 @@ test('合格结果复用后仍重新核对并更新原档案、重新评分和�
     });
     assert.equal(second.更新, 1);
     assert.equal(second.新增, 0);
-    assert.equal(second.research_usage.cache_hits, 1);
-    assert.equal(f.state.calls, 1);
+    assert.equal(second.research_usage.cache_hits, 2);
+    assert.equal(f.state.calls, 2);
     assert.equal(f.state.writes, 2);
     assert.equal(f.state.records.length, 1);
     assert.equal(f.state.records[0].fields['开发状态'], '人工跟进中');
@@ -206,7 +221,7 @@ test('待核实企业在重启和普通缓存过期后复用已核验证据，�
     f.raw.products = [{ value: 'zip screens', quote, source_url: source }];
     const changed = await f.research('review-new-products');
     assert.equal(changed.新增, 1);
-    assert.equal(changed.research_usage.model_calls, 1);
+    assert.equal(changed.research_usage.model_calls, 2);
     assert.equal(changed.research_usage.repeat_model_calls, 1);
     assert.equal(f.state.writes, 1);
   } finally {
@@ -336,8 +351,8 @@ test('缓存存储不可用不丢失当前有效响应，也不重试已经发�
       throw new Error('cache unavailable');
     };
     const result = await f.research('cache-unavailable');
-    assert.equal(f.state.calls, 1);
-    assert.equal(result.research_usage.model_calls, 1);
+    assert.equal(f.state.calls, 2);
+    assert.equal(result.research_usage.model_calls, 2);
     assert.equal(result.research_usage.cache_unavailable, true);
     assert.equal(result.research.company_name, 'Example Blinds');
   } finally {
@@ -569,7 +584,7 @@ test('带指定客户记录的研究绕过排除', async () => {
       operation_id: 'target-research',
     });
     assert.equal(f.state.reads, 2);
-    assert.equal(f.state.calls, 1);
+    assert.equal(f.state.calls, 2);
   } finally {
     f.service.close();
   }

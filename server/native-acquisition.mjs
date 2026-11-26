@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { acquisitionConfig } from './acquisition-config.mjs';
 import { createResearchProviders } from './research-providers.mjs';
 import { researchCacheKey } from './research-reuse.mjs';
+import { activitySources, verifyCompanyActivity } from './activity-verification.mjs';
 import { exclusionConditionsKey } from './exclusion-conditions.mjs';
 import { boundedResearchPages } from './research-input.mjs';
 import { compactResearchText } from './research-text.mjs';
@@ -861,6 +862,7 @@ export class NativeAcquisition {
           response = undefined;
         }
       }
+      const extractionFromCache = Boolean(parsed);
       if (parsed) {
         op.research_usage.cache_hits = 1;
         op.research_usage.input_tokens = 0;
@@ -881,6 +883,62 @@ export class NativeAcquisition {
           if (Number.isSafeInteger(value) && value >= 0) op.research_usage[key] = value;
         this.store.save(op);
         parsed = parseCompanyResearch(response, page, input);
+      }
+      if (
+        parsed.product_match === 'matched' &&
+        parsed.company_identity?.name &&
+        ![parsed.customer_type_match, parsed.country_match, parsed.profile_match].includes(
+          'not_matched',
+        ) &&
+        parsed.eligibility?.status !== 'rejected'
+      ) {
+        const sources = activitySources(parsed.facts, item.source_url, page.research_pages);
+        let verdict = { result: 'uncertain', reason: '官网经营用途缺少可复核的原文', sources: [] };
+        if (sources.length) {
+          try {
+            verdict = await verifyCompanyActivity(
+              this.providers.model,
+              this.store,
+              op.research_usage,
+              sources,
+              input,
+              {
+                name: parsed.company_identity.name,
+                website: item.source_url,
+                identity_evidence: parsed.company_identity.evidence
+                  .slice(0, 6)
+                  .map(({ value, quote, source_url }) => ({ value, quote, source_url })),
+                homepage: page.research_pages
+                  .find(
+                    (p) =>
+                      domainKey(p.source_url) === domain && new URL(p.source_url).pathname === '/',
+                  )
+                  ?.text?.slice(0, 1200),
+              },
+            );
+          } catch {
+            verdict.reason = '官网业务独立模型复核未完成，待重新核实';
+          }
+        }
+        parsed = parseCompanyResearch(
+          response,
+          page,
+          input,
+          verdict.result === 'relevant' ? verdict.sources : [],
+        );
+        parsed.activity_verification = {
+          result: verdict.result,
+          reason: verdict.reason,
+          sources: verdict.sources.map(({ source_url, quote }) => ({ source_url, quote })),
+        };
+        if (verdict.result !== 'relevant' || parsed.product_match !== 'matched') {
+          parsed.ok = false;
+          parsed.product_match = verdict.result === 'unrelated' ? 'not_matched' : 'unknown';
+          parsed.product_relation = { status: parsed.product_match, kind: null };
+          parsed.review_required = parsed.product_match === 'unknown';
+          parsed.reason = verdict.reason;
+          parsed.assessment_opportunities = [];
+        }
       }
       op.research_response = response;
       this.store.save(op);
@@ -905,7 +963,7 @@ export class NativeAcquisition {
       op.research_complete = true;
       op.evidence = page.website_metadata;
       op.research_pages = page.research_pages;
-      op.usage = op.research_usage.cache_hits ? undefined : response.usage;
+      op.usage = extractionFromCache ? undefined : response.usage;
       this.store.save(op);
       const identityVerified =
         research.company_identity?.name &&
@@ -950,7 +1008,7 @@ export class NativeAcquisition {
       }
       if (
         !hardMismatch &&
-        !op.research_usage.cache_hits &&
+        !extractionFromCache &&
         cacheKey &&
         typeof this.store.saveModelResponse === 'function'
       ) {
