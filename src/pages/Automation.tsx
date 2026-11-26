@@ -872,7 +872,7 @@ export function Automation() {
                           >
                             <option value="Asia/Shanghai">北京时间</option>
                             {countryZone && countryZone !== 'Asia/Shanghai' && (
-                              <option value={countryZone}>目标国家当地时间（{countryZone}）</option>
+                              <option value={countryZone}>{scheduleZoneLabel(countryZone)}</option>
                             )}
                             {timing.timezone !== 'Asia/Shanghai' &&
                               timing.timezone !== countryZone && (

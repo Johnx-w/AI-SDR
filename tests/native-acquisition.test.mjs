@@ -1149,3 +1149,57 @@ test('统一获客接口以 native 引擎完成单家批量任务，仅使用官
     await new Promise((resolve) => app.close(resolve));
   }
 });
+
+test('本轮再度出现的既有企业优先排除，客户库超过搜索服务上限仍可补找', async () => {
+  for (const [country, fresh] of [
+    ['Canada', 'maple'],
+    ['Australia', 'wattle'],
+    ['United States', null],
+  ]) {
+    const initial = Array.from({ length: 160 }, (_, index) => ({
+      record_id: 'rec' + index,
+      fields: { 来源链接: 'https://known' + index + '.com/' },
+    }));
+    const svc = fixture({ initial }).make();
+    const calls = [];
+    svc.providers.web.search = async ({ exclude_domains }) => {
+      calls.push(exclude_domains);
+      const url = !exclude_domains.includes('known0.com')
+        ? 'https://known0.com/'
+        : fresh
+          ? 'https://' + fresh + '.example.org/'
+          : null;
+      return { results: url ? [{ url }] : [] };
+    };
+    const leads = [];
+    const manager = new BatchJobs({
+      schedule: false,
+      discover: svc.discover.bind(svc),
+      readLeads: async () => leads,
+      research: async (_input, item) => {
+        leads.push({ id: 'rec-new', website: item.source_url });
+        return {
+          新增: 1,
+          明细: [{ source_url: item.source_url, result: 'inserted', record_id: 'rec-new' }],
+        };
+      },
+    });
+    try {
+      const job = manager.create(
+        { ...input, country, search_query: 'zip screens ' + country, target_count: 1 },
+        'recent-known-test',
+      );
+      await manager.work(job.id);
+      assert.equal(calls[1].at(-1), 'known0.com');
+      assert.ok(calls.every((domains) => domains.length <= 150));
+      assert.equal(manager.get(job.id).inserted, fresh ? 1 : 0);
+      assert.deepEqual(
+        leads.map((lead) => lead.website),
+        fresh ? ['https://' + fresh + '.example.org/'] : [],
+      );
+    } finally {
+      manager.close();
+      svc.close();
+    }
+  }
+});

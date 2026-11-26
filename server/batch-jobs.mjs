@@ -825,6 +825,12 @@ export class BatchJobs {
               metric.duplicates++;
             }
           }
+          // Give the domains just returned by search priority in its bounded exclusion list.
+          const repeated = new Set(
+            (found.skipped_existing || []).map((c) => domainKey(c.url)).filter(Boolean),
+          );
+          if (repeated.size)
+            j.seen = [...j.seen.filter((domain) => !repeated.has(domain)), ...repeated];
           checkpoint(j);
           continue;
         }
