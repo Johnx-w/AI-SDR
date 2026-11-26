@@ -1,10 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
 import { Clock3, Mail, Pencil, Plus, Trash2 } from 'lucide-react';
 import { outreachApi } from '../outreachApi';
 import { Modal } from './ui';
 import './sequence-policy.css';
-import './sequence-scroll-prototype.css';
 
 import { SequenceEmailComposer } from './SequenceEmailComposer';
 import {
@@ -35,7 +33,6 @@ function PolicyEditor({
   close: () => void;
   onSave: (next: Policy) => void;
 }) {
-  const [searchParams] = useSearchParams();
   const [active, setActive] = useState('first');
   const [customer, setCustomer] = useState('dealer');
   const [firstTemplate, setFirstTemplate] = useState(policy.firstTemplate ?? defaultTemplate(true));
@@ -161,13 +158,7 @@ function PolicyEditor({
         if (!busy) close();
       }}
     >
-      <form
-        className={
-          'sequence-form' +
-          (searchParams.get('variant') === 'scroll' ? ' sequence-scroll-prototype' : '')
-        }
-        onSubmit={save}
-      >
+      <form className="sequence-form" onSubmit={save}>
         <div className="modal-body sequence-form-body">
           <label>
             序列名称

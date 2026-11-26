@@ -89,17 +89,27 @@
   flex-shrink: 0;
 }
 .sequence-form {
+  flex: 1 1 auto;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
 .sequence-form-body {
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   gap: 12px;
   overflow-y: auto;
 }
+.sequence-form-body > * {
+  flex-shrink: 0;
+}
 .sequence-form-body > button {
-  justify-self: start;
+  align-self: flex-start;
 }
 .sequence-form label {
   display: grid;
@@ -170,6 +180,7 @@
 .modal[open]:has(> .sequence-form) {
   width: min(1360px, 96vw);
   max-width: 96vw;
+  height: min(900px, 94dvh);
   max-height: 94dvh;
 }
 .sequence-form-body > label:first-child {
@@ -181,11 +192,6 @@
 .sequence-studio {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(244px, 0.72fr);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  overflow: hidden;
-  min-height: 435px;
-  background: var(--color-surface);
 }
 .sequence-studio.closed {
   grid-template-columns: 1fr 1fr;
@@ -231,15 +237,14 @@
   border-right: 1px solid var(--color-border);
 }
 .compose-paper .body-field {
-  flex: 1;
   display: flex;
   flex-direction: column;
 }
 .compose-paper .body-field textarea {
-  flex: 1;
+  field-sizing: content;
   line-height: 1.65;
   font-size: 14px;
-  min-height: 155px;
+  min-height: 240px;
   resize: vertical;
 }
 .compose-paper footer {
@@ -293,12 +298,7 @@
   align-self: flex-start;
 }
 .preview-paper {
-  flex: 1;
-  padding: 15px;
-  min-height: 190px;
-  background: #f7f7f8;
-  color: #27272a;
-  border-radius: 6px;
+  color: var(--color-text);
   overflow-wrap: anywhere;
 }
 .preview-paper article strong,
@@ -317,7 +317,7 @@
   display: grid;
   place-content: center;
   justify-items: center;
-  height: 100%;
+  min-height: 190px;
   gap: 9px;
   text-align: center;
   font-size: 13px;

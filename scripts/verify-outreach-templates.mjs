@@ -64,6 +64,19 @@ try {
   await article.getByText(/Would a brief product overview/).waitFor();
   const recipient = page.getByLabel('预览联系人');
   const emailBody = page.getByLabel('邮件正文模板');
+  const longBody = Array(18).fill('A product note for {{company}}.').join('\n\n');
+  await emailBody.fill(longBody + '\n\nWould this detail help?');
+  await article.getByText(/Would this detail help/).waitFor();
+  await page.setViewportSize({ width: 1100, height: 713 });
+  const endVisible = await dialogEditor.locator('.sequence-form-body').evaluate((area) => {
+    area.scrollTop = area.scrollHeight;
+    const bottom = area.getBoundingClientRect().bottom;
+    const end = area.querySelector('.preview-paper article p').getBoundingClientRect().bottom;
+    return area.scrollTop > 0 && end <= bottom + 1 && end > area.getBoundingClientRect().top;
+  });
+  assert.ok(endVisible, '长正文的签名应可滚动至弹窗可视范围');
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await emailBody.fill('{{ai_body}}');
   await recipient.selectOption('');
   assert.ok(await button('生成预览').isDisabled());
   const realContact = await recipient

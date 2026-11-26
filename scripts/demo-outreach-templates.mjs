@@ -358,8 +358,7 @@ const html = (title, content) =>
   '</h1>' +
   content +
   '</html>';
-const templates =
-  '/inbox?tab=sequences' + (process.env.SEQUENCE_SCROLL_PROTOTYPE ? '&variant=scroll' : '');
+const templates = '/inbox?tab=sequences';
 function summary(plan) {
   const followups = actions(plan.id);
   return (
