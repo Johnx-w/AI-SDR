@@ -1,4 +1,5 @@
 import { randomUUID, createHash } from 'node:crypto';
+import { firstWritingRequirements } from './mail-writing-options.mjs';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -1166,8 +1167,12 @@ export class OutreachService {
         }
         try {
           const generated = await this.generatorClient().generate({
-            firstInstruction: template.firstInstruction,
-            firstBodyInstruction: template.firstBodyInstruction,
+            template: template.firstTemplate,
+            ...firstWritingRequirements(
+              template.firstBodyInstruction,
+              template.firstInstruction,
+              template.firstWriting,
+            ),
             candidate,
             mailbox,
             product,
