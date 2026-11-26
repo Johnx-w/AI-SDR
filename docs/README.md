@@ -70,6 +70,8 @@ T12 自动同步随本次版本交付，使用运行环境有效飞书连接和�
 | [ADR-0024](adr/0024-align-feishu-business-mirrors.md)                       | 当前评级与真实沟通镜像，正式原 T5 停止产品镜像 |
 | [ADR-0025](adr/0025-automatic-business-records-with-read-only-followups.md) | 自动需求、真实往来与只读追信任务               |
 
+客户大类、邮箱及产品范围预览的适用条件与验证证据见[分类预览验收](mail-automation/category-preview.md)。
+
 ## 维护与归档
 
 - 功能开发、撤销归档、导航更新和云端文档同步统一遵循 [AGENTS：文档维护流程](../AGENTS.md#文档维护流程)，作为每次任务的完成条件。按本页主题入口维护，不另建重复的“最终版”或“最新方案”。

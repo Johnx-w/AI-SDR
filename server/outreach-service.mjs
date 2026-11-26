@@ -85,6 +85,7 @@ export class OutreachService {
     path = ':memory:',
     mailboxes,
     loadLeads = async () => [],
+    previewLeads = () => [],
     products = () => [],
     answerQuestion = () => ({
       automatic: false,
@@ -141,6 +142,7 @@ export class OutreachService {
     Object.assign(this, {
       mailboxes,
       loadLeads,
+      previewLeads,
       products,
       answerQuestion,
       draftPhotos,

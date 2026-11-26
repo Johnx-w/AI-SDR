@@ -244,6 +244,7 @@ export function createApp({
           fetchImpl,
           path: env.OUTREACH_DB_PATH || ':memory:',
           mailboxes: new OutreachMailboxes({ env }),
+          previewLeads: (...args) => library().previewLeads(...args),
           loadLeads: async () =>
             decorateLeadDevelopment(await loadLeads(), business.state().store.view()).leads.filter(
               isDevelopmentCustomer,

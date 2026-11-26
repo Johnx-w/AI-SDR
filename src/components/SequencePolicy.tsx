@@ -34,7 +34,7 @@ function PolicyEditor({
   onSave: (next: Policy) => void;
 }) {
   const [active, setActive] = useState('first');
-  const [customer, setCustomer] = useState('dealer');
+  const [customer, setCustomer] = useState('distributor');
   const [firstTemplate, setFirstTemplate] = useState(policy.firstTemplate ?? defaultTemplate(true));
   const [firstWriting, setFirstWriting] = useState<Writing>(policy.firstWriting ?? {});
   const [revision, setRevision] = useState(policy.revision);
@@ -218,7 +218,7 @@ function PolicyEditor({
             </div>
           )}
           <SequenceEmailComposer
-            key={active}
+            stepKey={active}
             first={!row}
             template={row ? (row.template ?? defaultTemplate(false)) : firstTemplate}
             onChange={(next) => (row ? changeRow({ template: next }) : setFirstTemplate(next))}
@@ -232,7 +232,11 @@ function PolicyEditor({
               step: row ? chronologicalSteps.indexOf(row) + 1 : 0,
               day: row ? Number(row.day) : undefined,
               instruction: row ? row.instruction : firstInstruction,
-              firstBodyInstruction: row ? undefined : firstBodyInstruction,
+              firstBodyInstruction,
+              firstInstruction,
+              firstTemplate,
+              firstWriting,
+              priorSteps: chronologicalSteps.map((r) => ({ ...r, day: Number(r.day) })),
               writing,
             }}
             settings={

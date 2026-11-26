@@ -137,9 +137,17 @@ function dealer(id) {
     market: 'Australia',
     grade: 'B',
     status: '待开发',
-    type: '经销商',
+    type: id.includes('workshop') ? 'manufacturer' : 'distributor',
     email: 'info@' + domain,
     facts: [
+      {
+        field: 'customer_type',
+        value: id.includes('workshop') ? 'manufacturer' : 'distributor',
+        quote: id.includes('workshop')
+          ? 'We manufacture roller blinds.'
+          : 'We distribute roller blinds.',
+        source_url: 'https://' + domain + '/about',
+      },
       {
         field: 'entity_type',
         value: 'business',
@@ -165,6 +173,7 @@ function dealer(id) {
   leads.push(lead);
   return lead;
 }
+dealer('demo-workshop');
 const transport = [];
 let time = Date.parse('2026-11-24T04:00:00Z');
 const service = new OutreachService({
@@ -187,6 +196,17 @@ const service = new OutreachService({
       return { accepted: [mail.to], rejected: [], messageId: mail.messageId };
     },
   },
+  previewLeads: (category, after = '', id = '') =>
+    leads
+      .filter(
+        (l) =>
+          l.id > after &&
+          (!id || l.id === id) &&
+          l.facts.some((f) => f.field === 'customer_type' && f.value === category),
+      )
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .slice(0, 50)
+      .map((lead) => ({ id: lead.id, lead })),
   loadLeads: async () => leads,
   customers: () => leads,
   products: () => [product],
@@ -197,6 +217,7 @@ const service = new OutreachService({
     generateFollowUp: (input) => generateFollowUp({ ...input, fetchImpl: model }),
   },
 });
+service.previewDemo = true;
 const plans = [];
 async function prepare(name, members, followUpEnabled) {
   const plan = service.saveCampaign({
