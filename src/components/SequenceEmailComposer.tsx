@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ArrowLeft,
   Braces,
@@ -14,7 +14,6 @@ import {
 import { outreachApi } from '../outreachApi';
 import {
   expandTemplate,
-  followUpQuestionWarning,
   normalizeTemplate,
   variableLabels,
   type EmailTemplate,
@@ -22,8 +21,36 @@ import {
 } from '../domain/sequence-email.mjs';
 
 type Mode = 'email' | 'opener' | 'ps' | 'subject' | 'rewrite';
-type Contact = { id: string; company: string; email: string };
+type Sample = {
+  demo?: boolean;
+  id: string;
+  name: string;
+  category: string;
+  from: string;
+  brand: string;
+  product: string;
+  productId: string;
+  reason: string;
+  selection: string;
+  roleEvidence: { quote: string; sourceUrl: string }[];
+};
+type Options = {
+  categories: { value: string; label: string }[];
+  mailboxes: {
+    id: string;
+    email: string;
+    brand: string;
+    products: { id: string; name: string }[];
+  }[];
+};
 type Preview = {
+  sample: Sample;
+  rules: {
+    system: string;
+    instruction: string;
+    first: { firstBodyInstruction?: string; firstInstruction?: string };
+    productFacts: string[];
+  };
   subject: string;
   body: string;
   warning?: string;
@@ -41,6 +68,7 @@ const modes: Record<Mode, string> = {
 };
 const errorText = (e: unknown) => (e instanceof Error ? e.message : '操作失败，请重试');
 type Props = {
+  stepKey: string;
   library: CustomVariable[];
   first: boolean;
   template: EmailTemplate;
@@ -52,6 +80,7 @@ type Props = {
 };
 
 export function SequenceEmailComposer({
+  stepKey,
   first,
   library,
   template,
@@ -67,6 +96,9 @@ export function SequenceEmailComposer({
   const [tone, setTone] = useState('default'),
     [guidelines, setGuidelines] = useState(''),
     [signals, setSignals] = useState(['customer', 'product']);
+  useEffect(() => {
+    setPanel('menu');
+  }, [stepKey]);
   const [variableName, setVariableName] = useState(''),
     [variableGuide, setVariableGuide] = useState(''),
     [editKey, setEditKey] = useState('');
@@ -75,43 +107,91 @@ export function SequenceEmailComposer({
     [field, setField] = useState<'subject' | 'body'>('body');
   const bodyRef = useRef<HTMLTextAreaElement>(null),
     subjectRef = useRef<HTMLInputElement>(null);
+  const pendingCaret = useRef<{
+    stepKey: string;
+    target: 'subject' | 'body';
+    value: string;
+    position: number;
+  } | null>(null);
+  useLayoutEffect(() => {
+    const pending = pendingCaret.current;
+    pendingCaret.current = null;
+    if (!pending || pending.stepKey !== stepKey || template[pending.target] !== pending.value)
+      return;
+    const el = pending.target === 'subject' ? subjectRef.current : bodyRef.current;
+    if (el?.value !== pending.value) return;
+    el.focus();
+    el.setSelectionRange(pending.position, pending.position);
+  }, [stepKey, template]);
   const [result, setResult] = useState<{ key: string; subject: string; text: string } | null>(null);
   const [working, setWorking] = useState(false),
     [aiError, setAiError] = useState('');
   const [preview, setPreview] = useState<{ key: string; value: Preview } | null>(null),
     [loading, setLoading] = useState(false),
     [previewError, setPreviewError] = useState('');
-  const [contacts, setContacts] = useState<Contact[]>([]),
-    [cursor, setCursor] = useState<string | null>(null),
-    [contactError, setContactError] = useState('');
-  const previewKey = JSON.stringify([customer, previewInput, template.variables]);
+  const [optionsError, setOptionsError] = useState('');
+  const [options, setOptions] = useState<Options>({ categories: [], mailboxes: [] });
+  const [mailboxId, setMailboxId] = useState('');
+  const [productId, setProductId] = useState('');
+  const [representative, setRepresentative] = useState<Sample | null>(null);
+  const [sampleError, setSampleError] = useState('');
+  const [sampling, setSampling] = useState(false);
+  const sampleRequest = useRef(0);
+  const scopeKey = JSON.stringify([customer, mailboxId, productId]);
+  const previewKey = JSON.stringify([scopeKey, representative?.id, previewInput, template]);
   const previewRequest = useRef(0);
   useEffect(() => {
     previewRequest.current++;
     setLoading(false);
     setPreviewError('');
   }, [previewKey]);
-  async function loadContacts(after = '', signal?: AbortSignal) {
+  async function loadSample(after = '', signal?: AbortSignal) {
+    const id = ++sampleRequest.current;
+    setSampling(true);
+    setRepresentative(null);
+    setSampleError('');
+    if (!mailboxId || !customer) {
+      setSampling(false);
+      return;
+    }
     try {
-      const data = await outreachApi<{ items: Contact[]; next: string | null }>(
-        '/sequence-policy/contacts?after=' + encodeURIComponent(after),
+      const data = await outreachApi<Sample>(
+        '/sequence-policy/sample?' +
+          new URLSearchParams({ category: customer, mailboxId, productId, after }),
         { signal },
       );
-      if (signal?.aborted) return;
-      setContacts((old) =>
-        after ? [...old, ...data.items.filter((c) => !old.some((o) => o.id === c.id))] : data.items,
-      );
-      setCursor(data.next);
-      setContactError('');
+      if (signal?.aborted || id !== sampleRequest.current) return;
+      setRepresentative(data);
     } catch (e) {
-      if (!signal?.aborted) setContactError(errorText(e));
+      if (!signal?.aborted && id === sampleRequest.current) setSampleError(errorText(e));
+    } finally {
+      if (!signal?.aborted && id === sampleRequest.current) setSampling(false);
+    }
+  }
+  async function loadOptions(signal?: AbortSignal) {
+    setOptionsError('');
+    try {
+      const data = await outreachApi<Options>('/sequence-policy/preview-options', { signal });
+      if (signal?.aborted) return;
+      setOptions(data);
+      setMailboxId(data.mailboxes[0]?.id ?? '');
+    } catch (e) {
+      if (!signal?.aborted) setOptionsError(errorText(e));
     }
   }
   useEffect(() => {
     const controller = new AbortController();
-    void loadContacts('', controller.signal);
+    void loadOptions(controller.signal);
     return () => controller.abort();
   }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadSample('', controller.signal);
+    return () => {
+      controller.abort();
+      sampleRequest.current++;
+    };
+  }, [scopeKey]);
   async function generatePreview() {
     const id = ++previewRequest.current;
     setLoading(true);
@@ -119,9 +199,19 @@ export function SequenceEmailComposer({
     try {
       const value = await outreachApi<Preview>('/sequence-policy/preview', {
         method: 'POST',
-        body: JSON.stringify({ ...previewInput, customer, template }),
+        body: JSON.stringify({
+          ...previewInput,
+          category: customer,
+          mailboxId,
+          productId: productId || representative?.productId,
+          sampleId: representative?.id,
+          template,
+        }),
       });
-      if (id === previewRequest.current) setPreview({ key: previewKey, value });
+      if (id === previewRequest.current) {
+        setRepresentative({ ...value.sample, demo: representative?.demo });
+        setPreview({ key: previewKey, value });
+      }
     } catch (e) {
       if (id === previewRequest.current) {
         setPreview(null);
@@ -139,21 +229,31 @@ export function SequenceEmailComposer({
   if (sample) {
     try {
       normalizeTemplate(template, first);
-      subject =
-        first && sample.variables
-          ? expandTemplate(template.subject, sample.variables)
-          : sample.subject;
-      if (sample.variables) {
-        const text = expandTemplate(template.body, sample.variables);
-        warning = first ? undefined : followUpQuestionWarning(text, template.body);
-        body = [sample.greeting, text, sample.signature].join('\n\n');
-      } else body = sample.body;
+      subject = sample.subject;
+      body = sample.body;
     } catch (e) {
       expansionError = errorText(e);
     }
   }
   const selected = template.body.slice(selection.start, selection.end);
-  const requestKey = JSON.stringify([panel, template, field, selection, tone, guidelines, signals]);
+  const requestKey = JSON.stringify([
+    stepKey,
+    first,
+    panel,
+    template,
+    field,
+    selection,
+    tone,
+    guidelines,
+    signals,
+  ]);
+  const suggestionRequest = useRef(0);
+  useEffect(() => {
+    suggestionRequest.current++;
+    setWorking(false);
+    setAiError('');
+    setResult(null);
+  }, [requestKey]);
   const suggestion = result?.key === requestKey ? result : null;
   function previewSuggestion(text: string) {
     if (!sample?.variables) return text;
@@ -169,6 +269,7 @@ export function SequenceEmailComposer({
     setResult(null);
   }
   async function suggest() {
+    const id = ++suggestionRequest.current;
     setWorking(true);
     setAiError('');
     try {
@@ -184,11 +285,11 @@ export function SequenceEmailComposer({
           signals,
         }),
       });
-      setResult({ ...v, key: requestKey });
+      if (id === suggestionRequest.current) setResult({ ...v, key: requestKey });
     } catch (e) {
-      setAiError(errorText(e));
+      if (id === suggestionRequest.current) setAiError(errorText(e));
     } finally {
-      setWorking(false);
+      if (id === suggestionRequest.current) setWorking(false);
     }
   }
   function insert(
@@ -199,15 +300,12 @@ export function SequenceEmailComposer({
     variables = template.variables,
   ) {
     const original = template[target];
+    const value = original.slice(0, start) + text + original.slice(end);
+    pendingCaret.current = { stepKey, target, value, position: start + text.length };
     onChange({
       ...template,
       variables,
-      [target]: original.slice(0, start) + text + original.slice(end),
-    });
-    requestAnimationFrame(() => {
-      const el = target === 'subject' ? subjectRef.current : bodyRef.current;
-      el?.focus();
-      el?.setSelectionRange(start + text.length, start + text.length);
+      [target]: value,
     });
   }
   function putVariable(key: string, custom?: CustomVariable) {
@@ -337,7 +435,7 @@ export function SequenceEmailComposer({
       </section>
       <section className="compose-preview" aria-label="英文样信">
         <header>
-          <h3>联系人预览</h3>
+          <h3>按客户类别预览</h3>
           {!panel && (
             <button
               type="button"
@@ -350,56 +448,125 @@ export function SequenceEmailComposer({
             </button>
           )}
         </header>
+        {optionsError && (
+          <p role="alert">
+            {optionsError}{' '}
+            <button type="button" onClick={() => void loadOptions()}>
+              重新加载预览选项
+            </button>
+          </p>
+        )}
         <label>
-          预览联系人
+          发件邮箱
           <select
-            aria-label="预览联系人"
+            aria-label="预览发件邮箱"
+            value={mailboxId}
+            onChange={(e) => {
+              setMailboxId(e.target.value);
+              setProductId('');
+            }}
+          >
+            {options.mailboxes.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.email} · {b.brand}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          客户大类
+          <select
+            aria-label="预览客户大类"
             value={customer}
             onChange={(e) => onCustomer(e.target.value)}
           >
-            <option value="">选择联系人</option>
-            <optgroup label="示例客户">
-              <option value="dealer">卷帘经销商 · Example Dealer</option>
-              <option value="workshop">组装工厂 · Example Workshop</option>
-            </optgroup>
-            {contacts.length > 0 && (
-              <optgroup label="已发送首封的联系人">
-                {contacts.map((c) => (
-                  <option key={c.id} value={'record:' + c.id}>
-                    {c.company} · {c.email}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-            {customer.startsWith('record:') &&
-              !contacts.some((c) => 'record:' + c.id === customer) && (
-                <option value={customer}>已选联系人</option>
-              )}
+            <option value="">选择客户大类</option>
+            {options.categories.map((c) => (
+              <option key={c.value} value={c.value}>
+                {c.label}
+              </option>
+            ))}
           </select>
         </label>
-        {cursor && (
-          <button type="button" className="text-link" onClick={() => void loadContacts(cursor)}>
-            更多联系人
-          </button>
+        <label>
+          匹配产品
+          <select
+            aria-label="预览匹配产品"
+            value={productId}
+            onChange={(e) => setProductId(e.target.value)}
+          >
+            <option value="">当前邮箱全部获准产品</option>
+            {options.mailboxes
+              .find((b) => b.id === mailboxId)
+              ?.products.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+          </select>
+        </label>
+        {representative && (
+          <section aria-label="代表客户">
+            <small>{representative.demo ? '演示样本（非真实客户）' : '真实客户样本'}</small>
+            <strong>{representative.name}</strong>
+            <p>
+              {representative.category} · {representative.brand} · {representative.product}
+            </p>
+            <p>{representative.reason}</p>
+            {representative.roleEvidence.map((e, i) => (
+              <p key={i}>
+                {e.quote}{' '}
+                <a href={e.sourceUrl} target="_blank" rel="noreferrer">
+                  类别依据
+                </a>
+              </p>
+            ))}
+            <small>{representative.selection}</small>
+            <button
+              type="button"
+              disabled={sampling || loading}
+              onClick={() => void loadSample(representative.id)}
+            >
+              更换同类样本
+            </button>
+          </section>
         )}
-        {contactError && (
-          <button type="button" className="text-link" onClick={() => void loadContacts()}>
-            联系人加载失败，重试
-          </button>
+        {sampling && <p role="status">正在从完整类别中取样…</p>}
+        {sampleError && (
+          <p role="alert">
+            {sampleError}{' '}
+            <button type="button" onClick={() => void loadSample()}>
+              重新取样
+            </button>
+          </p>
         )}
         <button
           type="button"
           className="preview-trigger"
-          disabled={!customer || loading}
+          disabled={!representative || loading || sampling}
           onClick={() => void generatePreview()}
         >
           <RefreshCw size={13} />
           {loading ? '生成中…' : sample ? '刷新预览' : '生成预览'}
         </button>
         {warning && !expansionError && <p role="status">{warning}</p>}
+        {sample && (
+          <details>
+            <summary>本次使用的写作规则</summary>
+            <p>{sample.rules.instruction || '采用默认步骤规则'}</p>
+            <p>首封正文：{sample.rules.first.firstBodyInstruction || '默认写作规则'}</p>
+            <p>首封结尾：{sample.rules.first.firstInstruction || '默认写作规则'}</p>
+            <p>产品依据：{sample.rules.productFacts.join('；')}</p>
+            <details>
+              <summary>完整基础写作规则</summary>
+              <pre>{sample.rules.system}</pre>
+            </details>
+          </details>
+        )}
         <div className="preview-paper">
           {sample && !expansionError ? (
             <article>
+              <small>发件人　{sample.sample.from}</small>
               <small>收件人　{sample.to}</small>
               <strong>{subject}</strong>
               <p>{body}</p>
@@ -410,7 +577,7 @@ export function SequenceEmailComposer({
               <span>
                 {previewError ||
                   expansionError ||
-                  (!customer ? '请选择联系人' : '生成预览后在这里查看邮件')}
+                  (!representative ? '请选择有合格样本的客户类别' : '生成预览后在这里查看邮件')}
               </span>
             </div>
           )}

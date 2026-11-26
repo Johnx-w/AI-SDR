@@ -446,3 +446,12 @@
 .custom-variable button:last-child {
   width: auto;
 }
+
+.compose-preview pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+}
+.compose-preview small {
+  display: block;
+}

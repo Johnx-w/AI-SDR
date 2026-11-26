@@ -144,6 +144,21 @@ async function prepare(h, overrides = {}) {
   return h.service.campaign(campaign.id);
 }
 
+test('真实预览没有合格样本时拒绝生成，不得回退到虚构卷帘客户', async (t) => {
+  const h = harness();
+  t.after(() => h.service.close());
+  h.service.previewLeads = () => [];
+  await assert.rejects(
+    previewOutreachTemplate(h.service, {
+      step: 0,
+      instruction: '',
+      mailboxId: 'brand-b',
+      category: 'manufacturer',
+    }),
+    /没有合格样本/,
+  );
+});
+
 test('无邮箱跳过持久化，重启、恢复及旧计划重扫不恢复，新手动计划可纳入且不消耗名额', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'outreach-skip-'));
   const h = harness({ path: join(directory, 'outreach.sqlite') });
@@ -1470,12 +1485,29 @@ test('跟进变量重复时可预览并提示修改，实际发送仍要求只�
     Response.json({
       choices: [{ message: { content: JSON.stringify({ body_text: draft }) } }],
     });
-  const input = { step: 1, day: 3, template, instruction };
+  const input = { step: 1, day: 3, template, instruction, mailboxId: h.boxes[0].id };
+  h.service.previewLeads = (category) => [
+    {
+      id: 'buyer-one',
+      lead: {
+        ...buyer('buyer-one', 'roller blinds'),
+        facts: [
+          ...buyer('buyer-one', 'roller blinds').facts,
+          {
+            field: 'customer_type',
+            value: category,
+            quote: 'We operate as ' + category + '.',
+            source_url: 'https://buyer-one.example.org/about',
+          },
+        ],
+      },
+    },
+  ];
   for (const [customer, company] of [
-    ['dealer', 'Example Dealer'],
-    ['workshop', 'Example Workshop'],
+    ['distributor', 'Company buyer-one'],
+    ['manufacturer', 'Company buyer-one'],
   ]) {
-    const sample = await previewOutreachTemplate(h.service, { ...input, customer });
+    const sample = await previewOutreachTemplate(h.service, { ...input, category: customer });
     assert.ok(
       sample.body.startsWith(
         'Hi ' + company + ' team,\n\nHere is a product update.' + draft + draft,
@@ -1484,13 +1516,13 @@ test('跟进变量重复时可预览并提示修改，实际发送仍要求只�
     assert.match(sample.warning, /2 个问题/);
     const corrected = await previewOutreachTemplate(h.service, {
       ...input,
-      customer,
+      category: customer,
       template: { subject: '', body: '{{company}} {{ai_question}}' },
     });
     assert.ok(corrected.body.includes(company + ' ' + instruction));
     assert.equal(corrected.warning, undefined);
   }
-  await assert.rejects(previewOutreachTemplate(h.service, { ...input, customer: '' }), {
+  await assert.rejects(previewOutreachTemplate(h.service, { ...input, category: '' }), {
     status: 400,
   });
   const item = h.service.followUps.pending()[0];
@@ -1906,4 +1938,23 @@ test('首封计划核对监管、平台客服及官网跨域联系方式', async
       .sort(),
     ['crazy', 'dcb', 'platform', 'platform-cta'],
   );
+});
+
+test('正式首封拒绝模板或生成器带入邮箱范围外产品', async (t) => {
+  const h = harness();
+  t.after(() => h.service.close());
+  h.boxes[0].productIds = ['pvc'];
+  h.service.generator.generate = async () => ({
+    subject: 'Products',
+    bodyText: 'We supply roller blinds.',
+    sourceIds: [],
+  });
+  const campaign = await prepare(h, {
+    mailboxIds: [h.boxes[0].id],
+    filters: { products: ['pvc'] },
+  });
+  const row = h.service.deliveries(campaign.id)[0];
+  assert.equal(row.status, 'blocked');
+  assert.match(row.reason, /产品|品牌/);
+  assert.equal(h.deliveries.length, 0);
 });

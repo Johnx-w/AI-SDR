@@ -62,10 +62,11 @@ try {
   const article = dialogEditor.locator('article');
   await preview();
   await article.getByText(/Would a brief product overview/).waitFor();
-  const recipient = page.getByLabel('预览联系人');
+  const recipient = page.getByLabel('预览客户大类');
   const emailBody = page.getByLabel('邮件正文模板');
   const longBody = Array(18).fill('A product note for {{company}}.').join('\n\n');
   await emailBody.fill(longBody + '\n\nWould this detail help?');
+  await preview();
   await article.getByText(/Would this detail help/).waitFor();
   await page.setViewportSize({ width: 1100, height: 713 });
   const endVisible = await dialogEditor.locator('.sequence-form-body').evaluate((area) => {
@@ -79,15 +80,11 @@ try {
   await emailBody.fill('{{ai_body}}');
   await recipient.selectOption('');
   assert.ok(await button('生成预览').isDisabled());
-  const realContact = await recipient
-    .locator('option[value^="record:"]')
-    .first()
-    .getAttribute('value');
-  await recipient.selectOption(realContact);
+  await recipient.selectOption('distributor');
   await preview();
   await article.waitFor();
   assert.ok(!(await article.innerText()).includes('Example Dealer'));
-  await recipient.selectOption('dealer');
+  await recipient.selectOption('distributor');
   await button('整封邮件').click();
   await button('生成建议').click();
   await button('采用建议').waitFor();
@@ -130,17 +127,17 @@ try {
   assert.equal(await emailBody.inputValue(), '{{custom_买家产品}}');
   await preview();
   await article.getByText(/Your range includes roller blinds/).waitFor();
-  await recipient.selectOption('workshop');
+  await recipient.selectOption('manufacturer');
   await preview();
   await article.getByText(/Your workshop assembles roller blinds/).waitFor();
-  await recipient.selectOption('dealer');
+  await recipient.selectOption('distributor');
   await emailBody.fill('{{ai_body}}');
   await button('返回 AI 工具').click();
   await settings();
   await page.getByLabel('希望客户回什么').selectOption('sourcing');
   await preview();
   await article.getByText(/source roller blinds from external suppliers/).waitFor();
-  await page.getByLabel('预览联系人').selectOption('workshop');
+  await page.getByLabel('预览客户大类').selectOption('manufacturer');
   assert.equal(await article.count(), 0);
   await preview();
   await article.getByText(/Do you ever source finished units/).waitFor();
@@ -164,6 +161,7 @@ try {
   assert.equal((await article.innerText()).split(follow).length - 1, 2);
   await emailBody.fill('A product note for {{company}}. {{ai_question}}');
   await dialogEditor.getByText(/2 个问题/).waitFor({ state: 'hidden' });
+  await preview();
   await article.getByText(new RegExp(follow.slice(0, -1))).waitFor();
   await emailBody.press('Home');
   await page
@@ -176,6 +174,10 @@ try {
     .click();
   assert.ok((await emailBody.inputValue()).includes('{{custom_买家产品}}'));
   await emailBody.fill('{{custom_买家产品}}\n\nA product note for {{company}}. {{ai_question}}');
+  assert.equal(
+    await emailBody.inputValue(),
+    '{{custom_买家产品}}\n\nA product note for {{company}}. {{ai_question}}',
+  );
   await preview();
   await article.getByText(new RegExp(follow.slice(0, -1))).waitFor();
   await button('第 7 天跟进').click();
@@ -191,6 +193,11 @@ try {
   assert.equal((await previewRequest).postDataJSON().step, 1);
   await article.waitFor();
   await button('删除跟进 3').click();
+  await button('第 3 天跟进').click();
+  assert.equal(
+    await emailBody.inputValue(),
+    '{{custom_买家产品}}\n\nA product note for {{company}}. {{ai_question}}',
+  );
   await button('保存序列').click();
   await page.getByText('序列已保存').waitFor();
   await page.reload();

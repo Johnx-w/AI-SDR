@@ -363,6 +363,21 @@ export class LeadLibrary {
     return this.snapshot(true);
   }
 
+  previewLeads(category, after = '', id = '') {
+    this.assertOpen();
+    return this.db
+      .prepare(
+        `SELECT record_id AS id, detail FROM lead_library_customers
+      WHERE scope=? AND ${eligible} AND record_id>? AND (?='' OR record_id=?)
+      AND EXISTS (SELECT 1 FROM json_each(detail,'$.facts') f
+        WHERE json_extract(f.value,'$.field') IN ('customer_type','customer_types')
+        AND json_extract(f.value,'$.value')=?)
+      ORDER BY record_id LIMIT 50`,
+      )
+      .all(this.scope, after, id, id, category)
+      .map((row) => ({ id: row.id, lead: JSON.parse(row.detail) }));
+  }
+
   async detail(id) {
     this.assertOpen();
     return this.localDetail(id);

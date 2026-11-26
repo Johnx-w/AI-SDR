@@ -24,7 +24,7 @@ const text = (value) => (typeof value === 'string' ? value.trim() : '');
 const array = (value) => (Array.isArray(value) ? value : []);
 const compact = (value) => text(value).replace(/\s+/gu, ' ');
 const writerRoot = new URL('../agents/first-touch-writer/', import.meta.url);
-const writerPolicy = readFileSync(new URL('system.md', writerRoot), 'utf8');
+export const writerPolicy = readFileSync(new URL('system.md', writerRoot), 'utf8');
 // Keep the original default prompt in the material fingerprint used by existing queues.
 const [writerPrompt] = writerPolicy.split(/\r?\n## Workspace template overrides\r?\n/u);
 const confirmedSupply = JSON.parse(
@@ -420,6 +420,7 @@ export function selectOutreachCandidates({
   invalidAddresses = [],
   contacted = [],
   now = new Date(),
+  previewOnly = false,
 } = {}) {
   const eligible = [],
     blocked = [];
@@ -500,9 +501,7 @@ export function selectOutreachCandidates({
     }
     if (
       identities.some((value) => contactedKeys.has(value)) ||
-      !untouched.has(lead.status) ||
-      lead.humanOwned ||
-      lead.openConversation
+      (!previewOnly && (!untouched.has(lead.status) || lead.humanOwned || lead.openConversation))
     ) {
       reject('already_contacted_or_unknown', '客户已联系、已由人工接手或联系历史尚未明确');
       continue;
@@ -585,7 +584,9 @@ export function selectOutreachCandidates({
       continue;
     }
     const connectedSenders = permittedSenders.filter(
-      (mailbox) => mailbox.configured && !mailbox.paused && mailbox.smtpStatus === 'connected',
+      (mailbox) =>
+        previewOnly ||
+        (mailbox.configured && !mailbox.paused && mailbox.smtpStatus === 'connected'),
     );
     if (!connectedSenders.length) {
       reject('mailbox_unavailable', '该产品对应的邮箱已暂停或尚未通过连接验证');
@@ -600,7 +601,8 @@ export function selectOutreachCandidates({
     }
     const availableSenders = readySenders.filter(
       (mailbox) =>
-        Number.isSafeInteger(mailbox.dailyLimit) && mailbox.dailyLimit > workload(mailbox),
+        previewOnly ||
+        (Number.isSafeInteger(mailbox.dailyLimit) && mailbox.dailyLimit > workload(mailbox)),
     );
     availableSenders.sort(
       (a, b) =>
