@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
-import { mkdtempSync } from 'node:fs';
+import { cpSync, mkdtempSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../server/app.mjs';
@@ -13,6 +13,9 @@ import { saveSequencePolicy } from '../server/outreach-sequence-policy.mjs';
 
 let port = Number(process.argv[2] || 14374);
 const dir = mkdtempSync(join(tmpdir(), 'ai-sdr-template-demo-'));
+const demoDist = join(dir, 'dist');
+cpSync(new URL('../dist/', import.meta.url), demoDist, { recursive: true });
+symlinkSync(new URL('../node_modules/', import.meta.url), join(dir, 'node_modules'), 'junction');
 const modelEnv = {
   RESEARCH_MODEL_PROVIDER: 'openai_compatible',
   RESEARCH_MODEL_BASE_URL: 'https://offline.invalid/v1',
@@ -315,6 +318,7 @@ const appEnv = {
   BRANDING_CACHE_PATH: join(dir, 'branding'),
 };
 const app = createApp({
+  dist: demoDist,
   env: appEnv,
   fetchImpl: async () => {
     throw new Error('offline demo');
@@ -395,6 +399,14 @@ const server = createServer(async (req, res) => {
     return;
   }
   try {
+    if (path === '/demo/followups' && req.method === 'GET') {
+      res
+        .writeHead(302, {
+          Location: '/inbox?tab=campaigns&campaignTab=followups&campaignId=' + dayPlan.id,
+        })
+        .end();
+      return;
+    }
     if (path === '/demo' && req.method === 'GET') {
       res.writeHead(302, { Location: templates }).end();
       return;

@@ -40,6 +40,15 @@ try {
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
   const button = (name) => page.getByRole('button', { name, exact: true });
+  await page.goto(base + '/demo/followups');
+  await button('客户跟进').waitFor();
+  await page.getByRole('heading', { name: '已发送的客户', exact: true }).waitFor();
+  const clientScript = await page.locator('script[type="module"][src]').getAttribute('src');
+  const scriptResponse = await page.request.get(base + clientScript);
+  assert.equal(scriptResponse.status(), 200);
+  assert.match(scriptResponse.headers()['content-type'], /javascript/);
+  await button('计划概况').click();
+  await page.getByText('本次计划的客户范围与产品内容', { exact: true }).waitFor();
   await page.goto(base + '/demo');
   assert.equal(page.url(), base + '/inbox?tab=sequences');
   const policy = page.getByRole('region', { name: '未回复跟进规则' });
