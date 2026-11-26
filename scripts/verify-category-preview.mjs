@@ -85,6 +85,27 @@ try {
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   mkdirSync('outputs', { recursive: true });
   await page.screenshot({ path: 'outputs/category-preview.png', fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByRole('button', { name: '第 3 天跟进', exact: true }).click();
+  await page.getByRole('button', { name: '整封邮件', exact: true }).click();
+  let release;
+  let seen;
+  const arrived = new Promise((r) => (seen = r)),
+    gate = new Promise((r) => (release = r));
+  await page.route('**/sequence-policy/assist', async (route) => {
+    seen();
+    await gate;
+    await route.fulfill({ json: { subject: '', text: 'Late previous step' } });
+  });
+  await page.getByRole('button', { name: '生成建议', exact: true }).click();
+  await arrived;
+  await page.getByRole('button', { name: '第 7 天跟进', exact: true }).click();
+  await page.getByRole('button', { name: '整封邮件', exact: true }).click();
+  const finished = page.waitForResponse((r) => r.url().endsWith('/sequence-policy/assist'));
+  release();
+  await finished;
+  await page.getByRole('button', { name: '生成建议', exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: '采用建议', exact: true }).count(), 0);
   const apiTimes = [];
   for (const path of [
     '/sequence-policy/preview-options',
@@ -116,7 +137,7 @@ try {
     }),
   );
   assert.deepEqual(errors, []);
-  assert.ok(requests.every((r) => r.url.endsWith('/sequence-policy/preview')));
+  assert.ok(requests.every((r) => /\/sequence-policy\/(preview|assist)$/.test(r.url)));
   assert.equal(h.sends, 0);
   console.log(
     JSON.stringify({

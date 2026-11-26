@@ -1939,3 +1939,22 @@ test('首封计划核对监管、平台客服及官网跨域联系方式', async
     ['crazy', 'dcb', 'platform', 'platform-cta'],
   );
 });
+
+test('正式首封拒绝模板或生成器带入邮箱范围外产品', async (t) => {
+  const h = harness();
+  t.after(() => h.service.close());
+  h.boxes[0].productIds = ['pvc'];
+  h.service.generator.generate = async () => ({
+    subject: 'Products',
+    bodyText: 'We supply roller blinds.',
+    sourceIds: [],
+  });
+  const campaign = await prepare(h, {
+    mailboxIds: [h.boxes[0].id],
+    filters: { products: ['pvc'] },
+  });
+  const row = h.service.deliveries(campaign.id)[0];
+  assert.equal(row.status, 'blocked');
+  assert.match(row.reason, /产品|品牌/);
+  assert.equal(h.deliveries.length, 0);
+});

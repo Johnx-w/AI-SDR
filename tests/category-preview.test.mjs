@@ -144,3 +144,69 @@ test('固定发件邮箱不跨品牌，角色取样不越过作用域，单样�
     /没有合格样本/,
   );
 });
+
+test('跟进预览与正式发送共用产品范围校验，模板不得混入邮箱未获准的产品', async (t) => {
+  const h = categoryPreviewFixture(0);
+  t.after(h.close);
+  await assert.rejects(
+    api(h, '/sequence-policy/preview', 'POST', {
+      mailboxId: 'box-0',
+      category: 'distributor',
+      step: 1,
+      day: 3,
+      instruction: 'Ask one question.',
+      template: { subject: '', body: 'We also supply PVC shutters. Would a brief overview help?' },
+    }),
+    /产品|品牌/,
+  );
+});
+
+test('首封预览拒绝模板中的范围外产品', async (t) => {
+  const h = categoryPreviewFixture(0);
+  t.after(h.close);
+  await assert.rejects(
+    api(h, '/sequence-policy/preview', 'POST', {
+      mailboxId: 'box-0',
+      category: 'distributor',
+      step: 0,
+      instruction: '',
+      template: {
+        subject: 'Product overview',
+        body: 'We also supply PVC shutters. Would a brief overview help?',
+      },
+    }),
+    /产品|品牌/,
+  );
+});
+
+test('客户名称包含其他产品词时仍可生成首封，但额外供货声明仍被拦截', async (t) => {
+  const h = categoryPreviewFixture(0);
+  t.after(h.close);
+  const id = 'z0-distributor-0';
+  const row = h.library.previewLeads('distributor', '', id)[0];
+  row.lead.name = 'PVC Shutters Pty Ltd';
+  h.library.db
+    .prepare('UPDATE lead_library_customers SET detail=? WHERE record_id=?')
+    .run(JSON.stringify(row.lead), id);
+  const input = {
+    mailboxId: 'box-0',
+    category: 'distributor',
+    sampleId: id,
+    step: 0,
+    instruction: '',
+    template: { subject: '{{product}} for {{company}}', body: '{{ai_body}}' },
+  };
+  const p = await api(h, '/sequence-policy/preview', 'POST', input);
+  assert.match(p.body, /Hi PVC Shutters Pty Ltd team,/);
+  assert.match(p.subject, /PVC Shutters Pty Ltd/);
+  await assert.rejects(
+    api(h, '/sequence-policy/preview', 'POST', {
+      ...input,
+      template: {
+        ...input.template,
+        body: 'We also supply PVC shutters. Would a brief overview help?',
+      },
+    }),
+    /产品|品牌/,
+  );
+});

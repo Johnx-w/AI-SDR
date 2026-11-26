@@ -29,6 +29,7 @@ type Sample = {
   from: string;
   brand: string;
   product: string;
+  productId: string;
   reason: string;
   selection: string;
   roleEvidence: { quote: string; sourceUrl: string }[];
@@ -112,6 +113,7 @@ export function SequenceEmailComposer({
   const [preview, setPreview] = useState<{ key: string; value: Preview } | null>(null),
     [loading, setLoading] = useState(false),
     [previewError, setPreviewError] = useState('');
+  const [optionsError, setOptionsError] = useState('');
   const [options, setOptions] = useState<Options>({ categories: [], mailboxes: [] });
   const [mailboxId, setMailboxId] = useState('');
   const [productId, setProductId] = useState('');
@@ -150,17 +152,20 @@ export function SequenceEmailComposer({
       if (!signal?.aborted && id === sampleRequest.current) setSampling(false);
     }
   }
+  async function loadOptions(signal?: AbortSignal) {
+    setOptionsError('');
+    try {
+      const data = await outreachApi<Options>('/sequence-policy/preview-options', { signal });
+      if (signal?.aborted) return;
+      setOptions(data);
+      setMailboxId(data.mailboxes[0]?.id ?? '');
+    } catch (e) {
+      if (!signal?.aborted) setOptionsError(errorText(e));
+    }
+  }
   useEffect(() => {
     const controller = new AbortController();
-    outreachApi<Options>('/sequence-policy/preview-options', { signal: controller.signal })
-      .then((data) => {
-        if (controller.signal.aborted) return;
-        setOptions(data);
-        setMailboxId(data.mailboxes[0]?.id ?? '');
-      })
-      .catch((e) => {
-        if (!controller.signal.aborted) setSampleError(errorText(e));
-      });
+    void loadOptions(controller.signal);
     return () => controller.abort();
   }, []);
   useEffect(() => {
@@ -182,12 +187,15 @@ export function SequenceEmailComposer({
           ...previewInput,
           category: customer,
           mailboxId,
-          productId,
+          productId: productId || representative?.productId,
           sampleId: representative?.id,
           template,
         }),
       });
-      if (id === previewRequest.current) setPreview({ key: previewKey, value });
+      if (id === previewRequest.current) {
+        setRepresentative({ ...value.sample, demo: representative?.demo });
+        setPreview({ key: previewKey, value });
+      }
     } catch (e) {
       if (id === previewRequest.current) {
         setPreview(null);
@@ -212,7 +220,24 @@ export function SequenceEmailComposer({
     }
   }
   const selected = template.body.slice(selection.start, selection.end);
-  const requestKey = JSON.stringify([panel, template, field, selection, tone, guidelines, signals]);
+  const requestKey = JSON.stringify([
+    stepKey,
+    first,
+    panel,
+    template,
+    field,
+    selection,
+    tone,
+    guidelines,
+    signals,
+  ]);
+  const suggestionRequest = useRef(0);
+  useEffect(() => {
+    suggestionRequest.current++;
+    setWorking(false);
+    setAiError('');
+    setResult(null);
+  }, [requestKey]);
   const suggestion = result?.key === requestKey ? result : null;
   function previewSuggestion(text: string) {
     if (!sample?.variables) return text;
@@ -228,6 +253,7 @@ export function SequenceEmailComposer({
     setResult(null);
   }
   async function suggest() {
+    const id = ++suggestionRequest.current;
     setWorking(true);
     setAiError('');
     try {
@@ -243,11 +269,11 @@ export function SequenceEmailComposer({
           signals,
         }),
       });
-      setResult({ ...v, key: requestKey });
+      if (id === suggestionRequest.current) setResult({ ...v, key: requestKey });
     } catch (e) {
-      setAiError(errorText(e));
+      if (id === suggestionRequest.current) setAiError(errorText(e));
     } finally {
-      setWorking(false);
+      if (id === suggestionRequest.current) setWorking(false);
     }
   }
   function insert(
@@ -409,6 +435,14 @@ export function SequenceEmailComposer({
             </button>
           )}
         </header>
+        {optionsError && (
+          <p role="alert">
+            {optionsError}{' '}
+            <button type="button" onClick={() => void loadOptions()}>
+              重新加载预览选项
+            </button>
+          </p>
+        )}
         <label>
           发件邮箱
           <select

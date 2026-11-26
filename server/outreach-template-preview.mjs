@@ -8,7 +8,11 @@ import {
   outreachProductScope,
   eligibleOutreachFacts,
 } from './outreach-content.mjs';
-import { generateFollowUp, followUpWritingPolicy } from './outreach-follow-ups.mjs';
+import {
+  generateFollowUp,
+  followUpWritingPolicy,
+  checkOutreachScope,
+} from './outreach-follow-ups.mjs';
 import { sequencePolicy, writingInstruction } from './outreach-sequence-policy.mjs';
 import {
   normalizeWritingOptions,
@@ -51,6 +55,15 @@ export function previewOptions(service) {
 }
 
 async function previewContext(service, input) {
+  if (
+    !input ||
+    typeof input !== 'object' ||
+    ['category', 'mailboxId', 'productId', 'sampleId', 'after'].some(
+      (key) =>
+        input[key] !== undefined && (typeof input[key] !== 'string' || input[key].length > 300),
+    )
+  )
+    throw fail('预览范围格式无效', 400);
   if (!categories.some((c) => c.value === input.category)) throw fail('请选择现有客户类别', 400);
   const mailbox = service.mailboxes.get(input.mailboxId);
   if (!mailbox) throw fail('请选择发件邮箱', 400);
@@ -185,6 +198,25 @@ export async function previewOutreachTemplate(service, input) {
   const firstTemplate = firstTouch
     ? template
     : normalizeTemplate(input.firstTemplate ?? policy.firstTemplate, true);
+  const priorSteps = firstTouch ? [] : (input.priorSteps ?? policy.steps);
+  if (
+    !Array.isArray(priorSteps) ||
+    priorSteps.length > 12 ||
+    priorSteps.some((s) => !s || !Number.isInteger(s.day) || s.day < 1 || s.day > 365) ||
+    new Set(priorSteps.map((s) => s.day)).size !== priorSteps.length
+  )
+    throw fail('跟进上下文无效', 400);
+  const prior = priorSteps
+    .filter((s) => s.day < input.day)
+    .sort((a, b) => a.day - b.day)
+    .map((s) => ({
+      ...s,
+      template: normalizeTemplate(s.template, false),
+      instruction: followWritingRequirement(
+        writingInstruction(s.instruction, !!s.template || !!(s.writing?.angle || s.writing?.reply)),
+        normalizeWritingOptions(s.writing),
+      ),
+    }));
   const draft = await service.generatorClient().generate({
     candidate,
     mailbox,
@@ -201,6 +233,12 @@ export async function previewOutreachTemplate(service, input) {
     subject: draft.subject,
     bodyText: draft.bodyText + '\n\n' + signature,
   };
+  checkOutreachScope(
+    draft.subject + '\n' + draft.bodyText,
+    mailbox,
+    service,
+    candidate.companyName,
+  );
   const metadata = {
     sample: sampleDetails(context, input.category),
     rules: {
@@ -229,14 +267,9 @@ export async function previewOutreachTemplate(service, input) {
       body: first.bodyText,
     };
   const history = [];
-  const priorSteps = input.priorSteps ?? policy.steps;
-  if (!Array.isArray(priorSteps) || priorSteps.length > 12) throw fail('跟进上下文无效', 400);
-  const prior = priorSteps
-    .filter((s) => Number.isInteger(s.day) && s.day < input.day)
-    .sort((a, b) => a.day - b.day);
   const generate = service.generator?.generateFollowUp || generateFollowUp;
-  const follow = async (step, day, instruction, template) =>
-    generate({
+  const follow = async (step, day, instruction, template) => {
+    const result = await generate({
       env: service.getEnv(),
       fetchImpl: service.fetchImpl,
       first,
@@ -251,16 +284,16 @@ export async function previewOutreachTemplate(service, input) {
       history,
       now: service.now(),
     });
-  for (const [index, s] of prior.entries()) {
-    const body = await follow(
-      index + 1,
-      s.day,
-      followWritingRequirement(
-        writingInstruction(s.instruction, !!s.template || !!s.writing),
-        normalizeWritingOptions(s.writing),
-      ),
-      normalizeTemplate(s.template, false),
+    checkOutreachScope(
+      typeof result === 'string' ? result : result.body,
+      mailbox,
+      service,
+      candidate.companyName,
     );
+    return result;
+  };
+  for (const [index, s] of prior.entries()) {
+    const body = await follow(index + 1, s.day, s.instruction, s.template);
     history.push({
       direction: 'outbound',
       bodyText: [greeting, typeof body === 'string' ? body : body.body, signature].join('\n\n'),

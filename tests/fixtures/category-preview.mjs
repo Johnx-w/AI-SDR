@@ -1,4 +1,3 @@
-import { DatabaseSync } from 'node:sqlite';
 import { OutreachService } from '../../server/outreach-service.mjs';
 import { LeadLibrary } from '../../server/lead-library.mjs';
 import { createOutreachGenerator } from '../../server/outreach-content.mjs';

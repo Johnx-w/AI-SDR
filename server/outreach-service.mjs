@@ -10,7 +10,7 @@ import {
   outreachMaterialVersion,
   eligibleOutreachFacts,
 } from './outreach-content.mjs';
-import { OutreachFollowUps } from './outreach-follow-ups.mjs';
+import { OutreachFollowUps, checkOutreachScope } from './outreach-follow-ups.mjs';
 import { MailboxTags } from './mailbox-tags.mjs';
 import {
   initializeOutreachBounces,
@@ -1181,6 +1181,12 @@ export class OutreachService {
             campaign: c,
             now: new Date(this.now()),
           });
+          checkOutreachScope(
+            generated.subject + '\n' + generated.bodyText,
+            mailbox,
+            this,
+            candidate.companyName,
+          );
           const current = this.campaign(id);
           if (this.closed) return;
           if (current.revision !== revision || ['paused', 'cancelled'].includes(current.status)) {
