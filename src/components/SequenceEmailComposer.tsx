@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ArrowLeft,
   Braces,
@@ -107,6 +107,22 @@ export function SequenceEmailComposer({
     [field, setField] = useState<'subject' | 'body'>('body');
   const bodyRef = useRef<HTMLTextAreaElement>(null),
     subjectRef = useRef<HTMLInputElement>(null);
+  const pendingCaret = useRef<{
+    stepKey: string;
+    target: 'subject' | 'body';
+    value: string;
+    position: number;
+  } | null>(null);
+  useLayoutEffect(() => {
+    const pending = pendingCaret.current;
+    pendingCaret.current = null;
+    if (!pending || pending.stepKey !== stepKey || template[pending.target] !== pending.value)
+      return;
+    const el = pending.target === 'subject' ? subjectRef.current : bodyRef.current;
+    if (el?.value !== pending.value) return;
+    el.focus();
+    el.setSelectionRange(pending.position, pending.position);
+  }, [stepKey, template]);
   const [result, setResult] = useState<{ key: string; subject: string; text: string } | null>(null);
   const [working, setWorking] = useState(false),
     [aiError, setAiError] = useState('');
@@ -284,15 +300,12 @@ export function SequenceEmailComposer({
     variables = template.variables,
   ) {
     const original = template[target];
+    const value = original.slice(0, start) + text + original.slice(end);
+    pendingCaret.current = { stepKey, target, value, position: start + text.length };
     onChange({
       ...template,
       variables,
-      [target]: original.slice(0, start) + text + original.slice(end),
-    });
-    requestAnimationFrame(() => {
-      const el = target === 'subject' ? subjectRef.current : bodyRef.current;
-      el?.focus();
-      el?.setSelectionRange(start + text.length, start + text.length);
+      [target]: value,
     });
   }
   function putVariable(key: string, custom?: CustomVariable) {

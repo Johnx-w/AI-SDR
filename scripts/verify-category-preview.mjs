@@ -81,6 +81,34 @@ try {
     .locator('.preview-paper article')
     .getByText(/A note for/)
     .waitFor();
+  // Run a deferred insertion caret callback exactly while a later paste is replacing all text.
+  await page.getByLabel('邮件正文模板').fill('Original sentence.');
+  await page
+    .locator('.compose-tools')
+    .getByRole('button', { name: '插入变量', exact: true })
+    .click();
+  await page.evaluate(() => {
+    const original = window.requestAnimationFrame;
+    const frames = [];
+    window.requestAnimationFrame = (callback) => {
+      frames.push(callback);
+      return 0;
+    };
+    document.querySelector('[aria-label="邮件正文模板"]').addEventListener(
+      'beforeinput',
+      () => {
+        window.requestAnimationFrame = original;
+        frames.forEach((callback) => callback(performance.now()));
+      },
+      { once: true },
+    );
+  });
+  await page
+    .locator('.variable-list')
+    .getByRole('button', { name: /客户公司/ })
+    .click();
+  await page.getByLabel('邮件正文模板').fill('Replacement for {{company}}.');
+  assert.equal(await page.getByLabel('邮件正文模板').inputValue(), 'Replacement for {{company}}.');
   await page.setViewportSize({ width: 390, height: 844 });
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   mkdirSync('outputs', { recursive: true });

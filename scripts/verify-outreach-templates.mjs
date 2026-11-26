@@ -174,6 +174,10 @@ try {
     .click();
   assert.ok((await emailBody.inputValue()).includes('{{custom_买家产品}}'));
   await emailBody.fill('{{custom_买家产品}}\n\nA product note for {{company}}. {{ai_question}}');
+  assert.equal(
+    await emailBody.inputValue(),
+    '{{custom_买家产品}}\n\nA product note for {{company}}. {{ai_question}}',
+  );
   await preview();
   await article.getByText(new RegExp(follow.slice(0, -1))).waitFor();
   await button('第 7 天跟进').click();
@@ -189,6 +193,11 @@ try {
   assert.equal((await previewRequest).postDataJSON().step, 1);
   await article.waitFor();
   await button('删除跟进 3').click();
+  await button('第 3 天跟进').click();
+  assert.equal(
+    await emailBody.inputValue(),
+    '{{custom_买家产品}}\n\nA product note for {{company}}. {{ai_question}}',
+  );
   await button('保存序列').click();
   await page.getByText('序列已保存').waitFor();
   await page.reload();
