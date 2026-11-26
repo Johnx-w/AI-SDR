@@ -89,6 +89,17 @@ export function mailVariables({ company, product, brand, subject, body }) {
   };
 }
 
+export function followUpQuestionWarning(body, template = '') {
+  const count = (body.match(/[?？]/gu) || []).length;
+  if (count === 1) return undefined;
+  if (!count) return '跟进信需要一个便于回复的问题。请补一句问句或插入「AI 回复问题」。';
+  const action =
+    template.indexOf('{{ai_body}}') !== template.lastIndexOf('{{ai_body}}')
+      ? '「AI 正文」已包含结尾问题，请删去重复的「AI 正文」。'
+      : '请保留一个最希望对方回答的问题。';
+  return '跟进信中有 ' + count + ' 个问题。' + action;
+}
+
 export function expandTemplate(text, variables) {
   return text.replace(/\{\{([a-zA-Z0-9_\p{Script=Han}]+)\}\}/gu, (_, name) => {
     const value = Object.hasOwn(variables, name) && variables[name];

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { previewOutreachTemplate } from '../server/outreach-template-preview.mjs';
 import { OutreachService } from '../server/outreach-service.mjs';
 import { eligibleOutreachFacts } from '../server/outreach-content.mjs';
 import { saveSequencePolicy } from '../server/outreach-sequence-policy.mjs';
@@ -1450,6 +1451,54 @@ async function followUpHarness(options) {
   h.campaign = c;
   return h;
 }
+test('跟进变量重复时可预览并提示修改，实际发送仍要求只有一个问题', async (t) => {
+  const template = { subject: '', body: '{{ai_opener}}{{ai_body}}{{ai_body}}' };
+  const instruction = 'Would a product card help?';
+  const h = await followUpHarness({
+    policy: { name: '跟进预览', steps: [{ day: 3, instruction, template }] },
+  });
+  t.after(() => h.service.close());
+  delete h.service.generator.generateFollowUp;
+  h.service.getEnv = () => ({
+    RESEARCH_MODEL_PROVIDER: 'openai_compatible',
+    RESEARCH_MODEL_BASE_URL: 'https://test.invalid/v1',
+    RESEARCH_MODEL_API_KEY: 'fixture',
+    RESEARCH_MODEL_MODEL: 'fixture',
+  });
+  const draft = 'Here is a product update. ' + instruction;
+  h.service.fetchImpl = async () =>
+    Response.json({
+      choices: [{ message: { content: JSON.stringify({ body_text: draft }) } }],
+    });
+  const input = { step: 1, day: 3, template, instruction };
+  for (const [customer, company] of [
+    ['dealer', 'Example Dealer'],
+    ['workshop', 'Example Workshop'],
+  ]) {
+    const sample = await previewOutreachTemplate(h.service, { ...input, customer });
+    assert.ok(
+      sample.body.startsWith(
+        'Hi ' + company + ' team,\n\nHere is a product update.' + draft + draft,
+      ),
+    );
+    assert.match(sample.warning, /2 个问题/);
+    const corrected = await previewOutreachTemplate(h.service, {
+      ...input,
+      customer,
+      template: { subject: '', body: '{{company}} {{ai_question}}' },
+    });
+    assert.ok(corrected.body.includes(company + ' ' + instruction));
+    assert.equal(corrected.warning, undefined);
+  }
+  await assert.rejects(previewOutreachTemplate(h.service, { ...input, customer: '' }), {
+    status: 400,
+  });
+  const item = h.service.followUps.pending()[0];
+  h.state.clock = Date.parse(item.dueAt);
+  await assert.rejects(h.service.followUps.dispatch(item, h.boxes[0]), /2 个问题/);
+  assert.equal(h.deliveries.length, 1);
+});
+
 function addResponse(
   h,
   {

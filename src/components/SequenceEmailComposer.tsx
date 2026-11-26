@@ -14,6 +14,7 @@ import {
 import { outreachApi } from '../outreachApi';
 import {
   expandTemplate,
+  followUpQuestionWarning,
   normalizeTemplate,
   variableLabels,
   type EmailTemplate,
@@ -25,6 +26,7 @@ type Contact = { id: string; company: string; email: string };
 type Preview = {
   subject: string;
   body: string;
+  warning?: string;
   greeting: string;
   signature: string;
   to: string;
@@ -132,7 +134,8 @@ export function SequenceEmailComposer({
   const sample = preview?.key === previewKey ? preview.value : null;
   let subject = '',
     body = '',
-    expansionError = '';
+    expansionError = '',
+    warning = sample?.warning;
   if (sample) {
     try {
       normalizeTemplate(template, first);
@@ -140,11 +143,11 @@ export function SequenceEmailComposer({
         first && sample.variables
           ? expandTemplate(template.subject, sample.variables)
           : sample.subject;
-      body = sample.variables
-        ? [sample.greeting, expandTemplate(template.body, sample.variables), sample.signature].join(
-            '\n\n',
-          )
-        : sample.body;
+      if (sample.variables) {
+        const text = expandTemplate(template.body, sample.variables);
+        warning = first ? undefined : followUpQuestionWarning(text, template.body);
+        body = [sample.greeting, text, sample.signature].join('\n\n');
+      } else body = sample.body;
     } catch (e) {
       expansionError = errorText(e);
     }
@@ -393,6 +396,7 @@ export function SequenceEmailComposer({
           <RefreshCw size={13} />
           {loading ? '生成中…' : sample ? '刷新预览' : '生成预览'}
         </button>
+        {warning && !expansionError && <p role="status">{warning}</p>}
         <div className="preview-paper">
           {sample && !expansionError ? (
             <article>

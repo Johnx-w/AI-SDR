@@ -166,7 +166,7 @@ export async function previewOutreachTemplate(service, input) {
     product,
     campaign,
     template,
-    includeVariables: true,
+    previewOnly: true,
     history: stored
       ? service.db
           .prepare(
@@ -181,6 +181,7 @@ export async function previewOutreachTemplate(service, input) {
   const text = typeof body === 'string' ? body : body.body;
   return {
     variables: body.variables,
+    warning: body.warning,
     greeting,
     signature,
     to: candidate.to,
