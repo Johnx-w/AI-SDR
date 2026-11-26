@@ -253,6 +253,22 @@ export async function parseWorkbook(bytes, options = {}) {
     }
     for (const [row, items] of rowItems)
       if (items.size === 1 && !sheetOwners.has(row)) sheetOwners.set(row, [...items][0]);
+    if (structured && layout.kind === 'quote') {
+      const column = layout.headers.indexOf(layout.fields.photo);
+      const counts = new Map();
+      for (const [, , item] of rows.slice(start)) {
+        const key = item.toLowerCase();
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+      owners.set(
+        sheet,
+        new Map(
+          [...sheetOwners]
+            .filter(([, item]) => column >= 0 && counts.get(item.toLowerCase()) === 1)
+            .map(([row, item]) => [row + ',' + column, item]),
+        ),
+      );
+    }
     summary.push({
       name: sheet,
       rows: rows.length - start,

@@ -35,6 +35,19 @@ test('同一Excel入口按工作表呈现、改名复用，原位改价审核后
     .rows[0];
   assert.equal(row.cells[0].value, 'UP-001');
   assert.equal(row.photos.length, 1);
+  const ambiguous = workbookPage(k.db, first.id, first.documentId, {
+    sheet: '供应报价',
+    q: 'UP-002',
+    material: true,
+  });
+  assert.deepEqual(
+    ambiguous.rows.map((r) => [r.cells[0].value, r.photos.length]),
+    [
+      ['UP-002', 0],
+      ['UP-002', 0],
+    ],
+  );
+  assert.ok(doc.extraction.warnings.some((warning) => warning.includes('插图需核对所属产品')));
   const price = row.cells.find((c) => c.field === '参考价格');
   assert.equal(price.ref, 'A3');
   const updated = lib.edit(first.id, {
