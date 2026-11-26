@@ -4,66 +4,25 @@ import { outreachApi } from '../outreachApi';
 import { Modal } from './ui';
 import './sequence-policy.css';
 
+import { SequenceEmailComposer } from './SequenceEmailComposer';
+import {
+  defaultTemplate,
+  normalizeTemplate,
+  type EmailTemplate,
+} from '../domain/sequence-email.mjs';
+import choices from '../domain/mail-writing-options.json';
+type Writing = Partial<Record<keyof typeof choices, string>>;
 interface Policy {
+  firstTemplate?: EmailTemplate;
+  firstWriting?: Writing;
   name: string;
   revision: number;
   firstInstruction: string;
   firstBodyInstruction: string;
-  steps: { day: number; instruction: string }[];
+  steps: { day: number; instruction: string; writing?: Writing; template?: EmailTemplate }[];
 }
 const issue = (error: unknown) =>
   error instanceof Error ? error.message : '读取或保存失败，请重试。';
-
-function TemplatePreview({
-  step,
-  day,
-  instruction,
-  firstBodyInstruction,
-}: {
-  step: number;
-  day?: number;
-  instruction: string;
-  firstBodyInstruction?: string;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const [preview, setPreview] = useState<{ subject: string; body: string } | null>(null);
-  async function generate() {
-    setError('');
-    setBusy(true);
-    try {
-      setPreview(
-        await outreachApi('/sequence-policy/preview', {
-          method: 'POST',
-          body: JSON.stringify({ step, day, instruction, firstBodyInstruction }),
-        }),
-      );
-    } catch (e) {
-      setError(issue(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <div className="template-preview">
-      <button
-        type="button"
-        className="btn secondary"
-        disabled={busy || (step > 0 && !instruction.trim())}
-        onClick={() => void generate()}
-      >
-        {busy ? '正在生成…' : '预览示例邮件'}
-      </button>
-      {error && <p role="alert">{error}</p>}
-      {preview && (
-        <article aria-live="polite">
-          <strong>{preview.subject}</strong>
-          <p>{preview.body}</p>
-        </article>
-      )}
-    </div>
-  );
-}
 
 function PolicyEditor({
   policy,
@@ -74,6 +33,10 @@ function PolicyEditor({
   close: () => void;
   onSave: (next: Policy) => void;
 }) {
+  const [active, setActive] = useState('first');
+  const [customer, setCustomer] = useState('dealer');
+  const [firstTemplate, setFirstTemplate] = useState(policy.firstTemplate ?? defaultTemplate(true));
+  const [firstWriting, setFirstWriting] = useState<Writing>(policy.firstWriting ?? {});
   const [revision, setRevision] = useState(policy.revision);
   const [firstBodyInstruction, setFirstBodyInstruction] = useState(policy.firstBodyInstruction);
   const [firstInstruction, setFirstInstruction] = useState(policy.firstInstruction);
@@ -84,11 +47,19 @@ function PolicyEditor({
   const chronologicalSteps = [...rows].sort((a, b) => Number(a.day) - Number(b.day));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const row = rows.find((r) => r.id === active);
+  const writing = (row ? row.writing : firstWriting) ?? {};
+  const changeRow = (patch: Partial<(typeof rows)[number]>) =>
+    setRows(rows.map((r) => (r.id === active ? { ...r, ...patch } : r)));
+  const n = row ? rows.indexOf(row) + 1 : 0;
   const [conflict, setConflict] = useState(false);
   async function reload() {
     setBusy(true);
     try {
       const current = await outreachApi<Policy>('/sequence-policy');
+      setActive('first');
+      setFirstTemplate(current.firstTemplate ?? defaultTemplate(true));
+      setFirstWriting(current.firstWriting ?? {});
       setName(current.name);
       setFirstInstruction(current.firstInstruction);
       setFirstBodyInstruction(current.firstBodyInstruction);
@@ -104,9 +75,42 @@ function PolicyEditor({
   }
   async function save(event: React.FormEvent) {
     event.preventDefault();
+    try {
+      normalizeTemplate(firstTemplate, true);
+      for (const r of rows) {
+        try {
+          normalizeTemplate(r.template, false);
+        } catch (e) {
+          setActive(r.id);
+          setError(issue(e));
+          return;
+        }
+      }
+    } catch (e) {
+      setActive('first');
+      setError(issue(e));
+      return;
+    }
+    const invalid = rows.find(
+      (r) =>
+        !Number.isInteger(Number(r.day)) ||
+        Number(r.day) < 1 ||
+        Number(r.day) > 365 ||
+        (!r.instruction.trim() &&
+          !r.writing?.angle &&
+          !r.writing?.reply &&
+          !normalizeTemplate(r.template, false)),
+    );
+    if (invalid) {
+      setActive(invalid.id);
+      setError('请填写有效跟进日，并选择写法或填写写作要求。');
+      return;
+    }
     const steps = rows.map((row) => ({
       day: Number(row.day),
       instruction: row.instruction.trim(),
+      writing: row.writing ?? {},
+      template: row.template ?? defaultTemplate(false),
     }));
     if (new Set(steps.map((step) => step.day)).size !== steps.length) {
       setError('同一天只能安排一封跟进信，请修改跟进日。');
@@ -122,6 +126,8 @@ function PolicyEditor({
           revision,
           firstInstruction,
           firstBodyInstruction,
+          firstWriting,
+          firstTemplate,
           steps,
         }),
       });
@@ -140,7 +146,9 @@ function PolicyEditor({
       day = 1;
       while (days.includes(day)) day++;
     }
-    setRows([...rows, { id: crypto.randomUUID(), day: String(day), instruction: '' }]);
+    const id = crypto.randomUUID();
+    setRows([...rows, { id, day: String(day), instruction: '' }]);
+    setActive(id);
   }
   return (
     <Modal
@@ -161,109 +169,138 @@ function PolicyEditor({
               onChange={(e) => setName(e.target.value)}
             />
           </label>
-          <p>跟进日从首封实际发送算起。保存时按天数排序，写作要求会用于生成对应步骤的邮件。</p>
-          {rows.map((row, index) => (
-            <fieldset key={row.id}>
-              <legend>跟进 {index + 1}</legend>
-              <div className="sequence-edit-row">
-                <label>
-                  首封后第几天
-                  <input
-                    aria-label={'跟进 ' + (index + 1) + ' 天数'}
-                    type="number"
-                    min={1}
-                    max={365}
-                    step={1}
-                    required
-                    value={row.day}
-                    onChange={(e) =>
-                      setRows(
-                        rows.map((r) => (r.id === row.id ? { ...r, day: e.target.value } : r)),
-                      )
-                    }
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="icon-button"
-                  aria-label={'删除跟进 ' + (index + 1)}
-                  onClick={() => setRows(rows.filter((r) => r.id !== row.id))}
-                >
-                  <Trash2 size={15} />
-                </button>
-              </div>
+          <nav className="sequence-picker" aria-label="选择邮件">
+            <button type="button" aria-pressed={!row} onClick={() => setActive('first')}>
+              <Mail size={15} />
+              首封开发信
+            </button>
+            {chronologicalSteps.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                aria-pressed={r.id === active}
+                onClick={() => setActive(r.id)}
+              >
+                <Clock3 size={15} />第 {r.day || '…'} 天跟进
+              </button>
+            ))}
+            <button type="button" disabled={rows.length >= 12} onClick={add}>
+              <Plus size={15} />
+              添加步骤
+            </button>
+          </nav>
+
+          {row && (
+            <div className="sequence-edit-row">
               <label>
-                AI 写作要求
-                <textarea
-                  aria-label={'跟进 ' + (index + 1) + ' 写作要求'}
-                  rows={2}
+                首封后第几天
+                <input
+                  type="number"
+                  aria-label={'跟进 ' + n + ' 天数'}
+                  min={1}
+                  max={365}
                   required
-                  maxLength={1200}
-                  value={row.instruction}
-                  placeholder="例如，询问客户是否需要轨道样品。"
-                  onChange={(e) =>
-                    setRows(
-                      rows.map((r) =>
-                        r.id === row.id ? { ...r, instruction: e.target.value } : r,
-                      ),
-                    )
-                  }
+                  value={row.day}
+                  onChange={(e) => changeRow({ day: e.target.value })}
                 />
               </label>
-              <TemplatePreview
-                key={JSON.stringify([row.day, row.instruction, chronologicalSteps.indexOf(row)])}
-                step={chronologicalSteps.indexOf(row) + 1}
-                day={Number(row.day)}
-                instruction={row.instruction}
-              />
-            </fieldset>
-          ))}
-          {!rows.length && <p>当前仅发首封。添加步骤后，未回复的客户可继续收到跟进信。</p>}
-          <button
-            type="button"
-            className="btn secondary"
-            disabled={rows.length >= 12}
-            onClick={add}
-          >
-            <Plus size={15} /> 添加步骤
-          </button>
-          <details className="sequence-first-template">
-            <summary>首封开发信模板</summary>
-            <p>
-              预览使用示例客户 Example Dealer
-              和卷帘产品。正式草稿读取客户及已审核产品事实，由负责邮箱添加称呼和签名，并执行发送限制。
-            </p>
-            <div>
-              <label>
-                首封主题与正文写作要求
-                <textarea
-                  aria-label="首封主题与正文写作要求"
-                  rows={2}
-                  maxLength={1200}
-                  value={firstBodyInstruction}
-                  onChange={(e) => setFirstBodyInstruction(e.target.value)}
-                  placeholder="默认先写一条有依据的客户观察，再介绍品牌和供货产品。"
-                />
-              </label>
-              <label>
-                首封结尾写作要求
-                <textarea
-                  aria-label="首封结尾写作要求"
-                  rows={2}
-                  maxLength={1200}
-                  value={firstInstruction}
-                  onChange={(e) => setFirstInstruction(e.target.value)}
-                  placeholder="默认询问是否需要简短产品介绍。可填写新的写作要求或建议问句。"
-                />
-              </label>
-              <TemplatePreview
-                key={JSON.stringify([firstBodyInstruction, firstInstruction])}
-                firstBodyInstruction={firstBodyInstruction}
-                step={0}
-                instruction={firstInstruction}
-              />
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={'删除跟进 ' + n}
+                onClick={() => {
+                  setRows(rows.filter((r) => r.id !== active));
+                  setActive('first');
+                }}
+              >
+                <Trash2 size={15} />
+              </button>
             </div>
-          </details>
+          )}
+          <SequenceEmailComposer
+            key={active}
+            first={!row}
+            template={row ? (row.template ?? defaultTemplate(false)) : firstTemplate}
+            onChange={(next) => (row ? changeRow({ template: next }) : setFirstTemplate(next))}
+            library={[
+              ...(firstTemplate.variables ?? []),
+              ...rows.flatMap((r) => r.template?.variables ?? []),
+            ]}
+            customer={customer}
+            onCustomer={setCustomer}
+            previewInput={{
+              step: row ? chronologicalSteps.indexOf(row) + 1 : 0,
+              day: row ? Number(row.day) : undefined,
+              instruction: row ? row.instruction : firstInstruction,
+              firstBodyInstruction: row ? undefined : firstBodyInstruction,
+              writing,
+            }}
+            settings={
+              <div className="sequence-fields">
+                {(Object.keys(choices) as (keyof typeof choices)[]).map((k) => (
+                  <label key={k}>
+                    {k === 'angle'
+                      ? row
+                        ? '这次补充什么'
+                        : '首封切入点'
+                      : k === 'reply'
+                        ? '希望客户回什么'
+                        : '邮件口吻'}
+                    <select
+                      value={writing[k] || ''}
+                      onChange={(e) => {
+                        const next = { ...writing, [k]: e.target.value };
+                        if (row) changeRow({ writing: next });
+                        else setFirstWriting(next);
+                      }}
+                    >
+                      <option value="">默认写法</option>
+                      {Object.entries(choices[k]).map(([key, v]) => (
+                        <option key={key} value={key}>
+                          {v[0]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
+                {row ? (
+                  <label>
+                    补充写作要求
+                    <textarea
+                      aria-label={'跟进 ' + n + ' 写作要求'}
+                      rows={2}
+                      maxLength={1200}
+                      value={row.instruction}
+                      onChange={(e) => changeRow({ instruction: e.target.value })}
+                    />
+                  </label>
+                ) : (
+                  <>
+                    <label>
+                      主题与正文要求
+                      <textarea
+                        aria-label="首封主题与正文写作要求"
+                        rows={2}
+                        maxLength={1200}
+                        value={firstBodyInstruction}
+                        onChange={(e) => setFirstBodyInstruction(e.target.value)}
+                      />
+                    </label>
+                    <label>
+                      结尾要求
+                      <textarea
+                        aria-label="首封结尾写作要求"
+                        rows={2}
+                        maxLength={1200}
+                        value={firstInstruction}
+                        onChange={(e) => setFirstInstruction(e.target.value)}
+                      />
+                    </label>
+                  </>
+                )}
+              </div>
+            }
+          />
           {error && (
             <div className="outreach-alert error" role="alert">
               {error}
@@ -348,7 +385,9 @@ export function SequencePolicyPanel({ refreshToken }: { refreshToken: number }) 
               <div>
                 <small>起点</small>
                 <strong>首封开发信</strong>
-                <p>负责邮箱发出首封后开始计时。</p>
+                {(policy.firstTemplate || policy.firstBodyInstruction) && (
+                  <p>{policy.firstTemplate?.subject || policy.firstBodyInstruction}</p>
+                )}
               </div>
             </li>
             {policy.steps.map((step, i) => (
@@ -359,7 +398,19 @@ export function SequencePolicyPanel({ refreshToken }: { refreshToken: number }) 
                 <div>
                   <small>首封后第 {step.day} 天</small>
                   <strong>跟进 {i + 1}</strong>
-                  <p>{step.instruction}</p>
+                  <p>
+                    {step.template?.body ||
+                      step.instruction ||
+                      Object.entries(step.writing ?? {})
+                        .map(
+                          ([k, v]) =>
+                            Object.entries(choices[k as keyof typeof choices]).find(
+                              ([key]) => key === v,
+                            )?.[1][0],
+                        )
+                        .filter(Boolean)
+                        .join(' · ')}
+                  </p>
                 </div>
               </li>
             ))}

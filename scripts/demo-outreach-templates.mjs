@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
-import { mkdtempSync } from 'node:fs';
+import { cpSync, mkdtempSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../server/app.mjs';
@@ -13,6 +13,9 @@ import { saveSequencePolicy } from '../server/outreach-sequence-policy.mjs';
 
 let port = Number(process.argv[2] || 14374);
 const dir = mkdtempSync(join(tmpdir(), 'ai-sdr-template-demo-'));
+const demoDist = join(dir, 'dist');
+cpSync(new URL('../dist/', import.meta.url), demoDist, { recursive: true });
+symlinkSync(new URL('../node_modules/', import.meta.url), join(dir, 'node_modules'), 'junction');
 const modelEnv = {
   RESEARCH_MODEL_PROVIDER: 'openai_compatible',
   RESEARCH_MODEL_BASE_URL: 'https://offline.invalid/v1',
@@ -26,10 +29,45 @@ async function model(url, request) {
   assert.equal(String(url), 'https://offline.invalid/v1/chat/completions');
   const { messages } = JSON.parse(request.body);
   const data = JSON.parse(messages[1].content);
+  if (data.mode) {
+    const text =
+      {
+        email: '{{ai_opener}}\n\nAt {{brand}}, we supply {{product}}.\n\n{{ai_question}}',
+        opener: '{{ai_opener}}',
+        ps: 'P.S. {{ai_question}}',
+        rewrite: data.selection.includes('{{') ? data.selection : 'Would a brief overview help?',
+      }[data.mode] || '';
+    return Response.json({
+      choices: [
+        {
+          finish_reason: 'stop',
+          message: {
+            content: JSON.stringify({
+              subject:
+                data.first && ['email', 'subject'].includes(data.mode)
+                  ? '{{product}} for {{company}}'
+                  : '',
+              text,
+            }),
+          },
+        },
+      ],
+    });
+  }
   const requirement = (data.closing_instruction ?? data.writingInstruction ?? '').trim();
+  const explicitQuestion = requirement.split('\n').find((line) => /^[A-Za-z][^?\n]*\?$/.test(line));
   let question;
   if (!requirement) question = intro;
-  else if (/^[A-Za-z][^?\n]*\?$/.test(requirement)) question = requirement;
+  else if (explicitQuestion) question = explicitQuestion;
+  else if (requirement.includes('只问一个采购方式'))
+    question =
+      data.customer?.business === 'manufacturer'
+        ? 'Do you ever source finished units for individual projects?'
+        : follow;
+  else if (requirement.includes('适用性问题'))
+    question = 'Would a finished roller blind fit the installations you handle?';
+  else if (requirement.includes('规格资料'))
+    question = 'Would a product specification sheet be useful for your team?';
   else if (requirement.includes('外部采购')) question = follow;
   else if (requirement.includes('谁负责'))
     question = 'Who manages sourcing for roller blinds on your team?';
@@ -38,10 +76,10 @@ async function model(url, request) {
       status: 422,
     });
   const observation =
-    data.body_instruction ||
-    'I noticed you offer roller blinds as part of the window furnishings available to your customers.';
-  if (data.body_instruction && !/^[A-Z][^?\n]*\.$/.test(observation))
-    throw Object.assign(new Error('离线演示的正文要求可填写一条英文客户观察句。'), { status: 422 });
+    data.body_instruction?.split('\n').find((line) => /^[A-Z][^?\n]*\.$/.test(line)) ||
+    (data.customer?.business === 'manufacturer'
+      ? 'Your workshop assembles roller blinds as part of the window furnishings you make for customers.'
+      : 'I noticed you offer roller blinds as part of the window furnishings available to your customers.');
   const draft = data.customer
     ? {
         subject: 'Roller blinds supply',
@@ -55,6 +93,12 @@ async function model(url, request) {
         source_ids: [data.customer.evidence[0].id],
       }
     : { body_text: 'I wanted to follow up on my note about roller blinds. ' + question };
+  for (const rule of data.personalization_rules || []) {
+    draft[rule.key] =
+      data.customer?.business === 'manufacturer'
+        ? 'Your workshop assembles roller blinds.'
+        : 'Your range includes roller blinds.';
+  }
   return Response.json({
     choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(draft) } }],
   });
@@ -147,6 +191,7 @@ const service = new OutreachService({
   customers: () => leads,
   products: () => [product],
   getEnv: () => modelEnv,
+  fetchImpl: model,
   generator: {
     ...createOutreachGenerator({ env: modelEnv, fetchImpl: model }),
     generateFollowUp: (input) => generateFollowUp({ ...input, fetchImpl: model }),
@@ -273,6 +318,7 @@ const appEnv = {
   BRANDING_CACHE_PATH: join(dir, 'branding'),
 };
 const app = createApp({
+  dist: demoDist,
   env: appEnv,
   fetchImpl: async () => {
     throw new Error('offline demo');
@@ -300,8 +346,7 @@ function summary(plan) {
     '<section><h3>' +
     esc(plan.name) +
     '</h3><a href="' +
-    templates +
-    '&sequenceId=' +
+    '/inbox?tab=campaigns&campaignTab=followups&campaignId=' +
     plan.id +
     '">查看沟通中心执行记录</a>' +
     rows(plan.id)
@@ -354,6 +399,14 @@ const server = createServer(async (req, res) => {
     return;
   }
   try {
+    if (path === '/demo/followups' && req.method === 'GET') {
+      res
+        .writeHead(302, {
+          Location: '/inbox?tab=campaigns&campaignTab=followups&campaignId=' + dayPlan.id,
+        })
+        .end();
+      return;
+    }
     if (path === '/demo' && req.method === 'GET') {
       res.writeHead(302, { Location: templates }).end();
       return;
@@ -404,9 +457,14 @@ const server = createServer(async (req, res) => {
     }
     if (
       !['GET', 'HEAD'].includes(req.method) &&
-      !['/api/v1/outreach/sequence-policy', '/api/v1/outreach/sequence-policy/preview'].includes(
-        path,
-      )
+      !(
+        /^\/api\/v1\/outreach\/campaigns\/[\w-]+\/follow-ups$/.test(path) && req.method === 'POST'
+      ) &&
+      ![
+        '/api/v1/outreach/sequence-policy',
+        '/api/v1/outreach/sequence-policy/preview',
+        '/api/v1/outreach/sequence-policy/assist',
+      ].includes(path)
     ) {
       res.writeHead(403).end('Local template demo');
       return;
