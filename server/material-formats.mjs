@@ -1,12 +1,10 @@
-import { Open } from 'unzipper-esm';
-import { Parser } from 'saxen';
 import { splitMaterialText } from './material-chunks.mjs';
 import {
   checkMaterialSize,
   pagedMaterialTypes,
   videoTypes,
 } from '../src/domain/material-upload.mjs';
-import { workbookType, checkOfficeArchive } from './product-workbooks.mjs';
+import { workbookType } from './product-workbooks.mjs';
 
 export const types = {
   xlsx: workbookType,
@@ -56,49 +54,7 @@ function* textParagraphs(bytes) {
 }
 
 export async function extractText(file) {
-  let paragraphs = [];
-  if (file.contentType === types.docx) {
-    try {
-      checkOfficeArchive(file.bytes);
-      const archive = await Open.buffer(file.bytes);
-      const xml = archive.files.find((entry) => entry.path === 'word/document.xml');
-      if (!xml || archive.files.length > 2000 || xml.uncompressedSize > 8 * 1024 * 1024)
-        throw fail('Word 文档结构无效或过大');
-      const buffers = [];
-      let size = 0;
-      for await (const part of xml.stream()) {
-        size += part.length;
-        if (size > 8 * 1024 * 1024) throw fail('Word 正文过大');
-        buffers.push(part);
-      }
-      const raw = Buffer.concat(buffers).toString('utf8');
-      if (/<!DOCTYPE/i.test(raw)) throw fail('Word 文档结构无效');
-      const parser = new Parser();
-      parser.ns({
-        'http://schemas.openxmlformats.org/wordprocessingml/2006/main': 'w',
-        'http://purl.oclc.org/ooxml/wordprocessingml/main': 'w',
-      });
-      let text = '',
-        inline = false;
-      parser.on('openTag', (tag) => {
-        if (tag === 'w:p') text = '';
-        if (tag === 'w:t') inline = true;
-      });
-      parser.on('text', (value, decode) => {
-        if (inline) text += decode(value);
-      });
-      parser.on('closeTag', (tag) => {
-        if (tag === 'w:t') inline = false;
-        if (tag === 'w:p') paragraphs.push(text);
-      });
-      parser.on('error', (err) => {
-        throw err;
-      });
-      parser.parse(raw);
-    } catch {
-      throw fail('无法读取 DOCX 正文，请检查原件');
-    }
-  } else paragraphs = textParagraphs(file.bytes);
+  const paragraphs = textParagraphs(file.bytes);
   const facts = [];
   let extractedBytes = 0,
     number = 0;

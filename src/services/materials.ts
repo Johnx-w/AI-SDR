@@ -1,4 +1,11 @@
-export type ParseMode = 'rich_layout_recognition' | 'text_recognition' | 'model_parameters';
+import type { Layout } from '../domain/workbook-layout.mjs';
+export type WorkbookMapping = Pick<Layout, 'kind' | 'fields'>;
+export type ParseMode =
+  | 'rich_layout_recognition'
+  | 'text_recognition'
+  | 'model_parameters'
+  | 'quote_catalog'
+  | 'asset_only';
 import { checkMaterialSize, materialPartBytes } from '../domain/material-upload.mjs';
 
 export const materialFormats = [
@@ -56,6 +63,14 @@ export type ModelParameter = {
   box?: number[];
   upstream?: { documentId: string; file: string; page: number };
 };
+export type ProductField = {
+  item: string;
+  field: string;
+  value: string;
+  ref: string;
+  sheet?: string;
+  ownerRef?: string;
+};
 export type StoredDocument = {
   referencePages?: number;
   id: string;
@@ -67,10 +82,19 @@ export type StoredDocument = {
   createdAt: string;
   extraction: null | {
     photoCount?: number;
+    productFields?: ProductField[];
     parameters?: ModelParameter[];
     facts: { text: string; page: number; location: string }[];
     warnings: string[];
-    sheets?: { name: string; rows: number }[];
+    sheets?: {
+      name: string;
+      rows: number;
+      kind?: Layout['kind'];
+      fields?: Layout['fields'];
+      headers?: string[];
+    }[];
+    terms?: string[];
+    figures?: { label: string; source: string; index: number }[];
     model: string;
     pageCount?: number;
     mode?: ParseMode;
@@ -139,7 +163,14 @@ export const sendJson = <T>(path: string, method: string, body: unknown) =>
   });
 export async function uploadMaterial(
   file: File,
-  options: { site?: string; category?: string; id?: string; version?: number; mode?: ParseMode },
+  options: {
+    site?: string;
+    category?: string;
+    id?: string;
+    version?: number;
+    mappings?: Record<string, WorkbookMapping>;
+    mode?: ParseMode;
+  },
   key: string,
   onPage?: ExtractionProgress,
 ) {
@@ -147,19 +178,31 @@ export async function uploadMaterial(
   const q = new URLSearchParams({ name: file.name });
   const paged = /\.(?:pdf|docx|pptx)$/iu.test(file.name);
   const structured =
-    options.mode === 'model_parameters' && !/\.(?:webm|mp4|mov)$/iu.test(file.name);
+    (options.mode === 'model_parameters' || options.mode === 'quote_catalog') &&
+    !/\.(?:webm|mp4|mov)$/iu.test(file.name);
   const media = /\.(?:png|jpe?g|webp|gif|mp4|mov|webm)$/iu.test(file.name);
   if (
-    (paged || structured || (media && options.mode === 'rich_layout_recognition')) &&
+    (paged ||
+      structured ||
+      (media && ['rich_layout_recognition', 'asset_only'].includes(options.mode ?? ''))) &&
     options.mode
   )
     q.set('mode', options.mode);
+  if (options.mappings) q.set('mappings', JSON.stringify(options.mappings));
   if (options.site) q.set('site', options.site);
   if (options.category) q.set('category', options.category);
   if (options.version) q.set('version', String(options.version));
   const path = options.id ? '/' + options.id + '/versions' : '';
   type Result = { id: string; documentId: string; warning: string; reused: boolean };
-  return uploadBytes<Result>(file, path, q, key, paged || structured || media, onPage);
+  const workbookOrMarkdown = /\.(?:xlsx|md|markdown)$/iu.test(file.name);
+  return uploadBytes<Result>(
+    file,
+    path,
+    q,
+    key,
+    paged || workbookOrMarkdown || structured || media,
+    onPage,
+  );
 }
 async function uploadBytes<Result>(
   file: File,

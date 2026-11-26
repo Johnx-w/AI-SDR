@@ -1,0 +1,2 @@
+./vendor/docling[format-docx,format-pptx,format-xlsx,format-markdown,format-pdf]
+pdfplumber==0.11.11

@@ -1,8 +1,8 @@
 import { PDFiumLibrary } from '@hyzyla/pdfium';
 import sharp from 'sharp';
 import { jpegPreview, photoRows } from './material-pictures.mjs';
-import { officeBlocks } from './parameter-extraction.mjs';
-import { pictureRegions } from './pdf-picture-regions.mjs';
+import { officeBlocks, tableProduct } from './docling-blocks.mjs';
+import { convertDocument } from './docling.mjs';
 import { videoFrames } from './video-frames.mjs';
 import { splitMaterialText } from './material-chunks.mjs';
 import { researchProviderConfig } from './acquisition-config.mjs';
@@ -55,13 +55,10 @@ export async function request(fetchImpl, key, path, options) {
   }
   return body;
 }
-export function uploadBody(file, purpose, expires = false) {
+export function uploadBody(file, purpose) {
   const body = new FormData();
   body.append('purpose', purpose);
-  if (expires) {
-    body.append('expires_after[anchor]', 'created_at');
-    body.append('expires_after[seconds]', '3600');
-  }
+
   body.append('file', new Blob([file.bytes], { type: file.contentType }), file.name);
   return body;
 }
@@ -239,11 +236,11 @@ export async function readVisualAsset(file, { env, fetchImpl = fetch, onPage }) 
   };
 }
 
-async function officePictures(blocks, photos, warnings, fetchImpl, key) {
-  for (const b of blocks.filter((b) => b.imageEntry)) {
+async function officePictures(blocks, photos, warnings, fetchImpl, env) {
+  for (const b of blocks.filter((b) => b.picture)) {
     let image;
     try {
-      image = await jpegPreview(await b.imageEntry.buffer());
+      image = await jpegPreview(Buffer.from(b.image ?? '', 'base64'));
     } catch {
       warnings.push(b.ref + ' · 图片编码无法预览');
       continue;
@@ -254,7 +251,7 @@ async function officePictures(blocks, photos, warnings, fetchImpl, key) {
     }
     let v;
     try {
-      v = await visualRead(fetchImpl, key, imageInput(image), b.page, b.text);
+      v = await visualRead(fetchImpl, officialKey(env), imageInput(image), b.page, b.text);
     } catch {
       warnings.push(b.ref + ' · 视觉识别未完成，请核对原件');
       continue;
@@ -264,59 +261,68 @@ async function officePictures(blocks, photos, warnings, fetchImpl, key) {
   }
 }
 
-export async function readDeepSeekMaterial(file, options) {
-  try {
-    return await readLayout(file, options);
-  } catch (error) {
-    if (
-      !/officedocument/u.test(file.contentType) ||
-      ![200, 400, 415, 422].includes(error.upstreamStatus)
-    )
-      throw error;
-    const blocks = await officeBlocks(file),
-      facts = [],
-      photos = [],
-      warnings = ['版面服务未完成，已按 Office 原文提取。'];
-    let size = 0,
-      pageCount = 1;
-    for (const block of blocks) {
-      pageCount = Math.max(pageCount, block.page);
-      if (block.imageEntry) continue;
-      for (const text of splitMaterialText(block.text)) {
-        const fact = { text, page: block.page, location: block.ref };
-        size += Buffer.byteLength(JSON.stringify(fact));
-        if (size > 4 * 1024 * 1024) throw fail(422, '识别正文过长，请分册导入。');
-        facts.push(fact);
-      }
+export async function readOfficeMaterial(file, options) {
+  const blocks = await officeBlocks(file),
+    facts = [],
+    photos = [],
+    warnings = [];
+  let size = 0,
+    pageCount = 1;
+  for (const block of blocks) {
+    pageCount = Math.max(pageCount, block.page);
+    if (block.picture) continue;
+    for (const text of splitMaterialText(block.text)) {
+      const fact = { text, page: block.page, location: block.ref };
+      size += Buffer.byteLength(JSON.stringify(fact));
+      if (size > 4 * 1024 * 1024) throw fail(422, '识别正文过长，请分册导入。');
+      facts.push(fact);
     }
-    if (materialMode(options.mode) === 'rich_layout_recognition') {
-      const key = officialKey(options.env ?? {});
-      await officePictures(blocks, photos, warnings, options.fetchImpl ?? fetch, key);
-    }
-    if (!facts.length && !photos.length) throw error;
-    return {
-      photos,
-      rows: photoRows(photos),
-      extraction: {
-        model: 'Office XML',
-        mode: materialMode(options.mode),
-        pageCount,
-        facts,
-        photoCount: photos.length,
-        warnings,
-        extractedAt: new Date().toISOString(),
-      },
-    };
   }
+  if (materialMode(options.mode) === 'rich_layout_recognition') {
+    await officePictures(blocks, photos, warnings, options.fetchImpl ?? fetch, options.env ?? {});
+  }
+  if (!facts.length && !photos.length)
+    throw fail(422, '文档没有可引用的文字或已确认归属的图片，请核对原件。');
+  return {
+    photos,
+    rows: photoRows(photos),
+    extraction: {
+      model: 'Docling',
+      productFields: blocks.flatMap((b) => b.productFields ?? []),
+      mode: materialMode(options.mode),
+      pageCount,
+      facts,
+      photoCount: photos.length,
+      warnings,
+      extractedAt: new Date().toISOString(),
+    },
+  };
 }
-async function readLayout(file, { env = {}, fetchImpl = fetch, onPage, mode }) {
+export async function readDeepSeekMaterial(file, { env = {}, fetchImpl = fetch, onPage, mode }) {
   const purpose = materialMode(mode),
-    rich = purpose === 'rich_layout_recognition',
+    rich = purpose === 'rich_layout_recognition';
+  const warnings = [];
+  let key, result, layout;
+  try {
     key = officialKey(env);
-  const result = await request(fetchImpl, key, '/v1/tools/ocr', {
-    method: 'POST',
-    body: uploadBody(file, purpose),
-  });
+    result = await request(fetchImpl, key, '/v1/tools/ocr', {
+      method: 'POST',
+      body: uploadBody(file, purpose),
+    });
+  } catch (error) {
+    if (error.upstreamStatus && error.upstreamStatus < 500 && error.upstreamStatus !== 429)
+      throw error;
+    layout = (await convertDocument(file.bytes, 'pdf')).pages;
+    const pages = Object.values(layout).map((p, index) => ({
+      index,
+      text: p.lines.map(([line]) => line).join('\n'),
+      finish_reason: 'stop',
+    }));
+    if (!pages.some((p) => p.text.trim())) throw error;
+    warnings.push('OCR 未完成，已读取 PDF 原生文字和可定位的表格。扫描页需重试。');
+    result = { purpose, pages, page_count: pages.length };
+    key = null;
+  }
   if (
     result?.purpose !== purpose ||
     !Array.isArray(result.pages) ||
@@ -331,11 +337,10 @@ async function readLayout(file, { env = {}, fetchImpl = fetch, onPage, mode }) {
   )
     throw fail(502, 'DeepSeek 返回的页码或内容不完整，请重试。');
   const facts = [],
-    photos = [],
-    warnings = [];
+    productFields = [],
+    photos = [];
   let library,
     pdf,
-    fileId,
     storedBytes = 0;
   function add(text, page, location) {
     let part = 0;
@@ -349,6 +354,7 @@ async function readLayout(file, { env = {}, fetchImpl = fetch, onPage, mode }) {
   }
   try {
     if (rich && file.contentType === 'application/pdf') {
+      layout ??= (await convertDocument(file.bytes, 'pdf')).pages;
       library = await PDFiumLibrary.init();
       try {
         pdf = await library.loadDocument(file.bytes);
@@ -372,10 +378,23 @@ async function readLayout(file, { env = {}, fetchImpl = fetch, onPage, mode }) {
       if (pdf) {
         const page = pdf.getPage(p.index);
         try {
-          nativeText = page.getText().trim();
-          regions = pictureRegions(page);
+          const original = layout[number];
+          nativeText = original.lines.map(([text]) => text).join('\n');
+          regions = original.regions.slice(0, 150).map((box, id) => ({
+            id,
+            item:
+              original.cells?.[id] &&
+              tableProduct(original.cells[id].headers, original.cells[id].row),
+            box,
+            caption: original.lines
+              .filter(([, y]) => y >= box[1] && y <= box[3])
+              .map(([text]) => text)
+              .join('')
+              .slice(0, 1200),
+          }));
           if (p.finish_reason === 'length' && nativeText) add(nativeText, number, 'PDF 原文');
           if (
+            regions.length ||
             !text ||
             /<[｜|]ref[｜|]>(?:image|chart|table|figure)/iu.test(p.text) ||
             page.objects().some((o) => ['image', 'form', 'path'].includes(o.type))
@@ -399,25 +418,45 @@ async function readLayout(file, { env = {}, fetchImpl = fetch, onPage, mode }) {
         } finally {
           page.close();
         }
-      } else if (rich) {
-        // The rich Office file retains embedded figures. Bind each answer to the OCR page and its text.
-        if (!fileId) {
-          const uploaded = await request(fetchImpl, key, '/files', {
-            method: 'POST',
-            body: uploadBody(file, purpose, true),
-          });
-          if (typeof uploaded.id !== 'string' || !/^file-[\w-]+$/u.test(uploaded.id))
-            throw fail(502, 'DeepSeek 未返回有效的文档编号。');
-          fileId = uploaded.id;
-        }
-        input = { type: 'file', file_id: fileId };
       }
       if (input) {
-        const supplement = await visualRead(fetchImpl, key, input, number, text, regions);
+        let supplement = { facts: [], pictures: [], uncertain: false };
+        if (key) {
+          try {
+            supplement = await visualRead(fetchImpl, key, input, number, text, regions);
+          } catch (error) {
+            if (!nativeText || error.upstreamStatus === 401 || error.upstreamStatus === 403)
+              throw error;
+            warnings.push('第 ' + number + ' 页视觉补读未完成，已保留原文和可定位的产品图。');
+          }
+        }
+        for (const cell of Object.values(layout[number].cells ?? {})) {
+          const item = tableProduct(cell.headers, cell.row);
+          if (item)
+            cell.row.forEach((value, i) => {
+              if (value && cell.headers[i])
+                productFields.push({
+                  item,
+                  field: cell.headers[i],
+                  value,
+                  ref: '第 ' + number + ' 页 · 原生表格',
+                });
+            });
+          if (item)
+            add(
+              cell.headers
+                .map((h, i) => (h && cell.row[i] ? h + ' · ' + cell.row[i] : ''))
+                .filter(Boolean)
+                .join(' | '),
+              number,
+              '原生表格',
+            );
+        }
         if (regions.length && Array.isArray(supplement.pictures))
           supplement.pictures = supplement.pictures.flatMap((pic) => {
             const region = Number.isInteger(pic?.id) ? regions[pic.id] : null;
             return region &&
+              !region.item &&
               typeof pic.item === 'string' &&
               region.caption
                 .toLowerCase()
@@ -426,12 +465,20 @@ async function readLayout(file, { env = {}, fetchImpl = fetch, onPage, mode }) {
               ? [{ ...pic, box: region.box }]
               : [];
           });
+        const native = regions
+          .filter((r) => r.item)
+          .map((r) => ({ item: r.item, box: r.box, uncertain: false }));
+        if (native.length) {
+          supplement.pictures = [...native, ...(supplement.pictures ?? [])];
+        }
         if (pixels)
           await collectPictures(
             photos,
             supplement,
             pixels,
-            text + '\n' + nativeText + '\n' + regions.map((r) => r.caption).join('\n'),
+            [text, nativeText, ...regions.map((r) => r.caption), ...native.map((r) => r.item)].join(
+              '\n',
+            ),
             '第 ' + number + ' 页',
           );
         const supplementalText = pageText(supplement.facts.join('\n'));
@@ -445,26 +492,14 @@ async function readLayout(file, { env = {}, fetchImpl = fetch, onPage, mode }) {
   } finally {
     pdf?.destroy();
     library?.destroy();
-    if (fileId) {
-      try {
-        await request(fetchImpl, key, '/files/' + encodeURIComponent(fileId), { method: 'DELETE' });
-      } catch {
-        warnings.push('DeepSeek 临时文件清理未确认，已设置一小时到期。');
-      }
-    }
-  }
-  if (rich && !pdf && /officedocument/u.test(file.contentType)) {
-    const blocks = await officeBlocks(file);
-    for (const b of blocks.filter((b) => b.text && !b.imageEntry && b.ref.includes(' · 表 ')))
-      add(b.text, b.page, b.ref);
-    await officePictures(blocks, photos, warnings, fetchImpl, key);
   }
   if (!facts.length) throw fail(422, '文档没有可引用的文字或图表内容，请检查原件或更换解析方式。');
   return {
     photos,
     rows: photoRows(photos),
     extraction: {
-      model: 'DeepSeek',
+      productFields,
+      model: key ? (rich ? 'Docling + DeepSeek' : 'DeepSeek') : 'Docling',
       photoCount: photos.length,
       mode: purpose,
       pageCount: result.page_count,

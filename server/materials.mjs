@@ -2,8 +2,11 @@ import { createHash } from 'node:crypto';
 import { mailSite, siteAllowsProduct } from '../src/domain/mail-site.mjs';
 import { isPagedMaterial, pagedMaterialTypes } from '../src/domain/material-upload.mjs';
 import { parameterMode, linkParameter } from './model-parameters.mjs';
+import { sheetLayout } from '../src/domain/workbook-layout.mjs';
+import { workbookType } from './product-workbooks.mjs';
 import { pdfCount } from './parameter-extraction.mjs';
 import { materialMode } from './deepseek-materials.mjs';
+import { quoteMode, carryQuoteEdits } from './quote-catalog.mjs';
 import { materialType, validateFile } from './material-formats.mjs';
 
 const fail = (status, msg) => Object.assign(new Error(msg), { status });
@@ -103,7 +106,7 @@ export class MaterialLibrary {
            WHEN json_extract(d.extraction,'$.model')='manual' THEN 'manual'
            WHEN json_array_length(d.extraction,'$.facts')=0 AND json_type(d.extraction,'$.sheets') IS NULL THEN 'pending'
            ELSE 'ready' END AS extractionStatus,
-      COALESCE(json_array_length(d.extraction,'$.parameters'),json_array_length(d.extraction,'$.facts'),0) AS extractionCount`;
+      COALESCE(json_extract(d.extraction,'$.rowCount'),json_array_length(d.extraction,'$.parameters'),json_array_length(d.extraction,'$.facts'),0) AS extractionCount`;
     const cond = ['documentId IS NOT NULL'],
       args = [];
     if (q) {
@@ -184,6 +187,17 @@ export class MaterialLibrary {
     const all = this.k.documents.list(id);
     const linked = (p.documentIds || []).map((id) => all.find((d) => d.id === id)).filter(Boolean);
     for (const doc of linked) {
+      if (doc.contentType === workbookType && doc.extraction?.model === 'read-excel-file') {
+        for (const sheet of doc.extraction.sheets || []) {
+          if (sheet.kind) continue;
+          const first = this.db
+            .prepare(
+              'SELECT data FROM product_workbook_rows WHERE document_id=? AND sheet=? ORDER BY row_number LIMIT 1',
+            )
+            .get(doc.id, sheet.name);
+          if (first) Object.assign(sheet, sheetLayout(JSON.parse(first.data).map((c) => c.field)));
+        }
+      }
       if (doc.extraction?.parameters)
         doc.extraction.parameters = doc.extraction.parameters.map((c) => linkParameter(c, linked));
     }
@@ -220,6 +234,7 @@ export class MaterialLibrary {
     fetchImpl,
     onPage,
     mode,
+    workbookMappings,
   }) {
     if (typeof key !== 'string' || !/^[\w-]{8,128}$/.test(key))
       throw fail(400, '缺少有效的上传操作编号');
@@ -229,13 +244,31 @@ export class MaterialLibrary {
       const current = this.get(id);
       mode = this.k.documents.list(id).find((d) => d.id === current.documentIds?.[0])?.parseMode;
     }
+    if (mode === quoteMode && !/\.(?:pdf|docx|xlsx|md|markdown)$/iu.test(name))
+      throw fail(
+        400,
+        '图文报价清单支持 PDF、Excel、Word 和 Markdown。图片可选择型号参数或仅作附件。',
+      );
+    if (mode === 'asset_only' && !/^(image|video)\//u.test(contentType))
+      throw fail(400, '仅登记适用于图片和视频。');
     const chosen =
-      mode === parameterMode && !contentType.startsWith('video/')
-        ? parameterMode
-        : isPagedMaterial(contentType) ||
-            (/^(image|video)\//u.test(contentType) && mode === 'rich_layout_recognition')
-          ? materialMode(mode)
-          : undefined;
+      mode === quoteMode
+        ? quoteMode
+        : mode === parameterMode && !contentType.startsWith('video/')
+          ? parameterMode
+          : isPagedMaterial(contentType) ||
+              (/^(image|video)\//u.test(contentType) && mode === 'rich_layout_recognition')
+            ? materialMode(mode)
+            : undefined;
+    if (
+      workbookMappings &&
+      (contentType !== workbookType ||
+        chosen ||
+        typeof workbookMappings !== 'object' ||
+        Array.isArray(workbookMappings) ||
+        JSON.stringify(workbookMappings).length > 6000)
+    )
+      throw fail(400, '工作表映射无效或过长');
     const fingerprint = createHash('sha256')
       .update(
         JSON.stringify([
@@ -244,12 +277,13 @@ export class MaterialLibrary {
           name,
           site,
           category,
+          ...(workbookMappings ? [workbookMappings] : []),
           ...(chosen && chosen !== 'rich_layout_recognition' ? [chosen] : []),
         ]),
       )
       .update(bytes)
       .digest('hex');
-    const file = { name, contentType, bytes, mode: chosen };
+    const file = { name, contentType, bytes, mode: chosen, workbookMappings };
     const findRequest = this.db.prepare(
       'SELECT * FROM material_upload_requests WHERE request_key=?',
     );
@@ -283,18 +317,20 @@ export class MaterialLibrary {
         const digest = createHash('sha256').update(bytes).digest('hex');
         const matches = this.db
           .prepare(
-            "SELECT id,product_id,json_extract(metadata,'$.parseMode') parseMode,json_extract(extraction,'$.model') model FROM product_documents WHERE json_extract(metadata,'$.sha256')=? AND json_extract(metadata,'$.contentType')=? AND json_type(metadata,'$.referencePages') IS NULL ORDER BY rowid",
+            "SELECT id,product_id,json_extract(metadata,'$.parseMode') parseMode,json_extract(extraction,'$.model') model,json_extract(metadata,'$.workbookMappings') mappings FROM product_documents WHERE json_extract(metadata,'$.sha256')=? AND json_extract(metadata,'$.contentType')=? AND json_type(metadata,'$.referencePages') IS NULL ORDER BY rowid",
           )
           .all(digest, contentType);
         for (const d of matches) {
           const p = this.get(d.product_id),
             sites = scoped(p, this.sites);
           if (
+            (d.mappings ?? null) !== (workbookMappings ? JSON.stringify(workbookMappings) : null) ||
             ((chosen === parameterMode) !== (d.parseMode === parameterMode) &&
               !(formats[contentType] === 'Excel' && d.model === 'failed')) ||
             (chosen === 'rich_layout_recognition' &&
               /^(image|video)\//u.test(contentType) &&
               !d.parseMode) ||
+            (chosen === quoteMode) !== (d.parseMode === quoteMode) ||
             !p.documentIds?.includes(d.id) ||
             (site ? !sites.includes(site) : p.sourceUrl || p.brands?.length)
           )
@@ -316,7 +352,11 @@ export class MaterialLibrary {
             ...this.scope(site),
           });
       const document = this.k.documents.store(product.id, file);
-      if ((document.parseMode === parameterMode) !== (chosen === parameterMode))
+      if (
+        JSON.stringify(document.workbookMappings) !== JSON.stringify(workbookMappings) ||
+        (document.parseMode === parameterMode) !== (chosen === parameterMode) ||
+        (document.parseMode === quoteMode) !== (chosen === quoteMode)
+      )
         throw fail(409, '请把原件按新的解析方式导入为独立素材');
       if (
         prepared &&
@@ -324,20 +364,33 @@ export class MaterialLibrary {
           document.extraction.model === 'failed' ||
           (isPagedMaterial(contentType) &&
             !document.extraction.parameters &&
+            !document.extraction.sheets &&
             !document.extraction.facts.length))
       )
         this.k.documents.saveExtraction(document.id, prepared);
       const ids = product.documentIds || [];
       // Historical products may link several independent files. Replace only the primary file.
       const documentIds = [...new Set([document.id, ...ids.slice(1)])];
+      let reviewNote = '';
       if (document.id !== ids[0]) {
+        const carried = carryQuoteEdits(this.db, product, ids[0], document.id);
+        if ((chosen === quoteMode || contentType === workbookType) && id) {
+          const count = (product.cellEdits || []).filter((e) => e.documentId === ids[0]).length;
+          if (count > carried.length)
+            reviewNote =
+              String(count - carried.length) +
+              ' 处上版校对需要重新确认，可在历史版本查看原校对值。';
+        }
         this.k.save(
           {
             ...product,
             documentIds,
             parameterSet: undefined,
             status: 'draft',
-            cellEdits: (product.cellEdits || []).filter((e) => documentIds.includes(e.documentId)),
+            cellEdits: [
+              ...(product.cellEdits || []).filter((e) => documentIds.includes(e.documentId)),
+              ...carried,
+            ],
             sourceFacts: (product.sourceFacts || []).filter((e) =>
               documentIds.includes(e.documentId),
             ),
@@ -348,9 +401,15 @@ export class MaterialLibrary {
       this.db
         .prepare('INSERT INTO material_upload_requests VALUES(?,?,?,?)')
         .run(key, fingerprint, product.id, document.id);
-      return { id: product.id, documentId: document.id, reused: document.id === ids[0] };
+      return {
+        id: product.id,
+        documentId: document.id,
+        reused: document.id === ids[0],
+        reviewNote,
+      };
     });
-    let warning = '';
+    const { reviewNote = '', ...result } = record;
+    let warning = reviewNote;
     try {
       if (!prepared)
         await this.k.documents.extract(record.id, record.documentId, {
@@ -365,7 +424,7 @@ export class MaterialLibrary {
     } catch (e) {
       warning = e.message;
     }
-    return { ...record, warning };
+    return { ...result, warning };
   }
   async attachEvidence(id, { name, bytes, version }) {
     if (materialType(name) !== 'application/pdf') throw fail(400, '请上传来源 PDF');

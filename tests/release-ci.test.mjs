@@ -43,6 +43,7 @@ function commands(t, conclusion = 'success') {
       writeFileSync(join(source, 'scripts', 'release-server.mjs'), '// archived server script');
       writeFileSync(args[args.indexOf('-xf') + 1], 'fixture archive');
     }
+    if (command === 'gh' && args[0] === 'run' && args[1] === 'download') return '';
     if (command === 'gh') {
       const endpoint = args.at(-1);
       if (endpoint.includes('/actions/workflows/ci.yml/runs?'))
