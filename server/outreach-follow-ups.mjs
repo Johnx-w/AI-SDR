@@ -1,4 +1,8 @@
-import { mailVariables, expandTemplate } from '../src/domain/sequence-email.mjs';
+import {
+  mailVariables,
+  expandTemplate,
+  followUpQuestionWarning,
+} from '../src/domain/sequence-email.mjs';
 import {
   addPersonalizedFields,
   personalizedValues,
@@ -86,7 +90,7 @@ export async function generateFollowUp({
   day,
   instruction,
   template,
-  includeVariables = false,
+  previewOnly = false,
   mailbox,
   product,
   campaign,
@@ -158,13 +162,12 @@ export async function generateFollowUp({
   });
   Object.assign(variables, personalizedValues(response, custom));
   const body = template ? expandTemplate(template.body, variables) : draft;
-  assert(
-    typeof body === 'string' &&
-      body.trim() &&
-      body.length <= 3000 &&
-      (body.match(/[?？]/g) || []).length === 1,
-    '追信必须简短且只有一个问题',
-  );
+  if (!body.trim() || body.length > 3000)
+    throw Object.assign(new Error('跟进正文展开后须为 1 至 3000 个字符，请调整模板。'), {
+      status: 422,
+    });
+  const warning = followUpQuestionWarning(body, template?.body);
+  if (!previewOnly && warning) throw Object.assign(new Error(warning), { status: 422 });
   assert(
     !/https?:\/\/|[$€£¥]|\b(?:USD|EUR|MOQ|stock|certif\w*|guarantee\w*|lead[ -]?time|pricing|prices?|discounts?|freight|payment|attached|attachments?)\b/i.test(
       body,
@@ -178,7 +181,7 @@ export async function generateFollowUp({
     )
   )
     throw Object.assign(new Error('追信内容提到了其他品牌，请核对本步写作要求'), { status: 409 });
-  return includeVariables ? { body: body.trim(), variables } : body.trim();
+  return previewOnly ? { body: body.trim(), variables, warning } : body.trim();
 }
 
 export class OutreachFollowUps {

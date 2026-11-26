@@ -312,6 +312,25 @@ console.log(
 // Leave the editor on the workspace schedule after seeding the completed comparisons.
 revision(initialPolicy.firstInstruction, initialPolicy.steps);
 
+if (process.env.SEQUENCE_SCROLL_PROTOTYPE) {
+  saveSequencePolicy(service, {
+    ...service.followUps.policy(),
+    firstTemplate: {
+      subject: '{{product}} supply for {{company}}',
+      body: [
+        '{{ai_opener}}',
+        'At {{brand}}, we supply {{product}}. I wanted to introduce our business in connection with the products your team already works with.',
+        'I appreciate that every business has its own way of selecting products and working with suppliers. A useful first conversation would start with how this category fits into your current range.',
+        'For a team that assembles its own products, the conversation may be about the parts it uses. For a team that supplies finished blinds, the starting point may be a different part of the range.',
+        'That distinction would help us keep a later introduction relevant to your business. It would also give your team a clear starting point for deciding whether to continue the conversation.',
+        'We can keep that first exchange brief and focus on one product category at a time. Your reply can simply describe how your team usually handles roller blinds.',
+        'If another colleague handles this area, you are welcome to pass this note along. I would be glad to continue with the person who is familiar with this part of your business.',
+        'Would a short introduction to our roller blinds be useful to your team?',
+      ].join('\n\n'),
+    },
+  });
+}
+
 const appEnv = {
   PORT: String(port),
   CONNECTIONS_PATH: join(dir, 'connections.json'),

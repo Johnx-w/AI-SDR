@@ -26,7 +26,8 @@
     "benchmark:reply-reads": "node scripts/benchmark-reply-reads.mjs",
     "format": "prettier --write src server scripts tests docs README.md *.json *.ts",
     "format:check": "prettier --check src server scripts tests docs README.md *.json *.ts",
-    "import:price-catalog": "node --env-file-if-exists=.env scripts/import-price-catalog.mjs"
+    "import:price-catalog": "node --env-file-if-exists=.env scripts/import-price-catalog.mjs",
+    "prototype:sequence-scroll": "npm run build && node scripts/prototype-sequence-scroll.mjs"
   },
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "1.1.0",

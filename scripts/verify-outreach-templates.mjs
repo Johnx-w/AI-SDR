@@ -64,6 +64,19 @@ try {
   await article.getByText(/Would a brief product overview/).waitFor();
   const recipient = page.getByLabel('预览联系人');
   const emailBody = page.getByLabel('邮件正文模板');
+  const longBody = Array(18).fill('A product note for {{company}}.').join('\n\n');
+  await emailBody.fill(longBody + '\n\nWould this detail help?');
+  await article.getByText(/Would this detail help/).waitFor();
+  await page.setViewportSize({ width: 1100, height: 713 });
+  const endVisible = await dialogEditor.locator('.sequence-form-body').evaluate((area) => {
+    area.scrollTop = area.scrollHeight;
+    const bottom = area.getBoundingClientRect().bottom;
+    const end = area.querySelector('.preview-paper article p').getBoundingClientRect().bottom;
+    return area.scrollTop > 0 && end <= bottom + 1 && end > area.getBoundingClientRect().top;
+  });
+  assert.ok(endVisible, '长正文的签名应可滚动至弹窗可视范围');
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await emailBody.fill('{{ai_body}}');
   await recipient.selectOption('');
   assert.ok(await button('生成预览').isDisabled());
   const realContact = await recipient
@@ -144,7 +157,14 @@ try {
   await settings();
   await page.getByLabel('这次补充什么').selectOption('installation');
   await page.getByLabel('跟进 1 写作要求').fill(follow);
+  await emailBody.fill('{{ai_opener}}{{ai_body}}{{ai_body}}');
+  await preview();
+  await article.waitFor();
+  await dialogEditor.getByRole('status').filter({ hasText: '2 个问题' }).waitFor();
+  assert.equal((await article.innerText()).split(follow).length - 1, 2);
   await emailBody.fill('A product note for {{company}}. {{ai_question}}');
+  await dialogEditor.getByText(/2 个问题/).waitFor({ state: 'hidden' });
+  await article.getByText(new RegExp(follow.slice(0, -1))).waitFor();
   await emailBody.press('Home');
   await page
     .locator('.compose-tools')
