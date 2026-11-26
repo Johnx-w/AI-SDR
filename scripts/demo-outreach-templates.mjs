@@ -27,9 +27,19 @@ async function model(url, request) {
   const { messages } = JSON.parse(request.body);
   const data = JSON.parse(messages[1].content);
   const requirement = (data.closing_instruction ?? data.writingInstruction ?? '').trim();
+  const explicitQuestion = requirement.split('\n').find((line) => /^[A-Za-z][^?\n]*\?$/.test(line));
   let question;
   if (!requirement) question = intro;
-  else if (/^[A-Za-z][^?\n]*\?$/.test(requirement)) question = requirement;
+  else if (explicitQuestion) question = explicitQuestion;
+  else if (requirement.includes('只问一个采购方式'))
+    question =
+      data.customer?.business === 'manufacturer'
+        ? 'Do you ever source finished units for individual projects?'
+        : follow;
+  else if (requirement.includes('适用性问题'))
+    question = 'Would a finished roller blind fit the installations you handle?';
+  else if (requirement.includes('规格资料'))
+    question = 'Would a product specification sheet be useful for your team?';
   else if (requirement.includes('外部采购')) question = follow;
   else if (requirement.includes('谁负责'))
     question = 'Who manages sourcing for roller blinds on your team?';
@@ -38,10 +48,10 @@ async function model(url, request) {
       status: 422,
     });
   const observation =
-    data.body_instruction ||
-    'I noticed you offer roller blinds as part of the window furnishings available to your customers.';
-  if (data.body_instruction && !/^[A-Z][^?\n]*\.$/.test(observation))
-    throw Object.assign(new Error('离线演示的正文要求可填写一条英文客户观察句。'), { status: 422 });
+    data.body_instruction?.split('\n').find((line) => /^[A-Z][^?\n]*\.$/.test(line)) ||
+    (data.customer?.business === 'manufacturer'
+      ? 'Your workshop assembles roller blinds as part of the window furnishings you make for customers.'
+      : 'I noticed you offer roller blinds as part of the window furnishings available to your customers.');
   const draft = data.customer
     ? {
         subject: 'Roller blinds supply',

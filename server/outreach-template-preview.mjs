@@ -1,6 +1,11 @@
 import { outreachProductScope } from './outreach-content.mjs';
 import { generateFollowUp } from './outreach-follow-ups.mjs';
 import { writingInstruction } from './outreach-sequence-policy.mjs';
+import {
+  normalizeWritingOptions,
+  firstWritingRequirements,
+  followWritingRequirement,
+} from './mail-writing-options.mjs';
 import { renderMailboxSignature } from '../src/domain/mail-signature.mjs';
 
 // Preview uses a fixed example so editing never reads a customer or enrolls a campaign.
@@ -16,7 +21,11 @@ export async function previewOutreachTemplate(service, input) {
       input.day > 365)
   )
     throw Object.assign(new Error('请选择有效的邮件步骤和跟进日'), { status: 400 });
-  const instruction = writingInstruction(input.instruction, firstTouch);
+  const writing = normalizeWritingOptions(input.writing);
+  const instruction = writingInstruction(
+    input.instruction,
+    firstTouch || !!(writing?.angle || writing?.reply),
+  );
   const product = {
     id: 'roller',
     name: '卷帘',
@@ -35,24 +44,32 @@ export async function previewOutreachTemplate(service, input) {
     productIds: [product.id],
   };
   const campaign = { productScopes: [outreachProductScope(product)] };
+  const customer = input.customer ?? 'dealer';
+  if (!['dealer', 'workshop'].includes(customer))
+    throw Object.assign(new Error('请选择有效的示例客户'), { status: 400 });
+  const workshop = customer === 'workshop';
   const candidate = {
-    companyName: 'Example Dealer',
-    customerId: 'example-dealer',
+    companyName: workshop ? 'Example Workshop' : 'Example Dealer',
+    customerId: workshop ? 'example-workshop' : 'example-dealer',
     mailboxId: mailbox.id,
     productId: product.id,
     productVersion: 1,
-    to: 'info@dealer.example',
-    leadSnapshot: { market: 'Australia', type: 'distributor' },
+    to: workshop ? 'buyer@workshop.example' : 'info@dealer.example',
+    leadSnapshot: { market: 'Australia', type: workshop ? 'manufacturer' : 'distributor' },
     evidence: [
       {
         id: 'example-range',
         value: 'roller blinds',
-        quote: 'Our range includes roller blinds.',
-        sourceUrl: 'https://dealer.example/products',
+        quote: workshop
+          ? 'We assemble roller blinds in our own workshop.'
+          : 'Our range includes roller blinds.',
+        sourceUrl: workshop
+          ? 'https://workshop.example/products'
+          : 'https://dealer.example/products',
       },
     ],
   };
-  const greeting = 'Hi Example Dealer team,';
+  const greeting = 'Hi ' + candidate.companyName + ' team,';
   const signature = renderMailboxSignature(mailbox).text;
   if (firstTouch) {
     const draft = await service.generatorClient().generate({
@@ -60,8 +77,11 @@ export async function previewOutreachTemplate(service, input) {
       mailbox,
       product,
       campaign,
-      firstBodyInstruction: writingInstruction(input.firstBodyInstruction ?? '', true),
-      firstInstruction: instruction,
+      ...firstWritingRequirements(
+        writingInstruction(input.firstBodyInstruction ?? '', true),
+        instruction,
+        writing,
+      ),
     });
     return { subject: draft.subject, body: draft.bodyText + '\n\n' + signature };
   }
@@ -70,6 +90,9 @@ export async function previewOutreachTemplate(service, input) {
     companyName: candidate.companyName,
     bodyText:
       greeting +
+      (workshop
+        ? '\n\nYour workshop assembles roller blinds.'
+        : '\n\nYour range includes roller blinds.') +
       '\n\nExample Supply supplies roller blinds. Would a short introduction be useful?\n\n' +
       signature,
   };
@@ -79,7 +102,7 @@ export async function previewOutreachTemplate(service, input) {
     first,
     step: input.step,
     day: input.day,
-    instruction,
+    instruction: followWritingRequirement(instruction, writing),
     mailbox,
     product,
     campaign,

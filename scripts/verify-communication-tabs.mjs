@@ -196,6 +196,7 @@ try {
   await page.reload();
   await rules.getByRole('heading', { name: 'QA 自定义跟进' }).waitFor();
   await button('编辑序列').click();
+  await button('第 11 天跟进').click();
   await button('删除跟进 3').click();
   await button('保存序列').click();
   await rules.getByText('序列已保存').waitFor();

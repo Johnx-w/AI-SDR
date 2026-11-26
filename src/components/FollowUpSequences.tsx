@@ -397,8 +397,7 @@ export function FollowUpSequences({
     <section className="sequence-page">
       <div className="outreach-section-heading">
         <div>
-          <h2>跟进序列</h2>
-          <p>设置未回复客户的跟进节奏和每封邮件的写作要求。</p>
+          <h2>开发信与跟进信</h2>
         </div>
         <Link to="/inbox?tab=campaigns">打开触达计划</Link>
       </div>

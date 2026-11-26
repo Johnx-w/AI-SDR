@@ -1,3 +1,4 @@
+import { normalizeWritingOptions } from './mail-writing-options.mjs';
 const defaults = {
   name: '首封未回复跟进',
   steps: [
@@ -62,19 +63,29 @@ export function saveSequencePolicy(service, input) {
     throw fail(400, '请输入不超过 100 字的策略名称');
   if (!Array.isArray(input.steps) || input.steps.length > 12)
     throw fail(400, '一个策略最多设置 12 个跟进步骤');
-  const steps = input.steps
-    .map((item) => {
-      const day = item?.day;
-      if (!Number.isSafeInteger(day) || day < 1 || day > 365)
-        throw fail(400, '跟进日必须为首封后 1 至 365 的整数天');
-      const instruction = writingInstruction(item.instruction);
-      return { day, instruction };
-    })
-    .sort((a, b) => a.day - b.day);
-  if (new Set(steps.map((item) => item.day)).size !== steps.length)
-    throw fail(400, '同一天只能安排一个跟进步骤');
   return service.transaction(() => {
     const current = sequencePolicy(service.db);
+    const steps = input.steps
+      .map((item) => {
+        const day = item?.day;
+        if (!Number.isSafeInteger(day) || day < 1 || day > 365)
+          throw fail(400, '跟进日必须为首封后 1 至 365 的整数天');
+        const existing = current.steps.find((step) => step.day === day);
+        const writing =
+          item.writing === undefined ? existing?.writing : normalizeWritingOptions(item.writing);
+        const instruction = writingInstruction(
+          item.instruction,
+          !!(writing?.angle || writing?.reply),
+        );
+        return { day, instruction, ...(writing && { writing }) };
+      })
+      .sort((a, b) => a.day - b.day);
+    if (new Set(steps.map((item) => item.day)).size !== steps.length)
+      throw fail(400, '同一天只能安排一个跟进步骤');
+    const firstWriting =
+      input.firstWriting === undefined
+        ? current.firstWriting
+        : normalizeWritingOptions(input.firstWriting);
     const firstInstruction =
       input.firstInstruction === undefined
         ? current.firstInstruction
@@ -84,6 +95,7 @@ export function saveSequencePolicy(service, input) {
         ? current.firstBodyInstruction
         : writingInstruction(input.firstBodyInstruction, true);
     if (
+      JSON.stringify(firstWriting) === JSON.stringify(current.firstWriting) &&
       firstBodyInstruction === current.firstBodyInstruction &&
       firstInstruction === current.firstInstruction &&
       input.revision <= current.revision &&
@@ -94,10 +106,17 @@ export function saveSequencePolicy(service, input) {
     if (input.revision !== current.revision)
       throw fail(409, '其他人已更新跟进策略，请刷新后再保存');
     const revision = current.revision + 1;
+    const policy = {
+      name,
+      firstInstruction,
+      firstBodyInstruction,
+      ...(firstWriting && { firstWriting }),
+      steps,
+    };
     service.db
       .prepare('INSERT INTO outreach_sequence_policies VALUES(?,?)')
-      .run(revision, JSON.stringify({ name, firstInstruction, firstBodyInstruction, steps }));
-    return { revision, name, firstInstruction, firstBodyInstruction, steps };
+      .run(revision, JSON.stringify(policy));
+    return { revision, ...policy };
   });
 }
 

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { followWritingRequirement } from './mail-writing-options.mjs';
 import { createHash } from 'node:crypto';
 import { knownReplyType } from './communication-rounds.mjs';
 import { mailSite, mentionsOtherSite, siteAllowsProduct } from '../src/domain/mail-site.mjs';
@@ -235,7 +236,7 @@ export class OutreachFollowUps {
           "UPDATE outreach_deliveries SET data=json_set(data,'$.sequencePolicyRevision',?) WHERE id=?",
         )
         .run(policy.revision, first.id);
-    for (const [index, { day, instruction }] of policy.steps.entries()) {
+    for (const [index, { day, instruction, writing }] of policy.steps.entries()) {
       const id = 'followup-' + first.id + '-' + (index + 1);
       if (this.get(id)) continue;
       this.put({
@@ -249,7 +250,7 @@ export class OutreachFollowUps {
         to: first.to,
         step: index + 1,
         day,
-        instruction,
+        instruction: followWritingRequirement(instruction, writing),
         policyRevision: policy.revision,
         policyName: policy.name,
         status: 'pending',

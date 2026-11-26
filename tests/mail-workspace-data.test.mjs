@@ -237,3 +237,38 @@ test('首封模板经保存后可读回，旧客户端编辑跟进时保留首�
   });
   assert.equal(legacyEdit.firstInstruction, firstInstruction);
 });
+
+test('首封和各跟进独立保存写法，旧格式更新保留选择，显式清空恢复默认', async (t) => {
+  const { call } = api(t);
+  const base = await call('/sequence-policy');
+  const input = {
+    ...base,
+    firstWriting: { tone: 'warm' },
+    steps: [
+      { day: 3, instruction: '', writing: { angle: 'installation' } },
+      { day: 8, instruction: '确认采购方式', writing: { reply: 'sourcing' } },
+      { day: 10, instruction: '确认是否方便联系' },
+    ],
+  };
+  const saved = await call('/sequence-policy', 'PUT', input);
+  assert.deepEqual((await call('/sequence-policy')).steps, input.steps);
+  assert.deepEqual(saved.firstWriting, input.firstWriting);
+  const oldClient = await call('/sequence-policy', 'PUT', {
+    revision: saved.revision,
+    name: '新版',
+    steps: input.steps.map(({ day, instruction }) => ({ day, instruction })),
+  });
+  assert.deepEqual(oldClient.steps, saved.steps);
+  await assert.rejects(
+    call('/sequence-policy', 'PUT', { ...oldClient, firstWriting: { tone: 'unrecognized' } }),
+    { status: 400 },
+  );
+  const cleared = await call('/sequence-policy', 'PUT', {
+    ...oldClient,
+    firstWriting: {},
+    steps: oldClient.steps.map((s, i) => (i === 1 ? { ...s, writing: {} } : s)),
+  });
+  assert.equal(cleared.firstWriting, undefined);
+  assert.equal(cleared.steps[1].writing, undefined);
+  assert.deepEqual(cleared.steps[0], saved.steps[0]);
+});
