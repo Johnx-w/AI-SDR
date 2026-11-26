@@ -165,6 +165,24 @@ test('没有事实出处时，搜索标签和主营产品摘要不能单独触�
   assert.equal(result.blocked[0].reasonCode, 'product_match_unconfirmed');
 });
 
+test('旧B级档案不能用工业快门或已判定为其他用途的证据匹配首发', () => {
+  const input = fixture();
+  const product = input.products[0];
+  product.englishName = 'shutters';
+  product.name = '百叶窗';
+  input.campaign.productScopes = [outreachProductScope(product)];
+  const fact = input.leads[0].facts[1];
+  fact.value = 'beam shutters';
+  fact.quote = 'We manufacture beam shutters for lasers. Our office has roller blinds.';
+  assert.equal(selectOutreachCandidates(input).eligible.length, 0);
+  fact.value = 'PVC shutters';
+  fact.quote = 'Our range includes PVC shutters.';
+  fact.window_use = 'other';
+  assert.equal(selectOutreachCandidates(input).eligible.length, 0);
+  fact.window_use = 'window_covering';
+  assert.equal(selectOutreachCandidates(input).eligible.length, 1);
+});
+
 test('成品卷帘的用料描述不应被误判为只经营材料配件', () => {
   const input = fixture();
   Object.assign(input.products[0], {

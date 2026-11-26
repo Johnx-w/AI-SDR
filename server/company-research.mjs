@@ -1,6 +1,11 @@
 import { extractContacts } from './contact-extractor.mjs';
 import { normalizePhoneLines, selectBusinessPhones } from './phone-format.mjs';
-import { businessProductRelation, countryMatches, windowProductDirections } from './relevance.mjs';
+import {
+  businessProductRelation,
+  countryMatches,
+  supportsWindowUse,
+  windowProductDirections,
+} from './relevance.mjs';
 import { customerEligibility } from './customer-eligibility.mjs';
 import acquisition from '../src/data/acquisition.json' with { type: 'json' };
 import { isAllProductScope } from '../src/domain/acquisition-products.mjs';
@@ -36,6 +41,7 @@ customer_type 只选一种主要经营角色：manufacturer=工厂，contractor=
 demand_products 只提取企业自身明确公开的采购、求购、寻找供应商/生产商等需求，附逐字原文和来源。产品目录、销售介绍、面向访客的“looking for blinds?”或询价表单均不是企业采购需求；不得把 products、主营产品或 target.product 复制为 demand_products。没有明确采购依据必须返回空数组。
 main_product_preference 用一两句中文概括网站主营产品/产品线侧重，是分析而非实际采购偏好。必须基于产品介绍证据，禁止采购量、预算、周期、意向、决策人等推测。不得重复搜索目标当成主营产品。区分 zip screens、Venetian blinds、plantation shutters、roller shutters。如最新可见正文明确说不经营某产品，应剔除该产品；不可沿用旧记录或旧 JSON-LD 的过时产品。
 address 只能是企业实际办公/门店/工厂地址；服务城市不可冒充公司所在地。可将明确邮政地址标准化，如 TX 75006 对应美国；不能仅凭城市名或电话区号推国家。service_areas 只包括明确服务覆盖地区。不得输出邮箱/电话/社媒，由独立提取器负责。不得自行生成用户评级。` +
+          '\n逐项判断 products、manufactured_products、demand_products 的 window_use：window_covering（官网原文证明是建筑窗饰、遮阳或其专用件），other（有明确其他用途），unknown（无法辨明）。保留完整品名并引用能区分用途的原文；不能用搜索词、公司名或另一条产品线证明用途。' +
           assessmentInstructions +
           '\n' +
           scopeInstructions +
@@ -292,6 +298,7 @@ export function parseCompanyResearch(response, page, target = {}) {
   const recovered = [];
   if (company_identity.name && company_identity.status !== 'identity_conflict') {
     for (const fact of facts) {
+      if (fact.window_use && fact.window_use !== 'window_covering') continue;
       for (const quote of statements.get(fact)) {
         if (quote.length > 600) continue;
         const start = quote.match(supplyStart) || quote.match(supplyDescription);
@@ -409,7 +416,18 @@ export function parseCompanyResearch(response, page, target = {}) {
   // to the search target, and be located in the target market when evidence exists.
   // Explicit, source-verified procurement can establish component demand even
   // when a finished-goods factory does not sell those components itself.
-  const product_relation = businessProductRelation([...products, ...demand_products], target);
+  const catalogFacts = facts.filter(
+    (f) =>
+      (f.field === 'products' ||
+        (f.field === 'demand_products' && demand_products.includes(f.value))) &&
+      typeof f.value === 'string',
+  );
+  const productEvidence = catalogFacts.filter(supportsWindowUse);
+  const eligibleProducts = productEvidence.map((f) => f.value);
+  const product_relation =
+    catalogFacts.length && catalogFacts.every((f) => f.window_use === 'other')
+      ? { status: 'not_matched', kind: null }
+      : businessProductRelation(eligibleProducts, target);
   const product_match = product_relation.status;
   const country_match = countryMatches(scalar('actual_country'), target.market_countries);
   const entity_type = scalar('entity_type', 'unknown');
@@ -499,8 +517,8 @@ export function parseCompanyResearch(response, page, target = {}) {
       raw.assessment_opportunities,
       pages,
       target,
-      [...products, ...demand_products],
-      facts.filter((fact) => ['products', 'demand_products'].includes(fact.field)),
+      eligibleProducts,
+      productEvidence,
     ),
     facts,
   };
@@ -518,6 +536,12 @@ const evidenceSchema = (value) => ({
   additionalProperties: false,
 });
 const scalarSchema = (value) => ({ anyOf: [evidenceSchema(value), { type: 'null' }] });
+const productEvidenceSchema = evidenceSchema({ type: 'string' });
+productEvidenceSchema.properties.window_use = {
+  type: 'string',
+  enum: ['window_covering', 'other', 'unknown'],
+};
+productEvidenceSchema.required.push('window_use');
 export const companyResearchSchema = {
   type: 'object',
   properties: {
@@ -538,7 +562,7 @@ export const companyResearchSchema = {
       type: 'string',
       enum: ['local_only', 'beyond_local', 'unknown'],
     }),
-    manufactured_products: { type: 'array', items: evidenceSchema({ type: 'string' }) },
+    manufactured_products: { type: 'array', items: productEvidenceSchema },
     actual_country: scalarSchema({ type: 'string' }),
     customer_type: scalarSchema({
       type: 'string',
@@ -554,7 +578,7 @@ export const companyResearchSchema = {
     audience: scalarSchema({ type: 'string', enum: ['B', 'C', 'BC', 'unknown'] }),
     main_product_preference: scalarSchema({ type: 'string' }),
     industry_profile: scalarSchema({ type: 'string' }),
-    demand_products: { type: 'array', items: evidenceSchema({ type: 'string' }) },
+    demand_products: { type: 'array', items: productEvidenceSchema },
     profile_tags: {
       type: 'array',
       items: evidenceSchema({
@@ -562,7 +586,7 @@ export const companyResearchSchema = {
         enum: ['trade', 'project', 'service', 'manufacturing'],
       }),
     },
-    products: { type: 'array', items: evidenceSchema({ type: 'string' }) },
+    products: { type: 'array', items: productEvidenceSchema },
     service_areas: { type: 'array', items: evidenceSchema({ type: 'string' }) },
     address: scalarSchema({
       type: 'object',

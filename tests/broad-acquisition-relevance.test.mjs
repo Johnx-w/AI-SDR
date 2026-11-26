@@ -17,6 +17,33 @@ const source = 'https://example-window.example/about';
 const evidence = (value, quote) => ({ value, quote, source_url: source });
 const fact = (kind, quote, value = quote) => ({ kind, ...evidence(value, quote) });
 
+test('已核实的其他用途和含义不明的产品对全范围及指定产品均不能提供评级依据', () => {
+  for (const target of [broad, { ...broad, product_scope: 'specific', product: 'roller blinds' }]) {
+    for (const [use, status] of [
+      ['other', 'not_matched'],
+      ['unknown', 'unknown'],
+    ]) {
+      const quote = 'Example Window Co supplies roller blinds for test equipment.';
+      const raw = {
+        company_name: evidence('Example Window Co', quote),
+        entity_type: evidence('business', quote),
+        products: [{ ...evidence('roller blinds', quote), window_use: use }],
+        assessment_opportunities: [
+          { direction: 'finished', product: 'roller blinds', facts: [fact('core_product', quote)] },
+        ],
+      };
+      const research = parseCompanyResearch(
+        { choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(raw) } }] },
+        { source_url: source, research_pages: [{ source_url: source, text: quote }] },
+        target,
+      );
+      assert.equal(research.product_match, status);
+      assert.deepEqual(research.products, ['roller blinds']);
+      assert.deepEqual(assessCompany({ research, target, id: 'test' }).opportunities, []);
+    }
+  }
+});
+
 test('官网首页名称引文的链接斜杠误写可用原文校正，其他站点名称仍不接受', () => {
   const homepage = 'https://www.selectblinds.com/';
   const heading = '# [Select Blinds SelectBlinds](/)';
