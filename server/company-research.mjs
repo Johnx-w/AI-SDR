@@ -60,7 +60,7 @@ address 只能是企业实际办公/门店/工厂地址；服务城市不可冒�
   };
 }
 
-export function parseCompanyResearch(response, page, target = {}) {
+export function readResearchJson(response) {
   const body = response.body || response;
   const responseText = (body.output || [])
     .flatMap((x) => x.content || [])
@@ -73,9 +73,11 @@ export function parseCompanyResearch(response, page, target = {}) {
       ? { finish_reason: 'stop', message: { content: responseText } }
       : null);
   if (choice?.finish_reason !== 'stop') throw new Error('AI 企业研究未完整返回，请重试');
-  const raw = JSON.parse(
-    String(choice.message?.content || '').replace(/^```(?:json)?\s*|```\s*$/g, ''),
-  );
+  return JSON.parse(String(choice.message?.content || '').replace(/^```(?:json)?\s*|```\s*$/g, ''));
+}
+
+export function parseCompanyResearch(response, page, target = {}, approvedSources) {
+  const raw = readResearchJson(response);
   // Each nested value carries its own evidence, avoiding parallel fields drifting apart.
   if (
     !Array.isArray(raw.facts) &&
@@ -351,6 +353,22 @@ export function parseCompanyResearch(response, page, target = {}) {
         ),
     ),
   );
+  if (approvedSources) {
+    facts = facts.map((f) => {
+      if (
+        !['products', 'manufactured_products', 'demand_products'].includes(f.field) ||
+        approvedSources.some(
+          (s) =>
+            s.field === f.field &&
+            s.value === f.value &&
+            s.source_url === f.source_url &&
+            s.quote === f.quote,
+        )
+      )
+        return f;
+      return { ...f, window_use: f.window_use === 'other' ? 'other' : 'unknown' };
+    });
+  }
   const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const supported = (field, value) => facts.some((f) => f.field === field && equal(f.value, value));
   const scalar = (key, fallback = null) => {
@@ -532,6 +550,7 @@ export function parseCompanyResearch(response, page, target = {}) {
       target,
       eligibleProducts,
       productEvidence,
+      Boolean(approvedSources),
     ),
     facts,
   };
