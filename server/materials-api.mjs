@@ -2,14 +2,15 @@ import { listReplyFiles } from './reply-files.mjs';
 import { regionImage } from './parameter-extraction.mjs';
 import { randomUUID } from 'node:crypto';
 import { MaterialLibrary } from './materials.mjs';
-import { materialType } from './material-formats.mjs';
+import { materialType, types } from './material-formats.mjs';
 import {
   isPagedMaterial,
   checkMaterialSize,
   materialPartBytes,
   videoLimitMiB,
 } from '../src/domain/material-upload.mjs';
-import { workbookPage } from './product-workbooks.mjs';
+import { workbookPage, knowledgePage, workbookType } from './product-workbooks.mjs';
+import { quoteMode } from './quote-catalog.mjs';
 const fail = (n, msg) => Object.assign(new Error(msg), { status: n });
 
 // Return promptly through the public proxy while a catalogue is being recognised.
@@ -163,6 +164,8 @@ export async function handleMaterials({
           .all(doc),
       );
     }
+    if (!action && method === 'GET' && typeof q.item === 'string' && typeof q.sheet === 'string')
+      return json(response, 200, { photos: store.forItem(product, doc, q.sheet, q.item, q.row) });
     if (!action && method === 'GET') return json(response, 200, store.list(product, doc, q));
     if (!action && method === 'POST')
       return json(
@@ -190,7 +193,7 @@ export async function handleMaterials({
     throw fail(405, '图片操作不支持此方法');
   }
   const match =
-    /^\/(pk_[a-f0-9]{32})(?:\/(versions|restore|extract|document|evidence)(?:\/(pd_[a-f0-9]{64})(?:\/(rows|region))?)?)?$/.exec(
+    /^\/(pk_[a-f0-9]{32})(?:\/(versions|restore|extract|document|evidence)(?:\/(pd_[a-f0-9]{64})(?:\/(rows|region|figure))?)?)?$/.exec(
       path,
     );
   const [, id, op, docId, rows] = match || [];
@@ -222,10 +225,19 @@ export async function handleMaterials({
       throw fail(400, '素材分段请求无效');
     const upload = await readUpload(request, name, key, url.pathname + url.search, uploads);
     if (!upload.bytes) return json(response, 202, upload);
+    let workbookMappings;
+    if (q.mappings) {
+      try {
+        workbookMappings = JSON.parse(q.mappings);
+      } catch {
+        throw fail(400, '工作表映射无效');
+      }
+    }
     const save = async (onPage) => {
       const data = await library.upload({
         name,
         mode: q.mode,
+        workbookMappings,
         site: q.site || '',
         category: q.category || '',
         version: q.version === undefined ? undefined : Number(q.version),
@@ -241,8 +253,8 @@ export async function handleMaterials({
     };
     if (
       (isPagedMaterial(type) ||
-        q.mode === 'model_parameters' ||
-        q.mode === 'rich_layout_recognition') &&
+        [workbookType, types.md].includes(type) ||
+        ['model_parameters', 'rich_layout_recognition', quoteMode].includes(q.mode)) &&
       respondAsync
     )
       return json(response, 202, processMaterial(jobs, save));
@@ -291,6 +303,19 @@ export async function handleMaterials({
     return json(response, 200, await extract());
   }
   if (id && op === 'document' && docId && method === 'GET') {
+    if (rows === 'figure') {
+      const figure = knowledge.db
+        .prepare(
+          'SELECT f.jpeg FROM product_quote_figures f JOIN product_documents d ON d.id=f.document_id WHERE d.product_id=? AND f.document_id=? AND f.idx=?',
+        )
+        .get(id, docId, q.index ?? -1);
+      if (!figure) throw fail(404, '系列参考图不存在');
+      response.writeHead(200, {
+        'Content-Type': 'image/jpeg',
+        'Cache-Control': 'private, no-store',
+      });
+      return response.end(Buffer.from(figure.jpeg));
+    }
     if (rows === 'region') {
       const doc = knowledge.documents.get(id, docId);
       const candidate =
@@ -308,7 +333,18 @@ export async function handleMaterials({
       });
       return response.end(png);
     }
-    if (rows) return json(response, 200, workbookPage(knowledge.db, id, docId, q));
+    if (rows && q.view === 'knowledge') {
+      const data = library.detail(id, q.revision);
+      const doc = data.documents.find((d) => d.id === docId);
+      if (!doc) throw fail(404, '该版本没有此原件');
+      return json(
+        response,
+        200,
+        knowledgePage(knowledge.db, doc, q.sheet, data.product, q.page, q.q),
+      );
+    }
+    if (rows)
+      return json(response, 200, workbookPage(knowledge.db, id, docId, { ...q, material: true }));
     const meta = knowledge.db
       .prepare('SELECT metadata FROM product_documents WHERE id=? AND product_id=?')
       .get(docId, id);

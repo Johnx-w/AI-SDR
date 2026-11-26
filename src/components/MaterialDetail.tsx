@@ -1,3 +1,4 @@
+import { MaterialModels } from './MaterialModels';
 import { useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft,
@@ -19,7 +20,9 @@ import { MaterialPassages } from './MaterialPassages';
 import { ParameterReview } from './ParameterReview';
 import { lazy, Suspense } from 'react';
 import { WorkbookPhotos } from './WorkbookPhotos';
+import { KnowledgeSheet } from './KnowledgeSheet';
 import { WorkbookPreview } from './WorkbookPreview';
+import { UploadedQuote } from './price-catalog/UploadedQuote';
 import {
   type ParseMode,
   acceptMaterials,
@@ -59,7 +62,7 @@ export function MaterialDocument({
   onClose: () => void;
   onChanged: () => void;
 }) {
-  const [workbookView, setWorkbookView] = useState<'rows' | 'photos'>(
+  const [workbookView, setWorkbookView] = useState<'rows' | 'photos' | 'fields'>(
     showPhotos ? 'photos' : 'rows',
   );
   const upload = useRef<HTMLInputElement>(null);
@@ -108,11 +111,23 @@ export function MaterialDocument({
   const p = data?.product,
     doc = data?.documents.find((d) => d.id === docId),
     active = p?.version === data?.currentVersion;
+  const [sheetName, setSheetName] = useState('');
+  const sheets = doc?.extraction?.sheets || [];
+  const activeSheet = sheets.find((s) => s.name === sheetName) || sheets[0];
+  const automatic = !!activeSheet?.kind;
+  const selectedSheets = automatic ? [activeSheet] : sheets;
+  const showQuote = activeSheet?.kind === 'quote' || doc?.parseMode === 'quote_catalog';
+  const knowledge = activeSheet?.kind === 'knowledge';
   const structured = doc?.parseMode === 'model_parameters';
+  const quote = doc?.parseMode === 'quote_catalog';
   const parameterReview = structured && !(!doc?.extraction?.parameters && doc?.extraction?.sheets);
   const visual =
     !doc?.referencePages &&
     (structured ||
+      quote ||
+      doc?.contentType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+      doc?.contentType === 'text/markdown' ||
+      doc?.contentType === 'text/plain' ||
       isPagedMaterial(doc?.contentType) ||
       doc?.parseMode === 'rich_layout_recognition');
   const storedMode = doc?.extraction?.mode ?? doc?.parseMode ?? 'rich_layout_recognition';
@@ -219,7 +234,27 @@ export function MaterialDocument({
   const writable = active && p?.status !== 'archived' && !busy;
   const original = doc ? sourceUrl(id, doc.id) : '';
   const facts = p?.sourceFacts || [];
+  const modelFields = doc?.extraction?.productFields?.length
+    ? doc.extraction.productFields
+    : (doc?.extraction?.parameters ?? [])
+        .filter((p) => p.item && !p.issue)
+        .map((p) => ({
+          item: p.item,
+          sheet: p.sheet,
+          field: p.field,
+          value: p.value,
+          ref: [p.sheet || (p.page ? '第 ' + p.page + ' 页' : ''), p.ref, p.conditions]
+            .filter(Boolean)
+            .join(' · '),
+        }));
   const reviewFields = { adoptDocumentId: docId, cellEdits: edits, sourceFacts: facts };
+  function savePrice(sheet: string, ref: string, value: string, original: string) {
+    const cellEdits = edits.filter(
+      (e) => e.documentId !== docId || e.sheet !== sheet || e.ref !== ref,
+    );
+    if (value !== original) cellEdits.push({ documentId: docId, sheet, ref, value });
+    return save({ ...reviewFields, cellEdits }, '报价已保存');
+  }
   const incompleteFact = facts.some((f) => !f.text.trim() || !f.location.trim());
   const firstPage = Math.min(initialPage, doc?.extraction?.pageCount || 1);
   const [sourcePage, setSourcePage] = useState(firstPage);
@@ -494,6 +529,15 @@ export function MaterialDocument({
                         </button>
                       )
                     )}
+                    {!!modelFields.length && (
+                      <MaterialModels
+                        key={doc.id + revision}
+                        fields={modelFields}
+                        url={original}
+                        file={doc.name}
+                        pdf={doc.contentType === 'application/pdf'}
+                      />
+                    )}
                     {doc.referencePages ? (
                       <MaterialOriginal doc={doc} url={original} page={sourcePage} />
                     ) : structured && doc.extraction?.parameters ? (
@@ -530,49 +574,95 @@ export function MaterialDocument({
                           doc={doc.id}
                           edits={edits}
                           writable={!!writable && p.documentIds?.[0] === doc.id}
-                          saveCell={(sheet, ref, value, original) => {
-                            const cellEdits = edits.filter(
-                              (e) => e.documentId !== doc.id || e.sheet !== sheet || e.ref !== ref,
-                            );
-                            if (value !== original)
-                              cellEdits.push({ documentId: doc.id, sheet, ref, value });
-                            return save({ ...reviewFields, cellEdits }, '报价已保存');
-                          }}
+                          saveCell={savePrice}
                         />
                       </Suspense>
                     ) : doc.extraction?.sheets ? (
                       <>
+                        {automatic && sheets.length > 1 && (
+                          <label>
+                            工作表
+                            <select
+                              aria-label="切换工作表"
+                              value={activeSheet.name}
+                              onChange={(e) => {
+                                setSheetName(e.target.value);
+                                setWorkbookView('rows');
+                              }}
+                            >
+                              {sheets.map((s) => (
+                                <option key={s.name} value={s.name}>
+                                  {s.name}（{s.rows} 行）
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
                         <div className="photo-controls" aria-label="工作簿视图">
                           <button
                             className="kb-text"
                             aria-pressed={workbookView === 'rows'}
                             onClick={() => setWorkbookView('rows')}
                           >
-                            表格数据
+                            {showQuote ? '图文清单' : knowledge ? '答复规则' : '工作表数据'}
                           </button>
-                          <button
-                            className="kb-text"
-                            aria-pressed={workbookView === 'photos'}
-                            onClick={() => setWorkbookView('photos')}
-                          >
-                            产品图片
-                          </button>
+                          {(showQuote || knowledge) && (
+                            <button
+                              className="kb-text"
+                              aria-pressed={workbookView === 'fields'}
+                              onClick={() => setWorkbookView('fields')}
+                            >
+                              校对字段
+                            </button>
+                          )}
+                          {!knowledge && (
+                            <button
+                              className="kb-text"
+                              aria-pressed={workbookView === 'photos'}
+                              onClick={() => setWorkbookView('photos')}
+                            >
+                              产品图片
+                            </button>
+                          )}
                         </div>
-                        {workbookView === 'photos' ? (
+                        {knowledge && workbookView !== 'fields' ? (
+                          <KnowledgeSheet
+                            key={doc.id + activeSheet.name}
+                            product={id}
+                            doc={doc.id}
+                            sheet={activeSheet.name}
+                            revision={p.version}
+                          />
+                        ) : workbookView === 'photos' ? (
                           <WorkbookPhotos
                             key={doc.id + revision}
                             product={id}
                             doc={doc.id}
-                            sheets={doc.extraction.sheets}
+                            sheets={selectedSheets}
                             writable={!!writable && p.documentIds?.[0] === doc.id}
+                          />
+                        ) : showQuote && workbookView !== 'fields' ? (
+                          <UploadedQuote
+                            key={doc.id + '!' + activeSheet.name}
+                            product={id}
+                            doc={doc.id}
+                            sheets={selectedSheets}
+                            terms={doc.extraction.terms || []}
+                            figures={doc.extraction.figures || []}
+                            edits={edits}
+                            writable={!!writable && p.documentIds?.[0] === doc.id}
+                            onSave={savePrice}
+                            pdf={doc.contentType === 'application/pdf'}
+                            onPage={viewOriginal}
                           />
                         ) : (
                           <>
                             <WorkbookPreview
-                              key={doc.id}
+                              key={doc.id + '!' + activeSheet.name}
                               url={original}
+                              file={doc.name}
                               id={doc.id}
-                              sheets={doc.extraction.sheets}
+                              sheets={selectedSheets}
                               edits={edits}
                               onEdit={changeCell}
                               linked={!!writable}
@@ -631,11 +721,39 @@ export function MaterialDocument({
                         />
                       </details>
                     )}
-                    {doc.extraction?.warnings.map((m, n) => (
-                      <p className="kb-notice" key={n}>
-                        {m}
-                      </p>
-                    ))}
+                    {(quote || automatic) &&
+                    doc.extraction?.sheets &&
+                    doc.extraction.warnings.length ? (
+                      <details className="kb-notice">
+                        <summary>待核对项目（{doc.extraction.warnings.length}）</summary>
+                        <ul>
+                          {doc.extraction.warnings.map((message, i) => {
+                            const page =
+                              doc.contentType === 'application/pdf' &&
+                              /^PDF p\.(\d+)/u.exec(message)?.[1];
+                            return (
+                              <li key={i}>
+                                {message}{' '}
+                                {page && (
+                                  <button
+                                    className="kb-text"
+                                    onClick={() => viewOriginal(Number(page))}
+                                  >
+                                    打开第 {page} 页
+                                  </button>
+                                )}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </details>
+                    ) : (
+                      doc.extraction?.warnings.map((m, n) => (
+                        <p className="kb-notice" key={n}>
+                          {m}
+                        </p>
+                      ))
+                    )}
                   </>
                 ) : (
                   <>
@@ -758,7 +876,7 @@ export function MaterialDocument({
                   <footer className="kb-manage" inert={editingChunk}>
                     {p.status !== 'archived' && visual && (
                       <>
-                        {!structured && isPagedMaterial(doc?.contentType) && (
+                        {!structured && !quote && isPagedMaterial(doc?.contentType) && (
                           <MaterialParseMode
                             generalOnly
                             value={parseMode}
@@ -766,13 +884,13 @@ export function MaterialDocument({
                             disabled={busy || !!ocrDocument}
                           />
                         )}
-                        {visual && doc && (
+                        {visual && doc && !(quote && doc.extraction?.sheets) && (
                           <button
                             type="button"
                             disabled={busy || !!ocrDocument}
                             onClick={() =>
                               void perform(async () => {
-                                setNotice('正在使用 DeepSeek 解析…');
+                                setNotice(quote ? '正在读取报价行与配图…' : '正在解析原文件…');
                                 return materialsRequest(
                                   '/' + id + '/extract/' + doc.id + '?reparse=1&mode=' + parseMode,
                                   { method: 'POST', headers: { Prefer: 'respond-async' } },

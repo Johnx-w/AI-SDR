@@ -610,13 +610,15 @@ export function ProductKnowledgePage() {
                               </div>
                             </td>
                             <td>
-                              {m.parseMode === 'model_parameters'
-                                ? '型号参数'
-                                : m.extractionStatus === 'manual'
-                                  ? '人工录入'
-                                  : m.format === 'Excel'
-                                    ? '表格解析'
-                                    : '分块存储'}
+                              {m.parseMode === 'quote_catalog'
+                                ? '图文报价清单'
+                                : m.parseMode === 'model_parameters'
+                                  ? '型号参数'
+                                  : m.extractionStatus === 'manual'
+                                    ? '人工录入'
+                                    : m.format === 'Excel'
+                                      ? '表格解析'
+                                      : '分块存储'}
                             </td>
                             <td>
                               {m.format === 'Excel' &&
@@ -776,6 +778,12 @@ export function ProductKnowledgePage() {
                 </button>
               </header>
               <MaterialParseMode value={parseMode} onChange={setParseMode} />
+              {parseMode === 'quote_catalog' && (
+                <p>
+                  选择带表头的 PDF、Excel、Word 或 Markdown
+                  报价表。每行放一款产品，把图片放在同一行的图片列。
+                </p>
+              )}
               {parseMode === 'model_parameters' && (
                 <p>系统按表头识别型号和参数。可同时选择表中引用的来源 PDF。</p>
               )}
@@ -798,8 +806,8 @@ export function ProductKnowledgePage() {
                 onChange={(e) => void upload(Array.from(e.target.files || []))}
               />
               <p>
-                文档和图片每份最多 {documentLimitMiB} MiB，视频 {videoLimitMiB} MiB。PDF、DOCX、PPTX
-                由 DeepSeek 解析。图片和视频保留原件。
+                文档和图片每份最多 {documentLimitMiB} MiB，视频 {videoLimitMiB}{' '}
+                MiB。单图选“型号参数”识别图中数据，或选“仅登记图片或视频”。视频按名称、品类和关键词查找。
               </p>
             </dialog>
           )}

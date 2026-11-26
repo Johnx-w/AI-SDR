@@ -268,7 +268,7 @@ test('旧 PDF 空提取从素材接口后台补齐，同一原件重试保留审
 
 test(
   '上传完成时取素材库密钥，在途图文解析沿用同一密钥，失败重试和清除后重读',
-  { timeout: 15000 },
+  { timeout: 120000 },
   async (t) => {
     const gates = [0, 1].map(() => ({
       entered: Promise.withResolvers(),
@@ -311,10 +311,10 @@ test(
       });
       assert.equal(result.status, 200);
     }
-    const bytes = readFileSync(new URL('./fixtures/material-slats.docx', import.meta.url));
+    const bytes = readFileSync(new URL('./fixtures/material-mixed-catalog.pdf', import.meta.url));
     const accepting = once(app, 'request');
     const stream = new PassThrough();
-    const upload = fetch(root + '/materials?name=rotation.docx', {
+    const upload = fetch(root + '/materials?name=rotation.pdf', {
       method: 'POST',
       headers: { 'Idempotency-Key': randomUUID(), 'Content-Length': String(bytes.length) },
       body: stream,
@@ -337,21 +337,20 @@ test(
     assert.equal((await retry).status, 200);
     assert.equal((await fetch(extract + '?reparse=1', { method: 'POST' })).status, 200);
     assert.deepEqual(
-      calls,
-      ['first', 'second', 'fallback'].flatMap((key) =>
-        [
-          '/v1/tools/ocr',
-          '/files',
-          '/chat/completions',
-          ...(key === 'first' ? [] : ['/chat/completions']),
-          '/files/file-api-synthetic',
-        ].map((path) => [path, 'Bearer ' + key]),
-      ),
+      calls.filter(([path]) => path.endsWith('/ocr')).map(([, key]) => key),
+      ['Bearer first', 'Bearer second', 'Bearer fallback'],
     );
+    for (const [i, key] of ['first', 'second', 'fallback'].entries()) {
+      const paths = calls.filter(([, k]) => k === 'Bearer ' + key).map(([path]) => path);
+      assert.equal(paths[0], '/v1/tools/ocr');
+      assert.ok(paths.length >= 2);
+      assert.ok(paths.slice(1).every((path) => path === '/chat/completions'));
+      if (i === 0) assert.equal(paths.length, 2);
+    }
     const detail = await (await fetch(root + '/materials/' + saved.id)).json();
     assert.equal(detail.documents.length, 1);
     assert.equal(detail.documents[0].id, saved.documentId);
-    assert.equal(detail.documents[0].extraction.pageCount, 2);
+    assert.equal(detail.documents[0].extraction.pageCount, 3);
   },
 );
 

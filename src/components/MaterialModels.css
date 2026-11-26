@@ -1,0 +1,59 @@
+.material-models {
+  margin: 12px 0 18px;
+}
+.material-models h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+.model-find {
+  width: 100%;
+  max-width: 22rem;
+  margin-bottom: 8px;
+}
+.model-inline-pictures {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 10px 0 4px;
+}
+.model-inline-pictures figure {
+  margin: 0;
+  flex: 0 0 164px;
+}
+.model-inline-pictures img {
+  display: block;
+  width: 100%;
+  height: 116px;
+  object-fit: contain;
+  background: #fff;
+  border: 1px solid #dfe5ee;
+  border-radius: 7px;
+}
+.model-inline-pictures figcaption,
+.model-photo-status,
+.model-origin,
+.model-properties small {
+  color: #536580;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.model-properties {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr));
+  gap: 8px;
+  margin: 8px 0;
+}
+.model-properties > div {
+  border-top: 1px solid #dfe5ee;
+  padding: 6px 0;
+  min-width: 0;
+}
+.model-properties dt {
+  color: #536580;
+  font-size: 12px;
+}
+.model-properties dd {
+  margin: 3px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

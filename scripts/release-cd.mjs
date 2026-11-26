@@ -26,7 +26,7 @@ async function main() {
   const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
   assert.equal(git('rev-parse', 'HEAD'), revision, '构建源码与通过CI的提交不一致');
   const api = (path) => JSON.parse(execFileSync('gh', ['api', path], { encoding: 'utf8' }));
-  await waitForCI(revision, api);
+  const ci = await waitForCI(revision, api);
   if (api('repos/Johnx-w/AI-SDR/git/ref/heads/main').object.sha !== revision) {
     console.log('跳过已过时的main提交：' + revision);
     return;
@@ -36,6 +36,16 @@ async function main() {
     const archive = join(temporary, 'release.tar');
     execFileSync('git', ['archive', '--format=tar', '--output', archive, revision]);
     execFileSync('tar', ['-rf', archive, 'dist']);
+    execFileSync('gh', [
+      'run',
+      'download',
+      String(ci.id),
+      '-n',
+      'docling-runtime',
+      '-D',
+      temporary,
+    ]);
+    execFileSync('tar', ['-Af', archive, join(temporary, 'docling-runtime.tar')]);
     const bytes = readFileSync(archive);
     const digest = createHash('sha256').update(bytes).digest('hex');
     execFileSync(

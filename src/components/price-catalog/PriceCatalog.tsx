@@ -11,6 +11,7 @@ import {
 import data from './catalog.json';
 import { sourceUrl, sendJson, materialsRequest, type Correction } from '../../services/materials';
 import './catalog.css';
+import { PriceAmount } from './PriceAmount';
 
 const CanEdit = createContext(false);
 const originals = data.products;
@@ -55,60 +56,6 @@ function Specs({ p }: { p: Product }) {
         </div>
       )}
     </dl>
-  );
-}
-function PriceAmount({
-  value,
-  label,
-  commit,
-  notify,
-}: {
-  value: string;
-  label: string;
-  commit: (value: string) => void;
-  notify: (message: string) => void;
-}) {
-  const writable = useContext(CanEdit);
-  const [draft, setDraft] = useState<string | null>(null);
-  return (
-    <input
-      className={value.length > 9 ? 'pc-amount pc-long' : 'pc-amount'}
-      aria-label={label}
-      title={'点击修改 ' + label}
-      type="text"
-      readOnly={!writable}
-      inputMode="decimal"
-      autoComplete="off"
-      spellCheck={false}
-      value={draft ?? value}
-      placeholder="待报价"
-      onFocus={(e) => {
-        setDraft(value);
-        e.currentTarget.select();
-      }}
-      onChange={(e) => setDraft(e.target.value)}
-      onKeyDown={(e) => {
-        if (e.nativeEvent.isComposing) return;
-        if (e.key === 'Escape') {
-          e.currentTarget.value = value;
-          e.currentTarget.blur();
-        }
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          e.currentTarget.blur();
-        }
-      }}
-      onBlur={(e) => {
-        const amount = e.currentTarget.value.trim();
-        setDraft(null);
-        if (amount === value) return;
-        if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(amount) || !Number.isFinite(Number(amount))) {
-          notify('请输入有效的非负金额，已恢复原值');
-          return;
-        }
-        commit(amount);
-      }}
-    />
   );
 }
 
@@ -447,6 +394,7 @@ export function PriceCatalog({
                             <label key={i}>
                               <span>{name}</span>
                               <PriceAmount
+                                writable={writable && !working && assets !== null}
                                 value={value}
                                 label={p.model + ' ' + name + ' 价格'}
                                 commit={(v) => setPrice(p, i, v)}

@@ -1,14 +1,20 @@
-import { markdownMaterial } from './markdown-material.mjs';
+import { interpretProductText } from './material-product-fields.mjs';
 import { WorkbookPhotos } from './workbook-photos.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { isPagedMaterial } from '../src/domain/material-upload.mjs';
-import { readDeepSeekMaterial, readVisualAsset, materialMode } from './deepseek-materials.mjs';
+import {
+  readOfficeMaterial,
+  readDeepSeekMaterial,
+  readVisualAsset,
+  materialMode,
+} from './deepseek-materials.mjs';
 import sharp from 'sharp';
 import { extractParameters } from './parameter-extraction.mjs';
 import { parameterMode, mentionsModel } from './model-parameters.mjs';
 import { materialType, types, validateFile, extractText } from './material-formats.mjs';
 import { platformJson, providerBaseUrl } from './acquisition-config.mjs';
 import { parseWorkbook, workbookType } from './product-workbooks.mjs';
+import { quoteMode, readQuoteCatalog } from './quote-catalog.mjs';
 
 // The product JSON endpoint accepts Base64; the material library uploads original bytes.
 export const MAX_PRODUCT_DOCUMENT_BYTES = 10 * 1024 * 1024;
@@ -110,13 +116,36 @@ function extracted(data, contentType) {
 }
 
 async function documentExtraction(file, options) {
+  const result = await readDocument(file, options);
+  const data = result.extraction;
+  if (
+    options.material &&
+    !data.sheets &&
+    !data.parameters &&
+    data.facts.length &&
+    !data.productFields?.length
+  ) {
+    try {
+      data.productFields = await interpretProductText(
+        data.facts,
+        options.env ?? {},
+        options.fetchImpl ?? fetch,
+      );
+    } catch {
+      data.warnings.push('型号字段辅助识别未完成，可对照原文或重新解析。');
+    }
+  }
+  return result;
+}
+async function readDocument(file, options) {
+  if (options.material && options.mode === quoteMode) return readQuoteCatalog(file);
   if (
     options.material &&
     file.contentType === types.md &&
     options.mode !== parameterMode &&
     /!\[|^\s*\|/mu.test(file.bytes.toString('utf8'))
   )
-    return markdownMaterial(file);
+    return readOfficeMaterial(file, options);
   if (options.material && options.mode === parameterMode) return extractParameters(file, options);
   if (
     options.material &&
@@ -124,6 +153,7 @@ async function documentExtraction(file, options) {
     /^(image|video)\//u.test(file.contentType)
   )
     return readVisualAsset(file, options);
+  if ([types.docx, types.pptx].includes(file.contentType)) return readOfficeMaterial(file, options);
   if (options.material && isPagedMaterial(file.contentType))
     return readDeepSeekMaterial(file, options);
   if (file.contentType.startsWith('image/')) {
@@ -133,7 +163,8 @@ async function documentExtraction(file, options) {
       throw fail(422, '无法读取图片，请检查原件。');
     }
   }
-  if (file.contentType === workbookType) return parseWorkbook(file.bytes, options);
+  if (file.contentType === workbookType)
+    return parseWorkbook(file.bytes, { ...options, mappings: file.workbookMappings });
   const extraction =
     file.contentType.startsWith('video/') || file.contentType.startsWith('image/')
       ? {
@@ -159,6 +190,7 @@ export class ProductDocuments {
     ); CREATE INDEX IF NOT EXISTS product_documents_product ON product_documents(product_id);
     CREATE INDEX IF NOT EXISTS product_documents_sha ON product_documents(json_extract(metadata,'$.sha256'));
     CREATE TABLE IF NOT EXISTS product_parameter_sets(id TEXT PRIMARY KEY, document_id TEXT NOT NULL, data TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS product_quote_figures(document_id TEXT NOT NULL, idx INTEGER NOT NULL, jpeg BLOB NOT NULL, PRIMARY KEY(document_id,idx)) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS product_workbook_photos(
         document_id TEXT NOT NULL, sheet TEXT NOT NULL, item TEXT NOT NULL, source_cell TEXT NOT NULL,
         jpeg BLOB NOT NULL CHECK(length(jpeg) BETWEEN 1 AND 524288),
@@ -268,6 +300,7 @@ export class ProductDocuments {
       productId,
       name: file.name,
       ...(file.mode ? { parseMode: file.mode } : {}),
+      ...(file.workbookMappings ? { workbookMappings: file.workbookMappings } : {}),
       contentType: file.contentType,
       ...(file.referencePages ? { referencePages: file.referencePages } : {}),
       size: file.bytes.length,
@@ -293,7 +326,7 @@ export class ProductDocuments {
   prepareReplacement(file, options) {
     return this.runExtraction(file, () => documentExtraction(file, options));
   }
-  saveExtraction(id, { extraction, rows, photos }, replace = false) {
+  saveExtraction(id, { extraction, rows, photos, figures }, replace = false) {
     // Also used inside the transaction that switches the active version.
     this.db.exec('SAVEPOINT material_extraction');
     try {
@@ -308,11 +341,11 @@ export class ProductDocuments {
           'INSERT INTO workbook_image_assets(id,document_id,sheet,item,slot,origin,sha,jpeg) VALUES(?,?,?,?,?,?,?,?)',
         );
         const slots = new Map();
-        for (const { sheet, item, origin, jpeg } of photos) {
+        for (const { sheet, item, origin, jpeg, slot: explicitSlot } of photos) {
           const k = JSON.stringify([sheet, item]),
             n = (slots.get(k) ?? 0) + 1;
           slots.set(k, n);
-          const slot = n === 1 ? '主图' : '附图 ' + n;
+          const slot = explicitSlot ?? (n === 1 ? '主图' : '附图 ' + n);
           const prior = existing.get(id, sheet, item, slot),
             sha = createHash('sha256').update(jpeg).digest('hex');
           if (prior && (!prior.origin.startsWith('原件 · ') || prior.sha === sha)) {
@@ -337,6 +370,11 @@ export class ProductDocuments {
           'INSERT OR REPLACE INTO product_workbook_rows VALUES(?,?,?,?,?)',
         );
         for (const row of rows) insert.run(id, ...row);
+      }
+      if (figures) {
+        this.db.prepare('DELETE FROM product_quote_figures WHERE document_id=?').run(id);
+        const insert = this.db.prepare('INSERT INTO product_quote_figures VALUES(?,?,?)');
+        figures.forEach((f, i) => insert.run(id, i, f.jpeg));
       }
       this.db
         .prepare(
@@ -370,16 +408,22 @@ export class ProductDocuments {
   ) {
     const file = this.get(productId, id);
     if (file.referencePages) throw fail(400, '这是用于核对的来源 PDF，可独立导入以提取参数');
-    const structured = material && file.parseMode === parameterMode;
-    if (material && mode && (mode === parameterMode) !== structured)
+    const structured = material && [parameterMode, quoteMode].includes(file.parseMode);
+    if (
+      material &&
+      mode &&
+      ((structured && mode !== file.parseMode) ||
+        (!structured && [parameterMode, quoteMode].includes(mode)))
+    )
       throw fail(400, '请以对应解析方式重新导入文件');
     const paged =
       material &&
       (structured ||
+        [workbookType, types.md, types.txt].includes(file.contentType) ||
         isPagedMaterial(file.contentType) ||
         file.parseMode === 'rich_layout_recognition');
     const chosen = structured
-      ? parameterMode
+      ? file.parseMode
       : paged
         ? materialMode(mode ?? file.extraction?.mode ?? file.parseMode)
         : undefined;
@@ -388,7 +432,7 @@ export class ProductDocuments {
       throw fail(409, '该原件正在使用另一种方式解析，请稍后重试。');
     const visual = file.contentType === types.pdf || file.contentType.startsWith('image/');
     if (
-      !reparse &&
+      (!reparse || (chosen === quoteMode && file.extraction?.sheets)) &&
       file.extraction &&
       file.extraction.model !== 'failed' &&
       !(
@@ -477,7 +521,7 @@ export class ProductDocuments {
           .run(JSON.stringify(extraction), id);
         return this.list(productId).find((item) => item.id === id);
       } catch (error) {
-        if (!reparse || (!file.extraction?.facts.length && !file.extraction?.parameters))
+        if (!reparse || !file.extraction || file.extraction.model === 'failed')
           this.saveExtractionFailure(
             id,
             error instanceof Error ? error.message : '原件提取失败，请重试。',

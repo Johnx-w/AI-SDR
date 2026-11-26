@@ -1,12 +1,14 @@
 import { interpretSheet } from './workbook-layout.mjs';
 import { workbookPictures } from './material-pictures.mjs';
 import { hasModelHeader } from './model-parameters.mjs';
+import { convertDocument } from './docling.mjs';
 import * as XLSX from 'xlsx/xlsx.mjs';
+import { sheetLayout, workbookHeader } from '../src/domain/workbook-layout.mjs';
 
 export const workbookType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
-function columnName(n) {
+export function columnName(n) {
   let name = '';
   for (let index = n + 1; index; index = Math.floor((index - 1) / 26))
     name = String.fromCharCode(65 + ((index - 1) % 26)) + name;
@@ -39,42 +41,69 @@ export function checkOfficeArchive(bytes) {
 
 export async function parseWorkbook(bytes, options = {}) {
   checkOfficeArchive(bytes);
-  let sheets;
-  try {
-    const book = XLSX.read(bytes, {
-      type: 'buffer',
-      dense: true,
-      cellNF: true,
-      cellFormula: false,
-    });
-    sheets = book.SheetNames.map((sheet) => {
-      const ws = book.Sheets[sheet],
-        cells = ws['!data'] ?? [];
-      if (cells.length > 20000 || cells.some((row) => row && row.length > 150))
-        throw fail(413, '每张工作表最多 20000 行、150 列');
-      const data = Array.from(cells, (row) =>
-        Array.from(row ?? [], (cell) =>
-          cell?.v == null
-            ? null
-            : cell.t === 'n' && (!cell.z || cell.z === 'General')
-              ? String(Number(cell.v.toPrecision(15)))
-              : (cell.w ?? String(cell.v)),
-        ),
-      );
-      return { sheet, data, merges: ws['!merges'] ?? [] };
-    });
-  } catch (error) {
-    if (error.status) throw error;
-    throw fail(400, '无法解析此 XLSX，请检查文件或用 Excel 另存为工作簿');
+  const { sheets, pictures } = await convertDocument(bytes, 'xlsx');
+  // Docling supplies layout and cells. Excel number masks carry significant printed
+  // precision, leading zeros and units that are absent from Docling's text.
+  const formatted = XLSX.read(bytes, {
+    type: 'buffer',
+    dense: true,
+    cellNF: true,
+    cellFormula: false,
+  });
+  for (const { sheet, data } of sheets) {
+    const original = formatted.Sheets[sheet]?.['!data'];
+    for (const [r, row] of data.entries()) {
+      for (const [c, value] of row.entries()) {
+        const cell = original?.[r]?.[c];
+        if (value != null && cell?.t === 'n') {
+          row[c] =
+            cell.z && cell.z !== 'General'
+              ? (cell.w ?? value)
+              : String(Number(cell.v.toPrecision(15)));
+        }
+      }
+    }
   }
   const summary = [],
     rows = [],
     owners = new Map(),
     warnings = [],
+    productFields = [],
     facts = [];
   for (const { sheet, data, merges } of sheets) {
     const headerIndex = data.findIndex((row) => row.some((value) => value !== null));
     if (headerIndex < 0) continue;
+    const autoHeader = options.material ? workbookHeader(data) : headerIndex;
+    const layout = sheetLayout(data[autoHeader]);
+    const manual = options.mappings?.[sheet];
+    if (manual) {
+      if (!['table', 'knowledge', 'quote'].includes(manual.kind)) throw fail(400, '工作表类型无效');
+      const required =
+        manual.kind === 'quote'
+          ? ['model', 'price']
+          : manual.kind === 'knowledge'
+            ? ['topic', 'answer']
+            : [];
+      if (
+        required.some(
+          (key) =>
+            typeof manual.fields?.[key] !== 'string' ||
+            !layout.headers.includes(manual.fields[key]) ||
+            layout.headers.indexOf(manual.fields[key]) !==
+              layout.headers.lastIndexOf(manual.fields[key]),
+        ) ||
+        new Set(required.map((key) => manual.fields[key])).size !== required.length
+      )
+        throw fail(400, '请确认工作表的字段映射');
+      layout.kind = manual.kind;
+      for (const key of required) layout.fields[key] = manual.fields[key];
+    }
+    const structured = options.material && layout.kind !== 'table';
+    const mappedFields =
+      layout.kind === 'quote'
+        ? { model: '型号或品名', price: '参考价格', unit: '单位', currency: '币种' }
+        : { topic: '主题', answer: '内容', source: '来源' };
+    const identity = layout.fields[layout.kind === 'quote' ? 'model' : 'topic'];
     let headers = [],
       ownerCol = -1,
       acrossItems = null;
@@ -89,7 +118,11 @@ export async function parseWorkbook(bytes, options = {}) {
         inherited.set(r + ',' + m.s.c, { row: m.s.r, value: data[m.s.r]?.[m.s.c] });
     }
     const start = rows.length;
-    for (let index = headerIndex; index < data.length; index++) {
+    if (structured) {
+      headers = layout.headers;
+      ownerCol = headers.indexOf(identity);
+    }
+    for (let index = structured ? autoHeader + 1 : headerIndex; index < data.length; index++) {
       const row = data[index],
         filled = row.filter((v) => v != null && v !== '');
       const code = row.findIndex(hasModelHeader);
@@ -105,6 +138,7 @@ export async function parseWorkbook(bytes, options = {}) {
       );
       const next = data[index + 1] ?? [];
       const across =
+        !structured &&
         code === 0 &&
         filled.length > 1 &&
         hasModelHeader(row[0]) &&
@@ -125,6 +159,13 @@ export async function parseWorkbook(bytes, options = {}) {
       if (acrossItems && !across && filled.length && row[0]) {
         for (let col = 1; col < row.length; col++)
           if (row[col] && acrossItems[col]) {
+            productFields.push({
+              sheet,
+              item: acrossItems[col],
+              field: row[0],
+              value: row[col],
+              ref: sheet + '!' + columnName(col) + (index + 1),
+            });
             facts.push({
               page: 1,
               location: sheet + '!' + columnName(col) + (index + 1),
@@ -136,6 +177,7 @@ export async function parseWorkbook(bytes, options = {}) {
         for (let col = 1; col < acrossItems.length; col++)
           if (acrossItems[col]) sheetOwners.set(index + 1 + ',' + col, acrossItems[col]);
       if (
+        !structured &&
         !across &&
         filled.length > 1 &&
         filled.every((v) => typeof v === 'string') &&
@@ -147,17 +189,19 @@ export async function parseWorkbook(bytes, options = {}) {
         continue;
       }
       const cells = data[index].flatMap((value, col) =>
-        value === null || value === ''
+        (value === null || value === '') &&
+        !(structured && layout.kind === 'quote' && headers[col] === layout.fields.price)
           ? []
           : [
               {
                 ref: columnName(col) + (index + 1),
                 field: String(headers[col] ?? columnName(col)),
-                value: value instanceof Date ? value.toISOString() : String(value),
+                value: value instanceof Date ? value.toISOString() : String(value ?? ''),
               },
             ],
       );
       if (
+        !structured &&
         cells.length &&
         headers[0] === '型号或品名' &&
         headers[2] === '参考价格' &&
@@ -172,40 +216,84 @@ export async function parseWorkbook(bytes, options = {}) {
           field: headers[ownerCol],
           value: merged.value,
         });
-        sheetOwners.set(index + 1, merged.value);
+        if (!structured || layout.kind === 'quote') sheetOwners.set(index + 1, merged.value);
       }
       if (ownerCol >= 0 && row[ownerCol] != null && row[ownerCol] !== '') {
         const identity = cells.findIndex((c) => c.ref === columnName(ownerCol) + (index + 1));
         if (identity >= 0) {
           const [first] = cells.splice(identity, 1);
           cells.unshift(first);
-          sheetOwners.set(index + 1, first.value);
+          if (!structured || layout.kind === 'quote') sheetOwners.set(index + 1, first.value);
+        }
+      }
+      if (structured) {
+        if (!cells[0]?.value || cells[0].field !== identity) continue;
+        for (const cell of cells) {
+          const entry = Object.entries(mappedFields).find(
+            ([role]) => layout.fields[role] === cell.field,
+          );
+          if (entry) cell.field = entry[1];
         }
       }
       if (cells.length) rows.push([sheet, index + 1, cells[0].value, JSON.stringify(cells)]);
     }
-    if (!headers.length && !acrossItems && rows.length > start && options.material && options.env) {
+    if (ownerCol < 0 && !acrossItems && rows.length > start && options.material && options.env) {
       try {
-        facts.push(...(await interpretSheet(sheet, rows.slice(start), options)));
+        facts.push(...(await interpretSheet(sheet, rows.slice(start), options, productFields)));
       } catch {
         warnings.push(sheet + ' · 已保留原始单元格，产品字段关系需核对。');
       }
     }
-    summary.push({ name: sheet, rows: rows.length - start });
+    const rowItems = new Map();
+    for (const f of productFields.filter((f) => f.sheet === sheet && f.itemRef)) {
+      const row = Number(f.itemRef.match(/\d+$/u)?.[0]);
+      if (row !== Number(f.valueRef.match(/\d+$/u)?.[0])) continue;
+      if (!rowItems.has(row)) rowItems.set(row, new Set());
+      rowItems.get(row).add(f.item);
+    }
+    for (const [row, items] of rowItems)
+      if (items.size === 1 && !sheetOwners.has(row)) sheetOwners.set(row, [...items][0]);
+    if (structured && layout.kind === 'quote') {
+      const column = layout.headers.indexOf(layout.fields.photo);
+      const counts = new Map();
+      for (const [, , item] of rows.slice(start)) {
+        const key = item.toLowerCase();
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+      owners.set(
+        sheet,
+        new Map(
+          [...sheetOwners]
+            .filter(([, item]) => column >= 0 && counts.get(item.toLowerCase()) === 1)
+            .map(([row, item]) => [row + ',' + column, item]),
+        ),
+      );
+    }
+    summary.push({
+      name: sheet,
+      rows: rows.length - start,
+      ...(options.material ? layout : {}),
+    });
   }
   if (!rows.length || rows.length > 30000) throw fail(400, '工作簿须包含 1 至 30000 条非空资料行');
   const extraction = {
     sheets: summary,
+    productFields,
     facts,
     warnings,
-    model: 'SheetJS',
+    model: 'Docling',
     extractedAt: new Date().toISOString(),
   };
-  const photos = await workbookPictures(bytes, owners, warnings);
+  const photos = await workbookPictures(pictures, owners, warnings);
   return { extraction, rows, photos };
 }
 
-export function workbookPage(db, productId, documentId, { sheet, page = 1, q = '' }) {
+export function workbookPage(
+  db,
+  productId,
+  documentId,
+  { sheet, page = 1, q = '', material = false },
+) {
   page = Number(page);
   if (
     !Number.isSafeInteger(page) ||
@@ -217,12 +305,12 @@ export function workbookPage(db, productId, documentId, { sheet, page = 1, q = '
     q.length > 200
   )
     throw fail(400, '工作表或页码无效');
-  if (
-    !db
-      .prepare('SELECT 1 FROM product_documents WHERE id=? AND product_id=?')
-      .get(documentId, productId)
-  )
-    throw fail(404, '产品原文件不存在');
+  const document = db
+    .prepare(
+      "SELECT json_extract(extraction,'$.mode') AS mode FROM product_documents WHERE id=? AND product_id=?",
+    )
+    .get(documentId, productId);
+  if (!document) throw fail(404, '产品原文件不存在');
   const where =
     'WHERE document_id=? AND sheet=?' + (q ? ' AND instr(lower(label), lower(?))>0' : '');
   const args = q ? [documentId, sheet, q] : [documentId, sheet];
@@ -237,5 +325,66 @@ export function workbookPage(db, productId, documentId, { sheet, page = 1, q = '
     )
     .all(...args, (page - 1) * 12)
     .map((row) => ({ number: row.row_number, cells: JSON.parse(row.data) }));
+  if (material || document.mode === 'quote_catalog') {
+    const photos = db
+      .prepare(
+        "SELECT item,id,slot,origin FROM workbook_image_assets WHERE document_id=? AND sheet=? AND active=1 AND item IN (SELECT value FROM json_each(?)) ORDER BY slot!='主图',slot",
+      )
+      .all(documentId, sheet, JSON.stringify(rows.map((r) => r.cells[0].value)));
+    for (const row of rows) row.photos = photos.filter((p) => p.item === row.cells[0].value);
+  }
   return { rows, total, page, pageSize: 12 };
+}
+
+export function knowledgePage(db, doc, sheet, product, page = 1, query = '') {
+  page = Number(page);
+  if (
+    !Number.isSafeInteger(page) ||
+    page < 1 ||
+    page > 30000 ||
+    typeof query !== 'string' ||
+    query.length > 200
+  )
+    throw fail(400, '检索条件无效');
+  const layout = doc.extraction?.sheets?.find((s) => s.name === sheet);
+  if (layout?.kind !== 'knowledge') throw fail(400, '请选择答复规则工作表');
+  const edits = (product.cellEdits || []).filter(
+    (e) => e.documentId === doc.id && e.sheet === sheet,
+  );
+  const sql = `WITH cells AS (
+    SELECT r.row_number, json_extract(c.value,'$.field') field,
+      coalesce((SELECT json_extract(e.value,'$.value') FROM json_each(?) e
+        WHERE json_extract(e.value,'$.ref')=json_extract(c.value,'$.ref')),
+        json_extract(c.value,'$.value')) value
+    FROM product_workbook_rows r, json_each(r.data) c
+    WHERE r.document_id=? AND r.sheet=?
+  ), records AS (
+    SELECT row_number,
+      max(CASE WHEN field IN ('主题',?) THEN value ELSE '' END) topic,
+      max(CASE WHEN field IN ('内容',?) THEN value ELSE '' END) answer,
+      max(CASE WHEN field IN ('来源',?) THEN value ELSE '' END) source
+    FROM cells GROUP BY row_number
+  ), grouped AS (
+    SELECT min(row_number) number,json_group_array(DISTINCT topic) topics,answer,source
+    FROM records GROUP BY answer,source,CASE WHEN answer='' THEN row_number ELSE 0 END
+  ), found AS (
+    SELECT * FROM grouped WHERE instr(lower(answer || ' ' || source),lower(?))>0
+      OR EXISTS (SELECT 1 FROM json_each(topics) WHERE instr(lower(value),lower(?))>0)
+  ) `;
+  const args = [
+    JSON.stringify(edits),
+    doc.id,
+    sheet,
+    layout.fields.topic ?? null,
+    layout.fields.answer ?? null,
+    layout.fields.source ?? null,
+    query,
+    query,
+  ];
+  const { total } = db.prepare(sql + 'SELECT count(*) total FROM found').get(...args);
+  const groups = db
+    .prepare(sql + 'SELECT * FROM found ORDER BY number LIMIT 12 OFFSET ?')
+    .all(...args, (page - 1) * 12)
+    .map((g) => ({ ...g, topics: JSON.parse(g.topics) }));
+  return { groups, total, pageSize: 12 };
 }

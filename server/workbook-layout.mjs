@@ -1,7 +1,7 @@
 import { officialKey, request } from './deepseek-materials.mjs';
 
 // The model supplies cell references. Values and labels always come from the workbook.
-export async function interpretSheet(sheet, rows, { env, fetchImpl = fetch }) {
+export async function interpretSheet(sheet, rows, { env, fetchImpl = fetch }, productFields) {
   const facts = [];
   const cells = rows.flatMap((row) => JSON.parse(row[3]));
   let batch = [],
@@ -35,6 +35,15 @@ export async function interpretSheet(sheet, rows, { env, fetchImpl = fetch }) {
         ![item, field, value].every((k) => index.has(k))
       )
         continue;
+      productFields.push({
+        sheet,
+        item: index.get(item),
+        field: index.get(field),
+        value: index.get(value),
+        ref: sheet + '!' + value,
+        itemRef: item,
+        valueRef: value,
+      });
       facts.push({
         page: 1,
         location: sheet + '!' + value + ' · ' + item + ' / ' + field,

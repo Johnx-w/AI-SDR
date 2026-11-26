@@ -1,9 +1,7 @@
 import { PDFiumLibrary } from '@hyzyla/pdfium';
-import { Open } from 'unzipper-esm';
-import { Parser } from 'saxen';
 import sharp from 'sharp';
-import { posix } from 'node:path';
-import { checkOfficeArchive, parseWorkbook, workbookType } from './product-workbooks.mjs';
+import { parseWorkbook, workbookType } from './product-workbooks.mjs';
+import { officeBlocks } from './docling-blocks.mjs';
 import { types } from './material-formats.mjs';
 import { officialKey, request, uploadBody } from './deepseek-materials.mjs';
 import {
@@ -11,7 +9,6 @@ import {
   prepareParameters,
   workbookParameters,
   hasModelHeader,
-  tableParameters,
 } from './model-parameters.mjs';
 import { splitMaterialText } from './material-chunks.mjs';
 
@@ -25,196 +22,6 @@ const validBox = (b) =>
   b[2] > b[0] &&
   b[3] > b[1];
 
-function parseXml(xml, onOpen, onText, onClose) {
-  if (/<!DOCTYPE/iu.test(xml)) throw fail('Office 文档结构无效');
-  const parser = new Parser();
-  parser.on('openTag', onOpen);
-  parser.on('text', (s, decode) => onText(decode(s)));
-  parser.on('closeTag', onClose);
-  parser.on('error', (e) => {
-    throw e;
-  });
-  parser.parse(xml);
-}
-export async function officeBlocks(file) {
-  checkOfficeArchive(file.bytes);
-  const zip = await Open.buffer(file.bytes);
-  const files = new Map(zip.files.map((entry) => [entry.path, entry]));
-  async function xml(path) {
-    const entry = files.get(path);
-    if (!entry || entry.uncompressedSize > 16 * 1024 * 1024) throw fail('Office 正文缺失或过大');
-    return (await entry.buffer()).toString('utf8');
-  }
-  const word = file.contentType === types.docx;
-  let paths = ['word/document.xml'];
-  if (!word) {
-    const rels = new Map(),
-      order = [];
-    parseXml(
-      await xml('ppt/_rels/presentation.xml.rels'),
-      (tag, attrs) => {
-        const a = attrs();
-        if (tag.endsWith('Relationship') && a.Type?.endsWith('/slide'))
-          rels.set(
-            a.Id,
-            a.Target.startsWith('/') ? a.Target.slice(1) : posix.join('ppt', a.Target),
-          );
-      },
-      () => {},
-      () => {},
-    );
-    parseXml(
-      await xml('ppt/presentation.xml'),
-      (tag, attrs) => {
-        if (tag.endsWith(':sldId')) order.push(rels.get(attrs()['r:id']));
-      },
-      () => {},
-      () => {},
-    );
-    paths = order;
-  }
-  const blocks = [];
-  for (const [index, path] of paths.entries()) {
-    let paragraphs = [],
-      row = [],
-      table = [],
-      reading = false,
-      para = '',
-      cell = '',
-      inCell = false,
-      paragraph = 0,
-      tableNo = 0;
-    const page = index + 1,
-      locator = word ? 'Word 正文' : '幻灯片 ' + page;
-    const emit = (text, ref) => {
-      if (text.trim()) blocks.push({ text, ref, page });
-    };
-    const flush = () => {
-      for (const p of paragraphs) emit(p.text, p.ref);
-      paragraphs = [];
-    };
-    const placements = [];
-    parseXml(
-      await xml(path),
-      (tag, attributes) => {
-        const t = tag.split(':').at(-1);
-        if (t === 'blip') {
-          const rid = attributes()['r:embed'];
-          if (rid)
-            placements.push({ rid, at: paragraph, row: inCell ? row : null, headers: table[0] });
-        }
-        if (t === 'tbl') {
-          flush();
-          table = [];
-          tableNo++;
-        }
-        if (t === 'tr') row = [];
-        if (t === 'tc') {
-          cell = '';
-          inCell = true;
-        }
-        if (t === 'p') para = '';
-        if (t === 'br') para += '\n';
-        if (t === 't') reading = true;
-      },
-      (s) => {
-        if (reading) para += s;
-      },
-      (tag) => {
-        const t = tag.split(':').at(-1);
-        if (t === 't') reading = false;
-        if (t === 'p') {
-          paragraph++;
-          if (inCell) cell += para + ' ';
-          else if (para.trim())
-            paragraphs.push({ text: para, ref: locator + ' · 第 ' + paragraph + ' 段' });
-        }
-        if (t === 'tc') {
-          row.push(cell.trim());
-          inCell = false;
-        }
-        if (t === 'tr') table.push(row);
-        if (t === 'tbl') {
-          const headers = table[0] || [];
-          for (let n = 1; n < table.length; n++) {
-            const row = table[n],
-              ref = locator + ' · 表 ' + tableNo + ' 第 ' + (n + 1) + ' 行',
-              text = headers.join(' | ') + '\n' + row.join(' | ');
-            if (
-              headers.some(hasModelHeader) &&
-              row[headers.findIndex(hasModelHeader)] &&
-              row.length === headers.length &&
-              headers.every(Boolean)
-            ) {
-              const cells = row
-                .map((value, col) => ({
-                  value,
-                  field: headers[col],
-                  ref: ref + ' · 第 ' + (col + 1) + ' 列',
-                }))
-                .filter((c) => c.value);
-              const records = tableParameters(cells, { page }).map((p) => ({ ...p, quote: text }));
-              blocks.push({ page, ref, text, records });
-            } else emit(text, ref);
-          }
-          if (table.length === 1) emit(headers.join(' | '), locator + ' · 表 ' + tableNo);
-        }
-      },
-    );
-    flush();
-    const relPath = posix.join(posix.dirname(path), '_rels', posix.basename(path) + '.rels');
-    if (files.has(relPath)) {
-      const images = [];
-      parseXml(
-        await xml(relPath),
-        (tag, attrs) => {
-          const a = attrs();
-          if (
-            tag.endsWith('Relationship') &&
-            a.Type?.endsWith('/image') &&
-            a.TargetMode !== 'External'
-          )
-            for (const p of placements.filter((p) => p.rid === a.Id))
-              images.push({
-                ...p,
-                key: posix.resolve('/', posix.dirname(path), a.Target).slice(1),
-              });
-        },
-        () => {},
-        () => {},
-      );
-      for (const [i, { key, at, row, headers }] of images.entries()) {
-        const entry = files.get(key);
-        if (entry && at !== undefined) {
-          const item =
-            row?.[headers?.findIndex(hasModelHeader)] ||
-            row?.[headers?.findIndex((h) => /^(产品名称|品名|product name)$/iu.test(h))];
-          const context = row
-            ? row.join(' · ')
-            : blocks
-                .filter(
-                  (b) =>
-                    b.page === page &&
-                    b.text &&
-                    (!word ||
-                      [at, at + 1, at + 2].some((n) => b.ref === locator + ' · 第 ' + n + ' 段')),
-                )
-                .map((b) => b.text)
-                .join('\n')
-                .slice(0, 1800);
-          blocks.push({
-            imageEntry: entry,
-            item,
-            text: context,
-            ref: locator + ' · 插图 ' + (i + 1),
-            page,
-          });
-        }
-      }
-    }
-  }
-  return blocks;
-}
 export async function pdfPageImage(page) {
   const { originalWidth: w, originalHeight: h } = page.getOriginalSize();
   const bitmap = await page.render({
@@ -250,9 +57,9 @@ export async function regionImage(file, page, box, ref) {
       }
     });
   else if (file.contentType === types.docx || file.contentType === types.pptx) {
-    const block = (await officeBlocks(file)).find((b) => b.ref === ref && b.imageEntry);
+    const block = (await officeBlocks(file)).find((b) => b.ref === ref && b.picture);
     if (!block) throw fail('原图位置无效');
-    bytes = await block.imageEntry.buffer();
+    bytes = Buffer.from(block.image ?? '', 'base64');
   } else if (file.contentType.startsWith('image/')) bytes = file.bytes;
   else throw fail('该文件没有原图区域');
   const source = sharp(bytes, { limitInputPixels: 64 * 1024 * 1024 }).rotate();
@@ -431,10 +238,12 @@ export async function extractParameters(file, { env = {}, fetchImpl = fetch, onP
     pageCount = blocks.reduce((n, b) => Math.max(n, b.page), 1);
     for (const b of blocks) if (b.records) items.push(...b.records);
     await recognizeText(blocks.filter((b) => b.text && !b.records));
-    for (const b of blocks.filter((b) => b.imageEntry)) {
+    for (const b of blocks.filter((b) => b.picture)) {
       let png;
       try {
-        png = await sharp(await b.imageEntry.buffer(), { limitInputPixels: 64 * 1024 * 1024 })
+        png = await sharp(Buffer.from(b.image ?? '', 'base64'), {
+          limitInputPixels: 64 * 1024 * 1024,
+        })
           .rotate()
           .resize({ width: 3000, height: 3000, fit: 'inside', withoutEnlargement: true })
           .png()

@@ -79,7 +79,7 @@ T1/T3 与独立 T4 目标分别同步，共享同一份去重日志，避免多�
 
 ### 素材库
 
-从 `/materials` 导入的 PDF、DOCX 和 PPTX 由 DeepSeek 官方接口解析。导入时可选图文或纯文字，图文模式补读图表。系统按原页保存待审核片段。XLSX、Markdown 和 TXT 沿用本地读取；独立图片与视频保存为原件。已有审核内容独立于新候选，失败换版保留原文件。处理状态、重试和原件查看见[素材库操作](mail-automation/README.md#素材库与业务员操作)。
+素材库的 Office 文档和富文本 Markdown 在服务端直接调用 Docling 官方开源包，项目内原样收录的上游源码在 `vendor/docling`，MIT 许可证随附。来源是 PyPI 发布的 `docling_slim-2.153.0.tar.gz`，SHA-256 为 `fdaa9a6ecef3438c20935c831e245a794e91d168c26dcea7ccc660af2a0d7938`。开发进程优先从该目录导入，打包时也以此目录构建。锁定依赖见 `server/docling/requirements.txt`。PDF 图文模式结合 Docling 原生图块、pdfplumber 表格单元格、DeepSeek OCR 与 PDFium 页面渲染，独立图片和视频画面沿用视觉识别。图文报价清单使用同一 Python 运行环境，按报价清单模式提取报价字段、原件出处和配图。生产发布包携带 CI 验证过的 Linux 解析器和 Python 解释器；开发环境从项目根目录使用 Python 3.12 执行 `python -m pip install -r server/docling/requirements.txt`，服务自动识别项目内的 `.venv`，也可通过 `DOCLING_PYTHON` 指定解释器。已审核内容与重新解析的候选分别保存。[素材库操作](mail-automation/README.md#素材库与业务员操作)
 
 素材新建与换版以原文件作为 HTTP 请求体。普通文件上限为 50 MiB，视频为 80 MiB，边界值可导入。浏览器、服务端按块计数及原件存储共用同一校验。Office 解析允许在原件大小之上再展开 32 MiB，继续限制包内条目数、Word 正文和工作表数据量。需本地解析的新版先解析，随后在一个事务内核对当前版本、保存原件和解析结果、切换资料版本。产品 JSON 接口的 Base64 原件仍按 10 MiB 校验。当前发布状态见[本机验收与生产基线](mail-automation/status.md)。
 

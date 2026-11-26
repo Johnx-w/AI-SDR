@@ -1,3 +1,4 @@
+import { ModelPictures } from './MaterialModels';
 import { useEffect, useState } from 'react';
 
 export interface CellEdit {
@@ -24,6 +25,7 @@ export function WorkbookPreview({
   onEdit,
   linked,
   onToggle,
+  file,
 }: {
   url: string;
   id: string;
@@ -32,7 +34,10 @@ export function WorkbookPreview({
   onEdit: (edit: CellEdit, original: string) => void;
   linked: boolean;
   onToggle?: () => void;
+  file: string;
 }) {
+  const [expanded, setExpanded] = useState(''),
+    [editing, setEditing] = useState('');
   const [sheet, setSheet] = useState(sheets[0]?.name || ''),
     [page, setPage] = useState(1),
     [q, setQ] = useState('');
@@ -95,34 +100,83 @@ export function WorkbookPreview({
         <>
           <div className="workbook-grid">
             {result.rows.map((row) => (
-              <details key={row.number}>
-                <summary>
+              <details key={sheet + row.number} open={expanded === sheet + '!' + row.number}>
+                <summary
+                  onClick={(e) => {
+                    e.preventDefault();
+                    const key = sheet + '!' + row.number;
+                    setEditing('');
+                    setExpanded(expanded === key ? '' : key);
+                  }}
+                >
                   {row.number} · {row.cells[0]?.value}
                 </summary>
-                <div>
-                  {row.cells.map((cell) => {
-                    const edit = edits.find(
-                      (v) => v.documentId === id && v.sheet === sheet && v.ref === cell.ref,
-                    );
-                    return (
-                      <label key={cell.ref}>
-                        {cell.ref} · {cell.field}
-                        <input
-                          aria-label={sheet + '!' + cell.ref}
-                          value={edit?.value ?? cell.value}
-                          readOnly={!linked}
-                          onChange={(e) =>
-                            onEdit(
-                              { documentId: id, sheet, ref: cell.ref, value: e.target.value },
-                              cell.value,
-                            )
-                          }
-                        />
-                        {edit && <small>原值 {cell.value}</small>}
-                      </label>
-                    );
-                  })}
-                </div>
+                {expanded === sheet + '!' + row.number && (
+                  <>
+                    <ModelPictures
+                      url={url}
+                      sheet={sheet}
+                      item={row.cells[0].value}
+                      row={row.number}
+                    />
+                    <p className="model-origin">
+                      {file} · {sheet} · 第 {row.number} 行
+                    </p>
+                    {editing !== expanded && (
+                      <dl className="model-properties">
+                        {row.cells.map((cell) => {
+                          const corrected = edits.find(
+                            (e) => e.documentId === id && e.sheet === sheet && e.ref === cell.ref,
+                          );
+                          return (
+                            <div key={cell.ref}>
+                              <dt>{cell.field}</dt>
+                              <dd>{corrected?.value ?? cell.value}</dd>
+                              <small>
+                                {sheet}!{cell.ref}
+                              </small>
+                            </div>
+                          );
+                        })}
+                      </dl>
+                    )}
+                    {linked && (
+                      <button
+                        className="kb-text"
+                        type="button"
+                        onClick={() => setEditing(editing === expanded ? '' : expanded)}
+                      >
+                        {editing === expanded ? '查看字段' : '校对单元格'}
+                      </button>
+                    )}
+                    {editing === expanded && (
+                      <div>
+                        {row.cells.map((cell) => {
+                          const edit = edits.find(
+                            (v) => v.documentId === id && v.sheet === sheet && v.ref === cell.ref,
+                          );
+                          return (
+                            <label key={cell.ref}>
+                              {cell.ref} · {cell.field}
+                              <input
+                                aria-label={sheet + '!' + cell.ref}
+                                value={edit?.value ?? cell.value}
+                                readOnly={!linked}
+                                onChange={(e) =>
+                                  onEdit(
+                                    { documentId: id, sheet, ref: cell.ref, value: e.target.value },
+                                    cell.value,
+                                  )
+                                }
+                              />
+                              {edit && <small>原值 {cell.value}</small>}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
+                )}
               </details>
             ))}
           </div>

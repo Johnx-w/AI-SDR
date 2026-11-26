@@ -19,12 +19,18 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: server/docling/requirements.txt
+      - run: python -m pip install -r server/docling/requirements.txt
       - run: npm ci
       - run: npm run format:check
       - run: npm test
       - run: npm run build
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
         with:
@@ -33,3 +39,21 @@ jobs:
         with:
           node-version: '24'
       - run: node --test tests/release*.test.mjs
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Bundle and verify the offline Linux document reader
+        run: |
+          python -m pip install pex==2.107.1
+          python -m pip wheel --no-deps -w "$RUNNER_TEMP/docling-wheel" ./vendor/docling
+          wheel=$(find "$RUNNER_TEMP/docling-wheel" -name 'docling_slim-*.whl')
+          sed "s|^\./vendor/docling$|docling-slim @ file://$wheel|" server/docling/requirements.txt > "$RUNNER_TEMP/docling-requirements.txt"
+          pex -r "$RUNNER_TEMP/docling-requirements.txt" -D server/docling -m material_reader --python python3.12 --scie eager --scie-python-version 3.12 --venv -o server/docling/reader-linux
+          node scripts/check-docling.mjs
+          tar -cf docling-runtime.tar server/docling/reader-linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docling-runtime
+          path: docling-runtime.tar
+          compression-level: 0
+          retention-days: 7
