@@ -67,7 +67,8 @@ export function createAcquisitionProvider({
       const research = operation?.research || {};
       if (!operation) return null;
       const groupedFacts = new Map();
-      for (const { field, value, quote, source_url } of research.facts || []) {
+      for (const { field, value, quote, source_url, snapshot_id, quote_offset } of research.facts ||
+        []) {
         if (
           ![
             'company_name',
@@ -79,7 +80,13 @@ export function createAcquisitionProvider({
         )
           continue;
         const key = JSON.stringify([field, quote, source_url]);
-        const fact = groupedFacts.get(key) || { field, quote, source_url, values: [] };
+        const fact = groupedFacts.get(key) || {
+          field,
+          quote,
+          source_url,
+          values: [],
+          ...(snapshot_id ? { snapshot_id, quote_offset } : {}),
+        };
         const normalizedValue = String(value ?? '').trim();
         if (normalizedValue && !fact.values.includes(normalizedValue)) {
           fact.values.push(normalizedValue);
@@ -94,6 +101,9 @@ export function createAcquisitionProvider({
         checked_urls: (operation.checked_urls || []).slice(0, 5),
         ...(operation.collection_attempts
           ? { collection_attempts: operation.collection_attempts }
+          : {}),
+        ...(operation.collection_gaps?.length
+          ? { collection_gaps: operation.collection_gaps }
           : {}),
         facts: [...groupedFacts.values()]
           .slice(0, 15)

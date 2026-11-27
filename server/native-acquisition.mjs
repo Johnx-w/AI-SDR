@@ -150,8 +150,6 @@ export function selectWebsiteCandidates(results, knownDomains = [], limit = 20) 
   };
 }
 
-// Provider-reported billing only: an attempted call without valid usage makes
-// the total unknown, rather than silently treating its missing credits as zero.
 function admissionGap(research) {
   if (
     research.eligibility?.status === 'rejected' ||
@@ -168,6 +166,8 @@ function admissionGap(research) {
   return null;
 }
 
+// Provider-reported billing only: an attempted call without valid usage makes
+// the total unknown, rather than silently treating its missing credits as zero.
 function webUsageCounter(operation) {
   let calls = 0,
     reported = 0,
@@ -485,7 +485,7 @@ export class NativeAcquisition {
       usage: data.usage,
     };
   }
-  async collect(sourceUrl, { unified = false, now, refresh = false } = {}) {
+  async collect(sourceUrl, { unified = false, now, refresh = false, onAttempt } = {}) {
     const initial = websiteUrl(sourceUrl);
     if (!initial) throw new Error('官网地址无效，仅接受公网 HTTPS 企业网站');
     const domain = domainKey(initial.href),
@@ -538,11 +538,13 @@ export class NativeAcquisition {
           pages.push({ url: attempt.final_url, content: raw_content });
         if (links?.length) enqueue(attempt.final_url, links.map((url) => `[](${url})`).join('\n'));
       }
-      collection_attempts.push({
+      const trace = {
         ...attempt,
         evidence_version: acquisitionEvidenceVersion,
         reused,
-      });
+      };
+      collection_attempts.push(trace);
+      onAttempt?.(trace);
     };
     const record = ({
       requested_url,
@@ -622,8 +624,19 @@ export class NativeAcquisition {
             }
           }
           if (!unified && !addPage(url.href, content)) failures.add(original);
-        } catch {
+        } catch (error) {
           failures.add(original);
+          if (unified && error.code === 'WEBSITE_NOT_PUBLIC') {
+            status = 'blocked';
+            blocked.add(original);
+            record({
+              requested_url: original,
+              final_url: url?.href ?? null,
+              method: 'node',
+              status,
+              reason: 'non_public_source',
+            });
+          }
         }
         if (unified && status !== 'blocked') {
           record({
@@ -892,10 +905,12 @@ export class NativeAcquisition {
         operation.admission_version === websiteAdmissionVersion
           ? research.eligibility
           : { status: research.eligibility.status };
-    if (operation.admission_version === websiteAdmissionVersion)
+    if (operation.admission_version === websiteAdmissionVersion) {
+      minimal.research.company_name = research.company_name;
       minimal.research.facts = research.facts?.filter((fact) =>
         ['company_name', 'legal_company_name', 'admission_facts', 'products'].includes(fact.field),
       );
+    }
     const output = this.output(minimal, {
       research: { ...minimal.research, ok: false, reason },
       outcome: 'rejected',
@@ -1012,10 +1027,16 @@ export class NativeAcquisition {
       }
       op.stage = 'extract';
       this.store.save(op);
-      const page = await this.collect(item.source_url, { unified, refresh: bypassExclusion });
+      const page = await this.collect(item.source_url, {
+        unified,
+        refresh: bypassExclusion,
+        onAttempt: (attempt) => {
+          (op.collection_attempts ||= []).push(attempt);
+          this.store.save(op);
+        },
+      });
       page.admission_version = admissionVersion;
       page.source_title = item.source_title;
-      op.collection_attempts = page.collection_attempts;
       op.web_usage = page.web_usage;
       op.incomplete_urls = page.incomplete_urls;
       op.research_usage.omitted_pages = page.input_stats?.omittedPages || 0;
@@ -1161,7 +1182,7 @@ export class NativeAcquisition {
       const hardMismatch =
         !(
           unified &&
-          (research.company_identity.status === 'identity_conflict' ||
+          ((!identityVerified && research.entity_type !== 'individual') ||
             research.eligibility?.code === 'official_site_missing')
         ) &&
         (research.entity_type === 'individual' ||
@@ -1524,7 +1545,11 @@ export class NativeAcquisition {
                 .slice(0, 6)
                 .map(({ value, quote, source_url }) => ({ value, quote, source_url })),
               ...(unified
-                ? { admission_evidence: parsed.facts.filter((f) => f.field === 'admission_facts') }
+                ? {
+                    admission_evidence: parsed.facts
+                      .filter((f) => f.field === 'admission_facts')
+                      .map(({ value, quote, source_url }) => ({ value, quote, source_url })),
+                  }
                 : {}),
               homepage: page.research_pages
                 .find(

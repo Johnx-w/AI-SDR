@@ -223,7 +223,10 @@ test('到期的全球计划收录美国和法国的窗饰商，同样输入的�
     ],
     [
       'https://coast-tours.example.org/',
-      { quote: 'Coast Tours offers guided hiking holidays and coach tours along the coast.' },
+      {
+        name: 'Coast Tours',
+        quote: 'Coast Tours offers guided hiking holidays and coach tours along the coast.',
+      },
     ],
   ]);
   const localEnv = { TAVILY_API_KEY: 'fixture-search', DEEPSEEK_API_KEY: 'fixture-model' };
@@ -268,7 +271,8 @@ test('到期的全球计划收录美国和法国的窗饰商，同样输入的�
           production_model: fact('no_own_factory'),
           operating_model: fact('beyond_local'),
           main_product_preference: fact('户外窗用卷帘'),
-          products: [{ ...fact('zip screens'), window_use: 'window_covering' }],
+          products: country ? [{ ...fact('zip screens'), window_use: 'window_covering' }] : [],
+          admission_facts: [fact(country ? 'complete_supply' : 'unrelated_operator')],
         };
       }
       return json({
@@ -330,6 +334,7 @@ test('到期的全球计划收录美国和法国的窗饰商，同样输入的�
       }
       assert.equal(job.status, 'partial', JSON.stringify(job.rows));
       assert.equal(job.input.country, country);
+      assert.equal(job.admissionVersion, 'website-admission-v1');
       assert.equal(job.inserted, expected.length, JSON.stringify(job.rows));
       assert.equal(job.searchStats[0].query, firstQuery);
       assert.equal(queries[0], firstQuery);
@@ -1791,6 +1796,24 @@ test('获客任务按官网证据收录两家，空壳与参展商待核实，�
     );
     const exhibitorResult = await svc.status(job.rows[4].operation_id);
     assert.equal(exhibitorResult.output.research.eligibility.code, 'official_site_missing');
+    const review = await (
+      await fetch(base + '/acquisition/jobs/' + created.id + '/reviews/4')
+    ).json();
+    assert.equal(review.resolution, null);
+    assert.deepEqual(review.evidence.collection_attempts, job.rows[4].collection_attempts);
+    assert.equal(
+      review.evidence.facts.find((fact) => fact.field === 'admission_facts').quote,
+      exhibitorIdentity,
+    );
+    assert.equal(
+      review.evidence.facts.find((fact) => fact.field === 'admission_facts').snapshot_id,
+      job.rows[4].collection_attempts[0].snapshot_id,
+    );
+    assert.ok(
+      review.evidence.collection_attempts.every(
+        (attempt) => !Object.hasOwn(attempt, 'raw_content'),
+      ),
+    );
   } finally {
     await new Promise((resolve) => app.close(resolve));
   }
@@ -1845,6 +1868,38 @@ test('缺少主营供货引文时补抓，保留直接取得的主体与经营�
         [note, result.collection_attempts[1].snapshot_id],
       ],
     );
+  } finally {
+    svc.close();
+  }
+});
+test('新版官网采集记录跨站和非公网来源，禁止交给外部补采', async () => {
+  const { make, calls } = fixture();
+  const overseas = 'https://other-domain.example.org/';
+  const redirects = [
+    ['https://site-redirect.example.org/', 'off_site_redirect', overseas],
+    ['https://private-source.example.org/', 'non_public_source', null],
+  ];
+  const svc = make({
+    readPage: async (url) => {
+      if (url.hostname === 'site-redirect.example.org') return { redirect: overseas };
+      throw Object.assign(new Error('非公网来源'), { code: 'WEBSITE_NOT_PUBLIC' });
+    },
+    readScraplingPage: async () => assert.fail('blocked source was sent to the browser'),
+  });
+  try {
+    for (const [url, reason, redirect] of redirects) {
+      const result = await svc.research(
+        input,
+        { source_url: url, operation_id: new URL(url).hostname.split('.')[0] },
+        { admissionVersion: 'website-admission-v1' },
+      );
+      assert.equal(result.outcome, 'review');
+      assert.deepEqual(
+        result.collection_attempts.map((a) => [a.status, a.reason, a.final_url]),
+        [['blocked', reason, redirect || url]],
+      );
+    }
+    assert.ok(calls.every((call) => !/tavily.com\/extract|deepseek.com/.test(call.url)));
   } finally {
     svc.close();
   }

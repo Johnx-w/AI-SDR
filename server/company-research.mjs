@@ -466,11 +466,19 @@ export function parseCompanyResearch(response, page, target = {}, approvedSource
     (!unified ||
       (supportsWindowUse(fact) &&
         typeof fact.value === 'string' &&
+        windowProductDirections(fact.value).length > 0 &&
         compact(fact.quote).toLowerCase().includes(compact(fact.value).toLowerCase()) &&
         !/\b(?:not|never|no longer|stopped|ceased|used to|previously|formerly|if we|might|may)\b|n['’]t\b|不再|没有|并未|不会|未采购|此前|曾经|假如/i.test(
           fact.quote,
         )));
-  if (unified) facts = facts.filter((f) => f.field !== 'demand_products' || confirmedDemand(f));
+  if (unified)
+    facts = facts.flatMap((fact) =>
+      fact.field !== 'demand_products'
+        ? [fact]
+        : confirmedDemand(fact)
+          ? [{ ...fact, method: 'verified_current_demand' }]
+          : [],
+    );
   const demand_products = list('demand_products').filter((value) =>
     facts.some((f) => f.field === 'demand_products' && equal(f.value, value) && confirmedDemand(f)),
   );

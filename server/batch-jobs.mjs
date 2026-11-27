@@ -747,6 +747,13 @@ export class BatchJobs {
       ) {
         job.rejected++;
         job.rows.push({
+          ...(job.admissionVersion
+            ? {
+                source_url: item.source_url,
+                domain: item.domain,
+                name: output.research?.company_name || item.source_title,
+              }
+            : {}),
           search_id: item.search_id,
           operation_id: item.operation_id,
           result: 'rejected',

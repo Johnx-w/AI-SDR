@@ -16,4 +16,6 @@ Windows Node 24、Python 3.12.16 与仓库锁定的 Docling 环境中，同步�
 
 - 计划创建、刷新、编辑和保存通过 Windows Edge 验证。一次性及重复计划用测试时钟触发。两个独立 SQLite 环境使用相同冻结输入，全球收录美国和法国企业各一家，美国计划仅收录美国企业，旅游企业均无新增。逐家核对名称、官网、属地和新增计数。已有单国时区、无效旧范围及属地未知另有回归用例。真实发现覆盖率和生产调度仍需后续验证。
 - 固定回放使用三页独立标注的开发夹具，比较相同页面正文处理。采集器另有两家动态官网和一条空壳对照的结构化读取测试。现场配对和资源实测见[采集开发验证](collection-validation.md)。
+- 官网准入在 Windows Node 24 的隔离 SQLite 中从立即任务 API 回放五条候选。预期收录 2 家、排除 1 家、待核实 2 家，实际一致。Hillarys 的零售经营主体为 Hunter Douglas UK Retail Limited。Vision Decor 的经营产品与 Perth 门店由官网支持，交接简称「VD」的映射仍待确认。GaLaBau 主办方为 NürnbergMesse。两家正例分别使用浏览器补抓和外部提取替身。空壳与参展商为生成对照。核对档案列表、采集状态和待核实引文关联的快照编号。一次缺经营证据的回放验证直读与渲染的原文均保留。[Hillarys 条款](https://www.hillarys.co.uk/terms-conditions/) · [Vision Decor 产品](https://www.visiondecor.com.au/products/) · [GaLaBau 新闻](https://www.galabau-messe.com/en/press/press-releases/2026/09/galabau-2026-opens-its-gates)
+- 采购回放使用制造商的三份独立网页输入。明确采购窗帘布进入需求字段和评级依据并匹配窗帘布首发产品。否定采购和办公用品采购没有窗饰需求记录，首发选用该企业有证据的卷帘。三份输入均凭合格经营事实满足准入，评级均为 B。首发验证使用选材函数与获准产品夹具。
 - 质量样本预先冻结于应用预筛前。开发环境使用 DeepSeek Search，六次成功查询分别覆盖美国和澳大利亚的定制帘、户外遮阳、经销和本地加工查询。两国各返回 59 条，经域名去重后分别为 39、50 条。以固定 SHA-256 排序种子各抽 30 条，随后核对经营主体、独立官网和资格。目录及非官网结果保留在样本框中。域名只用于抽页，企业统计继续按核实主体去重。[服务计费口径](https://api-docs.deepseek.com/guides/search/index.html)

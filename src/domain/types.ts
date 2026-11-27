@@ -69,6 +69,16 @@ export interface IntegrationStatus {
   webProvider?: string;
   modelProvider?: string;
 }
+export interface WebsiteCollectionAttempt {
+  snapshot_id: string;
+  requested_url: string;
+  final_url?: string | null;
+  acquired_at: string;
+  method: string;
+  status: string;
+  reason: string;
+  reused?: boolean;
+}
 export interface AcquisitionJob {
   manualPaused?: boolean;
   sourcePause?: { outreachPlanId?: string; reason: string };
@@ -84,6 +94,7 @@ export interface AcquisitionJob {
   status: 'running' | 'stopping' | 'paused' | 'completed' | 'partial';
   target: number;
   countPolicy?: string;
+  admissionVersion?: string;
   inserted: number;
   updated: number;
   skipped: number;
@@ -111,6 +122,7 @@ export interface AcquisitionJob {
     executionId?: string;
     search_id?: string;
     search_query?: string;
+    collection_attempts?: WebsiteCollectionAttempt[];
     assessment?: { grade?: string | null; score: number; status: string } | null;
     handoff?: {
       ready: boolean;

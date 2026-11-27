@@ -142,7 +142,8 @@ export class AcquisitionStore {
           RETURNING model_attempts`,
         )
         .get(this.scope, conditionsKey, domain);
-      op.research_usage.repeat_model_calls = row.model_attempts > 1 ? 1 : 0;
+      op.research_usage.repeat_model_calls =
+        (op.research_usage.repeat_model_calls || 0) + Number(row.model_attempts > 1);
       this.save(op);
       this.db.exec('COMMIT');
     } catch (error) {
@@ -180,6 +181,7 @@ export class AcquisitionStore {
           let op, key, domain;
           try {
             op = JSON.parse(row.data);
+            if (op.admission_version && op.admission_version !== 'legacy') continue;
             if (!op.input?.item || !op.input?.input || !op.id || !(op.updatedAt || op.createdAt))
               continue;
             key = exclusionConditionsKey(op.input.input);

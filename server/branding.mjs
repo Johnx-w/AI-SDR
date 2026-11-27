@@ -341,7 +341,8 @@ export async function requestPublicWebsite(
     handleResponse,
   } = {},
 ) {
-  if (!websiteUrl(url.href)) throw new Error('非公网 HTTPS 来源');
+  if (!websiteUrl(url.href))
+    throw Object.assign(new Error('非公网 HTTPS 来源'), { code: 'WEBSITE_NOT_PUBLIC' });
   signal.throwIfAborted();
   const [addresses, proxy] = await withSignal(
     Promise.all([lookupImpl(url.hostname, { all: true }), proxyImpl()]),
@@ -349,7 +350,7 @@ export async function requestPublicWebsite(
   );
   signal.throwIfAborted();
   if (!addresses.length || addresses.some((a) => !publicAddress(a.address)))
-    throw new Error('非公网来源');
+    throw Object.assign(new Error('非公网来源'), { code: 'WEBSITE_NOT_PUBLIC' });
   const selected = addresses[0];
   const target = new URL(url);
   if (proxy)

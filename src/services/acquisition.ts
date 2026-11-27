@@ -7,6 +7,7 @@ import type {
   ConnectionSettings,
   ProductSelection,
   DiscoveryQuery,
+  WebsiteCollectionAttempt,
 } from '../domain/types';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -118,6 +119,7 @@ export const acquisitionApi = {
         product_match: string;
         products: string[];
         checked_urls: string[];
+        collection_attempts?: WebsiteCollectionAttempt[];
         facts: { field: string; value: string; quote: string; source_url: string }[];
       } | null;
     }>(`/jobs/${encodeURIComponent(jobId)}/reviews/${index}`),
