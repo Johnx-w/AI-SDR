@@ -23,10 +23,6 @@ Windows Node 24、Python 3.12.16 与仓库锁定的 Docling 环境中，同步�
 
 ## 目标机采集预检
 
-早期固定候选实测中，GaLaBau 的展会页已证明主办活动，模型因缺少可引用的经营主体而返回空名称。回读原始快照确认页脚有同域 `/en/legal-notice`，原规划的五页没有包含它。新版将同域法律声明优先纳入取证。隔离回放中，两类已证实经营主体的展会主办方均排除，同一展会站的参展记录及未核实身份的展会均留待核实。[GaLaBau 法律声明](https://www.galabau-messe.com/en/legal-notice)
-
-同次试跑中 Hillarys 的介绍页和首页只得到访问挑战页，开发实例的浏览器补抓当时不可用，外部提取未取得正文。该候选保留待核实，后续依赖合规采集环境复验。
-
 SSH 读回 `/srv/shadeflow/current`、`shadeflow.service` 进程目录和版本文件，均指向 `17aea0e`。目标为 Ubuntu 26.04、2 核、操作系统报告的总内存 3,621 MiB。预检前可用内存 1,665 MiB，系统盘剩余 57 GiB。健康接口返回 `ok=true`，维护关闭，采样时 1 个获客任务在途。回退目录可读到基线 CD 所记备份。
 
 使用 `abbc559` 的预检代码与 `7baefea` 同次 Linux CI 的运行时。目标机 `ldd` 首次发现 Chromium 缺少 9 个直接共享库。按 Ubuntu 26.04 清单安装共享库及字体，共新增 44 个系统包，升级、移除均为 0。Chromium 1255 文件树由 root 所有，`shadeflow` 组具备读取及目录访问权限。AppArmor 匹配 `/opt/shadeflow/chromium` 下的固定版本可执行文件，普通 `shadeflow` 用户仍无法执行 `unshare -Ur true`。[依赖及配置](collection-validation.md#ubuntu-2604-浏览器沙箱) · [CI 产物](https://github.com/Johnx-w/AI-SDR/actions/runs/46013031571)
@@ -40,3 +36,7 @@ SSH 读回 `/srv/shadeflow/current`、`shadeflow.service` 进程目录和版本�
 生产客户库按四个合作样本的域名和名称只读查询，未核实到对应的档案。名称 `Smart Shades` 命中两家其他域名，未归入校准样本。可用 Gmail 中，四个域名均未找到通信记录。本轮采购品类保持未知，后续按订单或原始沟通确认。
 
 开发期真实服务先导使用 `5270f0f`、固定三条发现记录、现场官网、有效的开发 DeepSeek 配置和空 SQLite。该轮未配置浏览器。Vision Decor 确认入库并读回。Hillarys 的目标页和首页均未取得正文，外部提取两次返回 404，保留待核实。GaLaBau 的主办角色引文已取得，当时所选页面缺法律署名，进入待核实。实测 3 次模型响应共 34,479 输入 token，其中 8,064 为服务商缓存，输出 3,160 token。两个失败提取计入尝试记录。按当时的 DeepSeek 公开非高峰费率估算服务消耗 0.00588 美元，确认新增分母为 1。该组使用固定发现输入，未产生付费搜索调用。账单及服务器归属成本未核对，扩大样本和浏览器对照待统一验收。[价格与计费说明](https://api-docs.deepseek.com/quick_start/pricing/)
+
+GaLaBau 隔离复验使用同一官网候选和真实 DeepSeek Flash。原始页脚有同域 `/en/legal-notice`，原规划的五页未包含它。`1304dcc` 已能优先读取声明，但主体名称的正文仍有未解码的 HTML 实体，模型没有提取名称，仍待核实。该次向模型提交 15,134 输入 token，其中 8,704 命中服务商缓存，输出 609 token。`9670309` 解码正文并明确先取证主体，再判断准入。最终读回 NürnbergMesse GmbH 的法律声明引文及快照位置，实际 0 新增、1 排除、0 待核实。一次模型调用使用 15,137 输入 token，其中 2,944 命中缓存，输出 870 token。两次复验均使用替身搜索，未调用外部提取。隔离回放另覆盖随声明验证的第二家主办方、同站参展商以及缺少独立身份的展会。[GaLaBau 法律声明](https://www.galabau-messe.com/en/legal-notice)
+
+Hillarys 的介绍页和首页受访问挑战拦截，继续保留待核实。真实浏览器可取证情况留到统一验收。
