@@ -5,7 +5,7 @@ const budget = 16000;
 const anchor =
   /\b(?:operat\w+|legal|registered|suppl\w*|manufactur\w+|purchase|distribut\w+|install\w+|produc\w+|custom|solely|exhibitor|third[- ]party|site|not|no|blinds?|shades?|curtains?|drapery|awnings?|shutters?)\b|经营|法人|制造|生产|经销|安装|采购|展商|第三方|窗帘|遮阳|没有|不提供/i;
 
-export const acquisitionEvidenceVersion = 'acquisition-evidence-v1';
+export const acquisitionEvidenceVersion = 'acquisition-evidence-v2';
 
 export function selectAcquisitionEvidence(source_url, content) {
   const raw = researchPageText(content, content.length);

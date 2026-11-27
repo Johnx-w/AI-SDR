@@ -1990,3 +1990,25 @@ test('主办方官网从法律声明取得身份后排除，参展与匿名对�
     }
   }
 });
+test('官网研究正文解码法人名称和标点，保留数值字符与短页原文', async () => {
+  const { make } = fixture();
+  const pages = new Map([
+    ['https://organizer.example.org/', ['<p>N&uuml;rnbergMesse GmbH</p>', 'NürnbergMesse GmbH']],
+    [
+      'https://dealer.example.org/',
+      ['<p>Dealer&rsquo;s blinds &#x2013; &#x1f31e;</p>', 'Dealer’s blinds – 🌞'],
+    ],
+    ['https://plain.example.org/', ['<p>Plain Blinds</p>', 'Plain Blinds']],
+  ]);
+  const native = make({
+    readPage: async (url) => ({ html: pages.get(url.href)[0] }),
+  });
+  try {
+    for (const [url, [, expected]] of pages) {
+      const collected = await native.collect(url, { unified: true });
+      assert.equal(collected.page_text, expected, url);
+    }
+  } finally {
+    native.close();
+  }
+});

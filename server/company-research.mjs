@@ -28,7 +28,8 @@ export function companyResearchRequest(page, target = {}) {
   const admissionInstructions =
     page.admission_version === websiteAdmissionVersion
       ? '\n逐条输出 evidence-backed admission_facts。候选页和本站运营者要分别核对：如果本次候选只出现在参展商、成员或第三方资料中，输出 third_party_profile，不归给官网运营者。只有在判定当前官网主体本身时才使用主办方、交易平台等运营角色。主营从网站整体定位、成品系列、询价、交付等实际事实判断；完整成品允许本地制造、专营家用销售、他牌经销及供应安装，含遮阳伞、窗用硬质外卷帘和随自家顶棚配售的完整遮阳系列。综合家居商和综合百货要核自身商业窗饰定制。只安装且供货未知、只有老目录、经营证据冲突或缺失，留空待核。明确仅有某类业务才使用 only 类代码，不能用旧目录或页面没提到另一类业务来证明。采购须为当前企业自身、明确肯定、用途与需求产品一致的采购或寻找供应商；历史、否定、假设、仅办公用品或访客提问均不输出。各代码含义：' +
-        JSON.stringify(admissionFactDescriptions)
+        JSON.stringify(admissionFactDescriptions) +
+        '\n先提取有证据的主体身份，再判断业务准入。候选页为展会官网且候选是展会本身时，即使应排除，也要从同站 Imprint、Impressum 或法律声明的经营者栏提取完整法人名及连续原文到 legal_company_name。无另一个独立官方名称时，company_name 可使用同一法人名。网站仅介绍参展商或外部商家时，勿把主办方或平台的法人归给该候选。缺证或归属冲突时留空。'
       : '';
   const scopeInstructions = isAllProductScope(target)
     ? '本次为all全窗饰范围：调查企业全部适用的窗饰成品、半成品、专用材料和配件业务，允许window coverings、window furnishings、blinds、shades、curtains等真实泛称，不要求命中某个细品类。environment_preference仅是发现阶段的优先顺序，不是产品准入限制；不能因另一环境而排除。generic screen、motor、fabric等词本身不能证明窗饰行业。半成品归materials；独立样本册/展示资料业务不在默认范围。只按官网事实输出实际经营产品、供货角色和可能适配方向，不从自产成品推测其已经采购配件，不把目录填进demand_products。'
