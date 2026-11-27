@@ -120,6 +120,16 @@ test('计划只展示邮箱负责的产品，不再填写旧介绍文案', async
   assert.match(text(render(null)), /自动发送/);
   assert.equal(elements(render(null)).filter((node) => node.type === 'textarea').length, 0);
   states.editor = [];
+  assert.deepEqual(
+    elements(render())
+      .filter(
+        (node) =>
+          node.type === 'button' &&
+          /^(透气窗|百叶窗|室内窗饰|户外遮阳|其他|未分类)（/.test(text(node)),
+      )
+      .map(text),
+    ['透气窗（1）', '室内窗饰（1）'],
+  );
   const picker = elements(render()).find((node) =>
     node.props.emptyText?.startsWith('所选邮箱与品类范围内'),
   );

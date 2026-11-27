@@ -994,33 +994,35 @@ function CampaignEditor({
           >
             选择全部可用产品
           </button>
-          {groups.map((category) => {
-            const groupProducts = availableProducts.filter(
-              (product) => groupId(product) === category.id,
-            );
-            return (
-              <div key={category.id}>
-                <button
-                  type="button"
-                  className={`outreach-choice ${selectedCategories.includes(category.id) ? 'selected' : ''}`}
-                  onClick={() => setSelectedCategories([category.id])}
-                >
-                  {category.label}（{groupProducts.length}）
-                </button>
-                <button
-                  type="button"
-                  className="text-link"
-                  onClick={() =>
-                    setSelectedProducts([
-                      ...new Set([...selectedProducts, ...groupProducts.map((p) => p.id)]),
-                    ])
-                  }
-                >
-                  选择本组
-                </button>
-              </div>
-            );
-          })}
+          {groups
+            .filter((group) => availableProducts.some((product) => groupId(product) === group.id))
+            .map((category) => {
+              const groupProducts = availableProducts.filter(
+                (product) => groupId(product) === category.id,
+              );
+              return (
+                <div key={category.id}>
+                  <button
+                    type="button"
+                    className={`outreach-choice ${selectedCategories.includes(category.id) ? 'selected' : ''}`}
+                    onClick={() => setSelectedCategories([category.id])}
+                  >
+                    {category.label}（{groupProducts.length}）
+                  </button>
+                  <button
+                    type="button"
+                    className="text-link"
+                    onClick={() =>
+                      setSelectedProducts([
+                        ...new Set([...selectedProducts, ...groupProducts.map((p) => p.id)]),
+                      ])
+                    }
+                  >
+                    选择本组
+                  </button>
+                </div>
+              );
+            })}
         </div>
         <span className="outreach-field-label">
           供货产品 · 已选择 {selectedProducts.length} 项，至少选择一项
