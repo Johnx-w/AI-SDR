@@ -25,8 +25,6 @@ const array = (value) => (Array.isArray(value) ? value : []);
 const compact = (value) => text(value).replace(/\s+/gu, ' ');
 const writerRoot = new URL('../agents/first-touch-writer/', import.meta.url);
 export const writerPolicy = readFileSync(new URL('system.md', writerRoot), 'utf8');
-// Keep the original default prompt in the material fingerprint used by existing queues.
-const [writerPrompt] = writerPolicy.split(/\r?\n## Workspace template overrides\r?\n/u);
 const confirmedSupply = JSON.parse(
   readFileSync(new URL('confirmed-supply.json', writerRoot), 'utf8'),
 );
@@ -351,7 +349,7 @@ export function outreachMaterialVersion(product, campaign, now = new Date()) {
             product.version,
             outreachProductScope(product),
             facts,
-            writerPrompt,
+            writerPolicy,
             confirmedSupply,
           ]),
         )
@@ -771,7 +769,7 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
           body_text: {
             type: 'string',
             description:
-              '55–85 English words in exactly three paragraphs separated by two newline characters: customer observation, sender brand and product supply introduction, then one easy question following the closing instruction or the default brief introduction. No greeting or signature.',
+              'Follow body_instruction and closing_instruction for the composition and ending. No greeting or signature.',
           },
           source_ids: { type: 'array', items: { type: 'string' } },
         },
@@ -805,9 +803,7 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
       const messages = [
         {
           role: 'system',
-          content:
-            (firstInstruction || firstBodyInstruction ? writerPolicy : writerPrompt) +
-            (custom.length ? personalizationPolicy : ''),
+          content: writerPolicy + (custom.length ? personalizationPolicy : ''),
         },
         { role: 'user', content: JSON.stringify(input) },
       ];
@@ -820,13 +816,6 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
             '',
           );
         if (
-          !subject ||
-          subject.length > 150 ||
-          /[\r\n\u0000-\u001f\u007f]/u.test(subject) ||
-          /^\s*(?:re|fwd?)\s*:/iu.test(subject) ||
-          !bodyText ||
-          bodyText.length > 6000 ||
-          /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(bodyText) ||
           !Array.isArray(draft.source_ids) ||
           !draft.source_ids.length ||
           draft.source_ids.length > 3 ||
@@ -834,41 +823,6 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
           draft.source_ids.some((id) => !evidence.some((e) => e.id === id))
         )
           throw fail(502, '开发信内容或客户依据不完整，请重试', 'outreach_generation_invalid');
-        verifyClaims(subject, bodyText);
-        const wordCount = bodyText.split(/\s+/u).length;
-        const paragraphs = bodyText.split(/\n\s*\n/u);
-        if (
-          wordCount < 50 ||
-          wordCount > 90 ||
-          paragraphs.length !== 3 ||
-          /\b(?:terms(?: and conditions)?|privacy|cookie|legal)\s+(?:page|policy|notice)\b|\bterms and conditions\b/iu.test(
-            paragraphs[0],
-          ) ||
-          paragraphs[0].toLowerCase().includes(mailbox.brandName.toLowerCase()) ||
-          !paragraphs[1].toLowerCase().includes(mailbox.brandName.toLowerCase()) ||
-          !/\b(?:suppl(?:y|ier|iers)|manufactur\w*)\b/iu.test(paragraphs[1]) ||
-          (bodyText.match(/\?/gu) || []).length !== 1 ||
-          !bodyText.endsWith('?') ||
-          /^(?:hello|hi|dear)\b|\bI hope this email finds you well\b|(?:^|\n)\s*(?:(?:best|kind|warm)\s+)?(?:regards|sincerely|yours (?:truly|sincerely)|thank you)(?:\s*[,!]|$)|\bconfirmed (?:range|types?|product types?)\b/iu.test(
-            bodyText,
-          )
-        ) {
-          if (attempt === 0) {
-            messages.push(
-              { role: 'assistant', content: JSON.stringify(draft) },
-              {
-                role: 'user',
-                content: `Revise the draft's writing format only, using the same supplied facts and focus_product. It currently has ${wordCount} words and ${paragraphs.length} paragraphs. Return 60–75 English words in exactly three paragraphs separated by two newlines: paragraph 1 describes the customer's matching product as an offer or activity, without naming a terms, privacy or legal page; paragraph 2 names the sender brand, states its approved product supply and explains the contact purpose plainly; paragraph 3 is one easy question following closing_instruction when supplied, otherwise about a brief overview or introduction. Add no filler, invented customer facts or counts inferred from a bare number in a source excerpt. No greeting, signature, generic well-wishes or internal phrases such as confirmed range/types. Keep customer source IDs valid and supplier claims grounded. Return the same JSON fields.`,
-              },
-            );
-            continue;
-          }
-          throw fail(
-            502,
-            '开发信应约 55–85 词，依次写客户观察、品牌供货介绍和一个容易回复的问题，请重试',
-            'outreach_generation_invalid',
-          );
-        }
         const variables = mailVariables({
           company: candidate.companyName,
           product: product.englishName,
@@ -879,16 +833,42 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
         Object.assign(variables, personalizedValues(draft, custom));
         const finalSubject = template ? expandTemplate(template.subject, variables) : subject;
         const finalBody = template ? expandTemplate(template.body, variables) : bodyText;
-        if (template) {
-          if (
-            finalSubject.length > 150 ||
-            /[\r\n]/u.test(finalSubject) ||
-            /^\s*(?:re|fwd?)\s*:/iu.test(finalSubject) ||
-            finalBody.length > 6000
+        verifyClaims(finalSubject, finalBody);
+        if (
+          /\b(?:terms(?: and conditions)?|privacy|cookie|legal)\s+(?:page|policy|notice)\b|\bterms and conditions\b/iu.test(
+            finalBody,
+          ) ||
+          /^(?:hello|hi|dear)\b|(?:^|\n)\s*(?:(?:best|kind|warm)\s+)?(?:regards|sincerely|yours (?:truly|sincerely)|thank you)(?:\s*[,!]|$)|\bconfirmed (?:range|types?|product types?)\b/iu.test(
+            finalBody,
           )
-            throw fail(422, '展开后的主题或正文超出邮件限制');
-          verifyClaims(finalSubject, finalBody);
+        ) {
+          if (!attempt && (!template || /\{\{(?:ai_|custom_)/u.test(template.body))) {
+            messages.push(
+              { role: 'assistant', content: JSON.stringify(draft) },
+              {
+                role: 'user',
+                content:
+                  'Follow the configured writing instructions. Remove greetings, signatures, references to legal pages and internal labels from the email. Keep all claims grounded and return the same JSON fields.',
+              },
+            );
+            continue;
+          }
+          throw fail(
+            502,
+            '请核对正文中的重复称呼、签名、条款页引用或内部措辞',
+            'outreach_generation_invalid',
+          );
         }
+        if (
+          !finalSubject ||
+          finalSubject.length > 150 ||
+          /[\u0000-\u001f\u007f]/u.test(finalSubject) ||
+          /^\s*(?:re|fwd?)\s*:/iu.test(finalSubject) ||
+          !finalBody.trim() ||
+          finalBody.length > 6000 ||
+          /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(finalBody)
+        )
+          throw fail(template ? 422 : 502, '展开后的主题或正文无效', 'outreach_generation_invalid');
         return {
           ...(includeVariables && { variables }),
           subject: finalSubject,

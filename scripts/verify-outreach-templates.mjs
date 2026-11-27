@@ -157,10 +157,10 @@ try {
   await emailBody.fill('{{ai_opener}}{{ai_body}}{{ai_body}}');
   await preview();
   await article.waitFor();
-  await dialogEditor.getByRole('status').filter({ hasText: '2 个问题' }).waitFor();
+  await dialogEditor.getByRole('status').filter({ hasText: '重复插入' }).waitFor();
   assert.equal((await article.innerText()).split(follow).length - 1, 2);
   await emailBody.fill('A product note for {{company}}. {{ai_question}}');
-  await dialogEditor.getByText(/2 个问题/).waitFor({ state: 'hidden' });
+  await dialogEditor.getByText(/重复插入/).waitFor({ state: 'hidden' });
   await preview();
   await article.getByText(new RegExp(follow.slice(0, -1))).waitFor();
   await emailBody.press('Home');

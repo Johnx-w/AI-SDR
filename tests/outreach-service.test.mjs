@@ -1466,8 +1466,11 @@ async function followUpHarness(options) {
   h.campaign = c;
   return h;
 }
-test('跟进变量重复时可预览并提示修改，实际发送仍要求只有一个问题', async (t) => {
-  const template = { subject: '', body: '{{ai_opener}}{{ai_body}}{{ai_body}}' };
+test('跟进变量重复时可预览并提示修改，正式起草保留相同正文', async (t) => {
+  const template = {
+    subject: 'A note for {{company}}',
+    body: '{{ai_opener}}{{ai_body}}{{ai_body}}',
+  };
   const instruction = 'Would a product card help?';
   const h = await followUpHarness({
     policy: { name: '跟进预览', steps: [{ day: 3, instruction, template }] },
@@ -1513,7 +1516,8 @@ test('跟进变量重复时可预览并提示修改，实际发送仍要求只�
         'Hi ' + company + ' team,\n\nHere is a product update.' + draft + draft,
       ),
     );
-    assert.match(sample.warning, /2 个问题/);
+    assert.match(sample.warning, /重复插入/);
+    assert.equal(sample.subject, 'A note for ' + company);
     const corrected = await previewOutreachTemplate(h.service, {
       ...input,
       category: customer,
@@ -1527,8 +1531,10 @@ test('跟进变量重复时可预览并提示修改，实际发送仍要求只�
   });
   const item = h.service.followUps.pending()[0];
   h.state.clock = Date.parse(item.dueAt);
-  await assert.rejects(h.service.followUps.dispatch(item, h.boxes[0]), /2 个问题/);
-  assert.equal(h.deliveries.length, 1);
+  await h.service.followUps.dispatch(item, h.boxes[0]);
+  assert.ok(h.deliveries.at(-1).text.includes(draft + draft));
+  assert.equal(h.deliveries.at(-1).subject, 'A note for ' + h.first.companyName);
+  assert.equal(h.deliveries.length, 2);
 });
 
 function addResponse(

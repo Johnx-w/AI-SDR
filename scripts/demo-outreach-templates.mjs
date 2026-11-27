@@ -43,10 +43,9 @@ async function model(url, request) {
           finish_reason: 'stop',
           message: {
             content: JSON.stringify({
-              subject:
-                data.first && ['email', 'subject'].includes(data.mode)
-                  ? '{{product}} for {{company}}'
-                  : '',
+              subject: ['email', 'subject'].includes(data.mode)
+                ? '{{product}} for {{company}}'
+                : '',
               text,
             }),
           },
@@ -69,6 +68,7 @@ async function model(url, request) {
   else if (requirement.includes('规格资料'))
     question = 'Would a product specification sheet be useful for your team?';
   else if (requirement.includes('外部采购')) question = follow;
+  else if (requirement.includes('围绕匹配产品简短跟进')) question = intro;
   else if (requirement.includes('谁负责'))
     question = 'Who manages sourcing for roller blinds on your team?';
   else
@@ -92,7 +92,10 @@ async function model(url, request) {
         ].join('\n\n'),
         source_ids: [data.customer.evidence[0].id],
       }
-    : { body_text: 'I wanted to follow up on my note about roller blinds. ' + question };
+    : {
+        subject: 'Roller blinds overview',
+        body_text: 'I wanted to follow up on my note about roller blinds. ' + question,
+      };
   for (const rule of data.personalization_rules || []) {
     draft[rule.key] =
       data.customer?.business === 'manufacturer'

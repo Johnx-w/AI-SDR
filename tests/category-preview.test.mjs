@@ -1,3 +1,6 @@
+import { outreachProductScope, selectOutreachCandidates } from '../server/outreach-content.mjs';
+import { generateFollowUp } from '../server/outreach-follow-ups.mjs';
+import { renderMailboxSignature } from '../src/domain/mail-signature.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
@@ -209,4 +212,109 @@ test('客户名称包含其他产品词时仍可生成首封，但额外供货�
     }),
     /产品|品牌/,
   );
+});
+
+test('三个邮箱按各步骤要求预览短正文与签名', async (t) => {
+  const a = 'One paragraph, two statements.';
+  const b = 'Two paragraphs ending in one question.';
+  const h = categoryPreviewFixture(0, (input, draft) => {
+    const product = input.sender.product || input.product;
+    const style = input.body_instruction || input.writingInstruction;
+    draft.body_text =
+      style === a
+        ? 'Your range includes ' + product + '. We supply this product.'
+        : 'We supply ' + product + '.\n\nWould an overview help?';
+    if (input.step) draft.subject = product + ' update';
+    return draft;
+  });
+  t.after(h.close);
+  for (const [index, box] of h.boxes.entries()) {
+    const product = h.products[index].englishName;
+    const original = h.leads.find((l) => l.id === 'z' + index + '-distributor-0');
+    const selectedProduct = h.products[index];
+    const campaign = {
+      mailboxIds: [box.id],
+      filters: { products: [selectedProduct.id] },
+      productScopes: [outreachProductScope(selectedProduct)],
+    };
+    const [candidate] = selectOutreachCandidates({
+      leads: [original],
+      mailboxes: [box],
+      products: [selectedProduct],
+      campaign,
+    }).eligible;
+    for (const [step, day] of [
+      [0, 0],
+      [1, 3],
+      [2, 7],
+    ]) {
+      for (const style of [a, b]) {
+        const before = h.requests.length;
+        const preview = await api(h, '/sequence-policy/preview', 'POST', {
+          mailboxId: box.id,
+          category: 'distributor',
+          sampleId: original.id,
+          step,
+          day,
+          firstBodyInstruction: style,
+          instruction: step ? style : '',
+          priorSteps: [],
+          template: {
+            subject: step && style === a ? 'Day ' + day + ' | {{product}}' : '{{ai_subject}}',
+            body: '{{ai_body}}',
+          },
+        });
+        const expected =
+          style === a
+            ? 'Your range includes ' + product + '. We supply this product.'
+            : 'We supply ' + product + '.\n\nWould an overview help?';
+        const subject = step
+          ? style === a
+            ? 'Day ' + day + ' | ' + product
+            : product + ' update'
+          : product + ' supply';
+        assert.equal(preview.subject, subject);
+        assert.equal(
+          preview.body,
+          ['Hi ' + original.name + ' team,', expected, box.signature].join('\n\n'),
+        );
+        assert.equal(preview.warning, undefined);
+        assert.equal(h.requests.length - before, step ? 2 : 1);
+        const input = {
+          candidate,
+          mailbox: box,
+          product: selectedProduct,
+          campaign,
+          now: new Date(),
+        };
+        const first = await h.service
+          .generatorClient()
+          .generate({ ...input, firstBodyInstruction: style });
+        const greeting = 'Hi ' + original.name + ' team,';
+        const follow =
+          step &&
+          (await generateFollowUp({
+            ...input,
+            env: h.service.getEnv(),
+            fetchImpl: h.service.fetchImpl,
+            first: { ...first, candidate, companyName: original.name },
+            step,
+            day,
+            instruction: style,
+            template: {
+              subject: style === a ? 'Day ' + day + ' | {{product}}' : '{{ai_subject}}',
+              body: '{{ai_body}}',
+            },
+            history: [],
+          }));
+        assert.equal(step ? follow.subject : first.subject, subject);
+        const signed = [
+          step ? greeting + '\n\n' + follow.body : first.bodyText,
+          renderMailboxSignature(box).text,
+        ].join('\n\n');
+        assert.equal(signed, preview.body);
+      }
+    }
+  }
+  assert.equal(h.sends, 0);
 });

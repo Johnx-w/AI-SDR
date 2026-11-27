@@ -1,3 +1,4 @@
+import { personalizationPolicy } from './sequence-personalization.mjs';
 import { setImmediate } from 'node:timers/promises';
 import { readFileSync } from 'node:fs';
 import { normalizeTemplate } from '../src/domain/sequence-email.mjs';
@@ -246,7 +247,9 @@ export async function previewOutreachTemplate(service, input) {
       step: input.step,
       day: input.day,
       first: requirements,
-      system: firstTouch ? writerPolicy : followUpWritingPolicy,
+      system:
+        (firstTouch ? writerPolicy : followUpWritingPolicy) +
+        (template?.variables?.length ? personalizationPolicy : ''),
       productFacts: eligibleOutreachFacts(product, campaign, new Date(service.now())).map(
         (f) => f.text,
       ),
@@ -286,7 +289,9 @@ export async function previewOutreachTemplate(service, input) {
       now: service.now(),
     });
     checkOutreachScope(
-      typeof result === 'string' ? result : result.body,
+      typeof result === 'string'
+        ? result
+        : [result.subject, result.body].filter(Boolean).join('\n'),
       mailbox,
       service,
       candidate.companyName,
@@ -310,7 +315,7 @@ export async function previewOutreachTemplate(service, input) {
     ...metadata,
     variables: body.variables,
     warning: body.warning,
-    subject: 'Re: ' + first.subject,
+    subject: body.subject || 'Re: ' + first.subject,
     body: [greeting, typeof body === 'string' ? body : body.body, signature].join('\n\n'),
   };
 }

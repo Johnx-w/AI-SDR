@@ -26,11 +26,12 @@ export function normalizeTemplate(value, first) {
   if (
     !body ||
     body.length > 6000 ||
-    (first ? !subject || subject.length > 150 : !!subject) ||
+    (first && !subject) ||
+    subject.length > 150 ||
     /[\r\n]/u.test(subject) ||
     /[\x00-\x08\x0b-\x1f\x7f]/u.test(subject + body)
   )
-    throw invalid('请核对主题和正文。首封主题最多 150 字，正文最多 6000 字');
+    throw invalid('请核对主题和正文。主题最多 150 字，正文最多 6000 字');
   const variables = value.variables ?? [];
   if (
     !Array.isArray(variables) ||
@@ -58,8 +59,7 @@ export function normalizeTemplate(value, first) {
     const rest = text.replace(/\{\{([a-zA-Z0-9_\p{Script=Han}]+)\}\}/gu, (_, name) => {
       if (
         !Object.hasOwn(labels, name) ||
-        (key === 'subject' && ['ai_body', 'ai_opener', 'ai_question'].includes(name)) ||
-        (!first && name === 'ai_subject')
+        (key === 'subject' && ['ai_body', 'ai_opener', 'ai_question'].includes(name))
       )
         throw invalid('此处不能使用变量 {{' + name + '}}');
       return '';
@@ -89,15 +89,9 @@ export function mailVariables({ company, product, brand, subject, body }) {
   };
 }
 
-export function followUpQuestionWarning(body, template = '') {
-  const count = (body.match(/[?？]/gu) || []).length;
-  if (count === 1) return undefined;
-  if (!count) return '跟进信需要一个便于回复的问题。请补一句问句或插入「AI 回复问题」。';
-  const action =
-    template.indexOf('{{ai_body}}') !== template.lastIndexOf('{{ai_body}}')
-      ? '「AI 正文」已包含结尾问题，请删去重复的「AI 正文」。'
-      : '请保留一个最希望对方回答的问题。';
-  return '跟进信中有 ' + count + ' 个问题。' + action;
+export function repeatedBodyWarning(template = '') {
+  if (template.split('{{ai_body}}').length > 2)
+    return '模板重复插入了「AI 正文」，请确认预期效果。';
 }
 
 export function expandTemplate(text, variables) {
