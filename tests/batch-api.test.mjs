@@ -58,7 +58,7 @@ test('批量接口持久、幂等且活跃任务保护共享连接，允许独�
         400,
       );
     }
-    for (const target_count of [0, 201, 1.2, '5'])
+    for (const target_count of [0, Number.MAX_SAFE_INTEGER + 1, 1.2, '5'])
       assert.equal((await post('/jobs', { ...input, target_count })).status, 400);
     const response = await post('/jobs', input);
     assert.equal(response.status, 202);
@@ -305,7 +305,11 @@ test('立即与到期计划按本国两地补搜并读回新增企业，仅返�
       const expected = samples.filter((sample) => sample[0] === country);
       assert.equal(job.status, expected.length ? 'completed' : 'partial', job.reason);
       assert.equal(job.inserted, expected.length);
-      assert.equal(job.searches, expected.length ? 4 : 20);
+      assert.equal(job.searches, expected.length ? 4 : 24);
+      if (!expected.length) {
+        assert.equal(job.reason, 'exhausted');
+        assert.equal(job.batch.previousBoundary, 'search_limit');
+      }
       const regional = job.searchStats.filter((stat) => stat.searchRegion);
       if (expected.length)
         assert.deepEqual(

@@ -3,7 +3,13 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { domainKey } from './website-identity.mjs';
-import { regionalSearchAfter, searchPlan } from './search-plan.mjs';
+import {
+  productiveSearch,
+  regionalSearchAfter,
+  searchPlan,
+  unifiedExecutionVersion,
+  unifiedSearchPlan,
+} from './search-plan.mjs';
 import { exclusionConditionsKey } from './exclusion-conditions.mjs';
 import { validateCountryScope } from './search-target.mjs';
 import { websiteAdmissionVersion } from './customer-eligibility.mjs';
@@ -27,7 +33,9 @@ const researchUsageKeys = [
   'cache_hits',
   'input_chars',
   'input_tokens',
+  'input_cached_tokens',
   'output_tokens',
+  'total_tokens',
   'omitted_pages',
   'truncated_pages',
 ];
@@ -111,8 +119,8 @@ function mapComparison(job) {
 }
 
 export function validateCount(value = 20) {
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 200)
-    throw fail(400, '本次新增客户目标必须是 1–200 的整数');
+  if (!Number.isSafeInteger(value) || value < 1)
+    throw fail(400, '本次新增客户目标必须是大于零的安全整数');
   return value;
 }
 export function validateAutoFirstTouch(value = false) {
@@ -138,6 +146,16 @@ const labels = {
   outreach_deleted: '关联触达计划已删除，自动首发已关闭；等待人工继续获客或删除来源',
   source_deleted: '来源任务已删除，执行历史保留',
 };
+const batchCapacity = 200;
+const nextBatch = (job, reason) => ({
+  number: (job.batch?.number || 0) + 1,
+  insertedAtStart: job.inserted,
+  searchedAtStart: job.searches,
+  researchedAtStart: job.researched,
+  elapsedAtStart: job.elapsedMs,
+  ...(reason ? { previousBoundary: reason } : {}),
+});
+
 export class BatchJobs {
   constructor({
     path = ':memory:',
@@ -145,6 +163,7 @@ export class BatchJobs {
     research,
     status,
     readLeads,
+    readLead,
     readAcquisitionCaptures = () => [],
     now = Date.now,
     schedule = true,
@@ -174,6 +193,7 @@ export class BatchJobs {
     this.research = research;
     this.remoteStatus = status;
     this.readLeads = readLeads;
+    this.readLead = readLead;
     this.readAcquisitionCaptures = readAcquisitionCaptures;
     this.now = now;
     this.schedule = schedule;
@@ -190,6 +210,7 @@ export class BatchJobs {
         job.status = 'paused';
         job.reason = 'interrupted';
         job.pending = job.current ? 1 : 0;
+        delete job.collectionWait;
         for (const metric of job.searchStats || [])
           if (metric.status === 'running') {
             metric.status = 'interrupted';
@@ -398,7 +419,8 @@ export class BatchJobs {
     }
     if (this.blockingJob(input, scheduleId))
       throw fail(409, '已有未结束任务，请先继续或停止该任务');
-    const queryPlan = searchPlan(input);
+    const executionVersion = this.identityVersion && unifiedExecutionVersion;
+    const queryPlan = executionVersion ? unifiedSearchPlan(input) : searchPlan(input);
     const planKey = discoveryPlanKey(input, queryPlan);
     const progress = this.db
       .prepare(
@@ -423,6 +445,7 @@ export class BatchJobs {
       ...(this.identityVersion
         ? { identityVersion: this.identityVersion, mapComparisonVersion: 1 }
         : {}),
+      ...(executionVersion ? { executionVersion } : {}),
       updated: 0,
       skipped: 0,
       rejected: 0,
@@ -436,16 +459,19 @@ export class BatchJobs {
       cursor: progress?.cursor ?? this.historicalCursor(scheduleId, planKey, queryPlan),
       queue,
       carriedCandidates: queue.length,
-      seen: queue.map((item) => item.domain),
+      seen: queue.map((item) =>
+        this.identityVersion ? acquisitionUrl(item.source_url) : item.domain,
+      ),
       skippedDomains: [],
       rows: [],
       current: null,
       limits: {
         research: researchBudget,
-        searches: Math.max(20, input.target_count * 3),
+        searches: Math.max(20, Math.min(input.target_count, batchCapacity) * 3),
         timeMs: 21600000,
       },
     };
+    if (executionVersion) job.batch = nextBatch(job);
     this.db.prepare('INSERT INTO jobs VALUES(?,?,?,?)').run(job.id, key, hash, JSON.stringify(job));
     this.outreachSnapshot = null;
     this.kick(job.id);
@@ -705,7 +731,10 @@ export class BatchJobs {
           result.output.outcome === 'failed' &&
           ['extract', 'research'].includes(result.output.stage) &&
           (latest.current.interruptionRetries || 0) < 1 &&
-          latest.researched < latest.limits.research
+          (latest.batch
+            ? latest.input.research_budget === undefined ||
+              latest.researched < latest.input.research_budget
+            : latest.researched < latest.limits.research)
         ) {
           latest.queue.unshift({
             ...latest.current,
@@ -781,7 +810,11 @@ export class BatchJobs {
         (output?.更新 === 1 && row.result === 'updated'));
     let record;
     if (written) {
-      const records = (await this.readLeads()).filter(
+      const leads =
+        job.identityVersion && this.readLead
+          ? [await this.readLead(row.record_id)]
+          : await this.readLeads();
+      const records = leads.filter(
         (lead) => lead.id === row.record_id && domainKey(lead.website) === item.domain,
       );
       if (records.length !== 1) throw new Error('飞书读回核验失败');
@@ -912,6 +945,7 @@ export class BatchJobs {
       const metric = job.searchStats?.find((entry) => entry.id === item.search_id);
       if (metric) {
         metric.researched++;
+        if (job.batch) metric.lastProcessedAt = new Date(this.now()).toISOString();
         const key = {
           inserted: 'inserted',
           duplicate: job.identityVersion && output?.更新 !== 1 ? 'duplicates' : 'updated',
@@ -937,6 +971,7 @@ export class BatchJobs {
       if (latest.status === 'stopping') job.status = 'stopping';
       job.current = null;
       job.pending = 0;
+      delete job.collectionWait;
       this.save(job);
       this.db.exec('COMMIT');
     } catch (error) {
@@ -949,18 +984,24 @@ export class BatchJobs {
     if (this.working.has(id)) return;
     this.working.add(id);
     let tick = this.now();
-    const checkpoint = (j) => {
+    const stamp = (j) => {
       const t = this.now();
       j.elapsedMs += Math.max(0, t - tick);
       tick = t;
+    };
+    const checkpoint = (j) => {
+      stamp(j);
       this.save(j);
     };
     try {
-      await this.initializeBaseline();
+      if (!this.get(id).identityVersion) await this.initializeBaseline();
       while (true) {
         const j = this.get(id);
-        checkpoint(j);
-        if (!['running', 'stopping'].includes(j.status)) return;
+        stamp(j);
+        if (!['running', 'stopping'].includes(j.status)) {
+          this.save(j);
+          return;
+        }
         if ((j.inserted || 0) >= j.target) {
           this.finish(j, 'target_reached');
           return;
@@ -970,31 +1011,55 @@ export class BatchJobs {
           return;
         }
         validateCountryScope(j.input);
-        if (j.elapsedMs >= j.limits.timeMs) {
-          this.finish(j, 'time_limit');
-          return;
-        }
-        if (j.researched >= j.limits.research) {
-          this.finish(j, 'research_limit');
-          return;
-        }
-        if (!j.queue.length) {
-          if (j.searches >= j.limits.searches) {
-            this.finish(j, 'search_limit');
+        const batch = j.executionVersion === unifiedExecutionVersion && j.batch;
+        if (batch) {
+          if (j.input.research_budget !== undefined && j.researched >= j.input.research_budget) {
+            this.finish(j, 'research_limit');
             return;
           }
+          const boundary =
+            j.elapsedMs - batch.elapsedAtStart >= j.limits.timeMs
+              ? 'time_limit'
+              : j.inserted - batch.insertedAtStart >= batchCapacity
+                ? 'batch_capacity'
+                : j.researched - batch.researchedAtStart >= j.limits.research
+                  ? 'research_limit'
+                  : !j.queue.length && j.searches - batch.searchedAtStart >= j.limits.searches
+                    ? 'search_limit'
+                    : '';
+          if (boundary) {
+            j.batch = nextBatch(j, boundary);
+          }
+        } else {
+          const limit =
+            j.elapsedMs >= j.limits.timeMs
+              ? 'time_limit'
+              : j.researched >= j.limits.research
+                ? 'research_limit'
+                : !j.queue.length && j.searches >= j.limits.searches
+                  ? 'search_limit'
+                  : '';
+          if (limit) {
+            this.finish(j, limit);
+            return;
+          }
+        }
+        if (!j.queue.length) {
           const plan = j.queryPlan || searchPlan(j.input);
           j.searchSignatures ||= [];
           const unusedSearch = (candidate) => {
             if (!candidate) return;
             const signature = createHash('sha256')
-              .update(JSON.stringify([candidate, j.seen.slice(-150)]))
+              .update(JSON.stringify(batch ? candidate.query : [candidate, j.seen.slice(-150)]))
               .digest('hex');
             if (j.searchSignatures.includes(signature)) return;
             j.searchSignatures.push(signature);
             return candidate;
           };
-          let search = j.pendingSearch || unusedSearch(regionalSearchAfter(j));
+          let search =
+            j.pendingSearch ||
+            unusedSearch(regionalSearchAfter(j)) ||
+            (batch && productiveSearch(j, plan, unusedSearch));
           // Revisit a query only when excluded domains have changed. This can
           // discover >100 companies without repeating an identical paid search.
           for (let i = 0; !search && i < plan.length; i++) {
@@ -1012,6 +1077,7 @@ export class BatchJobs {
             id: `${j.id}:search:${j.searches}`,
             query: search.query,
             country: search.country,
+            ...(batch ? { batch: j.batch.number, language: search.language || 'en' } : {}),
             ...(search.searchRegion ? { searchRegion: search.searchRegion } : {}),
             source_kind: search.source_kind || 'web',
             family: search.family,
@@ -1140,6 +1206,7 @@ export class BatchJobs {
           }
           item.discovery_sources = website;
         }
+        // Keeping one operation in flight per job reserves its final slot until readback.
         j.current = {
           ...item,
           operation_id: `${j.id}-${j.researched + 1}`,
@@ -1151,11 +1218,20 @@ export class BatchJobs {
           const output = await this.research(j.input, j.current, {
             admissionVersion: j.admissionVersion || 'legacy',
             ...(j.identityVersion ? { identityVersion: j.identityVersion } : {}),
+            ...(batch ? { executionVersion: j.executionVersion } : {}),
+            onCollectionQueue: (state, url) => {
+              if (this.closed) return;
+              const current = this.get(id);
+              if (current.current?.operation_id !== j.current?.operation_id) return;
+              if (state) current.collectionWait = { ...state, url };
+              else delete current.collectionWait;
+              this.save(current);
+            },
           });
           const latest = this.get(id);
           j.status = latest.status;
+          stamp(j);
           await this.accept(j, output);
-          checkpoint(j);
         } catch {
           j.status = 'paused';
           j.reason = 'uncertain';
@@ -1175,6 +1251,10 @@ export class BatchJobs {
     }
   }
   view(job, { summary = false } = {}) {
+    const coverage = job.batch && {
+      countries: [...new Set(job.searchStats.map(({ country }) => country).filter(Boolean))],
+      languages: [...new Set(job.searchStats.map(({ language }) => language).filter(Boolean))],
+    };
     return {
       ...job,
       ...(summary
@@ -1192,6 +1272,13 @@ export class BatchJobs {
       skippedDomains: undefined,
       searchSignatures: undefined,
       ...(!summary && job.mapComparisonVersion ? { mapComparison: mapComparison(job) } : {}),
+      ...(job.batch
+        ? {
+            coverage,
+            remainingTarget: Math.max(0, job.target - job.inserted),
+            insertedPerHour: job.elapsedMs ? (job.inserted * 3600000) / job.elapsedMs : null,
+          }
+        : {}),
       message: labels[job.reason] || '正在搜索与研究客户',
       queued: job.queue.length,
     };

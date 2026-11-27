@@ -5,7 +5,7 @@ import type {
   AcquisitionReviewDecision,
   WebsiteCollectionAttempt,
 } from '../domain/types';
-import { WORLDWIDE_COUNTRY, WORLDWIDE_LABEL } from '../domain/country-catalog';
+import { countryFor, WORLDWIDE_COUNTRY, WORLDWIDE_LABEL } from '../domain/country-catalog';
 import { acquisitionApi } from '../services/acquisition';
 import { Modal } from './ui';
 
@@ -125,6 +125,7 @@ const collectionStatuses: Record<string, string> = {
   empty: '无有效正文',
   blocked: '已拦截',
   unavailable: '暂不可用',
+  deferred: '已延后',
   timeout: '超时',
   failed: '读取失败',
 };
@@ -135,6 +136,20 @@ const collectionReasons: Record<string, string> = {
   missing_company_identity: '补主体证据',
   missing_operating_evidence: '补经营证据',
 };
+const collectionWaitReasons: Record<string, string> = {
+  browser_busy: '等待其他任务释放浏览器',
+  low_memory: '等待可用内存恢复',
+  queue_full: '浏览器队列已满',
+  queue_timeout: '等待超时',
+  aborted: '等待已取消',
+};
+const batchBoundaries: Record<string, string> = {
+  batch_capacity: '上一批已新增 200 家',
+  time_limit: '上一批运行已满 6 小时',
+  research_limit: '上一批已达到研究次数上限',
+  search_limit: '上一批已达到搜索次数上限',
+};
+const languageNames = new Intl.DisplayNames('zh-CN', { type: 'language' });
 function CollectionAttempts({ attempts }: { attempts?: WebsiteCollectionAttempt[] }) {
   if (!attempts?.length) return null;
   return (
@@ -146,6 +161,16 @@ function CollectionAttempts({ attempts }: { attempts?: WebsiteCollectionAttempt[
           {collectionStatuses[attempt.status] || attempt.status}
           {attempt.reused ? ' · 已复用' : ''}
           {collectionReasons[attempt.reason] ? ' · ' + collectionReasons[attempt.reason] : ''}
+          {attempt.resource_wait && (
+            <>
+              {' '}
+              · {collectionWaitReasons[attempt.resource_wait.reason]} · 等待{' '}
+              {(attempt.resource_wait.wait_ms / 1000).toFixed(1)} 秒
+              {attempt.resource_wait.end && (
+                <> · {collectionWaitReasons[attempt.resource_wait.end]}</>
+              )}
+            </>
+          )}
           {' · ' + beijingTime(attempt.acquired_at) + ' · '}
           {safeUrl(attempt.final_url || attempt.requested_url) ? (
             <a
@@ -698,6 +723,12 @@ function BatchProgressDetail({ job: snapshot, control, busy }: BatchProgressProp
       .filter((source) => source.reason === '第三方平台或目录')
       .map((source) => ({ ...source, query: metric.query })),
   );
+  const usage = job.researchUsage;
+  const reportedTokens =
+    usage?.total_tokens ??
+    (!job.executionVersion && usage?.input_tokens !== undefined && usage.output_tokens !== undefined
+      ? usage.input_tokens + usage.output_tokens
+      : undefined);
   return (
     <section className="batch-progress" aria-label="批量任务进度">
       <div className="result-title">
@@ -717,6 +748,9 @@ function BatchProgressDetail({ job: snapshot, control, busy }: BatchProgressProp
         <progress max={job.target} value={job.inserted} aria-label="去重后新增收录进度" />
       </div>
       <p>{job.message}</p>
+      {job.collectionWait && (
+        <p role="status">{collectionWaitReasons[job.collectionWait.reason]}</p>
+      )}
       {job.sourcePause && (
         <p role="status">
           {job.sourcePause.reason}。当前企业完成保存或核对后暂停，剩余队列与进度保留。
@@ -746,6 +780,36 @@ function BatchProgressDetail({ job: snapshot, control, busy }: BatchProgressProp
         已搜索 {job.searches} 次 · 已研究 {job.researched} 家
         {!!job.carriedCandidates && <> · 承接往轮候选 {job.carriedCandidates} 家</>}
       </p>
+      {job.batch && (
+        <p className="muted">
+          剩余 {job.remainingTarget} 家 · 已执行至第 {job.batch.number} 批
+          {job.insertedPerHour != null && (
+            <>
+              {' '}
+              · 平均{' '}
+              {job.insertedPerHour.toLocaleString('zh-CN', {
+                maximumFractionDigits: 1,
+              })}{' '}
+              家/小时
+            </>
+          )}
+          {job.batch.previousBoundary && <> · {batchBoundaries[job.batch.previousBoundary]}</>}
+        </p>
+      )}
+      {!!job.coverage?.languages.length && (
+        <p className="muted">
+          实际搜索语言 {job.coverage.languages.map((lang) => languageNames.of(lang)).join('、')}
+          {!!job.coverage.countries.length && (
+            <>
+              {' '}
+              · 检索地区{' '}
+              {job.coverage.countries
+                .map((country) => countryFor(country)?.zh || country)
+                .join('、')}
+            </>
+          )}
+        </p>
+      )}
       {job.researchUsage && (
         <p className="muted" title="模型请求按尝试统计；Token 仅累计供应商返回值。">
           模型请求 {job.researchUsage.model_calls} 次 · 结果复用 {job.researchUsage.cache_hits} 次
@@ -753,24 +817,26 @@ function BatchProgressDetail({ job: snapshot, control, busy }: BatchProgressProp
             <> · 同条件同域名再次请求 {job.researchUsage.repeat_model_calls} 次</>
           )}
           {(job.researchUsage.input_tokens !== undefined ||
-            job.researchUsage.output_tokens !== undefined) && (
+            job.researchUsage.output_tokens !== undefined ||
+            job.researchUsage.total_tokens !== undefined ||
+            job.researchUsage.input_cached_tokens !== undefined) && (
             <>
               {' '}
               · Token 输入 {job.researchUsage.input_tokens ?? '未返回'} / 输出{' '}
               {job.researchUsage.output_tokens ?? '未返回'}
-              {job.inserted > 0 &&
-                job.researchUsage.input_tokens !== undefined &&
-                job.researchUsage.output_tokens !== undefined && (
-                  <>
-                    {' '}
-                    · 每新增一家已报告{' '}
-                    {Math.round(
-                      (job.researchUsage.input_tokens + job.researchUsage.output_tokens) /
-                        job.inserted,
-                    ).toLocaleString()}{' '}
-                    token
-                  </>
-                )}
+              {job.researchUsage.input_cached_tokens !== undefined && (
+                <> · 服务商缓存命中 {job.researchUsage.input_cached_tokens} token</>
+              )}
+              {reportedTokens !== undefined && <> · 总计 {reportedTokens} token</>}
+              {job.inserted > 0 && reportedTokens !== undefined && (
+                <>
+                  {' '}
+                  · 每新增一家已报告 {Math.round(
+                    reportedTokens / job.inserted,
+                  ).toLocaleString()}{' '}
+                  token
+                </>
+              )}
             </>
           )}
         </p>
@@ -887,6 +953,8 @@ function BatchProgressDetail({ job: snapshot, control, busy }: BatchProgressProp
                             ? WORLDWIDE_LABEL
                             : job.input.country)}{' '}
                         · {metricState[metric.status] || metric.status}
+                        {metric.language && <> · {languageNames.of(metric.language)}</>}
+                        {metric.batch && <> · 第 {metric.batch} 批</>}
                         {metric.error ? ` · ${metric.error}` : ''}
                       </small>
                       {metric.maps && (
@@ -933,7 +1001,7 @@ function BatchProgressDetail({ job: snapshot, control, busy }: BatchProgressProp
             企业归入第一次发现它的搜索词；后续再次发现计入重复。尚未研究完的候选不参与评级效果判断。
           </p>
           <p className="muted">
-            新增目标只统计去重后实际写入并由飞书读回确认的企业。A/B/C 表示初始开发顺序，
+            新增目标只统计去重后实际写入并由客户主库读回确认的企业。A/B/C 表示初始开发顺序，
             不表示企业已采购、会回复或资料完整。
           </p>
         </details>

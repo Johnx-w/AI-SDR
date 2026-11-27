@@ -56,6 +56,29 @@ function requestLane() {
   };
 }
 
+export function addModelTokens(usage, response) {
+  const tokens = response.usage || response.body?.usage || {};
+  const input = tokens.input_tokens ?? tokens.prompt_tokens;
+  const output = tokens.output_tokens ?? tokens.completion_tokens;
+  const valid = (value) => Number.isSafeInteger(value) && value >= 0;
+  for (const [field, value] of [
+    ['input_tokens', input],
+    [
+      'input_cached_tokens',
+      tokens.input_tokens_details?.cached_tokens ??
+        tokens.prompt_tokens_details?.cached_tokens ??
+        tokens.prompt_cache_hit_tokens,
+    ],
+    ['output_tokens', output],
+    [
+      'total_tokens',
+      tokens.total_tokens ?? (valid(input) && valid(output) ? input + output : undefined),
+    ],
+  ]) {
+    if (valid(value)) usage[field] = (usage[field] || 0) + value;
+  }
+}
+
 // HTTP search gateways implement POST /search and /extract using the same
 // provider-neutral request fields as the current flow (query/urls, limits etc.).
 // Their JSON response is { results: [{url,title,content?,raw_content?}], usage? }.

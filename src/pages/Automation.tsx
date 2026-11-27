@@ -359,9 +359,8 @@ export function Automation() {
     !previewLoading &&
     !!input.country &&
     hasProductSelection &&
-    Number.isInteger(targetCount) &&
+    Number.isSafeInteger(targetCount) &&
     targetCount >= 1 &&
-    targetCount <= 200 &&
     !timingError &&
     (runMode !== 'scheduled' || !!scheduleName) &&
     !(runMode === 'now' && active) &&
@@ -496,7 +495,7 @@ export function Automation() {
                 .filter((t) => input.customer_types!.includes(t.value))
                 .map((t) => t.label)
                 .join('、')
-            : '不限客户类型'}
+            : '不限搜索角色'}
         </p>
       </div>
       <div className="acq-summary-block">
@@ -525,7 +524,10 @@ export function Automation() {
               <p>
                 完整一周 {weeklyRuns} 轮
                 <small>
-                  新增目标合计 {Number.isFinite(targetCount) ? weeklyRuns * targetCount : '—'}{' '}
+                  新增目标合计{' '}
+                  {Number.isSafeInteger(targetCount) && targetCount > 0
+                    ? (BigInt(weeklyRuns) * BigInt(targetCount)).toLocaleString('zh-CN')
+                    : '—'}{' '}
                   家；实际收录可能少于目标
                 </small>
               </p>
@@ -672,7 +674,7 @@ export function Automation() {
                       <span className="acq-step-number">01</span>
                       <div>
                         <h2>目标客户</h2>
-                        <p>选择国家、产品和企业经营角色</p>
+                        <p>选择国家、产品和搜索角色</p>
                       </div>
                     </header>
                     <div className="acq-form-grid">
@@ -807,7 +809,7 @@ export function Automation() {
                       </>
                     )}
                     <div className="acq-field-label">
-                      客户类型<span>可多选，满足任意一种即可；不选则不限</span>
+                      搜索角色<span>可多选。按官网核实实际经营角色。</span>
                     </div>
                     <div className="acq-role-options">
                       {acquisition.customerTypes
@@ -849,7 +851,6 @@ export function Automation() {
                           aria-label="本次新增客户目标"
                           type="number"
                           min={1}
-                          max={200}
                           step={1}
                           required
                           value={Number.isNaN(targetCount) ? '' : targetCount}
@@ -1143,7 +1144,7 @@ export function Automation() {
                       </span>
                     </summary>
                     <p className="muted">
-                      系统根据产品、国家和客户条件生成查询；执行后可在记录中查看实际产出。
+                      系统根据产品、范围和搜索角色生成查询。执行记录显示实际查询及产出。
                     </p>
                     {previewError && (
                       <p className="error-message" role="alert">

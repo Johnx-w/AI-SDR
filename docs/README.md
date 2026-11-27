@@ -8,7 +8,7 @@ T12 自动同步随本次版本交付，使用运行环境有效飞书连接和�
 
 ## 当前业务与运行入口
 
-2026-11-27 全球获客计划、官网准入和 Scrapling 按需补抓已有本地实现。采集对照及其他任务继续验证，统一验收后按标准流程发布。生产获客由用户启动。见[实施规格](unified-acquisition/spec.md)及[任务与验收](unified-acquisition/tasks.md)。
+2026-11-27 全球获客计划、官网准入、跨批累计新增和 Scrapling 排队补抓已有本地实现。采集对照及其他任务继续验证，统一验收后按标准流程发布。生产获客由用户启动。见[实施规格](unified-acquisition/spec.md)及[任务与验收](unified-acquisition/tasks.md)。
 
 陌生供应商的 PDF、Excel、Word 和 Markdown 报价表接入、人工校对及按邮箱起草见[图文报价清单](mail-automation/README.md#图文报价清单)。
 

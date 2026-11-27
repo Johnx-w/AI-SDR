@@ -9,6 +9,7 @@ import { FeishuClient } from '../server/feishu-direct.mjs';
 import { BatchJobs } from '../server/batch-jobs.mjs';
 import { createApp } from '../server/app.mjs';
 import { mapFeishuRecord } from '../server/feishu.mjs';
+import { collectScraplingPage } from '../server/scrapling-collector.mjs';
 import { withApp } from './helpers/http.mjs';
 
 const site = 'https://acme.example.org/';
@@ -487,6 +488,195 @@ test('地图和官网均拒绝无法从原文核对的模型身份引文', async
   });
 });
 
+test('全球目标跨过六小时和两百家批次，末位只确认一次且读回同一任务', async (t) => {
+  const start = Date.parse('2030-01-03T08:00:00Z');
+  t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: start });
+  const directory = mkdtempSync(join(tmpdir(), 'unified-batch-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const isolated = {
+    ...env,
+    BATCH_DB_PATH: join(directory, 'jobs.sqlite'),
+    ACQUISITION_DB_PATH: join(directory, 'acquisition.sqlite'),
+  };
+  const sites = Array.from({ length: 207 }, (_, index) => {
+    const name = 'Sample Window Business ' + (index + 100);
+    const url = 'https://sample-' + (index + 100) + '.example.org/';
+    const retailer = index === 19;
+    const country = index === 0 ? 'France' : '';
+    const quote =
+      index === 2
+        ? name + ' is my personal blog about choosing roller blinds for the windows in my own home.'
+        : name +
+          (retailer
+            ? ' is a window covering retailer. We sell and install '
+            : ' imports and distributes ') +
+          'made-to-measure roller blinds for building windows' +
+          (country ? ' across France.' : '.');
+    return { url, name, quote, country, retailer, individual: index === 2 };
+  });
+  const fixtureByUrl = new Map(sites.map((row) => [row.url, row]));
+  const f = fixture();
+  let offset = 0;
+  const paidQueries = [];
+  const modelResponse = (data, usage) =>
+    json({
+      status: 'completed',
+      output: [{ content: [{ type: 'output_text', text: JSON.stringify(data) }] }],
+      usage,
+    });
+  const fetchImpl = async (url, options) => {
+    if (url === 'https://api.tavily.com/search') {
+      paidQueries.push(JSON.parse(options.body).query);
+      const next = sites.slice(offset, offset + 19);
+      if (offset) next.unshift(sites[0]);
+      offset += 19;
+      return json({ results: next.map(({ url, name }) => ({ url, title: name })) });
+    }
+    if (url === 'https://api.deepseek.com/responses') {
+      const { pages, sources } = JSON.parse(JSON.parse(options.body).input[1].content);
+      if (sources)
+        return modelResponse({
+          result: 'relevant',
+          sources: sources.map(({ i }) => i),
+          reason: 'fixture',
+        });
+      const source = fixtureByUrl.get(pages[0].source_url);
+      const evidence = (value) => ({ value, quote: source.quote, source_url: source.url });
+      if (source === sites[0]) t.mock.timers.setTime(start + 6 * 60 * 60 * 1000);
+      return modelResponse(
+        {
+          company_name: evidence(source.name),
+          entity_type: evidence(source.individual ? 'individual' : 'business'),
+          actual_country: source.country ? evidence(source.country) : null,
+          customer_type: evidence(source.retailer ? 'retailer' : 'distributor'),
+          admission_facts: source.individual ? [] : [evidence('complete_supply')],
+          products: [{ ...evidence('roller blinds'), window_use: 'window_covering' }],
+        },
+        {
+          input_tokens: 20,
+          output_tokens: 7,
+          input_tokens_details: { cached_tokens: 11 },
+          total_tokens: 27,
+        },
+      );
+    }
+    return f.fetchImpl(url, options);
+  };
+  const make = () =>
+    f.make({
+      env: isolated,
+      fetchImpl,
+      readPage: async ({ href }) => ({ html: '<p>' + fixtureByUrl.get(href)?.quote + '</p>' }),
+    });
+  const payload = {
+    ...input,
+    country: 'worldwide',
+    product: 'window coverings',
+    product_scope: 'all',
+    customer_types: ['manufacturer'],
+    target_count: 203,
+  };
+  let jobId;
+  const firstService = make();
+  let finalWrites = 0;
+  await withApp({ env: isolated, nativeImpl: firstService, fetchImpl }, async (origin) => {
+    const archive = firstService.feishu;
+    const write = archive.write.bind(archive);
+    archive.write = async (...args) => {
+      const result = await write(...args);
+      if (args[4]?.source_url === sites[203].url && ++finalWrites === 1)
+        throw new Error('最后一家已写入，响应丢失');
+      return result;
+    };
+    const api = origin + '/api/v1/acquisition/jobs';
+    const submit = () =>
+      fetch(api, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'idempotency-key': 'cross-batch-target' },
+        body: JSON.stringify(payload),
+      });
+    const acknowledgments = await Promise.all([submit(), submit()]);
+    assert.deepEqual(
+      acknowledgments.map((response) => response.status),
+      [202, 202],
+    );
+    const [firstId, replayId] = await Promise.all(
+      acknowledgments.map(async (response) => (await response.json()).id),
+    );
+    assert.equal(firstId, replayId);
+    jobId = firstId;
+    assert.equal((await (await submit()).json()).id, jobId);
+    let job;
+    for (let attempt = 0; attempt < 1200; attempt++) {
+      ({
+        jobs: [job],
+      } = await (await fetch(api + '?summary=1')).json());
+      if (job.status !== 'running') break;
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+    assert.deepEqual(
+      [job.id, job.status, job.reason, job.inserted, job.pending, job.batch.number],
+      [jobId, 'paused', 'uncertain', 202, 1, 3],
+      '最后一家写入尝试次数：' + finalWrites,
+    );
+    assert.equal(
+      (await (await fetch(origin + '/api/v1/leads/real/list')).json()).leads.length,
+      203,
+    );
+  });
+  await withApp({ env: isolated, nativeImpl: make(), fetchImpl }, async (origin) => {
+    const api = origin + '/api/v1';
+    const url = api + '/acquisition/jobs/' + jobId;
+    const continueJob = () => fetch(url + '/resume', { method: 'POST' });
+    await Promise.all([continueJob(), continueJob()]);
+    let job;
+    for (let attempt = 0; attempt < 200; attempt++) {
+      job = await (await fetch(url)).json();
+      if (job.status === 'completed') break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(
+      job.status,
+      'completed',
+      JSON.stringify({ reason: job.reason, inserted: job.inserted, first: job.rows.slice(0, 3) }),
+    );
+    assert.deepEqual(
+      [job.target, job.inserted, job.remainingTarget, job.confirmedInserted, job.reason],
+      [203, 203, 0, 203, 'target_reached'],
+    );
+    assert.equal(job.admissionVersion, 'website-admission-v1');
+    assert.equal(job.identityVersion, 'registered-operator-v1');
+    assert.equal(job.batch.number, 3);
+    assert.deepEqual(job.coverage.languages.slice(0, 2), ['en', 'es']);
+    assert.ok(job.coverage.countries.includes('France'));
+    assert.match(paidQueries[0], /manufacturer/);
+    assert.ok(paidQueries.some((query) => /persianas|estores/.test(query)));
+    assert.equal(job.rows.filter((row) => row.result === 'rejected').length, 1);
+    assert.equal(
+      new Set(job.rows.filter((row) => row.capture).map((row) => row.capture.record_id)).size,
+      203,
+    );
+    assert.equal(job.researchUsage.input_cached_tokens, 2244);
+    assert.equal(job.researchUsage.total_tokens, 5508);
+    assert.equal(finalWrites, 1);
+    const { leads } = await (await fetch(api + '/leads/real/list')).json();
+    const expected = sites.slice(0, 204).filter(({ individual }) => !individual);
+    assert.deepEqual(
+      leads.map(({ website }) => website).sort(),
+      expected.map(({ url }) => url).sort(),
+    );
+    const french = leads.find(({ website }) => website === sites[0].url);
+    const unknown = leads.find(({ website }) => website === sites[19].url);
+    const unknownRow = job.rows.find(({ source_url }) => source_url === sites[19].url);
+    assert.equal(
+      job.searchStats.find(({ id }) => id === unknownRow.search_id).country,
+      'United States',
+    );
+    assert.equal(french.market, 'France');
+    assert.equal(unknown.market, '待核实');
+  });
+});
+
 test('到期的全球计划收录美国和法国的窗饰商，同样输入的美国计划只收录美国企业', async (t) => {
   t.mock.timers.enable({
     apis: ['Date', 'setInterval'],
@@ -595,7 +785,12 @@ test('到期的全球计划收录美国和法国的窗饰商，同样输入的�
       assert.deepEqual(before, []);
       const saved = await request(schedulesPath, {
         name: 'Scope test',
-        input: { country, product: 'zip screens', query_mode: 'auto', target_count: 3 },
+        input: {
+          country,
+          product: 'zip screens',
+          query_mode: 'auto',
+          target_count: country === 'worldwide' ? 203 : 3,
+        },
         timing: { repeat: 'once', startDate: '2030-01-01', times: ['09:00'], timezone },
       });
       const {
@@ -624,14 +819,17 @@ test('到期的全球计划收录美国和法国的窗饰商，同样输入的�
       }
       assert.equal(job.status, 'partial', JSON.stringify(job.rows));
       assert.equal(job.input.country, country);
+      assert.equal(job.reason, 'exhausted');
+      assert.equal(job.remainingTarget, country === 'worldwide' ? 201 : 2);
       assert.equal(job.admissionVersion, 'website-admission-v1');
       assert.equal(job.inserted, expected.length, JSON.stringify(job.rows));
       assert.equal(job.searchStats[0].query, firstQuery);
       assert.equal(queries[0], firstQuery);
-      if (country === 'worldwide')
-        assert.ok(
-          queries.every((query) => !/worldwide|所有国家|United States|France/i.test(query)),
-        );
+      if (country === 'worldwide') {
+        assert.doesNotMatch(queries[0], /United States|France/i);
+        assert.ok(queries.some((query) => /United States|France/i.test(query)));
+        assert.ok(queries.every((query) => !/worldwide|所有国家/i.test(query)));
+      }
       const { leads } = await request(archivePath);
       assert.deepEqual(leads.map((lead) => lead.market).sort(), expected);
       assert.deepEqual(
@@ -643,6 +841,164 @@ test('到期的全球计划收录美国和法国的窗饰商，同样输入的�
       );
     });
   }
+});
+
+test('两个到期任务等待浏览器时，官网直读任务独立完成并保留各自新增归属', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.parse('2030-01-01T00:59:50Z') });
+  const localEnv = { TAVILY_API_KEY: 'fixture-search', DEEPSEEK_API_KEY: 'fixture-model' };
+  const fixtures = [
+    {
+      country: 'United States',
+      name: 'Mesa Window Supply',
+      url: 'https://mesa-browser.example.org/',
+    },
+    {
+      country: 'Canada',
+      name: 'Harbour Window Supply',
+      url: 'https://harbour-browser.example.org/',
+    },
+    {
+      country: 'Australia',
+      name: 'Canyon Window Supply',
+      url: 'https://canyon-direct.example.org/',
+      direct: true,
+    },
+  ];
+  const quote = ({ country, name }) =>
+    name +
+    ' distributes and installs complete roller blinds for building windows in ' +
+    country +
+    '.';
+  const html = (source) => '<p>' + quote(source) + '</p>';
+  const byUrl = new Map(fixtures.map((source) => [source.url, source]));
+  const fetchImpl = async (url, options) => {
+    const request = JSON.parse(options.body);
+    if (url === 'https://api.tavily.com/search') {
+      const source = fixtures.find(({ country }) => request.query.includes(country));
+      return json({ results: source ? [{ url: source.url, title: source.name }] : [] });
+    }
+    if (url === 'https://api.tavily.com/extract')
+      return json({
+        results: request.urls.map((url) => ({ url, raw_content: html(byUrl.get(url)) })),
+      });
+    assert.equal(url, 'https://api.deepseek.com/responses');
+    const { pages, sources } = JSON.parse(request.input[1].content);
+    let result;
+    if (sources)
+      result = { result: 'relevant', sources: sources.map(({ i }) => i), reason: 'fixture' };
+    else {
+      const source = byUrl.get(pages[0].source_url);
+      const fact = (value) => ({ value, quote: quote(source), source_url: source.url });
+      result = {
+        company_name: fact(source.name),
+        entity_type: fact('business'),
+        actual_country: fact(source.country),
+        admission_facts: [fact('complete_supply')],
+        products: [{ ...fact('roller blinds'), window_use: 'window_covering' }],
+      };
+    }
+    return json({
+      status: 'completed',
+      output: [{ content: [{ type: 'output_text', text: JSON.stringify(result) }] }],
+    });
+  };
+  let release;
+  const held = new Promise((resolve) => (release = resolve));
+  let memory = 2 * 1024 ** 3;
+  const browserReads = [];
+  const native = new NativeAcquisition({
+    env: localEnv,
+    fetchImpl,
+    readPage: async ({ href }) => ({
+      html: byUrl.get(href).direct
+        ? html(byUrl.get(href))
+        : '<noscript>Enable JavaScript</noscript>',
+    }),
+    readScraplingPage: (url, options) =>
+      collectScraplingPage(url, {
+        ...options,
+        python: process.execPath,
+        availableMemoryImpl: () => memory,
+        async readResourceImpl() {
+          browserReads.push(url);
+          if (browserReads.length === 1) await held;
+          return { status: 503 };
+        },
+      }),
+  });
+  await withApp({ env: localEnv, nativeImpl: native, fetchImpl }, async (origin) => {
+    const api = origin + '/api/v1';
+    try {
+      for (const { country, name } of fixtures) {
+        const response = await fetch(api + '/acquisition/schedules', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'idempotency-key': 'collector-' + country.replace(' ', '-'),
+          },
+          body: JSON.stringify({
+            name,
+            input: { country, product: 'roller blinds', query_mode: 'auto', target_count: 1 },
+            timing: {
+              repeat: 'once',
+              startDate: '2030-01-01',
+              times: ['09:00'],
+              timezone: 'Asia/Shanghai',
+            },
+          }),
+        });
+        assert.equal(response.status, 201);
+      }
+      t.mock.timers.tick(15000);
+      const waitJobs = async (condition) => {
+        for (let attempt = 0; attempt < 160; attempt++) {
+          const { jobs } = await (await fetch(api + '/acquisition/jobs')).json();
+          if (condition(jobs)) return jobs;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        assert.fail('未达到任务预期状态');
+      };
+      const whileQueued = await waitJobs(
+        (jobs) =>
+          jobs.some(({ collectionWait }) => collectionWait?.reason === 'browser_busy') &&
+          jobs.some(({ input, status }) => input.country === 'Australia' && status === 'completed'),
+      );
+      const direct = whileQueued.find(({ input }) => input.country === 'Australia');
+      assert.deepEqual(
+        direct.rows[0].collection_attempts.map(({ method }) => method),
+        ['node'],
+      );
+      assert.equal(browserReads.length, 1);
+      memory = 0;
+      release();
+      const scarce = await waitJobs((jobs) =>
+        jobs.some(({ collectionWait }) => collectionWait?.reason === 'low_memory'),
+      );
+      const delayed = scarce.find(({ collectionWait }) => collectionWait?.reason === 'low_memory');
+      assert.equal(browserReads.length, 1);
+      memory = 2 * 1024 ** 3;
+      const finished = await waitJobs(
+        (jobs) => jobs.length === 3 && jobs.every(({ status }) => status === 'completed'),
+      );
+      assert.equal(browserReads.length, 2);
+      const recovered = finished.find(({ id }) => id === delayed.id);
+      assert.equal(
+        recovered.rows[0].collection_attempts.find(({ method }) => method === 'scrapling')
+          .resource_wait.reason,
+        'low_memory',
+      );
+      assert.ok(
+        finished.every(({ id, rows, inserted }) => inserted === 1 && rows[0].capture.job_id === id),
+      );
+      assert.deepEqual(
+        (await (await fetch(api + '/leads/real/list')).json()).leads.map(({ name }) => name).sort(),
+        fixtures.map(({ name }) => name).sort(),
+      );
+    } finally {
+      memory = 2 * 1024 ** 3;
+      release();
+    }
+  });
 });
 
 for (const [name, quote, result] of [

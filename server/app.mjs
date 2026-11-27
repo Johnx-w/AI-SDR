@@ -33,7 +33,7 @@ import { CustomerBusinessApi } from './customer-business-api.mjs';
 import { followupDesk, setFollowupPriority } from './followup-desk.mjs';
 import { listFollowupTasks, readFollowupTask } from './followup-task-view.mjs';
 import { readCustomerTimeline, timelineOriginal } from './customer-timeline.mjs';
-import { searchPlan } from './search-plan.mjs';
+import { searchPlan, unifiedSearchPlan } from './search-plan.mjs';
 import { OutreachMailboxes } from './outreach-mailboxes.mjs';
 import { OutreachService } from './outreach-service.mjs';
 import { handleOutreach } from './outreach-api.mjs';
@@ -184,6 +184,7 @@ export function createApp({
       status: (id) => provider.status(id),
       identityVersion: provider.identityVersion,
       readLeads: verifiedLeads,
+      readLead: (id) => library().localDetail(id).lead,
       readAcquisitionCaptures: () => provider.acquisitionCaptures(),
       isMaintaining,
       onOutreachChange: () => wakeAutomaticOutreach(),
@@ -798,7 +799,9 @@ export function createApp({
         }
         if (url.pathname === `${prefix}/search-preview` && request.method === 'POST') {
           const input = validateInput({ ...(await readJson(request)), query_mode: 'auto' });
-          return json(response, 200, { queries: searchPlan(input) });
+          return json(response, 200, {
+            queries: provider.identityVersion ? unifiedSearchPlan(input) : searchPlan(input),
+          });
         }
         if (
           url.pathname === `${prefix}/schedules` ||
@@ -1165,6 +1168,7 @@ export function createApp({
                 {
                   bypassExclusion: true,
                   admissionVersion: websiteAdmissionVersion,
+                  ...(job.executionVersion ? { executionVersion: job.executionVersion } : {}),
                   ...(provider.identityVersion
                     ? {
                         identityVersion: provider.identityVersion,
