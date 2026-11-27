@@ -279,6 +279,10 @@ export function parseBranding(html, base, companyName) {
 }
 // Never treat a truncated prefix as a complete page: contact links often live in the footer.
 export function readHtmlResponse(response, maxBytes = 4 * 1024 * 1024) {
+  return readWebsiteBytes(response, maxBytes).then((body) => ({ html: body.toString('utf8') }));
+}
+
+export function readWebsiteBytes(response, maxBytes) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
@@ -301,7 +305,7 @@ export function readHtmlResponse(response, maxBytes = 4 * 1024 * 1024) {
     response.on('end', () => {
       if (done) return;
       done = true;
-      resolve({ html: Buffer.concat(chunks).toString('utf8') });
+      resolve(Buffer.concat(chunks));
     });
     response.on('aborted', () => fail(new Error('官网 HTML 未完整返回')));
     response.on('close', () => {
@@ -322,10 +326,20 @@ function withSignal(promise, signal) {
   );
 }
 
-export async function readPublicHtml(
+export async function readPublicHtml(url, signal = AbortSignal.timeout(8000), transport) {
+  return requestPublicWebsite(url, signal, transport);
+}
+
+export async function requestPublicWebsite(
   url,
-  signal = AbortSignal.timeout(8000),
-  { lookupImpl = lookup, requestImpl = request, proxyImpl = websiteProxyUrl } = {},
+  signal,
+  {
+    lookupImpl = lookup,
+    requestImpl = request,
+    proxyImpl = websiteProxyUrl,
+    accept = 'text/html',
+    handleResponse,
+  } = {},
 ) {
   if (!websiteUrl(url.href)) throw new Error('非公网 HTTPS 来源');
   signal.throwIfAborted();
@@ -355,7 +369,7 @@ export async function readPublicHtml(
         headers: {
           Host: url.host,
           'User-Agent': WEBSITE_USER_AGENT,
-          Accept: 'text/html',
+          Accept: accept,
           'Accept-Encoding': 'identity',
         },
         lookup: (_host, options, callback) =>
@@ -367,6 +381,12 @@ export async function readPublicHtml(
         if ([301, 302, 303, 307, 308].includes(response.statusCode)) {
           response.resume();
           return resolve({ redirect: response.headers.location });
+        }
+        if (handleResponse) {
+          Promise.resolve()
+            .then(() => handleResponse(response))
+            .then(resolve, reject);
+          return;
         }
         if (response.statusCode !== 200 || !response.headers['content-type']?.includes('html')) {
           response.resume();
