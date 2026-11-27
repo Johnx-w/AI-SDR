@@ -48,7 +48,7 @@ profile shadeflow-chromium-1255 /opt/shadeflow/chromium/chromium_headless_shell-
 
 采集在全局队列中一次派一个页面。系统可用内存低于 1 GiB 时等待。单页导航和等待约 20 秒，派入后的整次请求含启动最多 30 秒，随后等待进程树清理。本机 Windows 用 Job Object 回收后代，非委托的 Linux 开发按独立进程组回收后代。开发进程每 100 毫秒采样 Python 与子进程 RSS 之和及整机使用量，RSS 之和会重复计入共享页。
 
-生产 Linux 要求 cgroup v2。管理员将 [单元片段](../../scripts/systemd/shadeflow-scrapling.conf) 安装为 `/etc/systemd/system/shadeflow.service.d/scrapling.conf` 并运行 `systemctl daemon-reload`，在标准发布的受控重启时生效。Node 应位于 `/system.slice/shadeflow.service/app`。采集请求在同级 `scrapling-worker` 下设置并读回 `memory.max=1073741824`、`memory.swap.max=0` 和 `memory.oom.group=1`。启动器在执行 Python 前加入该组，Chromium 后代继承同一限制。完成、崩溃、超时和取消都回收该组，并在释放队列前确认无活动进程。服务停止由 systemd 回收整个单元。无法建立该限制时记录 `worker_isolation_unavailable`，获客继续走原回退路径。内存超限依据内核计数归为 `memory_limit`，报告进程组峰值。采集状态和阶段原因用于补证和回退。
+生产 Linux 要求 cgroup v2。管理员将 [单元片段](../../scripts/systemd/shadeflow-scrapling.conf) 安装为 `/etc/systemd/system/shadeflow.service.d/scrapling.conf` 并运行 `systemctl daemon-reload`，在标准发布的受控重启时生效。Node 应位于 `/system.slice/shadeflow.service/app`。采集请求在同级 `scrapling-worker` 下设置并读回 `memory.max=1073741824`、`memory.swap.max=0` 和 `memory.oom.group=1`。启动器在执行 Python 前加入该组，Chromium 后代继承同一限制。完成、崩溃、超时和取消时回收该组。超过清理等待时限会记录 `worker_cleanup_failed`。后续采集启动前，先确认仍是本进程建立的同一叶组且已无活动进程，再移除该组。服务停止由 systemd 回收整个单元。无法建立该限制时记录 `worker_isolation_unavailable`，获客继续走原回退路径。内存超限依据内核计数归为 `memory_limit`，报告进程组峰值。采集状态和阶段原因用于补证和回退。
 
 在 Ubuntu 26.04 目标机的独立暂存目录运行下面的固定页面探测。使用包中的工作进程和已核对的 Chromium，期待 `delegated`、1 GiB 上限和非零内存峰值。命令不接触业务库。
 

@@ -5,6 +5,7 @@ import {
   readFileSync,
   rmdirSync,
   statfsSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -16,8 +17,15 @@ const scopes = [
   '/system.slice/shadeflow-scrapling-probe.service',
 ];
 const limit = 1024 ** 3;
-const read = (path, file) => readFileSync(join(path, file), 'utf8').trim();
-const write = (path, file, value) => writeFileSync(join(path, file), String(value));
+const pendingCleanup = new Map();
+const cgroupFiles = {
+  access: (path) => accessSync(join(path, 'cgroup.kill'), constants.W_OK),
+  identity: (path) => statSync(path, { bigint: true }).ino,
+  mkdir: mkdirSync,
+  read: (path, file) => readFileSync(join(path, file), 'utf8').trim(),
+  remove: rmdirSync,
+  write: (path, file, value) => writeFileSync(join(path, file), String(value)),
+};
 
 export function scraplingCgroupParent(required) {
   if (process.platform !== 'linux') return null;
@@ -35,12 +43,18 @@ export function scraplingCgroupParent(required) {
   return null;
 }
 
-export function createScraplingCgroup(parent) {
+export function createScraplingCgroup(
+  parent,
+  { access, identity, mkdir, read, remove, write } = cgroupFiles,
+) {
   const path = join(parent, 'scrapling-worker');
+  pendingCleanup.get(path)?.();
   if (!read(parent, 'cgroup.subtree_control').split(/\s+/).includes('memory'))
     write(parent, 'cgroup.subtree_control', '+memory');
-  mkdirSync(path);
+  mkdir(path);
+  let inode;
   try {
+    inode = identity(path);
     write(path, 'memory.max', limit);
     write(path, 'memory.swap.max', 0);
     write(path, 'memory.oom.group', 1);
@@ -53,27 +67,48 @@ export function createScraplingCgroup(parent) {
     ) {
       throw new Error('Scrapling cgroup limits unavailable');
     }
-    accessSync(join(path, 'cgroup.kill'), constants.W_OK);
+    access(path);
   } catch (error) {
-    rmdirSync(path);
+    remove(path);
     throw error;
+  }
+  const empty = () => /^populated 0$/m.test(read(path, 'cgroup.events'));
+  const populated = () => new Error('Scrapling cgroup is still populated');
+  function recover() {
+    let current;
+    try {
+      current = identity(path);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    // A later request may reclaim this leaf once empty, even after the cleanup deadline.
+    if (current === inode) {
+      if (!empty()) throw populated();
+      remove(path);
+    }
+    pendingCleanup.delete(path);
   }
   return {
     path,
     async close() {
-      write(path, 'cgroup.kill', 1);
-      const deadline = performance.now() + 2000;
-      while (!/^populated 0$/m.test(read(path, 'cgroup.events'))) {
-        if (performance.now() >= deadline) throw new Error('Scrapling cgroup is still populated');
-        await delay(20);
+      try {
+        write(path, 'cgroup.kill', 1);
+        const deadline = performance.now() + 2000;
+        while (!empty()) {
+          if (performance.now() >= deadline) throw populated();
+          await delay(20);
+        }
+        const events = read(path, 'memory.events');
+        const peak = Number(read(path, 'memory.peak'));
+        remove(path);
+        return {
+          oom: /^(?:oom|oom_kill|oom_group_kill) [1-9]\d*$/m.test(events),
+          resources: { cgroup_limit_bytes: limit, cgroup_peak_bytes: peak },
+        };
+      } catch (error) {
+        pendingCleanup.set(path, recover);
+        throw error;
       }
-      const events = read(path, 'memory.events');
-      const peak = Number(read(path, 'memory.peak'));
-      rmdirSync(path);
-      return {
-        oom: /^(?:oom|oom_kill|oom_group_kill) [1-9]\d*$/m.test(events),
-        resources: { cgroup_limit_bytes: limit, cgroup_peak_bytes: peak },
-      };
     },
   };
 }
