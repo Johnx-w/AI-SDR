@@ -6,6 +6,7 @@ import { researchCacheKey } from './research-reuse.mjs';
 import {
   acquisitionIdentityVersion,
   acquisitionUrl,
+  identityIntegrityCode,
   subjectName,
   verifiedRegistration,
 } from './acquisition-subject.mjs';
@@ -83,7 +84,9 @@ const paidUnknown = () =>
 const paidFailed = () =>
   Object.assign(new Error('已确认供应商请求失败'), { code: 'ACQUISITION_PAID_FAILED' });
 const recoverySignal = (error) =>
-  ['ACQUISITION_INTERRUPTED', 'ACQUISITION_PAID_UNKNOWN'].includes(error.code);
+  ['ACQUISITION_INTERRUPTED', 'ACQUISITION_PAID_UNKNOWN', identityIntegrityCode].includes(
+    error.code,
+  );
 const blockedHosts =
   /(?:^|\.)(?:facebook|instagram|linkedin|youtube|youtu|tiktok|twitter|x|pinterest|reddit|quora|wikipedia|alibaba|made-in-china|seek|indeed|jora|glassdoor|careerone|adzuna|jobsora|jooble|talent|careerjet|simplyhired|ziprecruiter|workforceaustralia|hipages|oneflare|yellowpages|truelocal|localsearch|hotfrog|yelp|houzz|gumtree|airtasker|serviceseeking|startlocal|aussieweb|dlook|brownbook|boombusinessdirectory|cylex|yably|bark|google|bing|amazon|ebay|eventbrite|medium)\./i;
 const blockedMedia = [
@@ -367,6 +370,9 @@ export class NativeAcquisition {
       assessmentStorage: 'latest_only',
       businessSchemaVersion: BUSINESS_SCHEMA_VERSION,
     };
+  }
+  assertAutomaticIdentityIntegrity() {
+    this.store.assertAutomaticIdentityIntegrity();
   }
   decorateLeads(data) {
     return {
@@ -765,7 +771,8 @@ export class NativeAcquisition {
         : new Map();
     for (const attempt of previousAttempts) {
       const stored =
-        pinned.get(attempt.snapshot_id) || this.store.snapshotById(attempt.snapshot_id);
+        pinned.get(attempt.snapshot_id) ||
+        this.store.snapshotById(attempt.snapshot_id, { verify: true });
       pinned.delete(attempt.snapshot_id);
       if (stored?.status === 'ok' && domainKey(stored.final_url) === domain) {
         resumedUrls.add(stored.requested_url);
@@ -1313,6 +1320,7 @@ export class NativeAcquisition {
     this.ensureConfigured();
     const id = item.operation_id;
     if (typeof id !== 'string' || !/^[\w-]{8,150}$/.test(id)) throw conflict('研究操作编号无效');
+    if (!review && !item.target_record_id) this.assertAutomaticIdentityIntegrity();
     const scopedIdentity = identityVersion === acquisitionIdentityVersion && this.feishu.localFirst;
     const { operation: op, existing } = this.store.begin(id, {
       input,
@@ -1822,6 +1830,7 @@ export class NativeAcquisition {
       }
       if (!Object.keys(fields).length) throw new Error('没有可更新字段');
       check();
+      if (!old && !review) this.assertAutomaticIdentityIntegrity();
       // Persist intent before the remote side effect. Never auto-repeat an uncertain write.
       op.stage = 'persist';
       op.action = old ? 'update' : 'insert';
@@ -2380,6 +2389,7 @@ export class NativeAcquisition {
       if (!(await this.verify(op))) throw new Error('客户档案保存后读回不一致');
       return await this.finishWritten(op);
     } catch (error) {
+      if (error.code === identityIntegrityCode) throw error;
       op.state = 'uncertain';
       this.store.save(op);
       throw conflict(
@@ -2558,6 +2568,7 @@ export class NativeAcquisition {
     this.store.save(op);
     if (match.record_id) {
       await this.feishu.record(match.record_id);
+      if (op.acquisition.mode === 'automatic') this.assertAutomaticIdentityIntegrity();
       this.recordAcquisitionSource(op, match.record_id);
     } else {
       op.research.identity_conflict = match.conflict;

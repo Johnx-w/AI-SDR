@@ -33,6 +33,7 @@ export function createAcquisitionProvider({
         : undefined,
     mapComparisonEnabled:
       nativeImpl instanceof NativeAcquisition && Boolean(nativeImpl.discoverMaps),
+    assertAutomaticIdentityIntegrity: () => service().assertAutomaticIdentityIntegrity?.(),
     get syncing() {
       return !!customers.syncing;
     },

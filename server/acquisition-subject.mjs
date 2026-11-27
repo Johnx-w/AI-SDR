@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { domainKey } from './website-identity.mjs';
 
 export const acquisitionIdentityVersion = 'registered-operator-v1';
+export const identityIntegrityCode = 'ACQUISITION_IDENTITY_INTEGRITY';
+export const identityIntegrityMessage = '共享身份核验证据损坏，自动入库已暂停，等待修复核对';
 
 export function acquisitionUrl(value) {
   try {
