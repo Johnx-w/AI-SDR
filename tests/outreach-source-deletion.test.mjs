@@ -62,6 +62,17 @@ test('正常HTTP删除来源A暂停并关闭授权，来源B和独立计划不�
       assert.equal(result.status, 200);
       const deleted = await result.json();
       assert.ok(deleted.campaign.deletedAt);
+      const repeats = await Promise.all(
+        [1, 2].map(() =>
+          fetch(base + '/api/v1/outreach/campaigns/a/delete', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ revision: 1, confirmed: true }),
+          }).then((r) => r.json()),
+        ),
+      );
+      for (const repeat of repeats)
+        assert.equal(repeat.campaign.deletedAt, deleted.campaign.deletedAt);
       assert.equal(jobs.get(a.id).input.auto_first_touch, false);
       assert.equal(jobs.get(a.id).manualPaused, true);
       assert.equal(jobs.get(b.id).input.auto_first_touch, true);
