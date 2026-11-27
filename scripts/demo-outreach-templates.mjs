@@ -27,7 +27,7 @@ const offer = 'May I send our one-page roller blinds product card?';
 const follow = 'Does your team source roller blinds from external suppliers?';
 async function model(url, request) {
   assert.equal(String(url), 'https://offline.invalid/v1/chat/completions');
-  const { messages } = JSON.parse(request.body);
+  const { messages, response_format } = JSON.parse(request.body);
   const data = JSON.parse(messages[1].content);
   if (data.mode) {
     const text =
@@ -102,8 +102,10 @@ async function model(url, request) {
         ? 'Your workshop assembles roller blinds.'
         : 'Your range includes roller blinds.';
   }
+  const properties = response_format.json_schema.schema.properties;
+  const fields = Object.fromEntries(Object.entries(draft).filter(([key]) => key in properties));
   return Response.json({
-    choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(draft) } }],
+    choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(fields) } }],
   });
 }
 const product = {

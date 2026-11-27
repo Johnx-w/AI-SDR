@@ -40,6 +40,25 @@ const evidenceText = (value) =>
     .replace(/\s+/g, ' ')
     .trim();
 
+const absence =
+  /^(?:(?:I am|I['’]m|We are) (?:currently )?(?:out of (?:the )?office|away from (?:the )?office|on (?:annual )?leave)(?: (?:this week|today|tomorrow|until (?:next )?(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|\d{1,4}[-/]\d{1,2}(?:[-/]\d{1,4})?)))?|(?:我|本人)(?:目前|现在)?(?:正在)?(?:外出|休假|不在办公室))[.!。！]?$/iu;
+const noticeLine =
+  /^(?:thank you for your (?:email|message)|thanks for your (?:email|message)|this is an (?:automated|automatically generated) (?:email|message)|(?:I will|I['’]ll) (?:reply|respond) (?:when I return|on my return)|(?:I will|I['’]ll) (?:be back|return) (?:on )?(?:next )?(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|\d{1,4}[-/]\d{1,2}(?:[-/]\d{1,4})?)|感谢(?:您)?的来信|我会在返回后回复)[.!。！]?$/iu;
+const delegateLine =
+  /^(?:(?:for urgent matters|for immediate assistance),? (?:please )?contact |如有紧急事项[，,]?\s*请联系)(?:[\p{L}][\p{L}'’-]*(?: [\p{L}][\p{L}'’-]*){0,4} (?:at )?)?(?:[\w.+-]+@[\w.-]+\.[a-z]{2,}|\+?\d[\d ()-]{5,}\d)[.!。！]?$/iu;
+
+function plainOutOfOffice(body) {
+  // shortcut: only known absence, courtesy, return and delegate phrases; novel prose still uses analysis.
+  const lines = body
+    .split(/\r?\n|(?<=[.!。！])\s+(?=[A-Z\p{Script=Han}])/u)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return (
+    lines.some((line) => absence.test(line)) &&
+    lines.every((line) => absence.test(line) || noticeLine.test(line) || delegateLine.test(line))
+  );
+}
+
 export async function analyzeCommunication(message, model) {
   const body = customerReplyText(message),
     known = knownReplyType(message);
@@ -47,6 +66,11 @@ export async function analyzeCommunication(message, model) {
     assert(known, '空正文来信无法确定回复类型');
     return { replyType: known, customerInfo: '', demandSummary: '' };
   }
+  const ownAddress = String(message.account || message.outboundAccount || '').toLowerCase();
+  const from = String(message.from || message.sender || '').trim();
+  const senderInfo = from && from.toLowerCase() !== ownAddress ? '来信邮箱：' + from : '';
+  if (known === '系统自动回复' && plainOutOfOffice(body))
+    return { replyType: known, customerInfo: senderInfo, demandSummary: '' };
   const result = await model.research({
     schema,
     messages: [
@@ -91,7 +115,6 @@ export async function analyzeCommunication(message, model) {
     quote.trim() &&
     (evidence.includes(evidenceText(quote)) || subjectEvidence.includes(evidenceText(quote)));
   if (!known) assert(supported(data.classificationQuote), '回复分类缺少原文依据');
-  const ownAddress = String(message.account || message.outboundAccount || '').toLowerCase();
   const facts = data.facts.map((fact) => {
     assert(
       labels.includes(fact.label) &&
@@ -108,8 +131,7 @@ export async function analyzeCommunication(message, model) {
     );
     return fact.label + '：' + fact.value.trim();
   });
-  const from = String(message.from || message.sender || '').trim();
-  if (from && from.toLowerCase() !== ownAddress) facts.push('来信邮箱：' + from);
+  if (senderInfo) facts.push(senderInfo);
   const replyType = known || data.replyType;
   assert(
     typeof data.demandSummary === 'string' && typeof data.demandQuote === 'string',
@@ -135,7 +157,11 @@ export async function enrichCommunicationMessages(
   store.db.exec(`CREATE TABLE IF NOT EXISTS customer_business_message_analysis(
     scope TEXT NOT NULL,message_id TEXT NOT NULL,input_hash TEXT NOT NULL,data TEXT NOT NULL,
     PRIMARY KEY(scope,message_id));`);
-  const analyzer = model || createResearchProviders({ env, fetchImpl }).model;
+  let analyzer = model;
+  const lazyModel = {
+    research: (request) =>
+      (analyzer ||= createResearchProviders({ env, fetchImpl }).model).research(request),
+  };
   const result = [];
   for (const message of messages) {
     checkMirrorMaintenance(isMaintaining);
@@ -160,7 +186,7 @@ export async function enrichCommunicationMessages(
     let replyAnalysis;
     if (cached?.input_hash === inputHash) replyAnalysis = JSON.parse(cached.data);
     else {
-      replyAnalysis = await analyzeCommunication(message, analyzer);
+      replyAnalysis = await analyzeCommunication(message, lazyModel);
       store.db
         .prepare('INSERT OR REPLACE INTO customer_business_message_analysis VALUES(?,?,?,?)')
         .run(store.scope, message.id, inputHash, JSON.stringify(replyAnalysis));

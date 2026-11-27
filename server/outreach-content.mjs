@@ -3,6 +3,7 @@ import {
   addPersonalizedFields,
   personalizedValues,
   personalizationPolicy,
+  templateModelFields,
 } from './sequence-personalization.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -699,7 +700,8 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
       firstBodyInstruction = '',
       now = new Date(),
     }) {
-      if (!configured)
+      const fields = templateModelFields(template, true);
+      if (fields.needed && !configured)
         throw fail(503, '请先在连接设置中配置开发信使用的研究模型', 'outreach_model_unconfigured');
       const facts = eligibleOutreachFacts(product, campaign, now);
       const materialVersion = outreachMaterialVersion(product, campaign, now);
@@ -763,23 +765,28 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
       const schema = {
         type: 'object',
         additionalProperties: false,
-        required: ['subject', 'body_text', 'source_ids'],
         properties: {
-          subject: { type: 'string' },
-          body_text: {
-            type: 'string',
-            description:
-              'Follow body_instruction and closing_instruction for the composition and ending. No greeting or signature.',
-          },
+          ...(fields.subject && { subject: { type: 'string' } }),
+          ...(fields.body && {
+            body_text: {
+              type: 'string',
+              description:
+                fields.fragment ||
+                'Follow body_instruction and closing_instruction for the composition and ending. No greeting or signature.',
+            },
+          }),
           source_ids: { type: 'array', items: { type: 'string' } },
         },
       };
-      const custom = template?.variables || [];
+      schema.required = Object.keys(schema.properties);
+      const custom = fields.variables;
       addPersonalizedFields(schema, custom);
       const input = {
         ...(custom.length && { personalization_rules: custom }),
-        ...(firstBodyInstruction ? { body_instruction: firstBodyInstruction } : {}),
-        ...(firstInstruction ? { closing_instruction: firstInstruction } : {}),
+        ...((fields.body || fields.subject) && firstBodyInstruction
+          ? { body_instruction: firstBodyInstruction }
+          : {}),
+        ...(fields.body && firstInstruction ? { closing_instruction: firstInstruction } : {}),
         customer: {
           name: candidate.companyName,
           country: candidate.leadSnapshot?.market,
@@ -792,7 +799,7 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
         },
         sender: {
           brand: mailbox.brandName,
-          product: product.englishName,
+          product: product.englishName || product.name,
           focus_product: matchedTypes.length === 1 ? matchedTypes[0] : product.englishName,
           manufacturing_confirmed: manufacturingConfirmed,
           origin_country: manufacturingConfirmed ? confirmedSupply.originCountry : null,
@@ -803,29 +810,34 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
       const messages = [
         {
           role: 'system',
-          content: writerPolicy + (custom.length ? personalizationPolicy : ''),
+          content:
+            writerPolicy +
+            (template ? '\nGenerate only the fields in the response schema.' : '') +
+            (custom.length ? personalizationPolicy : ''),
         },
         { role: 'user', content: JSON.stringify(input) },
       ];
       for (let attempt = 0; attempt < 2; attempt++) {
-        const response = await provider.research({ schema, messages });
-        const draft = parseGenerated(response, schema);
+        const draft = fields.needed
+          ? parseGenerated(await provider.research({ schema, messages }), schema)
+          : { source_ids: [] };
         const subject = text(draft.subject),
           bodyText = text(draft.body_text).replace(
             /^(?:hello|hi|dear)(?:\s+(?:there|team|all))?\s*[,!:]\s*/iu,
             '',
           );
         if (
-          !Array.isArray(draft.source_ids) ||
-          !draft.source_ids.length ||
-          draft.source_ids.length > 3 ||
-          new Set(draft.source_ids).size !== draft.source_ids.length ||
-          draft.source_ids.some((id) => !evidence.some((e) => e.id === id))
+          fields.needed &&
+          (!Array.isArray(draft.source_ids) ||
+            !draft.source_ids.length ||
+            draft.source_ids.length > 3 ||
+            new Set(draft.source_ids).size !== draft.source_ids.length ||
+            draft.source_ids.some((id) => !evidence.some((e) => e.id === id)))
         )
           throw fail(502, '开发信内容或客户依据不完整，请重试', 'outreach_generation_invalid');
         const variables = mailVariables({
           company: candidate.companyName,
-          product: product.englishName,
+          product: product.englishName || product.name,
           brand: mailbox.brandName,
           subject,
           body: bodyText,
@@ -842,7 +854,11 @@ export function createOutreachGenerator({ env = {}, fetchImpl = fetch } = {}) {
             finalBody,
           )
         ) {
-          if (!attempt && (!template || /\{\{(?:ai_|custom_)/u.test(template.body))) {
+          if (
+            !attempt &&
+            fields.needed &&
+            (!template || /\{\{(?:ai_|custom_)/u.test(template.body))
+          ) {
             messages.push(
               { role: 'assistant', content: JSON.stringify(draft) },
               {
