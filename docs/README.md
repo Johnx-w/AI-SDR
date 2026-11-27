@@ -72,7 +72,7 @@ T12 自动同步随本次版本交付，使用运行环境有效飞书连接和�
 
 客户大类、邮箱及产品范围预览的适用条件与验证证据见[分类预览验收](mail-automation/category-preview.md)。
 
-触达计划产品选择、邮箱负责范围维护和删除来源联动的已确认待实施方案见[邮件沟通](outreach-first-touch.md#触达计划范围调整方案设计中)，来源暂停决定见 [ADR-0026](adr/0026-pause-acquisition-when-deleting-outreach.md)。
+触达计划产品选择、邮箱负责范围维护和删除来源联动的已确认待实施方案见[邮件沟通](outreach-first-touch.md#触达计划范围调整方案设计中)，来源暂停及自动首发关闭规则见 [ADR-0026](adr/0026-pause-acquisition-when-deleting-outreach.md)，人工直接恢复仅继续获客。
 
 ## 维护与归档
 
