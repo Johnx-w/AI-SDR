@@ -738,14 +738,15 @@ test('跨计划分配计入已保留草稿，但待发草稿复核不因邮箱�
   );
 });
 
-test('计划品类筛选与邮箱产品范围共同决定首封资格', async (t) => {
+test('计划明确产品集合与邮箱范围共同决定首封资格，品类只作选择分组', async (t) => {
   const h = harness();
   t.after(() => h.service.close());
   h.products[0].category = 'ventilation';
   h.products[1].category = 'indoor';
   h.state.leads = [buyer('shutter'), buyer('roller', 'roller blinds')];
-  const campaign = await prepare(h, { filters: { categories: ['indoor'] } });
-  assert.deepEqual(campaign.filters.categories, ['indoor']);
+  const campaign = await prepare(h, { filters: { products: ['roller'], categories: ['indoor'] } });
+  assert.deepEqual(campaign.filters.categories, []);
+  assert.deepEqual(campaign.filters.products, ['roller']);
   const drafts = h.service.deliveries(campaign.id).filter((row) => row.status === 'draft');
   assert.equal(drafts.length, 1);
   assert.equal(drafts[0].customerId, 'roller');
@@ -1963,4 +1964,196 @@ test('正式首封拒绝模板或生成器带入邮箱范围外产品', async (t
   assert.equal(row.status, 'blocked');
   assert.match(row.reason, /产品|品牌/);
   assert.equal(h.deliveries.length, 0);
+});
+
+test('手动计划拒绝空集合和无覆盖产品，保存只授权明确编号并在启动时复查', async (t) => {
+  const h = harness();
+  t.after(() => h.service.close());
+  h.boxes[0].productIds = ['pvc'];
+  h.boxes[1].productIds = ['roller'];
+  assert.throws(
+    () => h.service.saveCampaign(h.campaignInput({ filters: { products: [] } })),
+    /至少选择一个供货产品/,
+  );
+  assert.throws(
+    () =>
+      h.service.saveCampaign(
+        h.campaignInput({ mailboxIds: ['brand-a'], filters: { products: ['roller'] } }),
+      ),
+    /负责范围/,
+  );
+  const first = h.service.saveCampaign(
+    h.campaignInput({ mailboxIds: ['brand-a'], filters: { products: ['pvc'] } }),
+  );
+  const second = h.service.saveCampaign(
+    h.campaignInput({ mailboxIds: ['brand-b'], filters: { products: ['roller'] } }),
+  );
+  assert.deepEqual(h.service.detail(first.id).campaign.filters.products, ['pvc']);
+  assert.deepEqual(h.service.detail(second.id).campaign.filters.products, ['roller']);
+  h.products.push({ ...h.products[0], id: 'outdoor' });
+  assert.throws(
+    () => h.service.saveCampaign(h.campaignInput({ filters: { products: ['outdoor'] } })),
+    /负责范围/,
+  );
+  h.boxes[0].productIds.push('outdoor');
+  assert.deepEqual(h.service.detail(first.id).campaign.filters.products, ['pvc']);
+  h.products[0].effectiveDate = '2099-01-01';
+  assert.throws(() => h.service.activate(first.id, first.revision), /尚未生效/);
+  delete h.products[0].effectiveDate;
+  h.products[0].status = 'draft';
+  assert.throws(() => h.service.activate(first.id, first.revision), /尚未审核/);
+  h.products[0].status = 'approved';
+  h.boxes[0].productIds = [];
+  assert.throws(() => h.service.activate(first.id, first.revision), /负责范围/);
+});
+
+test('旧计划按保存快照和原品类迁移，空交集与缺失快照等待确认，重启无扩大且历史可读', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'outreach-selection-migration-'));
+  const h = harness({ path: join(directory, 'outreach.sqlite') });
+  try {
+    h.products[0].category = 'ventilation';
+    h.products[1].category = 'indoor';
+    const seed = h.service.saveCampaign(h.campaignInput());
+    const scopes = h.service.campaign(seed.id).productScopes;
+    for (const [id, categories, productScopes] of [
+      ['limited', ['indoor'], scopes],
+      ['all', [], scopes],
+      ['empty', ['outdoor'], scopes],
+      ['missing', [], undefined],
+    ])
+      h.service.putCampaign({
+        ...seed,
+        id,
+        status: 'paused',
+        productSelectionVersion: undefined,
+        filters: { ...seed.filters, products: [], categories },
+        productScopes,
+      });
+    h.service.putDelivery({
+      id: 'historic',
+      campaignId: 'missing',
+      status: 'accepted',
+      subject: 'Original sent mail',
+    });
+    await h.service.close();
+    h.products.push({ ...h.products[0], id: 'new' });
+    h.boxes[0].productIds.push('new');
+    h.service = new OutreachService(h.serviceOptions);
+    assert.deepEqual(h.service.detail('limited').campaign.filters.products, ['roller']);
+    assert.deepEqual(h.service.detail('all').campaign.filters.products, ['pvc', 'roller']);
+    for (const id of ['empty', 'missing']) {
+      assert.deepEqual(h.service.detail(id).campaign.filters.products, []);
+      assert.equal(h.service.detail(id).campaign.productSelectionState, 'confirmation_required');
+      assert.throws(() => h.service.activate(id, seed.revision), /编辑并确认/);
+    }
+    assert.equal(h.service.detail('missing').deliveries[0].subject, 'Original sent mail');
+    const before = h.service.detail('all').campaign;
+    await h.service.close();
+    h.service = new OutreachService(h.serviceOptions);
+    assert.deepEqual(h.service.detail('all').campaign, before);
+  } finally {
+    await h.service.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('HTTP 新建双邮箱明确产品计划，拒绝无覆盖对照和空编辑，回读保持原集合', async (t) => {
+  const { createApp } = await import('../server/app.mjs');
+  const h = harness();
+  h.boxes[0].productIds = ['pvc'];
+  h.boxes[1].productIds = ['roller'];
+  h.products.push({ ...h.products[0], id: 'outdoor' });
+  const server = createApp({ env: {}, outreachServiceFactory: () => h.service });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    await h.service.close();
+  });
+  const base = `http://127.0.0.1:${server.address().port}/api/v1/outreach`;
+  const write = (path, body, method = 'POST') =>
+    fetch(base + path, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  for (const [mailbox, product] of [
+    ['brand-a', 'pvc'],
+    ['brand-b', 'roller'],
+  ]) {
+    const result = await write(
+      '/campaigns',
+      h.campaignInput({ mailboxIds: [mailbox], filters: { products: [product] } }),
+    );
+    assert.equal(result.status, 200);
+    const created = await result.json();
+    const id = created.id;
+    assert.deepEqual(
+      (await (await fetch(base + '/campaigns/' + id)).json()).campaign.filters.products,
+      [product],
+    );
+    assert.equal(
+      (
+        await write(
+          '/campaigns/' + id,
+          { ...h.campaignInput(), revision: created.revision, filters: { products: [] } },
+          'PUT',
+        )
+      ).status,
+      400,
+    );
+    assert.deepEqual(
+      (await (await fetch(base + '/campaigns/' + id)).json()).campaign.filters.products,
+      [product],
+    );
+  }
+  assert.equal(
+    (await write('/campaigns', h.campaignInput({ filters: { products: ['outdoor'] } }))).status,
+    400,
+  );
+  assert.equal(
+    (await write('/campaigns', h.campaignInput({ filters: { products: [] } }))).status,
+    400,
+  );
+  assert.equal(h.deliveries.length, 0);
+});
+
+test('两个明确产品计划经正常启动仅向各自邮箱提交所选产品，户外对照没有发送', async (t) => {
+  const h = harness();
+  t.after(() => h.service.close());
+  h.boxes[0].productIds = ['pvc'];
+  h.boxes[1].productIds = ['roller'];
+  h.products.push({ ...h.products[0], id: 'outdoor', englishName: 'outdoor awnings' });
+  h.state.leads = [
+    buyer('pvc-buyer'),
+    buyer('roller-buyer', 'roller blinds'),
+    buyer('outdoor-buyer', 'outdoor awnings'),
+  ];
+  for (const [mailbox, product] of [
+    ['brand-a', 'pvc'],
+    ['brand-b', 'roller'],
+  ]) {
+    const campaign = h.service.saveCampaign(
+      h.campaignInput({ mailboxIds: [mailbox], filters: { products: [product] }, targetCount: 1 }),
+    );
+    h.service.activate(campaign.id, campaign.revision);
+    await h.service.preparing.get(campaign.id);
+    await h.service.tick();
+    const accepted = h.service
+      .detail(campaign.id)
+      .deliveries.filter((d) => d.status === 'accepted');
+    assert.equal(accepted.length, 1);
+    assert.equal(accepted[0].mailboxId, mailbox);
+    assert.equal(accepted[0].customerId, product + '-buyer');
+  }
+  assert.equal(h.deliveries.length, 2);
+  assert.deepEqual(
+    h.deliveries.map((d) => d.mailboxId),
+    ['brand-a', 'brand-b'],
+  );
+  assert.match(h.deliveries[0].text, /We supply PVC shutters/);
+  assert.match(h.deliveries[1].text, /We supply roller blinds/);
+  assert.equal(
+    h.deliveries.some((d) => d.to.includes('outdoor-buyer')),
+    false,
+  );
 });
