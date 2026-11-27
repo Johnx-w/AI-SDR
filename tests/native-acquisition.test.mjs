@@ -2328,3 +2328,145 @@ test('官网研究正文解码法人名称和标点，保留数值字符与短�
     native.close();
   }
 });
+test('供应商档案发现后保留待核实，只有独立官网写入主库', async () => {
+  const nsw = 'https://buy.nsw.gov.au/supplier/profile/12468764';
+  const second = 'https://tender-network.example.org/companies/913';
+  const official = 'https://wattle-shade.example.org/supplier/profile';
+  const sites = new Map([
+    [
+      nsw,
+      [
+        'PAMIDO PTY LTD',
+        'A NSW Government website. This supplier has self-identified in the following products and services.',
+        'At Pamido, we manufacture premium window furnishings.',
+      ],
+    ],
+    [
+      second,
+      [
+        'Wattle Shade Pty Ltd',
+        'Supplier directory. Further information on this supplier is available to registered buyers.',
+        'Wattle Shade Pty Ltd supplies custom roller blinds for building windows.',
+      ],
+    ],
+    [
+      official,
+      [
+        'Wattle Shade Pty Ltd',
+        'About our company: Wattle Shade Pty Ltd.',
+        'Wattle Shade Pty Ltd supplies custom roller blinds for building windows.',
+      ],
+    ],
+  ]);
+  const requests = [];
+  const { make } = fixture();
+  const fetchImpl = async (url, options) => {
+    if (url === 'https://api.tavily.com/search')
+      return json({ results: [...sites].map(([url, [title]]) => ({ url, title })) });
+    if (url !== 'https://api.deepseek.com/responses') assert.fail('Unexpected external request');
+    const payload = JSON.parse(JSON.parse(options.body).input[1].content);
+    const source = payload.pages?.[0].source_url || payload.company?.website;
+    requests.push(source);
+    if (payload.sources)
+      return json({
+        status: 'completed',
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: {
+                  result: 'relevant',
+                  sources: payload.sources.map((s) => s.i),
+                  reason: '经营窗饰',
+                },
+              },
+            ],
+          },
+        ],
+      });
+    const [name, , productQuote] = sites.get(source);
+    const evidence = (value, quote) => ({ value, quote, source_url: source });
+    return json({
+      status: 'completed',
+      output: [
+        {
+          content: [
+            {
+              type: 'output_text',
+              text: {
+                company_name: evidence(name, name),
+                entity_type: evidence('business', name),
+                products: [
+                  {
+                    ...evidence(
+                      source === nsw ? 'window furnishings' : 'roller blinds',
+                      productQuote,
+                    ),
+                    window_use: 'window_covering',
+                  },
+                ],
+                admission_facts: [evidence('complete_supply', productQuote)],
+              },
+            },
+          ],
+        },
+      ],
+    });
+  };
+  const native = make({
+    env: { TAVILY_API_KEY: 'fixture-search', DEEPSEEK_API_KEY: 'fixture-model' },
+    fetchImpl,
+    readPage: async (url) => {
+      const values = sites.get(url.href);
+      if (!values) return { html: '<p>Welcome</p>' };
+      const [name, identity, quote] = values;
+      return { html: '<h1>' + name + '</h1><p>' + identity + '</p><p>' + quote + '</p>' };
+    },
+  });
+  await withApp(
+    {
+      env: { TAVILY_API_KEY: 'fixture-search', DEEPSEEK_API_KEY: 'fixture-model' },
+      nativeImpl: native,
+      fetchImpl,
+    },
+    async (base) => {
+      const jobs = base + '/api/v1/acquisition/jobs';
+      const created = await fetch(jobs, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'supplier-profile-custody',
+        },
+        body: JSON.stringify({
+          country: 'Australia',
+          product_scope: 'all',
+          query_mode: 'auto',
+          target_count: 4,
+        }),
+      });
+      assert.equal(created.status, 202);
+      const { id } = await created.json();
+      let job;
+      for (let n = 0; n < 100; n++) {
+        job = await (await fetch(jobs + '/' + id)).json();
+        if (job.status !== 'running') break;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      assert.deepEqual(
+        job.rows.map((row) => [row.source_url, row.result]),
+        [
+          [nsw, 'review'],
+          [second, 'review'],
+          [official, 'inserted'],
+        ],
+      );
+      const archive = await (await fetch(base + '/api/v1/leads/real/list')).json();
+      assert.deepEqual(
+        archive.leads.map(({ website, name }) => [website, name]),
+        [[official, 'Wattle Shade Pty Ltd']],
+      );
+      assert.deepEqual(requests, [official, official]);
+    },
+  );
+});

@@ -165,3 +165,40 @@ test('产品品牌和客户/贸易记录主体不是网页自身经营者', () =
     assert.equal(result.name, null, quote);
   }
 });
+test('官网候选在同站跳转到供应商档案时仍待核实', async () => {
+  const source = 'https://network.example.org/about/mayfair';
+  const target = 'https://network.example.org/supplier/profile/4132';
+  const native = new NativeAcquisition({
+    env,
+    readPage: async (url) =>
+      url.href === source
+        ? { redirect: target }
+        : {
+            html: '<h1>Mayfair Furnishings</h1><p>We supply made-to-measure roller blinds.</p>',
+          },
+    feishu: {
+      records: async () => [],
+      write: async () => assert.fail('A listed company has no verified own site'),
+    },
+    providers: {
+      web: { extract: async () => assert.fail('No fallback needed') },
+      model: {
+        research: async () => assert.fail('A confirmed supplier profile must stop before research'),
+      },
+    },
+  });
+  try {
+    const result = await native.research(
+      { country: 'United States', product_scope: 'all' },
+      { source_url: source, operation_id: 'redirected-supplier-profile' },
+    );
+    assert.equal(result.outcome, 'review');
+    assert.match(result.reason, /第三方|独立官网/);
+    assert.ok(
+      result.collection_attempts.some((a) => a.requested_url === source && a.final_url === target),
+    );
+    assert.equal(result.research_usage.model_calls, 0);
+  } finally {
+    native.close();
+  }
+});
