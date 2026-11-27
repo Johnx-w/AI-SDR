@@ -17,6 +17,8 @@ const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 const DPAPI = 'windows-dpapi-current-user';
 const AES = 'aes-256-gcm-local-key';
 const messages = {
+  MAILBOX_REVISION_CONFLICT: '邮箱配置已被其他使用者修改，请刷新后重新确认',
+  MAILBOX_COVERAGE_INVALID: '负责产品必须存在、已审核且获得当前品牌许可',
   MAILBOX_INVALID: '邮箱配置格式不正确',
   MAILBOX_NOT_FOUND: '邮箱不存在',
   MAILBOX_DUPLICATE: '该邮箱已经登记',
@@ -361,6 +363,7 @@ function normalize(input, previous) {
   if (!plainObject(input)) throw fail();
   const allowed = [
     'id',
+    'revision',
     'email',
     'website',
     'brandName',
@@ -402,6 +405,7 @@ function normalize(input, previous) {
   const signatureDesign = normalizeSignatureDesign(value.signatureDesign);
   const record = {
     id,
+    revision: value.revision ?? 1,
     email: address,
     website: site,
     smtp: smtp(value.smtp),
@@ -624,7 +628,37 @@ export class OutreachMailboxes {
   }
   async prepare(input, records, salesProducts) {
     const previous = plainObject(input) && input.id ? records.get(input.id) : undefined;
+    if (
+      previous &&
+      (Object.hasOwn(input, 'revision') || (salesProducts && Object.hasOwn(input, 'productIds'))) &&
+      input.revision !== previous.revision
+    )
+      throw fail('MAILBOX_REVISION_CONFLICT', 409);
     const record = normalize(input, previous);
+    if (
+      salesProducts &&
+      (Object.hasOwn(input, 'productIds') ||
+        (previous &&
+          (Object.hasOwn(input, 'website') ||
+            Object.hasOwn(input, 'email') ||
+            Object.hasOwn(input, 'brandName'))))
+    ) {
+      const products = salesProducts();
+      if (
+        record.productIds.some(
+          (id) =>
+            !products.some(
+              (p) =>
+                p.id === id &&
+                !p.materialOnly &&
+                (p.status ? p.status === 'approved' : p.approved === true) &&
+                siteAllowsProduct(p, record, true),
+            ),
+        )
+      )
+        throw fail('MAILBOX_COVERAGE_INVALID', 400);
+    }
+    record.revision = (previous?.revision || 0) + 1;
     if (!previous && salesProducts && !Object.hasOwn(input, 'productIds')) {
       record.productIds = salesProducts()
         .filter(
