@@ -193,6 +193,16 @@ function setup(
             result.campaignName = campaign.name;
             return deliveryResponse ? deliveryResponse(result) : result;
           }
+          if (path === '/campaigns/campaign-one/deletion-preview')
+            return { pendingFirst: 2, pendingFollowUps: 3, unknown: 1 };
+          if (path === '/campaigns/campaign-one/delete') {
+            campaign = {
+              ...campaign,
+              deleteRequestedAt: '2026-11-27T00:00:00Z',
+              deletedAt: '2026-11-27T00:00:00Z',
+            };
+            return { campaign, deliveries };
+          }
           if (path === '/campaigns/campaign-one/cancel') {
             if (cancelError) throw new Error(cancelError);
             campaign = { ...campaign, status: 'cancelled', revision: campaign.revision + 1 };
@@ -688,4 +698,21 @@ test('一个邮箱签名读取失败不隐藏其他邮箱Logo，离开邮箱页�
   const count = h.requests.length;
   h.render();
   assert.equal(h.requests.length, count);
+});
+
+test('全部手动正式状态显示删除入口并确认待首发追信核实数量', async () => {
+  for (const status of ['draft', 'active', 'paused', 'completed', 'cancelled']) {
+    const h = setup(status);
+    await h.ready();
+    if (['completed', 'cancelled'].includes(status)) {
+      h.click('历史计划');
+      await h.ready();
+    }
+    h.click('删除计划');
+    await h.ready();
+    assert.match(h.html(), /待首发 2.*待追信 3.*待核实 1/);
+    h.click('确认删除计划');
+    await h.ready();
+    assert.equal(h.writes().at(-1).path, '/campaigns/campaign-one/delete');
+  }
 });

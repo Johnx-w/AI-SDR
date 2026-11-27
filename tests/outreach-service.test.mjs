@@ -1964,3 +1964,73 @@ test('正式首封拒绝模板或生成器带入邮箱范围外产品', async (t
   assert.match(row.reason, /产品|品牌/);
   assert.equal(h.deliveries.length, 0);
 });
+
+test('删除阻止服务商提交前的旧邮件且不会重新生成追信', async (t) => {
+  const h = harness();
+  t.after(() => h.service.close());
+  await runInternalTest(h);
+  const c = await prepare(h, { followUpEnabled: true });
+  const entered = deferred(),
+    release = deferred();
+  let submitted = 0;
+  h.service.mailboxes.send = async (id, message, { beforeSend }) => {
+    entered.resolve();
+    await release.promise;
+    beforeSend();
+    submitted++;
+    return { accepted: [message.to] };
+  };
+  h.service.activate(c.id, c.revision);
+  await entered.promise;
+  h.service.deleteCampaign(c.id, c.revision, true);
+  release.resolve();
+  await h.service.tick();
+  assert.equal(submitted, 0);
+  assert.equal(h.service.detail(c.id).deliveries[0].status, 'cancelled');
+  assert.equal(h.service.followUps.all().length, 0);
+});
+
+test('删除保留提交后成功失败未知，未知人工核实后不生成追信且保留企业占用', async (t) => {
+  for (const result of ['accepted', 'failed', 'unknown']) {
+    const h = harness();
+    t.after(() => h.service.close());
+    await runInternalTest(h);
+    const c = await prepare(h, { followUpEnabled: true });
+    const entered = deferred(),
+      release = deferred();
+    let submitted = 0;
+    h.service.mailboxes.send = async (id, message, { beforeSend }) => {
+      beforeSend();
+      submitted++;
+      entered.resolve();
+      await release.promise;
+      if (result === 'unknown')
+        throw Object.assign(new Error('uncertain'), { code: 'ECONNECTION' });
+      return result === 'accepted' ? { accepted: [message.to] } : { rejected: [message.to] };
+    };
+    h.service.activate(c.id, c.revision);
+    await entered.promise;
+    h.service.deleteCampaign(c.id, c.revision, true);
+    release.resolve();
+    await h.service.tick();
+    let d = h.service.detail(c.id).deliveries[0];
+    assert.equal(d.status, result);
+    assert.equal(submitted, 1);
+    assert.equal(h.service.followUps.all().length, 0);
+    if (result === 'unknown') {
+      assert.equal(h.service.isReserved(d.candidate), true);
+      const unresolved = await h.service.reconcileDelivery(d.id);
+      assert.equal(unresolved.status, 'unknown');
+      d = await h.service.resolveDelivery(d.id, {
+        outcome: 'accepted',
+        evidence: '原邮箱已发送文件夹人工确认 Message-ID',
+        operator: '测试业务员',
+      });
+      assert.equal(d.status, 'accepted');
+      assert.equal(h.service.followUps.all().length, 0);
+    }
+    h.state.clock += 61000;
+    await h.service.tick();
+    assert.equal(submitted, 1);
+  }
+});

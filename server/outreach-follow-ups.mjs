@@ -264,6 +264,7 @@ export class OutreachFollowUps {
   schedule(first, campaign) {
     if (
       !campaign.followUpEnabled ||
+      campaign.deleteRequestedAt ||
       campaign.status === 'cancelled' ||
       first.mode !== 'production' ||
       first.status !== 'accepted'
@@ -316,7 +317,7 @@ export class OutreachFollowUps {
   control(id, action) {
     const s = this.service,
       c = s.campaign(id);
-    if (c.mode !== 'production' || c.status === 'cancelled')
+    if (c.mode !== 'production' || c.deleteRequestedAt || c.status === 'cancelled')
       throw Object.assign(new Error('该计划不能启用追信'), { status: 409 });
     if (!['enable', 'disable', 'pause', 'resume'].includes(action))
       throw Object.assign(new Error('追信操作无效'), { status: 400 });
@@ -380,7 +381,7 @@ export class OutreachFollowUps {
     const s = this.service,
       c = s.campaign(item.campaignId),
       first = s.delivery(item.firstId);
-    if (!c.followUpEnabled || c.status === 'cancelled')
+    if (!c.followUpEnabled || c.deleteRequestedAt || c.status === 'cancelled')
       return { status: 'cancelled', reason: '发送计划或自动跟进已关闭' };
     if (c.scope !== s.getScope()) return { reason: '客户数据来源已改变' };
     if (item.status === 'cancelled') return { status: 'cancelled', reason: item.reason };
@@ -484,7 +485,7 @@ export class OutreachFollowUps {
       const item = this.get(queued.id);
       if (item?.status !== 'pending') continue;
       const c = s.campaign(item.campaignId);
-      if (!c.followUpEnabled || c.status === 'cancelled') {
+      if (!c.followUpEnabled || c.deleteRequestedAt || c.status === 'cancelled') {
         await this.mirror(
           this.put({ ...item, status: 'cancelled', reason: '发送计划或自动跟进已关闭' }),
         );

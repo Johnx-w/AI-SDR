@@ -317,7 +317,9 @@ export async function handleOutreach({
   }
   if (path === '/campaigns' && method === 'POST')
     return service.saveCampaign(await readJson(request));
-  const campaign = path.match(/^\/campaigns\/([\w-]+)(?:\/(start|pause|cancel|follow-ups))?$/);
+  const campaign = path.match(
+    /^\/campaigns\/([\w-]+)(?:\/(start|pause|cancel|delete|deletion-preview|follow-ups))?$/,
+  );
   if (campaign) {
     const [, id, action] = campaign;
     if (!action && method === 'GET') {
@@ -327,6 +329,11 @@ export async function handleOutreach({
         ...detail,
         deliveries: detail.deliveries.map(({ bodyHtml, candidate, ...item }) => item),
       };
+    }
+    if (action === 'deletion-preview' && method === 'GET') return service.deletionPreview(id);
+    if (action === 'delete' && method === 'POST') {
+      const body = await readJson(request);
+      return service.deleteCampaign(id, body.revision, body.confirmed);
     }
     if (action === 'follow-ups' && method === 'POST')
       return service.followUps.control(id, (await readJson(request)).action);

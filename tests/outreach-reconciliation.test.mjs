@@ -255,3 +255,24 @@ test('人工结论要求操作人与依据；明确失败释放占用且旧计�
     blocked: [],
   });
 });
+
+test('删除后自动核实仍使用原邮箱证据且不建立新追信', async (t) => {
+  const h = harness(t);
+  h.service.putCampaign({
+    id: 'campaign',
+    mode: 'production',
+    status: 'completed',
+    revision: 2,
+    followUpEnabled: true,
+  });
+  h.service.putDelivery(delivery('deleted-unknown', { followUpAtSubmission: true }));
+  h.service.reserve(h.service.delivery('deleted-unknown'));
+  h.service.deleteCampaign('campaign', 2, true);
+  h.respond(batch([sent()]));
+  const resolved = await h.service.reconcileDelivery('deleted-unknown');
+  assert.equal(resolved.status, 'accepted');
+  assert.equal(resolved.resolution.source, 'imap');
+  assert.match(resolved.resolution.evidence, /UID 1.*Message-ID/);
+  assert.equal(h.service.followUps.all().length, 0);
+  assert.equal(h.service.isReserved(resolved.candidate), true);
+});
