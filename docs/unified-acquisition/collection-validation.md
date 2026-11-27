@@ -42,6 +42,8 @@ profile shadeflow-chromium-1255 /opt/shadeflow/chromium/chromium_headless_shell-
 
 直接读取与浏览器网关共用 gzip 正文解码，分别限制压缩和展开后的字节数。遇到损坏或未知编码时记录采集失败。澳大利亚 ONESOLOMON 实测在请求原文时仍返回声明为 gzip 的响应，解码后可以读取官网正文。
 
+浏览器成功状态要求渲染后的页面有正文文本。对 `7baefea` 现场快照的字节回放显示，Cameron 和 Clearview 只渲染出页头，Empire 只出现标题和 Trustindex 评分组件。修复后这三份渲染快照均保持采集失败，原始 HTML 里的正文仍可识别，快照均保留。固定浏览器回归同时确认实际短正文仍可成功返回。
+
 开发限制为 20 秒内页面导航和等待、30 秒采集硬超时、系统剩余内存 1 GiB 时停止派单。每 100 毫秒采样 Python 与子进程的 RSS 之和和整机内存使用量；RSS 之和会重复计入共享页。进程树 RSS 超过 1 GiB 时中断，Linux 的进程清理和目标机资源上限仍需实测。
 
 ## 固定快照

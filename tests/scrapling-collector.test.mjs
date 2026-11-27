@@ -98,6 +98,38 @@ test(
 );
 
 test(
+  'a page title or an isolated review badge cannot substitute for rendered body evidence',
+  { skip: !process.env.SCRAPLING_PYTHON },
+  async () => {
+    const samples = [
+      ['<head><title>Cameron Blinds</title></head><body></body>', 'failed'],
+      [
+        '<head><title>Empire Window Furnishings</title></head><body><div class="ti-widget-container">4.7 <span>1703 reviews</span></div><title>Empire Window Furnishings</title></body>',
+        'failed',
+      ],
+      ['<head><title>Clearview Blinds</title></head><body><p>Roller blinds.</p></body>', 'ok'],
+    ];
+    const snapshots = [];
+    for (const [html] of samples) {
+      snapshots.push(
+        await collectScraplingPage('https://blinds.example.org/', {
+          async readResourceImpl() {
+            return { status: 200, type: 'text/html', body: Buffer.from(html) };
+          },
+        }),
+      );
+    }
+    assert.deepEqual(
+      snapshots.map(({ status }) => status),
+      samples.map(([, status]) => status),
+    );
+    assert.match(snapshots[0].content, /Cameron Blinds/);
+    assert.match(snapshots[1].content, /1703 reviews/);
+    assert.match(snapshots[2].content, /Roller blinds\./);
+  },
+);
+
+test(
   'slow optional resources leave the already loaded public evidence readable',
   { skip: !process.env.SCRAPLING_PYTHON },
   async () => {
