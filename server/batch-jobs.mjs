@@ -2,10 +2,23 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import { setImmediate as yieldToRequests } from 'node:timers/promises';
 import { domainKey } from './website-identity.mjs';
-import { regionalSearchAfter, searchPlan } from './search-plan.mjs';
+import {
+  productiveSearch,
+  regionalSearchAfter,
+  searchPlan,
+  unifiedExecutionVersion,
+  unifiedSearchPlan,
+} from './search-plan.mjs';
 import { exclusionConditionsKey } from './exclusion-conditions.mjs';
 import { validateCountryScope } from './search-target.mjs';
+import { websiteAdmissionVersion } from './customer-eligibility.mjs';
+import {
+  acquisitionUrl,
+  identityIntegrityCode,
+  identityIntegrityMessage,
+} from './acquisition-subject.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 function discoveryPlanKey(input, plan) {
@@ -25,7 +38,11 @@ const researchUsageKeys = [
   'cache_hits',
   'input_chars',
   'input_tokens',
+  'model_calls_with_input_tokens',
+  'input_cached_tokens',
   'output_tokens',
+  'model_calls_with_output_tokens',
+  'total_tokens',
   'omitted_pages',
   'truncated_pages',
 ];
@@ -35,9 +52,82 @@ function knownResearchUsage(value) {
   if (!['model_calls', 'cache_hits', 'input_chars'].every(valid)) return null;
   return Object.fromEntries(researchUsageKeys.filter(valid).map((key) => [key, value[key]]));
 }
+
+function mapDiscoveryContext(job) {
+  const references = new Map();
+  const mapOnlyUrls = new Set();
+  const webUrls = new Set();
+  for (const row of job.rows) {
+    const url = acquisitionUrl(row.source_url);
+    if (row.source_kind === 'maps' && url) mapOnlyUrls.add(url);
+    else if (url) webUrls.add(url);
+    for (const source of row.discovery_sources || []) {
+      if (source.kind === 'maps') references.set(`${source.provider}:${source.reference}`, source);
+    }
+  }
+  for (const url of webUrls) mapOnlyUrls.delete(url);
+  return {
+    jobId: job.id,
+    references,
+    mapOnlyUrls,
+    blocked: job.mapsPaused,
+    used: job.searchStats.filter(({ maps }) => maps?.attempts > 0).length,
+    unknown: !!job.pendingSearch && job.searchStats.at(-1)?.maps?.status === 'running',
+  };
+}
+
+function mapComparison(job) {
+  const newRecords = new Set(
+    job.rows.filter(({ result }) => result === 'inserted').map(({ record_id }) => record_id),
+  );
+  const confirmed = new Map();
+  for (const row of job.rows) {
+    if (!newRecords.has(row.record_id)) continue;
+    if (!confirmed.has(row.record_id))
+      confirmed.set(row.record_id, { web: false, maps: false, scrapling: false });
+    const record = confirmed.get(row.record_id);
+    record.web ||= (row.discovery_sources || [{ kind: row.source_kind }]).some(
+      ({ kind }) => kind === 'web',
+    );
+    record.maps ||= row.discovery_sources?.some(({ kind }) => kind === 'maps');
+    record.scrapling ||= row.scrapling_evidence;
+  }
+  const qualifiedNew = {
+    websiteOnly: 0,
+    mapsOnly: 0,
+    both: 0,
+    mapsAndScrapling: 0,
+    scraplingOnly: 0,
+  };
+  for (const { web, maps, scrapling } of confirmed.values()) {
+    if (web && maps) qualifiedNew.both++;
+    else if (maps) qualifiedNew.mapsOnly++;
+    else if (web) qualifiedNew.websiteOnly++;
+    if (maps && !web && scrapling) qualifiedNew.mapsAndScrapling++;
+    else if (scrapling) qualifiedNew.scraplingOnly++;
+  }
+  const metrics = job.searchStats || [];
+  const usage = (source) => {
+    const amounts = metrics.map(source).filter(Number.isFinite);
+    return {
+      reportedSearches: amounts.length,
+      reportedCredits: amounts.reduce((sum, amount) => sum + amount, 0),
+    };
+  };
+  return {
+    qualifiedNew,
+    ...(job.mapsPaused ? { pausedReason: job.mapsPaused } : {}),
+    maps: {
+      calls: metrics.reduce((sum, { maps }) => sum + (maps?.attempts || 0), 0),
+      ...usage(({ maps }) => maps?.usage?.credits),
+    },
+    website: usage(({ usage }) => usage?.credits),
+  };
+}
+
 export function validateCount(value = 20) {
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 200)
-    throw fail(400, '本次新增客户目标必须是 1–200 的整数');
+  if (!Number.isSafeInteger(value) || value < 1)
+    throw fail(400, '本次新增客户目标必须是大于零的安全整数');
   return value;
 }
 export function validateAutoFirstTouch(value = false) {
@@ -58,22 +148,44 @@ const labels = {
   exhausted: '当前筛选条件下的候选已处理完',
   stopped: '已停止，已入库客户保留',
   interrupted: '服务中断，继续前需核对当前企业',
+  checkpointed: '已保存执行进度，等待继续',
   uncertain: '执行结果待确认，已暂停，未自动重复写入',
+  write_uncertain: '主库写入结果待核对，已保留原操作编号',
+  paid_uncertain: '供应商请求结果待核对，已保留原请求编号',
+  identity_integrity: identityIntegrityMessage,
   manual_pause: '已人工暂停，保留执行进度',
   outreach_deleted: '关联触达计划已删除，自动首发已关闭；等待人工继续获客或删除来源',
   source_deleted: '来源任务已删除，执行历史保留',
 };
+const interruptedReason = (job) => (job.batch ? 'checkpointed' : 'interrupted');
+const uncertainReason = (job) => (job.batch ? 'write_uncertain' : 'uncertain');
+const batchCapacity = 200;
+const nextBatch = (job, reason) => ({
+  number: (job.batch?.number || 0) + 1,
+  insertedAtStart: job.inserted,
+  searchedAtStart: job.searches,
+  researchedAtStart: job.researched,
+  elapsedAtStart: job.elapsedMs,
+  ...(reason ? { previousBoundary: reason } : {}),
+});
+
 export class BatchJobs {
   constructor({
     path = ':memory:',
     discover,
     research,
     status,
+    discoveryReady,
     readLeads,
+    readLead,
+    readAcquisitionCaptures = () => [],
     now = Date.now,
     schedule = true,
     provider = 'native',
     scope = '',
+    identityVersion,
+    mapComparisonEnabled = false,
+    assertAutomaticIdentityIntegrity = () => {},
     onOutreachChange = () => {},
     recoveryIntervalMs = 15000,
     isMaintaining = () => false,
@@ -96,21 +208,30 @@ export class BatchJobs {
     this.discover = discover;
     this.research = research;
     this.remoteStatus = status;
+    this.discoveryReady = discoveryReady;
     this.readLeads = readLeads;
+    this.readLead = readLead;
+    this.readAcquisitionCaptures = readAcquisitionCaptures;
     this.now = now;
     this.schedule = schedule;
     this.provider = provider;
     this.scope = scope || provider;
+    this.identityVersion = identityVersion;
+    this.mapComparisonEnabled = mapComparisonEnabled;
+    this.assertAutomaticIdentityIntegrity = assertAutomaticIdentityIntegrity;
     this.onOutreachChange = onOutreachChange;
     this.isMaintaining = isMaintaining;
     this.working = new Set();
+    this.workPromises = new Map();
+    this.collecting = new Map();
     this.resuming = new Set();
     this.closed = false;
     for (const job of this.activeJobs())
       if (['running', 'stopping'].includes(job.status)) {
         job.status = 'paused';
-        job.reason = 'interrupted';
+        job.reason = interruptedReason(job);
         job.pending = job.current ? 1 : 0;
+        delete job.collectionWait;
         for (const metric of job.searchStats || [])
           if (metric.status === 'running') {
             metric.status = 'interrupted';
@@ -218,7 +339,10 @@ export class BatchJobs {
         capturedAt: row.data.captured_at,
         jobId: row.data.created_job || '',
       }));
-    return { jobs, captures, scope: this.scope };
+    const uniqueCaptures = new Map(captures.map((capture) => [capture.customerId, capture]));
+    for (const capture of this.readAcquisitionCaptures())
+      if (!uniqueCaptures.has(capture.customerId)) uniqueCaptures.set(capture.customerId, capture);
+    return { jobs, captures: [...uniqueCaptures.values()], scope: this.scope };
   }
   get busy() {
     return this.working.size > 0 || this.resuming.size > 0;
@@ -314,9 +438,11 @@ export class BatchJobs {
       if (old.hash !== hash) throw fail(409, '同一请求编号不能使用不同参数');
       return JSON.parse(old.data);
     }
+    this.assertAutomaticIdentityIntegrity();
     if (this.blockingJob(input, scheduleId))
       throw fail(409, '已有未结束任务，请先继续或停止该任务');
-    const queryPlan = searchPlan(input);
+    const executionVersion = this.identityVersion && unifiedExecutionVersion;
+    const queryPlan = executionVersion ? unifiedSearchPlan(input) : searchPlan(input);
     const planKey = discoveryPlanKey(input, queryPlan);
     const progress = this.db
       .prepare(
@@ -337,6 +463,10 @@ export class BatchJobs {
       target: input.target_count,
       inserted: 0,
       countPolicy: 'broad-business-v1',
+      admissionVersion: websiteAdmissionVersion,
+      ...(this.identityVersion ? { identityVersion: this.identityVersion } : {}),
+      ...(this.identityVersion && this.mapComparisonEnabled ? { mapComparisonVersion: 1 } : {}),
+      ...(executionVersion ? { executionVersion } : {}),
       updated: 0,
       skipped: 0,
       rejected: 0,
@@ -350,16 +480,19 @@ export class BatchJobs {
       cursor: progress?.cursor ?? this.historicalCursor(scheduleId, planKey, queryPlan),
       queue,
       carriedCandidates: queue.length,
-      seen: queue.map((item) => item.domain),
+      seen: queue.map((item) =>
+        this.identityVersion ? acquisitionUrl(item.source_url) : item.domain,
+      ),
       skippedDomains: [],
       rows: [],
       current: null,
       limits: {
         research: researchBudget,
-        searches: Math.max(20, input.target_count * 3),
+        searches: Math.max(20, Math.min(input.target_count, batchCapacity) * 3),
         timeMs: 21600000,
       },
     };
+    if (executionVersion) job.batch = nextBatch(job);
     this.db.prepare('INSERT INTO jobs VALUES(?,?,?,?)').run(job.id, key, hash, JSON.stringify(job));
     this.outreachSnapshot = null;
     this.kick(job.id);
@@ -395,19 +528,23 @@ export class BatchJobs {
             this.finish(j, 'stopped');
           } else if (j.status === 'running') {
             j.status = 'paused';
-            j.reason = j.current ? 'uncertain' : 'interrupted';
+            j.reason = j.current ? uncertainReason(j) : interruptedReason(j);
             j.pending = j.current ? 1 : 0;
             this.save(j);
           }
           return;
         }
-        this.work(id).catch(() => {
-          if (this.closed) return;
-          const j = this.get(id);
-          j.status = 'paused';
-          j.reason = 'uncertain';
-          this.save(j);
-        });
+        if (this.workPromises.has(id)) return;
+        const work = this.work(id)
+          .catch(() => {
+            if (this.closed) return;
+            const j = this.get(id);
+            j.status = 'paused';
+            j.reason = uncertainReason(j);
+            this.save(j);
+          })
+          .finally(() => this.workPromises.delete(id));
+        this.workPromises.set(id, work);
       });
   }
   finish(job, reason) {
@@ -450,9 +587,19 @@ export class BatchJobs {
     }
   }
   async reconcile(job) {
+    if (job.batch && job.pendingSearch && this.discoveryReady) {
+      const id = job.searchStats.at(-1)?.discoveryRequestId;
+      if (!id || !(await this.discoveryReady(id)))
+        throw fail(409, '当前搜索请求结果待供应商核对，暂未开启下一次搜索');
+    }
     if (!job.current) return;
     const result = await this.remoteStatus(job.current.operation_id);
-    if (!result?.settled) throw fail(409, '尚未确认当前企业的执行结果，请稍后继续；未重复执行');
+    if (job.batch && (result?.resumeSafe || result?.missing)) return;
+    if (!result?.settled)
+      throw fail(
+        409,
+        result?.paidUnknown ? result.reason : '尚未确认当前企业的执行结果，请稍后继续；未重复执行',
+      );
     await this.accept(job, result.output);
   }
   async initializeBaseline() {
@@ -478,6 +625,14 @@ export class BatchJobs {
     }
   }
   claimCapture(job, item, row) {
+    if (job.identityVersion)
+      return row.capture?.operation_id === item.operation_id &&
+        row.capture.record_id === row.record_id &&
+        row.capture.mode === 'automatic' &&
+        row.capture.job_id === job.id &&
+        row.capture.confirmed_at
+        ? { newRecord: true, reason: 'new_business_record' }
+        : { newRecord: false, reason: 'already_in_lead_library' };
     // Count a company only once across all jobs in the customer library.
     const existing = this.db
       .prepare('SELECT * FROM handoff_entities WHERE scope=? AND (record_id=? OR domain=?)')
@@ -533,6 +688,7 @@ export class BatchJobs {
       if (job.provider !== this.provider)
         throw fail(409, '该任务由其他执行引擎创建，已停止支持，请核对历史结果');
       if (automatic && this.isMaintaining()) return job;
+      this.assertAutomaticIdentityIntegrity();
       await this.reconcile(job);
       if (automatic && (this.closed || this.isMaintaining())) return job;
       job = this.get(id);
@@ -540,7 +696,7 @@ export class BatchJobs {
         throw fail(409, '来源控制已变化，请刷新后继续');
       // Reconcile any prior write first, then forbid new work in retired markets.
       validateCountryScope(job.input);
-      job.status = 'running';
+      job.status = job.stopRequested ? 'stopping' : 'running';
       job.reason = '';
       job.manualPaused = false;
       if (!job.sourcePause?.outreachPlanId || job.input.auto_first_touch)
@@ -550,7 +706,7 @@ export class BatchJobs {
       this.save(job, { outreachControl: true });
       if (automatic && this.isMaintaining()) {
         job.status = 'paused';
-        job.reason = 'interrupted';
+        job.reason = interruptedReason(job);
         return this.save(job);
       }
       if (job.input.auto_first_touch) this.onOutreachChange();
@@ -583,7 +739,9 @@ export class BatchJobs {
       this.resuming.has(job.id) ||
       this.provider !== 'native' ||
       job.status !== 'paused' ||
-      !['interrupted', 'uncertain'].includes(job.reason) ||
+      !['interrupted', 'uncertain', 'checkpointed', 'write_uncertain', 'paid_uncertain'].includes(
+        job.reason,
+      ) ||
       job.provider !== this.provider ||
       job.scope !== this.scope
     )
@@ -598,6 +756,10 @@ export class BatchJobs {
         latest.current?.operation_id !== job.current.operation_id
       )
         return;
+      if (latest.batch && (result?.resumeSafe || result?.missing)) {
+        await this.resume(job.id, { automatic: true });
+        return;
+      }
       if (result?.missing === true) {
         await this.accept(latest, {
           stage: 'status',
@@ -611,7 +773,10 @@ export class BatchJobs {
           result.output.outcome === 'failed' &&
           ['extract', 'research'].includes(result.output.stage) &&
           (latest.current.interruptionRetries || 0) < 1 &&
-          latest.researched < latest.limits.research
+          (latest.batch
+            ? latest.input.research_budget === undefined ||
+              latest.researched < latest.input.research_budget
+            : latest.researched < latest.limits.research)
         ) {
           latest.queue.unshift({
             ...latest.current,
@@ -634,7 +799,9 @@ export class BatchJobs {
     }
     if (['running', 'stopping'].includes(j.status)) {
       j.status = 'stopping';
+      if (j.batch) j.stopRequested = true;
       this.save(j);
+      this.collecting.get(id)?.abort('stopped');
     } else if (j.status === 'paused') this.finish(j, 'stopped');
     if (j.input.auto_first_touch) this.onOutreachChange();
     return this.get(id);
@@ -655,6 +822,7 @@ export class BatchJobs {
     if (disableFirstTouch) job.input.auto_first_touch = false;
     if (disableFirstTouch || !job.scheduleId) job.autoFirstTouchPaused = true;
     this.save(job, { outreachControl: true });
+    this.collecting.get(id)?.abort();
     this.onOutreachChange();
     return this.get(id);
   }
@@ -666,6 +834,7 @@ export class BatchJobs {
     job.input.auto_first_touch = false;
     job.autoFirstTouchPaused = true;
     this.save(job, { outreachControl: true });
+    this.collecting.get(id)?.abort();
     this.onOutreachChange();
     return this.get(id);
   }
@@ -687,7 +856,11 @@ export class BatchJobs {
         (output?.更新 === 1 && row.result === 'updated'));
     let record;
     if (written) {
-      const records = (await this.readLeads()).filter(
+      const leads =
+        job.identityVersion && this.readLead
+          ? [await this.readLead(row.record_id)]
+          : await this.readLeads();
+      const records = leads.filter(
         (lead) => lead.id === row.record_id && domainKey(lead.website) === item.domain,
       );
       if (records.length !== 1) throw new Error('飞书读回核验失败');
@@ -695,6 +868,15 @@ export class BatchJobs {
     }
     this.db.exec('BEGIN IMMEDIATE');
     try {
+      const latestBeforeAccept = this.get(job.id);
+      if (
+        item.operation_id &&
+        latestBeforeAccept.rows.some((row) => row.operation_id === item.operation_id)
+      ) {
+        this.db.exec('COMMIT');
+        Object.assign(job, latestBeforeAccept);
+        return;
+      }
       if (output?.新增 === 1 && row?.result === 'inserted' && row.record_id) {
         // A target is the number of genuinely new, deduplicated company records.
         // Handoff readiness and completeness remain detail fields, not admission gates.
@@ -711,6 +893,7 @@ export class BatchJobs {
           handoff: output.handoff || null,
           inserted_new: claim.newRecord,
           qualification_reason: claim.reason,
+          ...(row.capture ? { capture: row.capture } : {}),
         });
       } else if (output?.更新 === 1 || output?.skipped_existing_count > 0) {
         job.skipped++;
@@ -724,6 +907,7 @@ export class BatchJobs {
           handoff: output.handoff || null,
           inserted_new: false,
           qualification_reason: 'already_in_lead_library',
+          ...(output.research?.company_name ? { name: output.research.company_name } : {}),
         });
       } else if (
         output?.outcome === 'review' ||
@@ -745,6 +929,13 @@ export class BatchJobs {
       ) {
         job.rejected++;
         job.rows.push({
+          ...(output.collection_attempts?.length
+            ? {
+                source_url: item.source_url,
+                domain: item.domain,
+                name: output.research?.company_name || item.source_title,
+              }
+            : {}),
           search_id: item.search_id,
           operation_id: item.operation_id,
           result: 'rejected',
@@ -757,13 +948,59 @@ export class BatchJobs {
         throw new Error('写入结果无法确认');
       }
       const acceptedRow = job.rows.at(-1);
+      if (output.collection_attempts) acceptedRow.collection_attempts = output.collection_attempts;
+      if (output.collection_gaps) acceptedRow.collection_gaps = output.collection_gaps;
+      if (output.research_trace) acceptedRow.research_trace = output.research_trace;
+      if (job.mapComparisonVersion) {
+        if (item.discovery_sources) acceptedRow.discovery_sources = item.discovery_sources;
+        if (output.discovery_sources && acceptedRow.record_id) {
+          acceptedRow.discovery_sources = output.discovery_sources;
+          const unverified = item.discovery_sources.filter(
+            (source) =>
+              !output.discovery_sources.some(
+                ({ kind, provider, reference }) =>
+                  kind === source.kind &&
+                  provider === source.provider &&
+                  reference === source.reference,
+              ),
+          );
+          if (unverified.length) acceptedRow.unverified_map_sources = unverified;
+        }
+        if (output.maps_binding) acceptedRow.maps_binding = output.maps_binding;
+        if (output.maps_binding === 'mismatch') job.mapsPaused = 'binding_mismatch';
+        const cited = new Set(
+          [
+            ...(output.research?.activity_verification?.sources || []).map(
+              ({ snapshot_id }) => snapshot_id,
+            ),
+            ...(output.research?.company_identity?.evidence || []).map(
+              ({ snapshot_id }) => snapshot_id,
+            ),
+          ].filter(Boolean),
+        );
+        if (
+          acceptedRow.record_id &&
+          output.collection_attempts?.some(
+            ({ status, method, snapshot_id }) =>
+              status === 'ok' && method === 'scrapling' && cited.has(snapshot_id),
+          )
+        )
+          acceptedRow.scrapling_evidence = true;
+      }
       if (written) acceptedRow.stored = true;
+      const unresolved = output?.paid_requests?.filter(({ status }) =>
+        ['pending', 'unknown'].includes(status),
+      );
+      if (unresolved?.length) acceptedRow.paid_requests = unresolved;
+      if (output.web_usage && (job.batch || output.web_usage.web_extract_calls))
+        acceptedRow.web_usage = output.web_usage;
       const metric = job.searchStats?.find((entry) => entry.id === item.search_id);
       if (metric) {
         metric.researched++;
+        if (job.batch) metric.lastProcessedAt = new Date(this.now()).toISOString();
         const key = {
           inserted: 'inserted',
-          duplicate: 'updated',
+          duplicate: job.identityVersion && output?.更新 !== 1 ? 'duplicates' : 'updated',
           rejected: 'rejected',
           review: 'review',
           failed: 'failed',
@@ -786,6 +1023,7 @@ export class BatchJobs {
       if (latest.status === 'stopping') job.status = 'stopping';
       job.current = null;
       job.pending = 0;
+      delete job.collectionWait;
       this.save(job);
       this.db.exec('COMMIT');
     } catch (error) {
@@ -798,19 +1036,27 @@ export class BatchJobs {
     if (this.working.has(id)) return;
     this.working.add(id);
     let tick = this.now();
-    const checkpoint = (j) => {
+    const stamp = (j) => {
       const t = this.now();
       j.elapsedMs += Math.max(0, t - tick);
       tick = t;
+    };
+    const checkpoint = (j) => {
+      stamp(j);
       this.save(j);
     };
     try {
-      await this.initializeBaseline();
+      const initial = this.get(id);
+      if (!initial.identityVersion) await this.initializeBaseline();
       while (true) {
+        if (initial.batch) await yieldToRequests();
         const j = this.get(id);
-        checkpoint(j);
-        if (!['running', 'stopping'].includes(j.status)) return;
-        if ((j.inserted || 0) >= j.target) {
+        stamp(j);
+        if (!['running', 'stopping'].includes(j.status)) {
+          this.save(j);
+          return;
+        }
+        if (!j.current && (j.inserted || 0) >= j.target) {
           this.finish(j, 'target_reached');
           return;
         }
@@ -818,32 +1064,64 @@ export class BatchJobs {
           this.finish(j, 'stopped');
           return;
         }
+        this.assertAutomaticIdentityIntegrity();
         validateCountryScope(j.input);
-        if (j.elapsedMs >= j.limits.timeMs) {
-          this.finish(j, 'time_limit');
+        const batch = j.executionVersion === unifiedExecutionVersion && j.batch;
+        if (batch && this.isMaintaining()) {
+          j.status = 'paused';
+          j.reason = interruptedReason(j);
+          j.pending = j.current ? 1 : 0;
+          checkpoint(j);
           return;
         }
-        if (j.researched >= j.limits.research) {
-          this.finish(j, 'research_limit');
-          return;
-        }
-        if (!j.queue.length) {
-          if (j.searches >= j.limits.searches) {
-            this.finish(j, 'search_limit');
+        if (batch && !j.current) {
+          if (j.input.research_budget !== undefined && j.researched >= j.input.research_budget) {
+            this.finish(j, 'research_limit');
             return;
           }
+          const boundary =
+            j.elapsedMs - batch.elapsedAtStart >= j.limits.timeMs
+              ? 'time_limit'
+              : j.inserted - batch.insertedAtStart >= batchCapacity
+                ? 'batch_capacity'
+                : j.researched - batch.researchedAtStart >= j.limits.research
+                  ? 'research_limit'
+                  : !j.queue.length && j.searches - batch.searchedAtStart >= j.limits.searches
+                    ? 'search_limit'
+                    : '';
+          if (boundary) {
+            j.batch = nextBatch(j, boundary);
+          }
+        } else if (!batch) {
+          const limit =
+            j.elapsedMs >= j.limits.timeMs
+              ? 'time_limit'
+              : j.researched >= j.limits.research
+                ? 'research_limit'
+                : !j.queue.length && j.searches >= j.limits.searches
+                  ? 'search_limit'
+                  : '';
+          if (limit) {
+            this.finish(j, limit);
+            return;
+          }
+        }
+        if (!j.current && !j.queue.length) {
           const plan = j.queryPlan || searchPlan(j.input);
           j.searchSignatures ||= [];
           const unusedSearch = (candidate) => {
             if (!candidate) return;
             const signature = createHash('sha256')
-              .update(JSON.stringify([candidate, j.seen.slice(-150)]))
+              .update(JSON.stringify(batch ? candidate.query : [candidate, j.seen.slice(-150)]))
               .digest('hex');
             if (j.searchSignatures.includes(signature)) return;
             j.searchSignatures.push(signature);
             return candidate;
           };
-          let search = j.pendingSearch || unusedSearch(regionalSearchAfter(j));
+          let search =
+            j.pendingSearch ||
+            unusedSearch(regionalSearchAfter(j)) ||
+            (batch && productiveSearch(j, plan, unusedSearch));
           // Revisit a query only when excluded domains have changed. This can
           // discover >100 companies without repeating an identical paid search.
           for (let i = 0; !search && i < plan.length; i++) {
@@ -853,47 +1131,90 @@ export class BatchJobs {
             this.finish(j, 'exhausted');
             return;
           }
-          j.searches++;
-          j.pendingSearch = search;
+          const mapsContext =
+            j.mapComparisonVersion && this.mapComparisonEnabled
+              ? mapDiscoveryContext(j)
+              : undefined;
           j.searchStats ||= [];
-          const metric = {
-            id: `${j.id}:search:${j.searches}`,
-            query: search.query,
-            country: search.country,
-            ...(search.searchRegion ? { searchRegion: search.searchRegion } : {}),
-            source_kind: search.source_kind || 'web',
-            family: search.family,
-            startedAt: new Date(this.now()).toISOString(),
-            status: 'running',
-            discovered: 0,
-            filtered: 0,
-            filterReasons: {},
-            filteredSources: [],
-            duplicates: 0,
-            queued: 0,
-            researched: 0,
-            inserted: 0,
-            updated: 0,
-            rejected: 0,
-            review: 0,
-            failed: 0,
-            ratings: { A: 0, B: 0, C: 0, unrated: 0 },
-          };
-          j.searchStats.push(metric);
+          const previous = batch && j.pendingSearch && j.searchStats.at(-1);
+          if (!previous?.discoveryRequestId) j.searches++;
+          j.pendingSearch = search;
+          const metric = previous?.discoveryRequestId
+            ? previous
+            : {
+                id: `${j.id}:search:${j.searches}`,
+                query: search.query,
+                country: search.country,
+                ...(batch ? { batch: j.batch.number, language: search.language || 'en' } : {}),
+                ...(search.searchRegion ? { searchRegion: search.searchRegion } : {}),
+                source_kind: search.source_kind || 'web',
+                family: search.family,
+                ...(search.dispatchEvidence ? { dispatchEvidence: search.dispatchEvidence } : {}),
+                startedAt: new Date(this.now()).toISOString(),
+                status: 'running',
+                discovered: 0,
+                filtered: 0,
+                filterReasons: {},
+                filteredSources: [],
+                duplicates: 0,
+                queued: 0,
+                researched: 0,
+                inserted: 0,
+                updated: 0,
+                rejected: 0,
+                review: 0,
+                failed: 0,
+                ratings: { A: 0, B: 0, C: 0, unrated: 0 },
+              };
+          if (!previous?.discoveryRequestId) {
+            if (batch && this.discoveryReady) metric.discoveryRequestId = metric.id + ':request';
+            j.searchStats.push(metric);
+          }
+          metric.status = 'running';
+          delete metric.error;
+          if (mapsContext) {
+            mapsContext.beforeRequest = (attempts) => {
+              metric.maps = { status: 'running', attempts, returned: 0, resolved: 0 };
+              checkpoint(j);
+            };
+          }
           checkpoint(j);
           let found;
           try {
-            found = await this.discover(j.input, search, j.seen);
+            found = await this.discover(j.input, search, j.seen, {
+              admissionVersion: j.admissionVersion || 'legacy',
+              ...(j.identityVersion ? { identityVersion: j.identityVersion } : {}),
+              ...(mapsContext ? { mapsContext } : {}),
+              ...(metric.discoveryRequestId
+                ? { discoveryRequestId: metric.discoveryRequestId }
+                : {}),
+            });
           } catch (error) {
-            metric.status = 'failed';
-            metric.error = error.status ? error.message : '本次搜索未取得结果';
+            metric.status = error.code === 'ACQUISITION_PAID_UNKNOWN' ? 'uncertain' : 'failed';
+            metric.error =
+              error.status || error.code?.startsWith('ACQUISITION_PAID')
+                ? error.message
+                : '本次搜索未取得结果';
             metric.completedAt = new Date(this.now()).toISOString();
+            if (metric.discoveryRequestId && error.code === 'ACQUISITION_PAID_FAILED') {
+              j.pendingSearch = null;
+              checkpoint(j);
+              continue;
+            }
             checkpoint(j);
             throw error;
           }
           metric.status = 'completed';
           metric.completedAt = new Date(this.now()).toISOString();
           metric.usage = found.usage || null;
+          if (found.maps) {
+            metric.maps = found.maps;
+            if (
+              found.maps.status === 'paused' ||
+              ['permission_denied', 'request_unknown'].includes(found.maps.reason)
+            )
+              j.mapsPaused = found.maps.reason;
+          }
           j.pendingSearch = null;
           for (const c of found.review_candidates || []) {
             j.review++;
@@ -921,7 +1242,7 @@ export class BatchJobs {
           j.status = fresh.status;
           for (const c of found.skipped_existing || []) {
             metric.duplicates++;
-            const d = domainKey(c.url);
+            const d = j.identityVersion ? acquisitionUrl(c.url) : domainKey(c.url);
             if (d && !j.skippedDomains.includes(d)) {
               j.skippedDomains.push(d);
               j.skipped++;
@@ -929,11 +1250,12 @@ export class BatchJobs {
           }
           for (const c of found.candidates || []) {
             const domain = domainKey(c.source_url);
-            if (domain && !j.seen.includes(domain)) {
-              j.seen.push(domain);
+            const candidate = j.identityVersion ? acquisitionUrl(c.source_url) : domain;
+            if (candidate && (!j.seen.includes(candidate) || c.discovery_sources?.length)) {
+              if (!j.seen.includes(candidate)) j.seen.push(candidate);
               j.queue.push({
                 ...c,
-                source_kind: search.source_kind || 'web',
+                source_kind: c.source_kind === 'maps' ? 'maps' : search.source_kind || 'web',
                 domain,
                 source_url: c.source_url,
                 source_title: c.source_title || '',
@@ -947,35 +1269,101 @@ export class BatchJobs {
           }
           // Give the domains just returned by search priority in its bounded exclusion list.
           const repeated = new Set(
-            (found.skipped_existing || []).map((c) => domainKey(c.url)).filter(Boolean),
+            (found.skipped_existing || [])
+              .map((c) => (j.identityVersion ? acquisitionUrl(c.url) : domainKey(c.url)))
+              .filter(Boolean),
           );
           if (repeated.size)
             j.seen = [...j.seen.filter((domain) => !repeated.has(domain)), ...repeated];
           checkpoint(j);
           continue;
         }
-        const item = j.queue.shift();
-        j.current = { ...item, operation_id: `${j.id}-${j.researched + 1}` };
-        j.researched++;
-        checkpoint(j);
+        const item = j.current || j.queue.shift();
+        if (
+          !j.current &&
+          j.mapsPaused &&
+          item.discovery_sources?.some(({ kind }) => kind === 'maps')
+        ) {
+          const website = item.discovery_sources.filter(({ kind }) => kind === 'web');
+          if (!website.length) {
+            j.review++;
+            const metric = j.searchStats.find(({ id }) => id === item.search_id);
+            if (metric) metric.review++;
+            j.rows.push({ ...item, result: 'review', reason: '地图路径暂停，待独立核实企业官网' });
+            checkpoint(j);
+            continue;
+          }
+          item.discovery_sources = website;
+        }
+        // Keeping one operation in flight per job reserves its final slot until readback.
+        if (!j.current) {
+          j.current = {
+            ...item,
+            operation_id: `${j.id}-${j.researched + 1}`,
+            ...(j.identityVersion ? { job_id: j.id } : {}),
+          };
+          j.researched++;
+          checkpoint(j);
+        }
+        const controller = batch ? new AbortController() : null;
+        if (controller) this.collecting.set(id, controller);
         try {
-          const output = await this.research(j.input, j.current);
+          const output = await this.research(j.input, j.current, {
+            admissionVersion: j.admissionVersion || 'legacy',
+            ...(j.identityVersion ? { identityVersion: j.identityVersion } : {}),
+            ...(batch
+              ? {
+                  executionVersion: j.executionVersion,
+                  isMaintaining: this.isMaintaining,
+                  signal: controller.signal,
+                }
+              : {}),
+            onCollectionQueue: (state, url) => {
+              if (this.closed) return;
+              const current = this.get(id);
+              if (current.current?.operation_id !== j.current?.operation_id) return;
+              if (state) current.collectionWait = { ...state, url };
+              else delete current.collectionWait;
+              this.save(current);
+            },
+          });
           const latest = this.get(id);
           j.status = latest.status;
+          stamp(j);
           await this.accept(j, output);
-          checkpoint(j);
-        } catch {
+        } catch (error) {
+          if (error.code === 'ACQUISITION_INTERRUPTED' && this.get(id).status === 'stopping') {
+            this.finish(j, 'stopped');
+            return;
+          }
           j.status = 'paused';
-          j.reason = 'uncertain';
+          j.reason =
+            error.code === identityIntegrityCode
+              ? 'identity_integrity'
+              : error.code === 'ACQUISITION_INTERRUPTED'
+                ? interruptedReason(j)
+                : error.code === 'ACQUISITION_PAID_UNKNOWN'
+                  ? 'paid_uncertain'
+                  : uncertainReason(j);
           j.pending = 1;
+          delete j.collectionWait;
           checkpoint(j);
           return;
+        } finally {
+          this.collecting.delete(id);
         }
       }
-    } catch {
+    } catch (error) {
       const j = this.get(id);
       j.status = 'paused';
-      j.reason = j.current ? 'uncertain' : 'interrupted';
+      j.reason =
+        error.code === identityIntegrityCode
+          ? 'identity_integrity'
+          : error.code === 'ACQUISITION_PAID_UNKNOWN'
+            ? 'paid_uncertain'
+            : j.current
+              ? uncertainReason(j)
+              : interruptedReason(j);
       j.pending = j.current ? 1 : 0;
       checkpoint(j);
     } finally {
@@ -983,6 +1371,10 @@ export class BatchJobs {
     }
   }
   view(job, { summary = false } = {}) {
+    const coverage = job.batch && {
+      countries: [...new Set(job.searchStats.map(({ country }) => country).filter(Boolean))],
+      languages: [...new Set(job.searchStats.map(({ language }) => language).filter(Boolean))],
+    };
     return {
       ...job,
       ...(summary
@@ -999,16 +1391,29 @@ export class BatchJobs {
       seen: undefined,
       skippedDomains: undefined,
       searchSignatures: undefined,
+      ...(!summary && job.mapComparisonVersion ? { mapComparison: mapComparison(job) } : {}),
+      ...(job.batch
+        ? {
+            coverage,
+            remainingTarget: Math.max(0, job.target - job.inserted),
+            insertedPerHour: job.elapsedMs ? (job.inserted * 3600000) / job.elapsedMs : null,
+          }
+        : {}),
       message: labels[job.reason] || '正在搜索与研究客户',
       queued: job.queue.length,
     };
+  }
+  abortCollectors() {
+    for (const controller of this.collecting.values()) controller.abort();
   }
   close() {
     if (this.closed) return this.closePromise;
     this.closed = true;
     clearInterval(this.recoveryTimer);
-    if (this.recoveryPromise) {
-      this.closePromise = this.recoveryPromise.finally(() => this.db.close());
+    this.abortCollectors();
+    const pending = [this.recoveryPromise, ...this.workPromises.values()].filter(Boolean);
+    if (pending.length) {
+      this.closePromise = Promise.allSettled(pending).finally(() => this.db.close());
       return this.closePromise;
     }
     this.db.close();

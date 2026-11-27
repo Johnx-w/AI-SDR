@@ -35,6 +35,44 @@ export function thirdPartyTradeProfile({ title = '', text = '' } = {}) {
   return records && platform;
 }
 
+export function thirdPartySupplierProfile({ url = '', title = '', text = '' } = {}) {
+  const path = /^https?:\/\/[^/?#]+([^?#]*)/i.exec(url)?.[1] || '';
+  const numberedProfile =
+    /\/(?:suppliers?|vendors?|sellers?)\/(?:profiles?|records?|listings?)\/\d+\/?$/i.test(path);
+  const content = [title, text]
+    .join(' ')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ');
+  return (
+    numberedProfile ||
+    /\bthis supplier has self[- ]identified in the following (?:products|services)\b|\b(?:further|more) (?:information|details) (?:on|about) this supplier (?:is|are) available to registered buyers\b/i.test(
+      content,
+    )
+  );
+}
+
+export function businessDirectoryEvidence(text) {
+  const content = text.normalize('NFKC').replace(/\s+/g, ' ');
+  const directoryListingFeed =
+    /\bbusiness directory\b/i.test(content) &&
+    /\b(?:new|latest|search) business(?:es)? listings\b/i.test(content);
+  return {
+    browseProfiles:
+      directoryListingFeed ||
+      /\b(?:browse|review|compare|explore) (?:[\w&-]+ ){0,5}(?:(?:business|company|contractor|provider|supplier|vendor|merchant) (?:profiles|listings)|(?:businesses|companies|contractors|providers|suppliers|vendors|merchants) in your area)\b/i.test(
+        content,
+      ),
+    publishListings:
+      /\b(?:claim or add your business|add your business|submit a business listing|list your business)\b/i.test(
+        content,
+      ),
+    manageProfile:
+      /\b(?:update (?:this |the )?listing|claim (?:this|your) (?:business|listing|profile))\b/i.test(
+        content,
+      ) && /\b(?:write|leave|submit) a review\b/i.test(content),
+  };
+}
+
 // A supplier's product card on a marketplace belongs to the marketplace
 // operator. Its membership, legal address and customer-service contacts must
 // never be attributed to the merchant named in that card.
@@ -71,7 +109,8 @@ export function thirdPartyCompanySource({ url = '', title = '', text = '' } = {}
     'tracxn.com',
   ];
   if (platforms.some((platform) => host === platform || host.endsWith('.' + platform))) return true;
-  if (thirdPartyTradeProfile({ title, text })) return true;
+  if (thirdPartyTradeProfile({ title, text }) || thirdPartySupplierProfile({ url, title, text }))
+    return true;
   const content = [title, text]
     .join(' ')
     .normalize('NFKC')

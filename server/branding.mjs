@@ -1,6 +1,8 @@
 import { lookup } from 'node:dns/promises';
 import { Agent, request } from 'node:https';
 import { isIP } from 'node:net';
+import { promisify } from 'node:util';
+import { gunzip } from 'node:zlib';
 import { websiteProxyUrl } from './website-proxy.mjs';
 
 export const WEBSITE_USER_AGENT = 'Mozilla/5.0';
@@ -279,7 +281,21 @@ export function parseBranding(html, base, companyName) {
 }
 // Never treat a truncated prefix as a complete page: contact links often live in the footer.
 export function readHtmlResponse(response, maxBytes = 4 * 1024 * 1024) {
-  return new Promise((resolve, reject) => {
+  return readWebsiteBytes(response, maxBytes).then((body) => ({ html: body.toString('utf8') }));
+}
+
+const decompressWebsite = promisify(gunzip);
+const oversizedWebsite = () => new Error('官网 HTML 超过读取上限，未使用截断页面');
+
+export async function readWebsiteBytes(response, maxBytes) {
+  const encoding = String(response.headers?.['content-encoding'] || 'identity')
+    .trim()
+    .toLowerCase();
+  if (encoding !== 'identity' && encoding !== 'gzip') {
+    response.destroy();
+    throw new Error('官网返回不支持的正文编码');
+  }
+  const body = await new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
     let done = false;
@@ -292,7 +308,7 @@ export function readHtmlResponse(response, maxBytes = 4 * 1024 * 1024) {
       if (done) return;
       size += chunk.length;
       if (size > maxBytes) {
-        fail(new Error('官网 HTML 超过读取上限，未使用截断页面'));
+        fail(oversizedWebsite());
         response.destroy();
         return;
       }
@@ -301,7 +317,7 @@ export function readHtmlResponse(response, maxBytes = 4 * 1024 * 1024) {
     response.on('end', () => {
       if (done) return;
       done = true;
-      resolve({ html: Buffer.concat(chunks).toString('utf8') });
+      resolve(Buffer.concat(chunks));
     });
     response.on('aborted', () => fail(new Error('官网 HTML 未完整返回')));
     response.on('close', () => {
@@ -309,6 +325,13 @@ export function readHtmlResponse(response, maxBytes = 4 * 1024 * 1024) {
     });
     response.on('error', fail);
   });
+  if (encoding === 'identity') return body;
+  try {
+    return await decompressWebsite(body, { maxOutputLength: maxBytes });
+  } catch (error) {
+    if (error.code === 'ERR_BUFFER_TOO_LARGE') throw oversizedWebsite();
+    throw new Error('官网压缩正文不完整或格式无效', { cause: error });
+  }
 }
 function withSignal(promise, signal) {
   signal.throwIfAborted();
@@ -322,12 +345,23 @@ function withSignal(promise, signal) {
   );
 }
 
-export async function readPublicHtml(
+export async function readPublicHtml(url, signal = AbortSignal.timeout(8000), transport) {
+  return requestPublicWebsite(url, signal, transport);
+}
+
+export async function requestPublicWebsite(
   url,
-  signal = AbortSignal.timeout(8000),
-  { lookupImpl = lookup, requestImpl = request, proxyImpl = websiteProxyUrl } = {},
+  signal,
+  {
+    lookupImpl = lookup,
+    requestImpl = request,
+    proxyImpl = websiteProxyUrl,
+    accept = 'text/html',
+    handleResponse,
+  } = {},
 ) {
-  if (!websiteUrl(url.href)) throw new Error('非公网 HTTPS 来源');
+  if (!websiteUrl(url.href))
+    throw Object.assign(new Error('非公网 HTTPS 来源'), { code: 'WEBSITE_NOT_PUBLIC' });
   signal.throwIfAborted();
   const [addresses, proxy] = await withSignal(
     Promise.all([lookupImpl(url.hostname, { all: true }), proxyImpl()]),
@@ -335,7 +369,7 @@ export async function readPublicHtml(
   );
   signal.throwIfAborted();
   if (!addresses.length || addresses.some((a) => !publicAddress(a.address)))
-    throw new Error('非公网来源');
+    throw Object.assign(new Error('非公网来源'), { code: 'WEBSITE_NOT_PUBLIC' });
   const selected = addresses[0];
   const target = new URL(url);
   if (proxy)
@@ -355,7 +389,7 @@ export async function readPublicHtml(
         headers: {
           Host: url.host,
           'User-Agent': WEBSITE_USER_AGENT,
-          Accept: 'text/html',
+          Accept: accept,
           'Accept-Encoding': 'identity',
         },
         lookup: (_host, options, callback) =>
@@ -367,6 +401,12 @@ export async function readPublicHtml(
         if ([301, 302, 303, 307, 308].includes(response.statusCode)) {
           response.resume();
           return resolve({ redirect: response.headers.location });
+        }
+        if (handleResponse) {
+          Promise.resolve()
+            .then(() => handleResponse(response))
+            .then(resolve, reject);
+          return;
         }
         if (response.statusCode !== 200 || !response.headers['content-type']?.includes('html')) {
           response.resume();

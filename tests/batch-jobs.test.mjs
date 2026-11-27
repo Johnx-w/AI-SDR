@@ -239,9 +239,10 @@ test('旧市场任务禁止重新规划或恢复，已有记录不删除', async
     manager.close();
   }
 });
-test('数量仅接受1–200整数，域名规范化并保留地域', () => {
-  for (const n of [1, 20, 200]) assert.equal(validateCount(n), n);
-  for (const n of [0, 201, 1.5, '20', null, NaN]) assert.throws(() => validateCount(n), /整数/);
+test('数量接受大于零的安全整数，域名规范化并保留地域', () => {
+  for (const n of [1, 20, 200, 201]) assert.equal(validateCount(n), n);
+  for (const n of [0, Number.MAX_SAFE_INTEGER + 1, 1.5, '20', null, NaN])
+    assert.throws(() => validateCount(n), /整数/);
   assert.equal(domainKey('https://WWW.Example.com/contact?x=1'), 'example.com');
   assert.equal(domainKey('http://127.0.0.1/'), '');
   const plan = searchPlan(input);

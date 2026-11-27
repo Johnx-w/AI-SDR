@@ -1,3 +1,4 @@
+import { decodeHTMLStrict } from 'entities';
 import { websiteTextExcerpt } from './website-metadata.mjs';
 export function researchPageText(content, limit = 16000) {
   let text = String(content || '')
@@ -14,6 +15,7 @@ export function researchPageText(content, limit = 16000) {
         Math.min(0x10ffff, n[0].toLowerCase() === 'x' ? parseInt(n.slice(1), 16) : Number(n)),
       ),
     )
+    .replace(/&[a-z][a-z\d]+;/gi, (entity) => decodeHTMLStrict(entity))
     .replace(/[\t ]+/g, ' ')
     .replace(/\n\s*\n/g, '\n')
     .trim();

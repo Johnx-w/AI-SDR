@@ -6,6 +6,7 @@ import { customerWebsite, resolveCustomerField, encodeCustomerFields } from './c
 
 const base = 'https://open.feishu.cn/open-apis';
 const fail = (message) => Object.assign(new Error(message), { status: 502 });
+const notApplied = (error) => Object.assign(error, { writeNotApplied: true });
 
 export class FeishuClient {
   constructor({ env, fetchImpl = fetch, isMaintaining = () => false }) {
@@ -52,7 +53,9 @@ export class FeishuClient {
     }
   }
   async request(path, { method = 'GET', body } = {}) {
-    const token = await this.accessToken();
+    const token = await this.accessToken().catch((error) => {
+      throw method === 'GET' ? error : notApplied(error);
+    });
     let data;
     for (let attempt = 0; ; attempt++) {
       try {
@@ -73,6 +76,8 @@ export class FeishuClient {
           });
         break;
       } catch (error) {
+        if (method !== 'GET' && error.remoteCode === 1254607 && error.upstreamStatus === 400)
+          throw notApplied(error);
         // Reads can be retried; an uncertain remote write must be reconciled by its owner.
         if (
           method !== 'GET' ||
@@ -156,15 +161,20 @@ export class FeishuClient {
     return data.record;
   }
   async write(action, fields, recordId, clientToken, tableId) {
-    if (!tableId) {
-      const definitions = await this.fields();
-      fields = encodeCustomerFields(fields, definitions);
+    let path;
+    try {
+      if (!tableId) {
+        const definitions = await this.fields();
+        fields = encodeCustomerFields(fields, definitions);
+      }
+      path =
+        this.tablePath(tableId) +
+        '/records' +
+        (action === 'update' ? '/' + encodeURIComponent(recordId) : '') +
+        (action === 'insert' ? '?client_token=' + encodeURIComponent(clientToken) : '');
+    } catch (error) {
+      throw notApplied(error);
     }
-    const path =
-      this.tablePath(tableId) +
-      '/records' +
-      (action === 'update' ? '/' + encodeURIComponent(recordId) : '') +
-      (action === 'insert' ? '?client_token=' + encodeURIComponent(clientToken) : '');
     const data = await this.request(path, {
       method: action === 'update' ? 'PUT' : 'POST',
       body: { fields },

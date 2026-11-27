@@ -51,7 +51,11 @@ function fixture({ pageText, modelData, existingRecords = [] } = {}) {
     throw new Error('Unexpected API endpoint: ' + url);
   };
   const readPage = async () => ({ html: '<p>' + pageText + '</p>' });
-  return { calls, records, make: () => new NativeAcquisition({ env, fetchImpl, readPage }) };
+  return {
+    calls,
+    records,
+    make: () => new NativeAcquisition({ admissionVersion: 'legacy', env, fetchImpl, readPage }),
+  };
 }
 
 test('AI 研究前预筛：与目标产品无关的官网直接排除，不调用模型不写飞书', async () => {

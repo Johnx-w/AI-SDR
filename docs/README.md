@@ -8,6 +8,8 @@ T12 自动同步随本次版本交付，使用运行环境有效飞书连接和�
 
 ## 当前业务与运行入口
 
+全球获客计划、官网准入、跨批累计新增和 Scrapling 排队补抓已有本地实现。正式发布范围为官网，地图发现保留隔离测试。生产获客由用户启动。见[实施规格](unified-acquisition/spec.md)、[实施任务](unified-acquisition/tasks.md)及[统一验收与发布报告](unified-acquisition/release-acceptance.md)。
+
 陌生供应商的 PDF、Excel、Word 和 Markdown 报价表接入、人工校对及按邮箱起草见[图文报价清单](mail-automation/README.md#图文报价清单)。
 
 接手沟通中心或产品资料开发，从[当前进展与验收](mail-automation/status.md)查看生产版本、当前工作项和待用户验证的问题。
@@ -64,7 +66,7 @@ T12 自动同步随本次版本交付，使用运行环境有效飞书连接和�
 | [ADR-0017](adr/0017-automatic-sending-with-confirmed-information.md)        | 基础首封免逐封审核；标准商务自动回信待实现     |
 | [ADR-0018](adr/0018-simple-llm-outreach-with-fixed-signatures.md)           | 独立首封写作；旧专业模式及审批链已移除         |
 | [ADR-0019](adr/0019-ai-sales-agents-with-controlled-mail-reception.md)      | 接待独立授权，四品类角色配置待实现             |
-| [ADR-0020](adr/0020-website-only-acquisition.md)                            | 官网为唯一自动获客来源                         |
+| [ADR-0020](adr/0020-website-only-acquisition.md)                            | 官网是自动获客的准入证据                       |
 | [ADR-0022](adr/0022-unified-abc-customer-grades.md)                         | 当前统一 A/B/C，正式 T12 已按快照回填          |
 | [ADR-0023](adr/0023-acquisition-scoped-automatic-first-touch.md)            | 获客范围内逐家自动首发及计划控制               |
 | [ADR-0024](adr/0024-align-feishu-business-mirrors.md)                       | 当前评级与真实沟通镜像，正式原 T5 停止产品镜像 |

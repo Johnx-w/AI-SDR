@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { CustomerArchive } from '../server/customer-archive.mjs';
+import { FeishuClient } from '../server/feishu-direct.mjs';
 import { LeadLibrary } from '../server/lead-library.mjs';
 import { mapFeishuRecord } from '../server/feishu.mjs';
 
@@ -14,6 +15,13 @@ const fields = {
   邮箱: 'buyer@shadeco.com',
   开发状态: '待开发',
 };
+const compactCustomerFields = [
+  { field_name: '客户ID', type: 1005 },
+  { field_name: '公司名称', type: 1 },
+  { field_name: '官网链接', type: 1 },
+  { field_name: '邮箱', type: 1 },
+];
+
 function fixture(t) {
   const path = mkdtempSync(join(tmpdir(), 'customer-archive-'));
   const opened = [];
@@ -163,6 +171,204 @@ test('新增同步响应丢失并重启后先核对飞书，不重复创建，�
   assert.equal(restarted.archive.remoteId(record.record_id), 'rec_1');
   assert.equal(restarted.library.metadata().sync.pendingWrites, 0);
 });
+
+test('同一官网的已登记经营主体各自同步，丢失响应后重启核对原镜像', async (t) => {
+  const { remote, open } = fixture(t);
+  remote.fields = async () => compactCustomerFields;
+  const first = open();
+  const north = await registeredCustomer(first.archive, 'North Ltd', '10110001', 'north');
+  await first.archive.sync();
+  const south = await registeredCustomer(first.archive, 'South Ltd', '10110002', 'south');
+  assert.equal((await first.archive.record(north.record_id)).fields.公司名称, 'North Ltd');
+  assert.equal((await first.archive.record(south.record_id)).fields.公司名称, 'South Ltd');
+
+  const write = remote.write.bind(remote);
+  remote.write = (...args) => {
+    remote.loseResponse = args[1].公司名称 === 'South Ltd';
+    return write(...args);
+  };
+  await first.archive.sync();
+  assert.deepEqual(await remote.records(), [
+    {
+      record_id: 'rec_1',
+      fields: { 公司名称: 'North Ltd', 官网链接: sharedWebsite, 邮箱: 'north@shared.example' },
+    },
+    {
+      record_id: 'rec_2',
+      fields: { 公司名称: 'South Ltd', 官网链接: sharedWebsite, 邮箱: 'south@shared.example' },
+    },
+  ]);
+  assert.equal(first.library.metadata().sync.pendingWrites, 1);
+
+  await first.close();
+  const restarted = open();
+  const delayed = remote.rows.pop();
+  await restarted.archive.sync();
+  assert.equal(restarted.library.metadata().sync.pendingWrites, 1);
+  assert.equal(remote.writes, 2, '读回暂不可见时不能重复提交结果未知的新增');
+  remote.rows.push(delayed);
+  await restarted.archive.sync();
+  await restarted.archive.sync();
+  assert.equal(restarted.archive.remoteId(north.record_id), 'rec_1');
+  assert.equal(restarted.archive.remoteId(south.record_id), 'rec_2');
+  assert.equal(restarted.library.metadata().sync.pendingWrites, 0);
+  assert.equal(remote.writes, 2, '重启核对时无需再次发起写入');
+});
+
+test('飞书明确拒绝新增后，重启先核对归属再用原编号重试', async (t) => {
+  const { remote, open } = fixture(t);
+  const calls = [];
+  const feishu = new FeishuClient({
+    env: { FEISHU_APP_TOKEN: 'fixture-app', FEISHU_TABLE_ID: 'fixture-table' },
+    async fetchImpl(url, { method, body }) {
+      const endpoint = new URL(url);
+      const { pathname } = endpoint;
+      const success = (data) => Response.json({ code: 0, data });
+      if (pathname.endsWith('/fields'))
+        return success({ items: compactCustomerFields, has_more: false });
+      if (pathname.endsWith('/records') && method === 'GET') {
+        calls.push('read');
+        return success({ items: await remote.records(), has_more: false });
+      }
+      if (pathname.includes('/records/') && method === 'GET')
+        return success({ record: await remote.record(pathname.split('/').at(-1)) });
+      assert.equal(method, 'POST');
+      const patch = JSON.parse(body).fields;
+      const insert = [patch.公司名称, endpoint.searchParams.get('client_token')];
+      const south = patch.公司名称 === 'South Ltd';
+      const firstSouth = south && !calls.some((call) => call[0] === insert[0]);
+      calls.push(insert);
+      if (firstSouth) return Response.json({ code: 1254607 }, { status: 400 });
+      const record = await remote.write('insert', patch);
+      if (south) throw new Error('response lost after insert');
+      return success({ record });
+    },
+  });
+  feishu.token = { value: 'fixture-token', until: Infinity };
+  const first = open({ remote: feishu });
+  const north = await registeredCustomer(first.archive, 'North Ltd', '10110001', 'north');
+  await first.archive.sync();
+  const south = await registeredCustomer(first.archive, 'South Ltd', '10110002', 'south');
+  await first.archive.sync();
+  assert.deepEqual(calls, [
+    'read',
+    ['North Ltd', 'customer-10110001'],
+    'read',
+    ['South Ltd', 'customer-10110002'],
+  ]);
+  assert.equal(first.library.metadata().sync.pendingWrites, 1);
+  assert.deepEqual(
+    remote.rows.map((row) => row.fields.公司名称),
+    ['North Ltd'],
+  );
+  await first.close();
+
+  const restarted = open({ remote: feishu });
+  const ambiguous = {
+    record_id: 'rec_unknown',
+    fields: { 公司名称: 'South Ltd', 官网链接: sharedWebsite, 邮箱: 'south@shared.example' },
+  };
+  remote.rows.push(structuredClone(ambiguous));
+  await restarted.archive.sync();
+  assert.equal(restarted.archive.remoteId(south.record_id), null);
+  assert.deepEqual(remote.rows.pop(), ambiguous);
+  assert.deepEqual(calls.slice(4), ['read']);
+
+  await restarted.archive.sync();
+  assert.equal(restarted.library.metadata().sync.pendingWrites, 1);
+  const delayed = remote.rows.pop();
+  await restarted.archive.sync();
+  assert.equal(restarted.library.metadata().sync.pendingWrites, 1);
+  remote.rows.push(delayed);
+  await restarted.archive.sync();
+  assert.deepEqual(calls.slice(4), [
+    'read',
+    'read',
+    ['South Ltd', 'customer-10110002'],
+    'read',
+    'read',
+  ]);
+  assert.equal(restarted.archive.remoteId(north.record_id), 'rec_1');
+  assert.equal(restarted.archive.remoteId(south.record_id), 'rec_2');
+  assert.deepEqual(
+    remote.rows.map((row) => row.fields.公司名称),
+    ['North Ltd', 'South Ltd'],
+  );
+  assert.equal(restarted.library.metadata().sync.pendingWrites, 0);
+});
+
+test('飞书没有主体编号时，已存在的同名同官网行仍待核对且不覆盖', async (t) => {
+  const { remote, open } = fixture(t);
+  remote.fields = async () => [
+    { field_name: '公司名称', type: 1 },
+    { field_name: '官网链接', type: 1 },
+    { field_name: '邮箱', type: 1 },
+  ];
+  const existing = {
+    record_id: 'rec_unidentified',
+    fields: { 公司名称: 'Central Ltd', 官网链接: sharedWebsite, 邮箱: 'central@shared.example' },
+  };
+  remote.rows.push(structuredClone(existing));
+  const { archive, library } = open();
+  const local = await registeredCustomer(archive, 'Central Ltd', '10110003', 'central');
+  await archive.sync();
+  await archive.sync();
+  assert.deepEqual(await archive.record(local.record_id), local);
+  assert.equal(archive.remoteId(local.record_id), null);
+  assert.equal(library.metadata().sync.pendingWrites, 1);
+  assert.match(library.metadata().sync.writeError, /经营主体归属不明确/);
+  assert.deepEqual(await remote.records(), [existing]);
+  assert.equal(remote.writes, 0);
+});
+
+test('飞书已有明确主体编号时，在同官网行中只关联对应的主体', async (t) => {
+  const { remote, open } = fixture(t);
+  const north = {
+    record_id: 'rec_north',
+    fields: {
+      公司名称: 'North Ltd',
+      企业官网: sharedWebsite,
+      customer_id: 'web_gb-company:10110001',
+      邮箱: 'north@shared.example',
+    },
+  };
+  const other = {
+    record_id: 'rec_other',
+    fields: { 公司名称: 'Other Ltd', 企业官网: sharedWebsite, 私有备注: '保留' },
+  };
+  remote.rows.push(structuredClone(other), structuredClone(north));
+  const { archive, library } = open();
+  const local = await registeredCustomer(archive, 'North Ltd', '10110001', 'north');
+  await archive.sync();
+  assert.equal(archive.remoteId(local.record_id), 'rec_north');
+  assert.equal(library.metadata().sync.pendingWrites, 0);
+  assert.deepEqual(await remote.records(), [other, north]);
+  assert.equal(remote.writes, 0);
+});
+
+const sharedWebsite = 'https://shared.example/home';
+
+function registeredCustomer(archive, name, number, account) {
+  const key = `gb-company:${number}`;
+  return archive.write(
+    'insert',
+    {
+      公司名称: name,
+      企业官网: sharedWebsite,
+      customer_id: `web_${key}`,
+      邮箱: `${account}@shared.example`,
+    },
+    undefined,
+    `customer-${number}`,
+    {
+      operation_id: `acquisition-${number}`,
+      source_url: sharedWebsite,
+      name,
+      registration: { key, kind: 'identifier' },
+      mode: 'automatic',
+    },
+  );
+}
 
 test('同步期间再次编辑，旧同步完成不能清掉新修改，后续同步最新版本', async (t) => {
   const { remote, open } = fixture(t);

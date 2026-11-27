@@ -5,7 +5,7 @@ import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { waitForCI } from './release-ci.mjs';
+import { appendReleaseRuntimes, waitForCI } from './release-ci.mjs';
 
 export function cdRevision(event) {
   const run = event.workflow_run;
@@ -36,16 +36,7 @@ async function main() {
     const archive = join(temporary, 'release.tar');
     execFileSync('git', ['archive', '--format=tar', '--output', archive, revision]);
     execFileSync('tar', ['-rf', archive, 'dist']);
-    execFileSync('gh', [
-      'run',
-      'download',
-      String(ci.id),
-      '-n',
-      'docling-runtime',
-      '-D',
-      temporary,
-    ]);
-    execFileSync('tar', ['-Af', archive, join(temporary, 'docling-runtime.tar')]);
+    appendReleaseRuntimes(execFileSync, ci.id, temporary, archive);
     const bytes = readFileSync(archive);
     const digest = createHash('sha256').update(bytes).digest('hex');
     execFileSync(

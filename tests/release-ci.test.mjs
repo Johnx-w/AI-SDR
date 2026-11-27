@@ -84,6 +84,14 @@ test('部署的提交必须与两个成功CI作业对应的提交一致，先检
     (call) => call.command === 'gh' && call.args.at(-1).includes('/workflows/'),
   );
   assert.ok(request.args.at(-1).includes(`head_sha=${revision}`));
+  const downloads = h.calls.slice(ci + 1, upload).filter((call) => call.args[1] === 'download');
+  assert.deepEqual(
+    downloads.map((call) => [call.args[2], call.args[4]]),
+    [
+      ['42', 'docling-runtime'],
+      ['42', 'scrapling-runtime'],
+    ],
+  );
   const deploy = h.calls.find(
     (call) => call.command === 'ssh' && call.args.at(-1).includes(' - deploy '),
   );

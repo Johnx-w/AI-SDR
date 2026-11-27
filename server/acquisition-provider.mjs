@@ -2,6 +2,7 @@ import { acquisitionConfig } from './acquisition-config.mjs';
 import { FeishuClient } from './feishu-direct.mjs';
 import { NativeAcquisition } from './native-acquisition.mjs';
 import { CustomerArchive } from './customer-archive.mjs';
+import { acquisitionIdentityVersion } from './acquisition-subject.mjs';
 
 // HTTP routes and the batch scheduler share the direct acquisition service.
 export function createAcquisitionProvider({
@@ -26,12 +27,21 @@ export function createAcquisitionProvider({
     (native ??= nativeImpl || new NativeAcquisition({ env, fetchImpl, feishu: customers }));
   if (nativeImpl instanceof NativeAcquisition && customerLibrary) nativeImpl.feishu = customers;
   return {
+    identityVersion:
+      customerLibrary && (!nativeImpl || nativeImpl instanceof NativeAcquisition)
+        ? acquisitionIdentityVersion
+        : undefined,
+    mapComparisonEnabled:
+      nativeImpl instanceof NativeAcquisition && Boolean(nativeImpl.discoverMaps),
+    assertAutomaticIdentityIntegrity: () => service().assertAutomaticIdentityIntegrity?.(),
     get syncing() {
       return !!customers.syncing;
     },
     syncCustomers: () => customers.sync?.(),
     saveCustomerFields: (id, fields) => customers.write('update', fields, id),
     customerRecord: (id) => customers.record(id),
+    acquisitionSources: (id) => customers.acquisitionSources?.(id) || [],
+    acquisitionCaptures: () => customers.acquisitionCaptures?.() || [],
     customerRemoteId: (id) => customers.remoteId?.(id) ?? (id.startsWith('local_') ? null : id),
     closeArchive: () => customers.close?.(),
     decorateLeads: (data) => (service().decorateLeads ? service().decorateLeads(data) : data),
@@ -67,10 +77,26 @@ export function createAcquisitionProvider({
       const research = operation?.research || {};
       if (!operation) return null;
       const groupedFacts = new Map();
-      for (const { field, value, quote, source_url } of research.facts || []) {
-        if (!['company_name', 'products', 'entity_type'].includes(field)) continue;
+      for (const { field, value, quote, source_url, snapshot_id, quote_offset } of research.facts ||
+        []) {
+        if (
+          ![
+            'company_name',
+            'products',
+            'entity_type',
+            'admission_facts',
+            'legal_company_name',
+          ].includes(field)
+        )
+          continue;
         const key = JSON.stringify([field, quote, source_url]);
-        const fact = groupedFacts.get(key) || { field, quote, source_url, values: [] };
+        const fact = groupedFacts.get(key) || {
+          field,
+          quote,
+          source_url,
+          values: [],
+          ...(snapshot_id ? { snapshot_id, quote_offset } : {}),
+        };
         const normalizedValue = String(value ?? '').trim();
         if (normalizedValue && !fact.values.includes(normalizedValue)) {
           fact.values.push(normalizedValue);
@@ -83,12 +109,23 @@ export function createAcquisitionProvider({
         product_match: research.product_match || 'unknown',
         products: (research.products || []).slice(0, 20),
         checked_urls: (operation.checked_urls || []).slice(0, 5),
+        ...(operation.collection_attempts
+          ? { collection_attempts: operation.collection_attempts }
+          : {}),
+        ...(operation.collection_gaps?.length
+          ? { collection_gaps: operation.collection_gaps }
+          : {}),
+        ...(operation.research_trace ? { research_trace: operation.research_trace } : {}),
+        ...(research.identity_conflict ? { identity_conflict: research.identity_conflict } : {}),
         facts: [...groupedFacts.values()]
           .slice(0, 15)
           .map(({ values, ...fact }) => ({ ...fact, value: values.join('、') })),
       };
     },
-    status: (id) => service().status(id),
+    status: (id, options) => service().status(id, { ...options, isMaintaining }),
+    operationProgress: (id) => service().operationProgress?.(id),
+    discoveryReady: (id) => service().discoveryReady?.(id),
+    maintainPageSnapshots: () => native?.store?.maintainPageSnapshots(),
     close: () => {
       const pending = customers.close?.();
       if (pending) return pending.finally(() => native?.close());

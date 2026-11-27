@@ -16,6 +16,7 @@ import {
 } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
 import { parseEnv } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -87,9 +88,30 @@ export function validateArchiveEntries(entries) {
   }
 }
 
+function assertIdentityHoldCompatible(candidate, acquisitionDatabase) {
+  if (!acquisitionDatabase || !existsSync(acquisitionDatabase)) return;
+  const marker = join(candidate, 'server', 'acquisition-identity-hold.version');
+  if (existsSync(marker) && readFileSync(marker, 'utf8').trim() === '1') return;
+  const database = new DatabaseSync(acquisitionDatabase, { readOnly: true });
+  try {
+    const holdTable = database
+      .prepare(
+        "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='acquisition_identity_hold'",
+      )
+      .get();
+    assert(
+      !holdTable || !database.prepare('SELECT 1 FROM acquisition_identity_hold LIMIT 1').get(),
+      '存在共享身份核验暂停；候选版本无法保留该保护，拒绝切换',
+    );
+  } finally {
+    database.close();
+  }
+}
+
 export async function activateRelease({
   directory,
   candidate,
+  acquisitionDatabase,
   stop,
   backup,
   configure,
@@ -102,6 +124,7 @@ export async function activateRelease({
   assertReleasePath(directory, previous);
   assertReleasePath(directory, candidate);
   assert(previous !== candidate, '该版本已经运行，无需重复切换');
+  assertIdentityHoldCompatible(candidate, acquisitionDatabase);
   await stop();
   try {
     const backupPath = await backup();
@@ -120,6 +143,7 @@ export async function activateRelease({
   } catch (error) {
     try {
       await stop();
+      assertIdentityHoldCompatible(previous, acquisitionDatabase);
       pointCurrent(directory, previous);
       await start();
       await verify(previous);
@@ -305,10 +329,14 @@ function checkLayout() {
       `${key} 使用独立存储路径，请先补充对应备份方案`,
     );
   }
+  return resolve(
+    join(root, 'app'),
+    env.ACQUISITION_DB_PATH || env.BATCH_DB_PATH || '.data/acquisition.sqlite',
+  );
 }
 
 async function main([mode, revision, digest, upload]) {
-  checkLayout();
+  const acquisitionDatabase = checkLayout();
   if (mode === 'check') {
     const maintenance = await getJson('/api/v1/ops/maintenance');
     assert(
@@ -405,6 +433,7 @@ async function main([mode, revision, digest, upload]) {
       activateRelease({
         directory: root,
         candidate,
+        acquisitionDatabase,
         stop: () => exec('systemctl', ['stop', service]),
         backup: snapshot,
         configure,

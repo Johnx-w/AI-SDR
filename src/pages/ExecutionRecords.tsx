@@ -8,6 +8,7 @@ import type { OverviewPeriod } from '../domain/overview-rules.mjs';
 import { BatchProgress } from '../components/BatchProgress';
 import { Badge, Empty } from '../components/ui';
 import type { AcquisitionJob } from '../domain/types';
+import { WORLDWIDE_COUNTRY, WORLDWIDE_LABEL } from '../domain/country-catalog';
 import {
   ALL_PRODUCTS_LABEL,
   environmentPreferenceLabels,
@@ -104,8 +105,9 @@ function CapturedCompanies() {
       {data && (
         <>
           <p className="acq-capture-note">
-            共 {data.metrics.newCompanies} 家 · {data.coverage.note}。
-            每家企业按实际收录记录计数，后续更新和重复发现不计新增。
+            共 {data.metrics.newCompanies} 家 · 人工补录{' '}
+            {data.captures.filter(({ mode }) => mode === 'manual').length} 家 · {data.coverage.note}
+            。 每家企业按实际收录记录计数，后续更新和重复发现不计新增。
           </p>
           {data.sources.acquisition.state === 'stale' && (
             <p className="error-message" role="status">
@@ -147,6 +149,9 @@ function CapturedCompanies() {
                         <time dateTime={capture.capturedAt}>{dateText(capture.capturedAt)}</time>
                       </td>
                       <td>
+                        {capture.mode && (
+                          <small>{capture.mode === 'manual' ? '人工补录' : '自动获客'}</small>
+                        )}
                         {capture.jobId ? (
                           <Link
                             className="text-link"
@@ -280,7 +285,7 @@ function AcquisitionExecutionList({ selectedId }: { selectedId?: string }) {
           >
             <span>
               <strong>
-                {job.input.country}
+                {job.input.country === WORLDWIDE_COUNTRY ? WORLDWIDE_LABEL : job.input.country}
                 {job.input.region ? ' · ' + job.input.region : ''}
               </strong>
               <small>

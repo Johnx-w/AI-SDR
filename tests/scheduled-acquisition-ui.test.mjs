@@ -56,7 +56,20 @@ test('已关闭计划独立筛选并复用恢复操作', async () => {
   closedPlan.input.country = 'Australia';
   closedPlan.timing.timezone = 'Australia/Sydney';
   ended.input.region = 'Texas';
-  const states = [[canada, closedPlan, ended], false];
+  const worldwide = {
+    ...plan('completed'),
+    id: 'global-once',
+    name: '全球单次计划',
+    lastJob: null,
+    timing: {
+      repeat: 'once',
+      startDate: '2026-10-30',
+      times: ['09:00'],
+      timezone: 'Asia/Shanghai',
+    },
+    input: { country: 'worldwide', target_count: 10, market_countries: [] },
+  };
+  const states = [[canada, closedPlan, ended, worldwide], false];
   const actions = [];
   let index = 0;
   const load = createModuleLoader((specifier, path) => {
@@ -101,9 +114,11 @@ test('已关闭计划独立筛选并复用恢复操作', async () => {
   history.props.onClick();
   const closed = render();
   assert.equal(words(history), '已关闭计划');
-  assert.equal(cards(closed).length, 2, '历史入口保留关闭计划及已结束单次计划');
+  assert.equal(cards(closed).length, 3, '历史入口保留关闭计划及已结束单次计划');
   assert.match(words(cards(closed)[0]), /澳大利亚东部.*获客范围：澳大利亚全境/);
   assert.match(words(cards(closed)[1]), /北京时间.*获客范围：美国 \/ Texas/);
+  assert.match(words(cards(closed)[2]), /北京时间.*获客范围：所有国家/);
+  assert.doesNotMatch(words(cards(closed)[2]), /worldwide|全境/);
   assert.ok(words(closed).includes('每天'));
   const restore = elements(closed).find(
     (element) => element.type === 'button' && words(element).includes('恢复计划'),
@@ -112,7 +127,7 @@ test('已关闭计划独立筛选并复用恢复操作', async () => {
   restore.props.onClick();
   await flush();
   assert.deepEqual(actions, [{ id: closedPlan.id, action: 'resume' }]);
-  assert.equal(cards(render()).length, 1, '恢复成功的计划移出关闭列表');
+  assert.equal(cards(render()).length, 2, '恢复成功的计划移出关闭列表');
   elements(render())
     .find((element) => element.type === 'button' && words(element) === '进行中的计划')
     .props.onClick();

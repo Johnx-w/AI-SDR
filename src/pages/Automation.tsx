@@ -20,7 +20,13 @@ import { PageHeading } from '../components/PageHeading';
 import { ProductPicker } from '../components/ProductPicker';
 import { useWorkspace } from '../app/WorkspaceProvider';
 import { acquisitionApi } from '../services/acquisition';
-import { acquisitionMarkets, isCountryScope, marketTimeZone } from '../domain/country-catalog';
+import {
+  acquisitionScopes,
+  isCountryScope,
+  marketTimeZone,
+  WORLDWIDE_COUNTRY,
+  WORLDWIDE_LABEL,
+} from '../domain/country-catalog';
 import { SearchableLocation } from '../components/SearchableLocation';
 import type {
   AcquisitionJob,
@@ -64,7 +70,7 @@ const initialInput: WorkflowInput = {
   query_mode: 'auto',
   auto_first_touch: false,
   customer_types: [],
-  country: 'United States',
+  country: WORLDWIDE_COUNTRY,
   region: '',
   product_scope: 'all',
   environment_preference: 'all',
@@ -314,14 +320,15 @@ export function Automation() {
       controller.abort();
     };
   }, [JSON.stringify(input), revision]);
+  const taskCountry = input.country === WORLDWIDE_COUNTRY ? WORLDWIDE_LABEL : input.country;
   const scheduleName =
     name?.trim() ??
-    `${input.country} · ${allProductScope ? ALL_PRODUCTS_LABEL : selected[0]?.label || input.product}`.slice(
+    `${taskCountry} · ${allProductScope ? ALL_PRODUCTS_LABEL : selected[0]?.label || input.product}`.slice(
       0,
       80,
     );
   const marketLabel =
-    acquisitionMarkets.find((m) => m.value === input.country)?.label || '请选择国家';
+    acquisitionScopes.find((m) => m.value === input.country)?.label || '请选择获客范围';
   let timingError = '';
   let nextRunAt: string | null = null;
   const zoneLabel = scheduleZoneLabel(timing.timezone);
@@ -352,9 +359,8 @@ export function Automation() {
     !previewLoading &&
     !!input.country &&
     hasProductSelection &&
-    Number.isInteger(targetCount) &&
+    Number.isSafeInteger(targetCount) &&
     targetCount >= 1 &&
-    targetCount <= 200 &&
     !timingError &&
     (runMode !== 'scheduled' || !!scheduleName) &&
     !(runMode === 'now' && active) &&
@@ -489,7 +495,7 @@ export function Automation() {
                 .filter((t) => input.customer_types!.includes(t.value))
                 .map((t) => t.label)
                 .join('、')
-            : '不限客户类型'}
+            : '不限搜索角色'}
         </p>
       </div>
       <div className="acq-summary-block">
@@ -518,7 +524,10 @@ export function Automation() {
               <p>
                 完整一周 {weeklyRuns} 轮
                 <small>
-                  新增目标合计 {Number.isFinite(targetCount) ? weeklyRuns * targetCount : '—'}{' '}
+                  新增目标合计{' '}
+                  {Number.isSafeInteger(targetCount) && targetCount > 0
+                    ? (BigInt(weeklyRuns) * BigInt(targetCount)).toLocaleString('zh-CN')
+                    : '—'}{' '}
                   家；实际收录可能少于目标
                 </small>
               </p>
@@ -665,7 +674,7 @@ export function Automation() {
                       <span className="acq-step-number">01</span>
                       <div>
                         <h2>目标客户</h2>
-                        <p>选择国家、产品和企业经营角色</p>
+                        <p>选择国家、产品和搜索角色</p>
                       </div>
                     </header>
                     <div className="acq-form-grid">
@@ -675,11 +684,14 @@ export function Automation() {
                           id="acquisition-market"
                           label="任务国家"
                           value={input.country}
-                          options={acquisitionMarkets}
+                          options={acquisitionScopes}
                           disabled={locked}
                           onChange={(country) => {
                             patch({ country });
-                            if (timing.timezone !== 'Asia/Shanghai')
+                            if (
+                              country !== WORLDWIDE_COUNTRY &&
+                              timing.timezone !== 'Asia/Shanghai'
+                            )
                               changeZone(marketTimeZone(country) ?? 'Asia/Shanghai');
                           }}
                         />
@@ -689,7 +701,7 @@ export function Automation() {
                             {editPlan
                               ? `（${[editPlan.input.country, editPlan.input.region].filter(Boolean).join(' / ')}）`
                               : ''}
-                            已停用，请重新选择一个国家。保存后将按该国全境获客。
+                            已停用，请重新选择“所有国家”或一个支持的国家。
                           </small>
                         )}
                       </div>
@@ -797,7 +809,7 @@ export function Automation() {
                       </>
                     )}
                     <div className="acq-field-label">
-                      客户类型<span>可多选，满足任意一种即可；不选则不限</span>
+                      搜索角色<span>可多选。按官网核实实际经营角色。</span>
                     </div>
                     <div className="acq-role-options">
                       {acquisition.customerTypes
@@ -839,7 +851,6 @@ export function Automation() {
                           aria-label="本次新增客户目标"
                           type="number"
                           min={1}
-                          max={200}
                           step={1}
                           required
                           value={Number.isNaN(targetCount) ? '' : targetCount}
@@ -1133,7 +1144,7 @@ export function Automation() {
                       </span>
                     </summary>
                     <p className="muted">
-                      系统根据产品、国家和客户条件生成查询；执行后可在记录中查看实际产出。
+                      系统根据产品、范围和搜索角色生成查询。执行记录显示实际查询及产出。
                     </p>
                     {previewError && (
                       <p className="error-message" role="alert">
@@ -1144,7 +1155,7 @@ export function Automation() {
                       {preview.map((q, i) => (
                         <li key={`${q.country}:${q.query}`}>
                           <small>
-                            {i + 1} · 官网搜索 · {q.country}
+                            {i + 1} · 官网搜索 · {q.country || WORLDWIDE_LABEL}
                           </small>
                           <span>{q.query}</span>
                         </li>

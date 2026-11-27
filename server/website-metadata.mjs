@@ -301,13 +301,31 @@ export function extractWebsiteMetadata({ content, sourceUrl }) {
   };
 }
 
-export function planWebsitePages(sourceUrl, content = '') {
+const imprint = /\/(?:impressum|imprint|legal[-_]notice)\/?$/i;
+const legalPage =
+  /\/(?:privacy(?:[-_/](?:policy|notice|statement))?|terms(?:[-_/](?:and|conditions|of|service|use))*|legal|impressum)\/?$/i;
+const productDetail = /\/motorized-shad(?:es|ing)(?:\.html?)?\/?$/i;
+const productIndex =
+  /\/(?:products?|collections?|shop|services?|blinds(?:-range)?|shutters|curtains|awnings)\/?$/i;
+
+export function websitePagePriority(url, includeProducts = false) {
+  const scope = websiteScope(url);
+  const path = scope?.path || '';
+  if (includeProducts) {
+    if (scope && url === scope.origin + '/') return 8;
+    if (imprint.test(path)) return 7;
+    if (legalPage.test(path)) return 6;
+    if (productDetail.test(path)) return 5;
+    if (productIndex.test(path)) return 4;
+  }
+  if (/contact|联系我们|聯絡/i.test(url)) return 3;
+  if (/about/i.test(url)) return 2;
+  return legalPage.test(path) ? 1 : 0;
+}
+
+export function planWebsitePages(sourceUrl, content = '', { includeProducts = false } = {}) {
   const base = websiteScope(sourceUrl);
   if (!base) return [];
-  const legalPage = (path) =>
-    /\/(?:privacy(?:[-_/](?:policy|notice|statement))?|terms(?:[-_/](?:and|conditions|of|service|use))*|legal|impressum)\/?$/i.test(
-      path,
-    );
   const urls = [base.url, base.origin + '/'];
   const links = [
     ...String(content)
@@ -323,7 +341,11 @@ export function planWebsitePages(sourceUrl, content = '') {
       (/contact|about|联系我们|聯絡|service[-_/ ]?areas?|areas[-_/ ](?:we[-_/ ])?(?:serve|service)/i.test(
         m[0],
       ) ||
-        legalPage(next.path) ||
+        legalPage.test(next.path) ||
+        (includeProducts &&
+          (imprint.test(next.path) ||
+            productDetail.test(next.path) ||
+            productIndex.test(next.path))) ||
         /^\/(?:cities|locations)\/?$/i.test(next.path)) &&
       !/\/(?:wp-content|wp-includes|wp-json)\//i.test(next.path) &&
       !/\.(pdf|jpe?g|png|gif|webp|svg|ico|zip|css|js|json|xml|woff2?)$/i.test(next.path)
@@ -333,17 +355,9 @@ export function planWebsitePages(sourceUrl, content = '') {
   const first = [...new Set(urls)].slice(0, base.path === '/' ? 1 : 2);
   const extra = [...new Set(urls)]
     .filter((u) => !first.includes(u))
-    .sort((a, b) => {
-      const priority = (url) =>
-        /contact|联系我们|聯絡/i.test(url)
-          ? 3
-          : /about/i.test(url)
-            ? 2
-            : legalPage(websiteScope(url)?.path || '')
-              ? 1
-              : 0;
-      return priority(b) - priority(a);
-    });
+    .sort(
+      (a, b) => websitePagePriority(b, includeProducts) - websitePagePriority(a, includeProducts),
+    );
   return [...first, ...extra].slice(0, 5);
 }
 

@@ -7,6 +7,8 @@ import type {
   ConnectionSettings,
   ProductSelection,
   DiscoveryQuery,
+  WebsiteCollectionAttempt,
+  AcquisitionReviewDecision,
 } from '../domain/types';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -118,16 +120,24 @@ export const acquisitionApi = {
         product_match: string;
         products: string[];
         checked_urls: string[];
+        collection_attempts?: WebsiteCollectionAttempt[];
         facts: { field: string; value: string; quote: string; source_url: string }[];
       } | null;
     }>(`/jobs/${encodeURIComponent(jobId)}/reviews/${index}`),
-  reviewCandidate: (jobId: string, index: number, sourceUrl: string, key: string) =>
+  reviewCandidate: (
+    jobId: string,
+    index: number,
+    sourceUrl: string,
+    key: string,
+    actor?: string,
+    decision?: AcquisitionReviewDecision,
+  ) =>
     request<{ resolution: NonNullable<AcquisitionJob['rows'][number]['review_resolution']> }>(
       `/jobs/${encodeURIComponent(jobId)}/reviews/${index}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
-        body: JSON.stringify({ source_url: sourceUrl }),
+        body: JSON.stringify({ source_url: sourceUrl, actor, decision }),
       },
     ),
   createJob: (input: WorkflowInput, target_count: number, requestId: string) =>

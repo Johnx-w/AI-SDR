@@ -24,10 +24,21 @@ export interface ProductSelection {
   selectAll?: boolean;
   aliases: string[];
 }
+export interface AcquisitionDiscoverySource {
+  kind: 'web' | 'maps';
+  source_url?: string;
+  provider?: string;
+  reference?: string;
+  mentioned_company?: string;
+  job_id: string;
+  discovered_at: string;
+}
 export interface SearchMetric {
   id: string;
   query: string;
   country: string;
+  language?: string;
+  batch?: number;
   status: string;
   error?: string;
   discovered: number;
@@ -45,6 +56,7 @@ export interface SearchMetric {
   ratings: Record<string, number>;
   source_kind?: 'web';
   family?: string;
+  dispatchEvidence?: { metered: string[]; attempts: string[] };
   usage?: {
     returned_records?: number;
     charged_records?: number;
@@ -52,10 +64,19 @@ export interface SearchMetric {
     run_reserved_records?: number;
     credits?: number | null;
   } | null;
+  maps?: {
+    status: string;
+    reason?: string;
+    attempts: number;
+    returned: number;
+    resolved: number;
+    usage?: { credits: number };
+  };
 }
 export interface DiscoveryQuery {
   country: string;
   query: string;
+  language?: string;
   source_kind?: 'web';
   family?: string;
 }
@@ -68,6 +89,43 @@ export interface IntegrationStatus {
   note: string;
   webProvider?: string;
   modelProvider?: string;
+}
+export interface WebsiteCollectionAttempt {
+  snapshot_id: string;
+  requested_url: string;
+  final_url?: string | null;
+  acquired_at: string;
+  method: string;
+  status: string;
+  reason: string;
+  failure_reason?: string;
+  reused?: boolean;
+  resource_wait?: { reason: string; wait_ms: number; end?: string };
+}
+export interface AcquisitionReviewDecision {
+  source_url: string;
+  company_name: string;
+  identity_quote: string;
+  operating_quote: string;
+  product: string;
+  admission_fact: string;
+  reason: string;
+}
+export interface AcquisitionPaidRequest {
+  id: string;
+  kind: string;
+  provider: string;
+  status: 'pending' | 'completed' | 'failed' | 'unknown';
+  started_at: string;
+  usage?: { credits: number };
+}
+export interface AcquisitionCurrentProgress {
+  id: string;
+  stage: string;
+  collection_attempts: WebsiteCollectionAttempt[];
+  requests: AcquisitionPaidRequest[];
+  research_usage?: ResearchUsage;
+  web_usage?: { web_extract_calls: number; web_extract_credits?: number };
 }
 export interface AcquisitionJob {
   manualPaused?: boolean;
@@ -84,7 +142,18 @@ export interface AcquisitionJob {
   status: 'running' | 'stopping' | 'paused' | 'completed' | 'partial';
   target: number;
   countPolicy?: string;
+  admissionVersion?: string;
+  identityVersion?: string;
+  executionVersion?: string;
+  batch?: { number: number; previousBoundary?: string };
+  coverage?: { countries: string[]; languages: string[] };
+  remainingTarget?: number;
+  insertedPerHour?: number | null;
+  collectionWait?: { reason: string; url: string };
+  currentProgress?: AcquisitionCurrentProgress;
   inserted: number;
+  manualInserted?: number;
+  confirmedInserted?: number;
   updated: number;
   skipped: number;
   rejected: number;
@@ -96,6 +165,18 @@ export interface AcquisitionJob {
   review?: number;
   researchUsage?: ResearchUsage;
   searchStats?: SearchMetric[];
+  mapComparison?: {
+    pausedReason?: string;
+    qualifiedNew: {
+      websiteOnly: number;
+      mapsOnly: number;
+      both: number;
+      mapsAndScrapling: number;
+      scraplingOnly: number;
+    };
+    maps: { calls: number; reportedSearches: number; reportedCredits: number };
+    website: { reportedSearches: number; reportedCredits: number };
+  };
   queryPlan?: DiscoveryQuery[];
   message: string;
   createdAt: string;
@@ -103,7 +184,9 @@ export interface AcquisitionJob {
   rows: {
     domain?: string;
     source_url?: string;
-    source_kind?: 'web';
+    source_kind?: 'web' | 'maps';
+    discovery_sources?: AcquisitionDiscoverySource[];
+    unverified_map_sources?: AcquisitionDiscoverySource[];
     result: string;
     name?: string;
     reason?: string;
@@ -111,6 +194,9 @@ export interface AcquisitionJob {
     executionId?: string;
     search_id?: string;
     search_query?: string;
+    collection_attempts?: WebsiteCollectionAttempt[];
+    paid_requests?: AcquisitionPaidRequest[];
+    web_usage?: { web_extract_calls: number; web_extract_credits?: number };
     assessment?: { grade?: string | null; score: number; status: string } | null;
     handoff?: {
       ready: boolean;
@@ -132,6 +218,10 @@ export interface AcquisitionJob {
       record_id?: string | null;
       reason?: string;
       updated_at: string;
+      actor?: string;
+      submitted_at?: string;
+      decided_at?: string;
+      decision?: AcquisitionReviewDecision;
     };
   }[];
 }
@@ -141,7 +231,9 @@ export interface ResearchUsage {
   cache_hits: number;
   input_chars: number;
   input_tokens?: number;
+  input_cached_tokens?: number;
   output_tokens?: number;
+  total_tokens?: number;
   omitted_pages?: number;
   truncated_pages?: number;
 }

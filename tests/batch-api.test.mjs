@@ -58,7 +58,7 @@ test('批量接口持久、幂等且活跃任务保护共享连接，允许独�
         400,
       );
     }
-    for (const target_count of [0, 201, 1.2, '5'])
+    for (const target_count of [0, Number.MAX_SAFE_INTEGER + 1, 1.2, '5'])
       assert.equal((await post('/jobs', { ...input, target_count })).status, 400);
     const response = await post('/jobs', input);
     assert.equal(response.status, 202);
@@ -187,7 +187,32 @@ test('立即与到期计划按本国两地补搜并读回新增企业，仅返�
     ],
   ];
   const known = 'https://known-curtains.com/';
-  const native = new NativeAcquisition({ env });
+  const sites = new Map(
+    samples.map(([country, region, product, , name, url]) => [
+      url,
+      {
+        name,
+        country,
+        identity: `${name} operates in ${region}, ${country}.`,
+        products: [product],
+      },
+    ]),
+  );
+  sites.set(known, {
+    name: 'Known',
+    identity: 'Known is a window coverings supplier.',
+    products: ['curtains', 'roller blinds'],
+  });
+  for (const data of sites.values())
+    data.supply = `We supply ${data.products.join(' and ')} for residential windows and commercial buildings.`;
+  const native = new NativeAcquisition({
+    env,
+    readPage: async ({ href }) => {
+      const data = sites.get(href);
+      return { html: data ? `<p>${data.identity}</p><p>${data.supply}</p>` : '' };
+    },
+    readScraplingPage: async () => ({ status: 'unavailable' }),
+  });
   native.providers.web.search = async ({ query }) => {
     const match = samples.find(
       ([country, region, product, role]) =>
@@ -195,20 +220,30 @@ test('立即与到期计划按本国两地补搜并读回新增企业，仅返�
     );
     return { results: [{ url: known }, ...(match ? [{ url: match[5] }] : [])] };
   };
-  native.research = async (target, item) => {
-    const [country, region, , , name, url] = samples.find(
-      (sample) => sample[5] === item.source_url,
-    );
-    assert.equal(country, target.country);
-    const record = await native.feishu.write(
-      'insert',
-      { 客户名称: name, 来源链接: url, 国家: country, '州 / 城市': region },
-      null,
-      item.operation_id,
-    );
+  native.providers.web.extract = async () => ({ results: [] });
+  native.providers.model.research = async ({ messages }) => {
+    const { pages, sources } = JSON.parse(messages[1].content);
+    let response;
+    if (sources) {
+      response = { result: 'relevant', sources: sources.map(({ i }) => i), reason: '核实官网主营' };
+    } else {
+      const source_url = pages.find((page) => sites.has(page.source_url)).source_url;
+      const data = sites.get(source_url);
+      const evidence = (value, quote) => ({ value, quote, source_url });
+      response = {
+        company_name: evidence(data.name, data.identity),
+        actual_country: data.country ? evidence(data.country, data.identity) : null,
+        entity_type: evidence('business', data.identity),
+        admission_facts: [evidence('complete_supply', data.supply)],
+        products: data.products.map((product) => ({
+          ...evidence(product, data.supply),
+          window_use: 'window_covering',
+        })),
+      };
+    }
     return {
-      新增: 1,
-      明细: [{ source_url: url, record_id: record.record_id, result: 'inserted' }],
+      status: 'completed',
+      output: [{ content: [{ type: 'output_text', text: JSON.stringify(response) }] }],
     };
   };
   const app = createApp({
@@ -270,7 +305,11 @@ test('立即与到期计划按本国两地补搜并读回新增企业，仅返�
       const expected = samples.filter((sample) => sample[0] === country);
       assert.equal(job.status, expected.length ? 'completed' : 'partial', job.reason);
       assert.equal(job.inserted, expected.length);
-      assert.equal(job.searches, expected.length ? 4 : 20);
+      assert.equal(job.searches, expected.length ? 4 : 24);
+      if (!expected.length) {
+        assert.equal(job.reason, 'exhausted');
+        assert.equal(job.batch.previousBoundary, 'search_limit');
+      }
       const regional = job.searchStats.filter((stat) => stat.searchRegion);
       if (expected.length)
         assert.deepEqual(

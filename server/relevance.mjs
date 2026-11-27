@@ -19,6 +19,7 @@ const strongPhrases = [
   /cassette\s+(?:awning|blind|shade)/i,
   /pergola/i,
   /shade\s?sail/i,
+  /\b(?:(?:sun|patio|garden|outdoor|market) umbrellas?|parasols?)\b|遮阳伞/i,
   /solar\s+(?:screen|shade|shading)/i,
   /roller\s+(?:shutter|blind)/i,
   /plantation\s+shutter/i,
@@ -139,7 +140,7 @@ const categories = [
 const unrelatedWindowProducts =
   /\b(?:(?:shower|bath|stage|theat(?:re|er)|welding|air|fire|vehicle|caravan|automotive|car|truck|marine|boat|rv)\s+(?:window\s+)?(?:curtains?|blinds?|shades?|screens?|awnings?|shutters?)|(?:medical|cubicle|surgical)\s+(?:privacy\s+)?curtains?|hospital\s+(?:privacy|cubicle|bedside)\s+curtains?|(?:lamp|eye|sun\s*glass)\s*shades?|(?:led|lcd|computer|phone|projection|printing)\s+screens?|screen\s+printing|camera\s+shutters?|(?:curtains?|blinds?|shades?|awnings?)\s+(?:for|in)\s+(?:cars?|vehicles?|caravans?|boats?|rvs?))\b|浴帘|医用帘|医疗帘|隔帘|舞台幕布|焊接帘|房车|车载|汽车遮阳|灯罩/gi;
 const windowIndustryPattern =
-  /\b(?:window\s+(?:coverings?|furnishings?|treatments?|blinds?|shades?|curtains?|shutters?|screens?)|blinds|shades|curtains|draper(?:y|ies)|awnings?|pergolas?|shutters?|zip\s*[- ]?(?:screens?|tracks?)|zipscreen|ziptrak|(?:roller|roman|venetian|cellular|honeycomb|zebra|vertical|pleated|panel\s+track|woven\s+wood|bamboo)\s+(?:blinds?|shades?)|(?:insect|fly|bug)\s+screens?|shade\s+sails?)\b|窗饰|窗帘|遮阳篷|遮阳棚|遮阳帆|百叶帘|百叶窗|卷帘|罗马帘|蜂巢帘|斑马帘|百褶帘|竹木帘|防风帘|拉链帘|纱窗|凉亭|廊架|天幕/i;
+  /\b(?:window\s+(?:coverings?|furnishings?|treatments?|blinds?|shades?|curtains?|shutters?|screens?)|blinds|shades|curtains|draper(?:y|ies)|awnings?|pergolas?|shutters?|zip\s*[- ]?(?:screens?|tracks?)|zipscreen|ziptrak|(?:roller|roman|venetian|cellular|honeycomb|zebra|vertical|pleated|panel\s+track|woven\s+wood|bamboo)\s+(?:blinds?|shades?)|(?:insect|fly|bug)\s+screens?|shade\s+sails?|(?:sun|patio|garden|outdoor|market) umbrellas?|parasols?)\b|遮阳伞|窗饰|窗帘|遮阳篷|遮阳棚|遮阳帆|百叶帘|百叶窗|卷帘|罗马帘|蜂巢帘|斑马帘|百褶帘|竹木帘|防风帘|拉链帘|纱窗|凉亭|廊架|天幕/i;
 const dedicatedWindowMaterialsPattern =
   /\b(?:blind|shade|curtain|awning|shutter)\s+(?:components?|parts?|motors?|fabrics?|tracks?|rails?|slats?|tubes?|brackets?|accessories|hardware)\b|\bsemi[- ]?finished\s+(?:window\s+coverings?|blinds?|shades?|curtains?|awnings?|shutters?)\b/i;
 const sampleProductPattern =
