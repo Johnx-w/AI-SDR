@@ -1,4 +1,4 @@
-import { countryFor } from '../src/domain/country-catalog.ts';
+import { countryFor, WORLDWIDE_COUNTRY, WORLDWIDE_LABEL } from '../src/domain/country-catalog.ts';
 import assert from 'node:assert/strict';
 import { checkMirrorMaintenance } from './mirror-maintenance.mjs';
 import { createHash } from 'node:crypto';
@@ -15,6 +15,7 @@ const templates = readFileSync(
 const day = () =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
 function taskCountryLabel(value) {
+  if (value === WORLDWIDE_COUNTRY) return WORLDWIDE_LABEL;
   const country = countryFor(value);
   return country && country.name === value ? country.zh : value;
 }

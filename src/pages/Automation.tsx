@@ -20,7 +20,13 @@ import { PageHeading } from '../components/PageHeading';
 import { ProductPicker } from '../components/ProductPicker';
 import { useWorkspace } from '../app/WorkspaceProvider';
 import { acquisitionApi } from '../services/acquisition';
-import { acquisitionMarkets, isCountryScope, marketTimeZone } from '../domain/country-catalog';
+import {
+  acquisitionScopes,
+  isCountryScope,
+  marketTimeZone,
+  WORLDWIDE_COUNTRY,
+  WORLDWIDE_LABEL,
+} from '../domain/country-catalog';
 import { SearchableLocation } from '../components/SearchableLocation';
 import type {
   AcquisitionJob,
@@ -64,7 +70,7 @@ const initialInput: WorkflowInput = {
   query_mode: 'auto',
   auto_first_touch: false,
   customer_types: [],
-  country: 'United States',
+  country: WORLDWIDE_COUNTRY,
   region: '',
   product_scope: 'all',
   environment_preference: 'all',
@@ -314,14 +320,15 @@ export function Automation() {
       controller.abort();
     };
   }, [JSON.stringify(input), revision]);
+  const taskCountry = input.country === WORLDWIDE_COUNTRY ? WORLDWIDE_LABEL : input.country;
   const scheduleName =
     name?.trim() ??
-    `${input.country} · ${allProductScope ? ALL_PRODUCTS_LABEL : selected[0]?.label || input.product}`.slice(
+    `${taskCountry} · ${allProductScope ? ALL_PRODUCTS_LABEL : selected[0]?.label || input.product}`.slice(
       0,
       80,
     );
   const marketLabel =
-    acquisitionMarkets.find((m) => m.value === input.country)?.label || '请选择国家';
+    acquisitionScopes.find((m) => m.value === input.country)?.label || '请选择获客范围';
   let timingError = '';
   let nextRunAt: string | null = null;
   const zoneLabel = scheduleZoneLabel(timing.timezone);
@@ -675,11 +682,14 @@ export function Automation() {
                           id="acquisition-market"
                           label="任务国家"
                           value={input.country}
-                          options={acquisitionMarkets}
+                          options={acquisitionScopes}
                           disabled={locked}
                           onChange={(country) => {
                             patch({ country });
-                            if (timing.timezone !== 'Asia/Shanghai')
+                            if (
+                              country !== WORLDWIDE_COUNTRY &&
+                              timing.timezone !== 'Asia/Shanghai'
+                            )
                               changeZone(marketTimeZone(country) ?? 'Asia/Shanghai');
                           }}
                         />
@@ -689,7 +699,7 @@ export function Automation() {
                             {editPlan
                               ? `（${[editPlan.input.country, editPlan.input.region].filter(Boolean).join(' / ')}）`
                               : ''}
-                            已停用，请重新选择一个国家。保存后将按该国全境获客。
+                            已停用，请重新选择“所有国家”或一个支持的国家。
                           </small>
                         )}
                       </div>
@@ -1144,7 +1154,7 @@ export function Automation() {
                       {preview.map((q, i) => (
                         <li key={`${q.country}:${q.query}`}>
                           <small>
-                            {i + 1} · 官网搜索 · {q.country}
+                            {i + 1} · 官网搜索 · {q.country || WORLDWIDE_LABEL}
                           </small>
                           <span>{q.query}</span>
                         </li>

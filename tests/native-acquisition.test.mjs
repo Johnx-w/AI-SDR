@@ -9,6 +9,7 @@ import { FeishuClient } from '../server/feishu-direct.mjs';
 import { BatchJobs } from '../server/batch-jobs.mjs';
 import { createApp } from '../server/app.mjs';
 import { mapFeishuRecord } from '../server/feishu.mjs';
+import { withApp } from './helpers/http.mjs';
 
 const site = 'https://acme.example.org/';
 const env = {
@@ -193,6 +194,159 @@ function fixture({
 }
 
 const policyFact = (value, quote) => ({ value, quote, source_url: site });
+
+test('到期的全球计划收录美国和法国的窗饰商，同样输入的美国计划只收录美国企业', async (t) => {
+  t.mock.timers.enable({
+    apis: ['Date', 'setInterval'],
+    now: Date.parse('2030-01-01T08:59:50+08:00'),
+  });
+  const fixtures = new Map([
+    [
+      'https://mesa-window.example.org/',
+      {
+        name: 'Mesa Window Supply',
+        country: 'United States',
+        quote:
+          'Mesa Window Supply imports and supplies complete outdoor zip screens for building windows to dealers across the United States.',
+      },
+    ],
+    [
+      'https://lyon-window.example.org/',
+      {
+        name: 'Lyon Window Supply',
+        country: 'France',
+        quote:
+          'Lyon Window Supply imports and supplies complete outdoor zip screens for building windows to dealers across France.',
+      },
+    ],
+    [
+      'https://coast-tours.example.org/',
+      { quote: 'Coast Tours offers guided hiking holidays and coach tours along the coast.' },
+    ],
+  ]);
+  const localEnv = { TAVILY_API_KEY: 'fixture-search', DEEPSEEK_API_KEY: 'fixture-model' };
+  const expectedByScope = [
+    ['worldwide', 'Asia/Shanghai', ['France', 'United States'], '"zip screens" supplier'],
+    [
+      'United States',
+      'America/New_York',
+      ['United States'],
+      '"zip screens" supplier United States',
+    ],
+  ];
+  for (const [country, timezone, expected, firstQuery] of expectedByScope) {
+    const utcTime = timezone === 'Asia/Shanghai' ? '01:00' : '14:00';
+    t.mock.timers.setTime(Date.parse(`2030-01-01T${utcTime}:00Z`) - 10000);
+    const queries = [];
+    const fetchImpl = async (url, options) => {
+      const request = JSON.parse(options.body);
+      if (url === 'https://api.tavily.com/search') {
+        queries.push(request.query);
+        return json({ results: [...fixtures.keys()].map((url) => ({ url })) });
+      }
+      assert.equal(url, 'https://api.deepseek.com/responses');
+      const payload = JSON.parse(request.input[1].content);
+      let output;
+      if (payload.sources) {
+        output = {
+          result: 'relevant',
+          sources: payload.sources.map(({ i }) => i),
+          reason: '窗饰供货',
+        };
+      } else {
+        const source_url = payload.pages[0].source_url;
+        const { name, country, quote } = fixtures.get(source_url);
+        assert.ok(payload.pages[0].text.includes(quote));
+        const fact = (value) => ({ value, quote, source_url });
+        output = {
+          company_name: fact(name),
+          entity_type: fact('business'),
+          actual_country: fact(country),
+          customer_type: fact('distributor'),
+          production_model: fact('no_own_factory'),
+          operating_model: fact('beyond_local'),
+          main_product_preference: fact('户外窗用卷帘'),
+          products: [{ ...fact('zip screens'), window_use: 'window_covering' }],
+        };
+      }
+      return json({
+        status: 'completed',
+        output: [{ content: [{ type: 'output_text', text: JSON.stringify(output) }] }],
+      });
+    };
+    const native = new NativeAcquisition({
+      env: localEnv,
+      fetchImpl,
+      readPage: async (url) => ({ html: `<p>${fixtures.get(url.href).quote}</p>` }),
+    });
+    await withApp({ env: localEnv, nativeImpl: native, fetchImpl }, async (base) => {
+      const request = async (path, body) => {
+        const response = await fetch(
+          base + path,
+          body && {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'scope-once-2030' },
+            body: JSON.stringify(body),
+          },
+        );
+        const data = await response.json();
+        assert.ok(response.ok, JSON.stringify(data));
+        return data;
+      };
+      const schedulesPath = '/api/v1/acquisition/schedules';
+      const archivePath = '/api/v1/leads/real/list?page=1';
+      const { leads: before } = await request(archivePath);
+      assert.deepEqual(before, []);
+      const saved = await request(schedulesPath, {
+        name: 'Scope test',
+        input: { country, product: 'zip screens', query_mode: 'auto', target_count: 3 },
+        timing: { repeat: 'once', startDate: '2030-01-01', times: ['09:00'], timezone },
+      });
+      const {
+        schedules: [plan],
+      } = await request(schedulesPath + '?summary=1');
+      assert.equal(plan.id, saved.id);
+      assert.equal(plan.input.country, country);
+      assert.deepEqual(
+        plan.input.market_countries,
+        country === 'worldwide' ? [] : ['United States'],
+      );
+      assert.equal(plan.timing.timezone, timezone);
+      assert.equal(plan.nextRunAt, `2030-01-01T${utcTime}:00.000Z`);
+      assert.deepEqual(queries, []);
+      t.mock.timers.tick(15000);
+      const {
+        schedules: [triggered],
+      } = await request(schedulesPath + '?summary=1');
+      assert.equal(triggered.runs, 1);
+      assert.equal(triggered.status, 'completed');
+      let job;
+      for (let i = 0; i < 200; i++) {
+        job = await request('/api/v1/acquisition/jobs/' + triggered.lastJobId);
+        if (job.status !== 'running') break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(job.status, 'partial', JSON.stringify(job.rows));
+      assert.equal(job.input.country, country);
+      assert.equal(job.inserted, expected.length, JSON.stringify(job.rows));
+      assert.equal(job.searchStats[0].query, firstQuery);
+      assert.equal(queries[0], firstQuery);
+      if (country === 'worldwide')
+        assert.ok(
+          queries.every((query) => !/worldwide|所有国家|United States|France/i.test(query)),
+        );
+      const { leads } = await request(archivePath);
+      assert.deepEqual(leads.map((lead) => lead.market).sort(), expected);
+      assert.deepEqual(
+        leads.map(({ name, website }) => [name, website]).sort(),
+        [...fixtures]
+          .filter(([, item]) => expected.includes(item.country))
+          .map(([url, { name }]) => [name, url])
+          .sort(),
+      );
+    });
+  }
+});
 
 for (const [name, quote, result] of [
   ['Simulation Studio', 'We sell a Roller Blinds asset pack for virtual worlds.', 'unrelated'],
@@ -434,12 +588,16 @@ test('精简后的中部经营证据贯通研究、初评、模拟写入及读�
   }
 });
 
-for (const product_scope of ['all', 'specific']) {
-  test(`${product_scope} 范围的相关企业国家未知仍入库，核实后归入实际市场`, async () => {
+for (const [product_scope, country] of [
+  ['all', 'United States'],
+  ['specific', 'United States'],
+  ['all', 'worldwide'],
+]) {
+  test(`${country} 的 ${product_scope} 范围内，相关企业国家未知仍入库，核实后归入实际市场`, async () => {
     const modelOverrides = { actual_country: null };
     const f = fixture({ modelOverrides, automaticAssessment: true });
     const svc = f.make();
-    const target = { ...input, product_scope, query_mode: 'auto' };
+    const target = { ...input, country, product_scope, query_mode: 'auto' };
     try {
       const output = await svc.research(target, {
         source_url: site,
