@@ -23,6 +23,10 @@ Windows Node 24、Python 3.12.16 与仓库锁定的 Docling 环境中，同步�
 
 ## 目标机采集预检
 
+早期固定候选实测中，GaLaBau 的展会页已证明主办活动，模型因缺少可引用的经营主体而返回空名称。回读原始快照确认页脚有同域 `/en/legal-notice`，原规划的五页没有包含它。新版将同域法律声明优先纳入取证。隔离回放中，两类已证实经营主体的展会主办方均排除，同一展会站的参展记录及未核实身份的展会均留待核实。[GaLaBau 法律声明](https://www.galabau-messe.com/en/legal-notice)
+
+同次试跑中 Hillarys 的介绍页和首页只得到访问挑战页，开发实例的浏览器补抓当时不可用，外部提取未取得正文。该候选保留待核实，后续依赖合规采集环境复验。
+
 SSH 读回 `/srv/shadeflow/current`、`shadeflow.service` 进程目录和版本文件，均指向 `17aea0e`。目标为 Ubuntu 26.04、2 核、操作系统报告的总内存 3,621 MiB。预检前可用内存 1,665 MiB，系统盘剩余 57 GiB。健康接口返回 `ok=true`，维护关闭，采样时 1 个获客任务在途。回退目录可读到基线 CD 所记备份。
 
 使用 `abbc559` 的预检代码与 `7baefea` 同次 Linux CI 的运行时。目标机 `ldd` 首次发现 Chromium 缺少 9 个直接共享库。按 Ubuntu 26.04 清单安装共享库及字体，共新增 44 个系统包，升级、移除均为 0。Chromium 1255 文件树由 root 所有，`shadeflow` 组具备读取及目录访问权限。AppArmor 匹配 `/opt/shadeflow/chromium` 下的固定版本可执行文件，普通 `shadeflow` 用户仍无法执行 `unshare -Ur true`。[依赖及配置](collection-validation.md#ubuntu-2604-浏览器沙箱) · [CI 产物](https://github.com/Johnx-w/AI-SDR/actions/runs/46013031571)
