@@ -1,0 +1,52 @@
+[
+  {
+    "market": "US",
+    "group": "static",
+    "url": "https://www.skandiawf.com/",
+    "facts": ["Proudly Manufactured in America", "national manufacturer of custom window coverings"]
+  },
+  {
+    "market": "AU",
+    "group": "static",
+    "url": "https://clearviewblinds.com.au/",
+    "facts": ["Blinds Sydney, Made in Our Own Factory", "we still make our roller blinds ourselves"]
+  },
+  {
+    "market": "US",
+    "group": "static",
+    "url": "https://www.blindsdistributor.com/faqs/",
+    "facts": ["custom-made to your chosen color", "professional installers measure and install"]
+  },
+  {
+    "market": "AU",
+    "group": "static",
+    "url": "https://rounablinds.com.au/",
+    "facts": ["Sydney homeowners and businesses", "curtains & blinds are crafted"]
+  },
+  {
+    "market": "US",
+    "group": "static",
+    "url": "https://www.theshadestore.com/",
+    "facts": ["All of our custom window treatments are handmade", "The Shade Store, LLC"]
+  },
+  {
+    "market": "AU",
+    "group": "static",
+    "url": "https://decor8.com.au/about/",
+    "facts": ["Australian made curtains and blinds", "fitted by experienced Decor8 installers"]
+  },
+  { "market": "CA", "group": "partner-calibration", "url": "https://lavishblinds.ca/" },
+  { "market": "US", "group": "partner-calibration", "url": "https://smartshadesutah.com/" },
+  {
+    "market": "CA",
+    "group": "partner-calibration",
+    "url": "https://saveonblinds.com/",
+    "facts": ["Our collection of shades", "Gardiners Road, Kingston ON"]
+  },
+  {
+    "market": "US",
+    "group": "partner-calibration",
+    "url": "https://bldrsupply.com/",
+    "facts": ["Eastern Washington's Hardware & Lumber Experts", "Airway Heights"]
+  }
+]
