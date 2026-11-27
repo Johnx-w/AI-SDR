@@ -1,8 +1,15 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { collectScraplingPage } from '../server/scrapling-collector.mjs';
+import {
+  chromiumExecutable,
+  chromiumRevisionDirectory,
+  chromiumVersion,
+  verifyReleaseChromium,
+} from '../server/scrapling-runtime.mjs';
 
 const archive = fileURLToPath(new URL('../server/scrapling/runtime-linux.tar.gz', import.meta.url));
 const directory = fileURLToPath(new URL('../server/scrapling/runtime-linux', import.meta.url));
@@ -13,11 +20,8 @@ if (existsSync(archive)) {
     execFileSync('tar', [option, archive], { encoding: 'utf8' }).trim().split('\n');
   const entries = listing('-tzf');
   assert(entries.includes('worker'), '官网采集运行时缺少工作进程');
-  const browser = 'browsers/chromium_headless_shell-1255';
-  assert(
-    entries.includes(browser + '/chrome-headless-shell-linux64/chrome-headless-shell'),
-    '官网采集运行时缺少浏览器',
-  );
+  const browser = 'browsers/' + chromiumRevisionDirectory;
+  assert(entries.includes('browsers/' + chromiumExecutable), '官网采集运行时缺少浏览器');
   assert.equal(new Set(entries).size, entries.length, '官网采集运行时含重复文件');
   assert(
     entries.every((entry) => {
@@ -38,6 +42,7 @@ if (existsSync(archive)) {
   );
   mkdirSync(directory, { recursive: true });
   execFileSync('tar', ['--no-same-owner', '-xzf', archive, '-C', directory]);
+  const browserDirectory = await verifyReleaseChromium(join(directory, 'browsers'));
   const checked = await collectScraplingPage('https://collection-health.example.org/', {
     python: null,
     async readResourceImpl(_url, kind) {
@@ -62,7 +67,9 @@ if (existsSync(archive)) {
     python: '3.12.16',
     scrapling: '0.5.1',
     playwright: '1.65.2',
-    chromium: '159.0.8154.6',
+    chromium: chromiumVersion,
   });
-  console.log('官网采集发布运行时已验证：' + JSON.stringify(checked.versions));
+  console.log(
+    '官网采集发布运行时已验证：' + JSON.stringify({ ...checked.versions, browserDirectory }),
+  );
 }
