@@ -747,7 +747,7 @@ export class BatchJobs {
       ) {
         job.rejected++;
         job.rows.push({
-          ...(job.admissionVersion
+          ...(output.collection_attempts?.length
             ? {
                 source_url: item.source_url,
                 domain: item.domain,
