@@ -122,7 +122,7 @@ export function createAcquisitionProvider({
           .map(({ values, ...fact }) => ({ ...fact, value: values.join('、') })),
       };
     },
-    status: (id) => service().status(id, { isMaintaining }),
+    status: (id, options) => service().status(id, { ...options, isMaintaining }),
     operationProgress: (id) => service().operationProgress?.(id),
     discoveryReady: (id) => service().discoveryReady?.(id),
     maintainPageSnapshots: () => native?.store?.maintainPageSnapshots(),

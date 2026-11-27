@@ -1151,10 +1151,28 @@ export function createApp({
               submission,
               row.source_url,
             );
+            const review = provider.identityVersion && {
+              ...(attempt.decision ? { decision: attempt.decision } : {}),
+              actor: attempt.actor,
+              submitted_at: attempt.submitted_at,
+              job_id: job.id,
+              row_index: index,
+              original_source_url: attempt.original_source_url,
+            };
             if (prior) {
               if (!['pending', 'uncertain'].includes(attempt.status))
                 return json(response, 200, { resolution: attempt });
-              const result = await provider.status(attempt.operation_id);
+              const mayResumeWrite = review && !reviewBusy();
+              if (mayResumeWrite) running++;
+              let result;
+              try {
+                result = await provider.status(
+                  attempt.operation_id,
+                  mayResumeWrite ? { review, sourceUrl: attempt.source_url } : undefined,
+                );
+              } finally {
+                if (mayResumeWrite) running--;
+              }
               if (result?.settled) {
                 const resolution = reviews().settle(job.id, index, result.output);
                 return json(response, 200, { resolution });
@@ -1186,19 +1204,7 @@ export function createApp({
                   ...(job.executionVersion
                     ? { executionVersion: job.executionVersion, isMaintaining }
                     : {}),
-                  ...(provider.identityVersion
-                    ? {
-                        identityVersion: provider.identityVersion,
-                        review: {
-                          ...(attempt.decision ? { decision: attempt.decision } : {}),
-                          actor: attempt.actor,
-                          submitted_at: attempt.submitted_at,
-                          job_id: job.id,
-                          row_index: index,
-                          original_source_url: attempt.original_source_url,
-                        },
-                      }
-                    : {}),
+                  ...(review ? { identityVersion: provider.identityVersion, review } : {}),
                 },
               );
               const resolution = reviews().settle(job.id, index, output);
