@@ -42,7 +42,7 @@ test('the fallback keeps a cross-site redirect and an access challenge out of Ch
 test(
   'sandboxed Chromium renders two same-site fixture businesses and retains the empty-shell control',
   { skip: !process.env.SCRAPLING_PYTHON },
-  async () => {
+  async (context) => {
     const targets = [
       'https://canyon.example.org/',
       'https://harbour.example.org/',
@@ -86,7 +86,34 @@ test(
     assert.equal(results[1].final_url, 'https://www.harbour.example.org/');
     assert.match(results[2].content, /Loading/);
     assert.equal(results[0].versions.scrapling, '0.5.1');
+    assert.equal(results[0].versions.playwright, '1.65.2');
+    assert.equal(results[0].versions.chromium, '159.0.8154.6');
+    assert.match(results[0].versions.python, /^3\.12\./);
     assert.ok(results[0].resources.processes > 1);
     assert.deepEqual(accessed, Object.keys(replies));
+    context.diagnostic(
+      JSON.stringify({ versions: results[0].versions, resources: results[0].resources }),
+    );
+  },
+);
+
+test(
+  'slow optional resources leave the already loaded public evidence readable',
+  { skip: !process.env.SCRAPLING_PYTHON },
+  async () => {
+    const html =
+      '<main><p>Canyon Shade LLC manufactures complete roller shades.</p></main>' +
+      Array.from({ length: 5 }, (_, i) => '<script src="/slow-' + i + '.js"></script>').join('');
+    const result = await collectScraplingPage('https://canyon.example.org/', {
+      async readResourceImpl(_url, kind, signal) {
+        if (kind === 'document') {
+          return { status: 200, type: 'text/html', body: Buffer.from(html) };
+        }
+        await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+        return { status: 503 };
+      },
+    });
+    assert.equal(result.status, 'ok');
+    assert.match(result.content, /Canyon Shade LLC manufactures complete roller shades/);
   },
 );

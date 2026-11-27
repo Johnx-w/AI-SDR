@@ -175,7 +175,8 @@ export async function collectScraplingPage(
     return { ...snapshot, status: 'unavailable' };
   }
   const timeout = AbortSignal.timeout(30000);
-  const stop = signal ? AbortSignal.any([signal, timeout]) : timeout;
+  const finished = new AbortController();
+  const stop = AbortSignal.any([timeout, finished.signal, ...(signal ? [signal] : [])]);
   const { server, token, readChecked } = browserGateway(initial, stop, readResourceImpl);
   active = true;
   try {
@@ -228,6 +229,7 @@ export async function collectScraplingPage(
       status: timeout.aborted ? 'timeout' : error.code === 'ENOENT' ? 'unavailable' : 'failed',
     };
   } finally {
+    finished.abort();
     server.closeAllConnections();
     server.close();
     active = false;
