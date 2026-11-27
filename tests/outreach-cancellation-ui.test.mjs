@@ -716,3 +716,22 @@ test('全部手动正式状态显示删除入口并确认待首发追信核实�
     assert.equal(h.writes().at(-1).path, '/campaigns/campaign-one/delete');
   }
 });
+
+test('已删除空列表明确表示已删除，当前计划和公司试发保留各自空态', async () => {
+  for (const status of ['completed', 'cancelled']) {
+    const h = setup(status);
+    await h.ready();
+    h.click('已删除');
+    await h.ready();
+    assert.match(h.html(), /暂无已删除计划/);
+    assert.doesNotMatch(h.html(), /暂无公司试发计划/);
+    h.click('当前计划');
+    await h.ready();
+    assert.match(h.html(), /暂无当前正式计划/);
+    h.click('公司试发');
+    await h.ready();
+    assert.match(h.html(), /暂无公司试发计划/);
+    assert.doesNotMatch(h.html(), /暂无已删除计划/);
+    assert.deepEqual(h.writes(), []);
+  }
+});

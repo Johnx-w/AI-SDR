@@ -2304,7 +2304,9 @@ export function OutreachCommunication({
                                   ? '暂无当前正式计划'
                                   : campaignView === 'history'
                                     ? '暂无历史计划'
-                                    : '暂无公司试发计划'
+                                    : campaignView === 'deleted'
+                                      ? '暂无已删除计划'
+                                      : '暂无公司试发计划'
                             }
                             detail={
                               campaignView === 'current'

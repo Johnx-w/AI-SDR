@@ -40,7 +40,7 @@
 
 最新生产版本和在办工作见[当前进展与验收](status.md)。最初的功能分支 `codex/production-mail-automation` 从 2026-11-22 的生产提交 `736e160` 建立，对应本地回退标签 `mail-automation-production-baseline-20261122`。
 
-触达计划产品选择、邮箱负责范围、删除与来源恢复的隔离验收见[触达计划验收](outreach-plan-acceptance.md)，覆盖规格 #85 的 AC01—AC22。main 合并和生产发布另行确认。
+触达计划产品选择、邮箱负责范围、删除与来源恢复的隔离验收见[触达计划验收](outreach-plan-acceptance.md)，覆盖规格 #85 的 AC01—AC22，并记录 `8c978da` 的 production CD 及生产实际核对范围。
 
 ## 本机实数工作区
 

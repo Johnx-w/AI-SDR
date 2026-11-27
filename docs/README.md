@@ -72,7 +72,7 @@ T12 自动同步随本次版本交付，使用运行环境有效飞书连接和�
 
 客户大类、邮箱及产品范围预览的适用条件与验证证据见[分类预览验收](mail-automation/category-preview.md)。
 
-触达计划产品选择、邮箱负责范围维护和删除来源联动的本地实现规则见[邮件沟通](outreach-first-touch.md#触达计划范围与删除规则本地实现)，AC01—AC22 的实际验证范围、测试、浏览器与性能结果见[触达计划验收](mail-automation/outreach-plan-acceptance.md)。来源暂停及自动首发关闭规则见 [ADR-0026](adr/0026-pause-acquisition-when-deleting-outreach.md)，人工直接恢复仅继续获客。生产尚未发布。
+触达计划产品选择、邮箱负责范围维护和删除来源联动规则见[邮件沟通](outreach-first-touch.md#触达计划范围与删除规则本地实现)，AC01—AC22 的隔离验收及生产发布与实际核对结果见[触达计划验收](mail-automation/outreach-plan-acceptance.md)。来源暂停及自动首发关闭规则见 [ADR-0026](adr/0026-pause-acquisition-when-deleting-outreach.md)，人工直接恢复仅继续获客。`8c978da` 的 production CD 已成功。
 
 ## 维护与归档
 
