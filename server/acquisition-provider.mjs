@@ -31,6 +31,8 @@ export function createAcquisitionProvider({
       customerLibrary && (!nativeImpl || nativeImpl instanceof NativeAcquisition)
         ? acquisitionIdentityVersion
         : undefined,
+    mapComparisonEnabled:
+      nativeImpl instanceof NativeAcquisition && Boolean(nativeImpl.discoverMaps),
     get syncing() {
       return !!customers.syncing;
     },

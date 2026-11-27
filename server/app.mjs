@@ -183,6 +183,7 @@ export function createApp({
       research: (...args) => provider.research(...args),
       status: (id) => provider.status(id),
       identityVersion: provider.identityVersion,
+      mapComparisonEnabled: provider.mapComparisonEnabled,
       readLeads: verifiedLeads,
       readLead: (id) => library().localDetail(id).lead,
       readAcquisitionCaptures: () => provider.acquisitionCaptures(),
