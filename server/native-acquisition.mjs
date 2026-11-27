@@ -2409,6 +2409,8 @@ export class NativeAcquisition {
       return await this.finishWritten(op);
     } catch (error) {
       if (error.code === identityIntegrityCode) throw error;
+      if (this.feishu.localFirst && error.status >= 400 && error.status < 500)
+        op.local_write_blocked = true;
       op.state = 'uncertain';
       this.store.save(op);
       throw conflict(
@@ -2608,7 +2610,7 @@ export class NativeAcquisition {
       }),
     ).output;
   }
-  async status(id) {
+  async status(id, { isMaintaining = () => false } = {}) {
     const op = this.store.get(id);
     if (!op) return { settled: false, missing: true, reason: '操作记录不存在，未自动重放' };
     if (op.state === 'completed') return { settled: true, output: op.output };
@@ -2624,12 +2626,33 @@ export class NativeAcquisition {
       }
     }
     if (['persist', 'assessment'].includes(op.stage)) {
+      this.active.add(id);
       try {
         if (op.stage === 'assessment' && op.recordVerifiedAt)
           return { settled: true, output: await this.finishWritten(op) };
         if (!op.recordId && op.acquisition) {
           op.recordId = this.feishu.acquisitionWrite(id);
           if (op.recordId) this.store.save(op);
+          else if (
+            op.stage === 'persist' &&
+            this.feishu.localFirst &&
+            op.recovery_version === 1 &&
+            op.input.executionVersion === unifiedExecutionVersion &&
+            op.identity_version === acquisitionIdentityVersion &&
+            op.admission_version === websiteAdmissionVersion &&
+            op.action === 'insert' &&
+            op.acquisition.mode === 'automatic' &&
+            op.acquisition.operation_id === id &&
+            op.acquisition.source_url === op.source_url &&
+            op.input.item?.source_url === op.source_url &&
+            op.clientToken &&
+            op.fields &&
+            !op.local_write_blocked &&
+            !isMaintaining()
+          ) {
+            this.assertAutomaticIdentityIntegrity();
+            return { settled: true, output: await this.writePreparedAssessment(op) };
+          }
         } else if (!op.recordId && op.action === 'insert') {
           const candidates = recordsForDomain(
             await this.feishu.records(),
@@ -2641,8 +2664,11 @@ export class NativeAcquisition {
           }
         }
         if (await this.verify(op)) return { settled: true, output: await this.finishWritten(op) };
-      } catch {
+      } catch (error) {
+        if (error.code === identityIntegrityCode) throw error;
         /* Preserve uncertainty when the read-back service is unavailable. */
+      } finally {
+        this.active.delete(id);
       }
       return { settled: false, reason: '写入尚未确认，未自动重试' };
     }
