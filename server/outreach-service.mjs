@@ -791,7 +791,12 @@ export class OutreachService {
     // Only saved product snapshots prove old authorization; today's catalog cannot add it.
     for (const row of this.db.prepare('SELECT data FROM outreach_campaigns').all()) {
       const c = JSON.parse(row.data);
-      if (c.mode !== 'production' || c.acquisitionSource || c.productSelectionVersion === 1)
+      if (
+        c.mode !== 'production' ||
+        c.acquisitionSource ||
+        c.deleteRequestedAt ||
+        c.productSelectionVersion === 1
+      )
         continue;
       const snapshots = Array.isArray(c.productScopes) ? c.productScopes : [];
       const products = snapshots
