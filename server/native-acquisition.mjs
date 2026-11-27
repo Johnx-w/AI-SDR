@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { acquisitionConfig } from './acquisition-config.mjs';
 import { createResearchProviders } from './research-providers.mjs';
+import { createMapsDiscovery } from './maps-discovery.mjs';
 import { researchCacheKey } from './research-reuse.mjs';
 import {
   acquisitionIdentityVersion,
@@ -157,6 +158,91 @@ export function selectWebsiteCandidates(results, knownDomains = [], limit = 20, 
   };
 }
 
+function compareMapDiscovery(selected, lookup, context) {
+  const { maps, places } = lookup;
+  if (!places.length && !context.mapOnlyUrls.size) return { ...selected, maps };
+  const candidates = new Map(selected.candidates.map((c) => [acquisitionUrl(c.source_url), c]));
+  const discovered_at = new Date().toISOString();
+  const common = { job_id: context.jobId, discovered_at };
+  const observations = new Map();
+  const review_candidates = [];
+  for (const candidate of candidates.values()) {
+    candidate.discovery_sources = [{ ...common, kind: 'web', source_url: candidate.source_url }];
+  }
+  for (const { id, name, website } of places) {
+    const sourceUrl = name && companyWebsiteSourceUrl(website);
+    const source = {
+      ...common,
+      kind: 'maps',
+      provider: maps.provider,
+      reference: id,
+      ...(name ? { mentioned_company: name } : {}),
+      ...(sourceUrl ? { source_url: sourceUrl.href } : {}),
+    };
+    const reference = `${maps.provider}:${id}`;
+    const previous = observations.get(reference) || context.references.get(reference);
+    if (previous) {
+      if (
+        (source.source_url &&
+          previous.source_url &&
+          acquisitionUrl(source.source_url) !== acquisitionUrl(previous.source_url)) ||
+        (name &&
+          previous.mentioned_company &&
+          subjectName(name) !== subjectName(previous.mentioned_company))
+      ) {
+        return {
+          ...selected,
+          maps: { ...maps, status: 'paused', reason: 'conflicting_reference' },
+        };
+      }
+      if (!source.source_url || previous.source_url) continue;
+    }
+    observations.set(reference, source);
+  }
+  for (const source of observations.values()) {
+    if (!source.source_url) {
+      review_candidates.push({
+        source_kind: 'maps',
+        name: source.mentioned_company,
+        reason: '地图地点尚未定位可独立核验的企业官网',
+        discovery_sources: [source],
+      });
+      continue;
+    }
+    const key = acquisitionUrl(source.source_url);
+    if (!candidates.has(key)) {
+      candidates.set(key, {
+        source_url: source.source_url,
+        source_kind: 'maps',
+        discovery_sources: [],
+      });
+    }
+    candidates.get(key).discovery_sources.push(source);
+    maps.resolved++;
+  }
+  return { ...selected, maps, candidates: [...candidates.values()], review_candidates };
+}
+
+function checkMapBinding(op, item, identity) {
+  if (!item.discovery_sources?.some(({ kind }) => kind === 'maps')) return true;
+  const verifiedNames = new Set(
+    [identity?.name, identity?.website_name, ...(identity?.aliases || [])]
+      .map(subjectName)
+      .filter(Boolean),
+  );
+  op.discovery_sources = item.discovery_sources.filter(
+    (source) =>
+      source.kind === 'web' ||
+      (identity?.status !== 'identity_conflict' &&
+        verifiedNames.has(subjectName(source.mentioned_company))),
+  );
+  if (op.discovery_sources.length !== item.discovery_sources.length) {
+    op.maps_binding =
+      verifiedNames.size && identity?.status !== 'identity_conflict' ? 'mismatch' : 'unverified';
+  }
+  return !op.maps_binding || op.discovery_sources.some(({ kind }) => kind === 'web');
+}
+
 function admissionGap(research) {
   if (
     research.eligibility?.status === 'rejected' ||
@@ -211,6 +297,7 @@ export class NativeAcquisition {
     store,
     assessments,
     providers,
+    mapsProvider,
     admissionVersion = websiteAdmissionVersion,
   } = {}) {
     this.env = env;
@@ -219,6 +306,7 @@ export class NativeAcquisition {
     this.readScraplingPage = readScraplingPage;
     this.admissionVersion = admissionVersion;
     this.providers = providers || createResearchProviders({ env, fetchImpl });
+    this.discoverMaps = createMapsDiscovery({ env, fetchImpl, provider: mapsProvider });
     this.feishu = feishu || new FeishuClient({ env, fetchImpl });
     this.store =
       store ||
@@ -457,7 +545,7 @@ export class NativeAcquisition {
     input,
     search,
     seen = [],
-    { admissionVersion = this.admissionVersion, identityVersion } = {},
+    { admissionVersion = this.admissionVersion, identityVersion, mapsContext } = {},
   ) {
     input = { ...input, ...validateTarget(input) };
     const conditionsKey = exclusionConditionsKey(input);
@@ -469,10 +557,12 @@ export class NativeAcquisition {
     const known = byUrl
       ? []
       : (await this.feishu.records()).map((r) => domainKey(customerWebsite(r))).filter(Boolean);
-    const recent = new Set(seen);
+    const paired = byUrl && admissionVersion === websiteAdmissionVersion && mapsContext;
+    const recent = new Set(paired ? seen.filter((url) => !mapsContext.mapOnlyUrls.has(url)) : seen);
     const excluded = [...new Set(known.filter((domain) => !recent.has(domain))), ...recent];
+    const query = search.query.slice(0, 395);
     const data = await this.providers.web.search({
-      query: search.query.slice(0, 395),
+      query,
       search_depth: 'basic',
       max_results: 20,
       include_answer: false,
@@ -492,12 +582,18 @@ export class NativeAcquisition {
       });
       return false;
     });
-    return {
+    const result = {
       ...selected,
       stage: 'select',
       source: this.providers.web.provider,
       usage: data.usage,
     };
+    if (!paired) return result;
+    const lookup = await this.discoverMaps(
+      { query, country: search.country, searchRegion: search.searchRegion },
+      mapsContext,
+    );
+    return compareMapDiscovery(result, lookup, mapsContext);
   }
   async collect(sourceUrl, { unified = false, now, refresh = false, onAttempt, evidenceUrl } = {}) {
     const initial = websiteUrl(sourceUrl);
@@ -878,6 +974,8 @@ export class NativeAcquisition {
         : {}),
       ...(operation.collection_gaps?.length ? { collection_gaps: operation.collection_gaps } : {}),
       ...(operation.research_trace ? { research_trace: operation.research_trace } : {}),
+      ...(operation.discovery_sources ? { discovery_sources: operation.discovery_sources } : {}),
+      ...(operation.maps_binding ? { maps_binding: operation.maps_binding } : {}),
       明细: row ? [row] : [],
     };
   }
@@ -916,6 +1014,7 @@ export class NativeAcquisition {
       ),
       research_usage: operation.research_usage,
       web_usage: operation.web_usage,
+      ...(operation.maps_binding ? { maps_binding: operation.maps_binding } : {}),
     };
     if (research.relevance) minimal.research.relevance = { relevant: research.relevance.relevant };
     if (research.eligibility)
@@ -1274,6 +1373,14 @@ export class NativeAcquisition {
           // current validated result or a reason to repeat its model call.
           op.research_usage.cache_unavailable = true;
         }
+      }
+      if (identityVerified && !checkMapBinding(op, item, research.company_identity)) {
+        const output = this.output(op, {
+          research,
+          outcome: 'review',
+          reason: '地图地点与独立官网的经营主体不一致，暂停地图路径待核实',
+        });
+        return this.store.complete(op, output).output;
       }
       if (scopedIdentity && hardMismatch && !item.target_record_id) {
         return this.rejectNewCandidate(op, research.reason || '官网经营资格与本次目标不符');
@@ -1934,6 +2041,9 @@ export class NativeAcquisition {
   recordAcquisitionSource(op, recordId) {
     this.feishu.observeAcquisition(recordId, op.id, {
       ...op.acquisition,
+      ...(op.discovery_sources?.length || op.input.item.discovery_sources?.length
+        ? { discovery_sources: op.discovery_sources || op.input.item.discovery_sources }
+        : {}),
       research_trace: op.research_trace,
       eligibility: op.research?.eligibility,
       activity: op.research?.activity_verification,
@@ -1962,6 +2072,13 @@ export class NativeAcquisition {
     for (const previous of this.feishu.acquisitionSourcesByContent(key)) {
       if (!previous.registration || domainKey(previous.source_url) === domain) continue;
       if (item.source_title && subjectName(item.source_title) !== subjectName(previous.name))
+        continue;
+      if (
+        item.discovery_sources?.some(
+          ({ kind, mentioned_company }) =>
+            kind === 'maps' && subjectName(mentioned_company) !== subjectName(previous.name),
+        )
+      )
         continue;
       const locate = ({ quote, value, field }) =>
         [...page.evidence_by_url].flatMap(([source_url, page]) =>
