@@ -236,6 +236,6 @@
 
 公开接口 `GET /api/v1/outreach/mailboxes/:id/coverage-products` 返回供货选择所需的目录摘要；`POST .../:id/coverage-preview` 校验产品、品牌及 `revision` 并返回差异和计划影响；`PUT .../:id` 提交明确 `productIds` 时必须携带最新 `revision`，冲突返回409，刷新后重新确认。邮箱配置版本与负责范围持久化保存；业务备注独立维护。
 
-发件身份摘要现在只包括身份字段，产品覆盖逐项检查。升级前已准备邮件使用旧摘要，首次发送前可能被阻止，需按页面提示重新准备；不得将升级解释为旧队列无条件继续发送。此处仅说明本地实现，未推送或部署。
+发件身份摘要现在只包括身份字段，产品覆盖逐项检查。升级前已准备邮件仅在旧公式精确证明当前发件身份及产品覆盖未变时迁移摘要并继续原队列；真实身份或旧覆盖不符仍阻止提交，不能无条件放行。此处仅说明本地实现，未推送或部署。
 
 回归入口：`node --test tests/outreach-mailboxes.test.mjs tests/outreach-service.test.mjs`；构建后运行 `node scripts/verify-mailbox-coverage-browser.mjs`，隔离夹具包含两个不同品牌邮箱及空覆盖对照，外部发信使用替身，不证明真实投递。

@@ -856,7 +856,19 @@ export function createApp({
             );
           }
           if (suffix.length === 2 && request.method === 'POST')
-            return json(response, 200, reviewPlan(manager.control(suffix[0], suffix[1])));
+            return json(
+              response,
+              200,
+              reviewPlan(
+                manager.control(
+                  suffix[0],
+                  suffix[1],
+                  request.headers['content-type']?.includes('application/json')
+                    ? await readJson(request)
+                    : {},
+                ),
+              ),
+            );
           throw new ApiError(404, '定时计划接口不存在');
         }
         if (url.pathname === '/api/v1/leads/real/metrics' && request.method === 'GET')
@@ -1021,6 +1033,7 @@ export function createApp({
           return json(response, 200, provider.info);
         if (url.pathname === `${prefix}/jobs` || url.pathname.startsWith(`${prefix}/jobs/`)) {
           const suffix = url.pathname.slice(`${prefix}/jobs`.length).split('/').filter(Boolean);
+          plans().recoverAuthorizations();
           const manager = jobs();
           if (!suffix.length && request.method === 'GET')
             return json(response, 200, {
@@ -1148,7 +1161,18 @@ export function createApp({
               return json(response, 200, reviewJob(manager.stop(suffix[0])));
             if (suffix[1] === 'resume') {
               if (!provider.info.configured) throw new ApiError(503, '获客执行引擎尚未配置');
-              return json(response, 200, reviewJob(await manager.resume(suffix[0])));
+              return json(
+                response,
+                200,
+                reviewJob(
+                  await manager.resume(
+                    suffix[0],
+                    request.headers['content-type']?.includes('application/json')
+                      ? await readJson(request)
+                      : {},
+                  ),
+                ),
+              );
             }
           }
           throw new ApiError(404, '任务接口不存在');

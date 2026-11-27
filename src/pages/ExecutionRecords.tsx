@@ -236,7 +236,11 @@ function AcquisitionExecutionList({ selectedId }: { selectedId?: string }) {
   async function control(id: string, action: 'stop' | 'resume' | 'pause' | 'delete') {
     setBusy(id);
     try {
-      const job = await acquisitionApi.controlJob(id, action);
+      const job = await acquisitionApi.controlJob(
+        id,
+        action,
+        jobs.find((job) => job.id === id)?.sourceControlRevision || 0,
+      );
       setJobs((current) => current.map((j) => (j.id === id ? job : j)));
       setError('');
     } catch (e) {
