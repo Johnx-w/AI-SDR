@@ -225,7 +225,7 @@ export async function collectScraplingPage(
       ...snapshot,
       final_url: final.href,
       acquired_at: new Date().toISOString(),
-      status: hasUsableResearchText(text, content) ? 'ok' : 'failed',
+      status: result.has_body_text && hasUsableResearchText(text, content) ? 'ok' : 'failed',
       content,
       content_hash: createHash('sha256').update(content).digest('hex'),
       raw_content: document.body.toString('utf8'),
