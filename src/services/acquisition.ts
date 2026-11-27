@@ -85,7 +85,7 @@ export const acquisitionApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, input: { ...input, target_count }, timing }),
     }),
-  controlSchedule: (id: string, action: 'pause' | 'resume' | 'close') =>
+  controlSchedule: (id: string, action: 'pause' | 'resume' | 'close' | 'delete') =>
     request<AcquisitionSchedule>(`/schedules/${encodeURIComponent(id)}/${action}`, {
       method: 'POST',
     }),
@@ -119,7 +119,7 @@ export const acquisitionApi = {
       headers: { 'Content-Type': 'application/json', 'Idempotency-Key': requestId },
       body: JSON.stringify({ ...input, target_count }),
     }),
-  controlJob: (id: string, action: 'stop' | 'resume') =>
+  controlJob: (id: string, action: 'stop' | 'resume' | 'pause' | 'delete') =>
     request<AcquisitionJob>(`/jobs/${encodeURIComponent(id)}/${action}`, { method: 'POST' }),
   status: () => request<IntegrationStatus>('/status'),
 };

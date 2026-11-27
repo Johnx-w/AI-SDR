@@ -321,3 +321,29 @@ test('Dandoush 五个历史来源只显示一个折叠入口，编号按同站�
   assert.equal((identified.match(/表单编号 elementor:add9249/g) || []).length, 1);
   assert.doesNotMatch(identified, /<details class="handoff-forms" open/);
 });
+
+test('来源人工暂停显示原因、未勾选首发、旧计划入口与继续删除操作', () => {
+  const html = renderToStaticMarkup(
+    createElement(
+      MemoryRouter,
+      null,
+      createElement(BatchProgress, {
+        job: {
+          ...job,
+          status: 'paused',
+          manualPaused: true,
+          input: { auto_first_touch: false },
+          sourcePause: { outreachPlanId: 'old-plan', reason: '关联触达已删除' },
+        },
+        control: () => {},
+        busy: false,
+      }),
+    ),
+  );
+  assert.match(html, /关联触达已删除/);
+  assert.match(html, /campaignId=old-plan/);
+  assert.match(html, /继续获客/);
+  assert.match(html, /删除来源任务/);
+  assert.match(html, /<input[^>]*type="checkbox"[^>]*disabled/);
+  assert.doesNotMatch(html, /<input[^>]*checked/);
+});
