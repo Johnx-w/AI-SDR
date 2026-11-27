@@ -39,6 +39,57 @@ test('the fallback keeps a cross-site redirect and an access challenge out of Ch
   }
 });
 
+test('browser captures wait in FIFO across callers while low memory and capacity defer safely', async () => {
+  const reads = [];
+  const waits = [];
+  const availableMemoryImpl = () => memory;
+  let memory = 2 * 1024 ** 3;
+  let continueFirst;
+  const firstPage = new Promise((resolve) => (continueFirst = resolve));
+  const request = (name, options = {}) =>
+    collectScraplingPage('https://' + name + '.example.org/', {
+      python: process.execPath,
+      availableMemoryImpl,
+      onQueue: (state) => waits.push([name, state?.reason]),
+      async readResourceImpl(url) {
+        reads.push(url.hostname);
+        if (name === 'first') await firstPage;
+        return {
+          status: 200,
+          type: 'text/html',
+          body: Buffer.from('<title>Access denied</title>'),
+        };
+      },
+      ...options,
+    });
+  const first = request('first');
+  await new Promise((resolve) => setImmediate(resolve));
+  const second = request('second');
+  const third = request('third');
+  const backup = new AbortController();
+  const controls = Array.from({ length: 6 }, (_, n) =>
+    request('control-' + n, { signal: backup.signal }),
+  );
+  const overflow = await request('overflow');
+  assert.equal(overflow.status, 'deferred');
+  assert.equal(overflow.resource_wait.reason, 'queue_full');
+  assert.deepEqual(reads, ['first.example.org']);
+  assert.ok(waits.some(([name, reason]) => name === 'second' && reason === 'browser_busy'));
+  backup.abort();
+  assert.ok((await Promise.all(controls)).every((result) => result.status === 'deferred'));
+  memory = 0;
+  continueFirst();
+  assert.equal((await first).status, 'blocked');
+  assert.ok(waits.some(([name, reason]) => name === 'second' && reason === 'low_memory'));
+  assert.deepEqual(reads, ['first.example.org']);
+  memory = 2 * 1024 ** 3;
+  const [next, last] = await Promise.all([second, third]);
+  assert.deepEqual([next.status, last.status], ['blocked', 'blocked']);
+  assert.equal(next.resource_wait.reason, 'low_memory');
+  assert.equal(last.resource_wait.reason, 'browser_busy');
+  assert.deepEqual(reads, ['first.example.org', 'second.example.org', 'third.example.org']);
+});
+
 test(
   'sandboxed Chromium renders two same-site fixture businesses and retains the empty-shell control',
   { skip: !process.env.SCRAPLING_PYTHON },

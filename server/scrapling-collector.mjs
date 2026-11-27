@@ -23,6 +23,75 @@ const maxDocument = 4 * 1024 * 1024;
 const maxResources = 30;
 const allowed = new Set(['document', 'script', 'stylesheet', 'xhr', 'fetch']);
 let active = false;
+const waiting = [];
+const queueCapacity = 8;
+const queueTimeoutMs = 30000;
+const minAvailableMemory = 1024 ** 3;
+let memoryCheck;
+
+function dispatchBrowser() {
+  if (active) return;
+  clearTimeout(memoryCheck);
+  const next = waiting[0];
+  if (!next) return;
+  if (next.availableMemoryImpl() < minAvailableMemory) {
+    next.wait('low_memory');
+    memoryCheck = setTimeout(dispatchBrowser, 250);
+    return;
+  }
+  active = true;
+  next.finish(true);
+}
+
+function requestBrowser({ availableMemoryImpl, onQueue, signal }) {
+  if (signal?.aborted) return { resource_wait: { reason: 'aborted', wait_ms: 0 } };
+  if (waiting.length >= queueCapacity)
+    return { resource_wait: { reason: 'queue_full', wait_ms: 0 } };
+  return new Promise((resolve) => {
+    const started = performance.now();
+    let reason;
+    const notify = (state) => {
+      try {
+        onQueue?.(state);
+      } catch {
+        // A progress-write failure must release the browser queue.
+      }
+    };
+    const entry = {
+      availableMemoryImpl,
+      wait(value) {
+        if (reason === value) return;
+        reason = value;
+        notify({ reason });
+      },
+      finish(admitted, end) {
+        waiting.splice(waiting.indexOf(entry), 1);
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', abort);
+        if (reason) notify(null);
+        resolve({
+          admitted,
+          ...(reason || end
+            ? {
+                resource_wait: {
+                  reason: reason || end,
+                  wait_ms: Math.round(performance.now() - started),
+                  ...(end ? { end } : {}),
+                },
+              }
+            : {}),
+        });
+        if (!admitted) dispatchBrowser();
+      },
+    };
+    const abort = () => entry.finish(false, 'aborted');
+    const timer = setTimeout(() => entry.finish(false, 'queue_timeout'), queueTimeoutMs);
+    signal?.addEventListener('abort', abort, { once: true });
+    waiting.push(entry);
+    if (active || waiting.length > 1) entry.wait('browser_busy');
+    dispatchBrowser();
+  });
+}
 
 async function readResource(url, resource, signal) {
   return requestPublicWebsite(url, signal, {
@@ -165,6 +234,8 @@ export async function collectScraplingPage(
     signal,
     python = process.env.SCRAPLING_PYTHON,
     readResourceImpl = readResource,
+    availableMemoryImpl = availableMemory,
+    onQueue,
   } = {},
 ) {
   const snapshot = {
@@ -181,14 +252,18 @@ export async function collectScraplingPage(
   if (!initial || !domainKey(initial.href)) return snapshot;
   const installed =
     python || (process.platform === 'linux' && existsSync(bundledWorker) && bundledWorker);
-  if (!installed || active || availableMemory() < 1024 ** 3) {
-    return { ...snapshot, status: 'unavailable' };
-  }
+  if (!installed) return { ...snapshot, status: 'unavailable' };
+  const { admitted, resource_wait } = await requestBrowser({
+    availableMemoryImpl,
+    onQueue,
+    signal,
+  });
+  if (resource_wait) snapshot.resource_wait = resource_wait;
+  if (!admitted) return { ...snapshot, status: 'deferred' };
   const timeout = AbortSignal.timeout(30000);
   const finished = new AbortController();
   const stop = AbortSignal.any([timeout, finished.signal, ...(signal ? [signal] : [])]);
   const { server, token, readChecked } = browserGateway(initial, stop, readResourceImpl);
-  active = true;
   try {
     const document = await readChecked(initial.href, 'document');
     if (!document.body)
@@ -243,5 +318,6 @@ export async function collectScraplingPage(
     server.closeAllConnections();
     server.close();
     active = false;
+    dispatchBrowser();
   }
 }

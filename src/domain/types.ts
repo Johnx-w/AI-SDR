@@ -37,6 +37,8 @@ export interface SearchMetric {
   id: string;
   query: string;
   country: string;
+  language?: string;
+  batch?: number;
   status: string;
   error?: string;
   discovered: number;
@@ -73,6 +75,7 @@ export interface SearchMetric {
 export interface DiscoveryQuery {
   country: string;
   query: string;
+  language?: string;
   source_kind?: 'web';
   family?: string;
 }
@@ -95,6 +98,7 @@ export interface WebsiteCollectionAttempt {
   status: string;
   reason: string;
   reused?: boolean;
+  resource_wait?: { reason: string; wait_ms: number; end?: string };
 }
 export interface AcquisitionReviewDecision {
   source_url: string;
@@ -121,6 +125,13 @@ export interface AcquisitionJob {
   target: number;
   countPolicy?: string;
   admissionVersion?: string;
+  identityVersion?: string;
+  executionVersion?: string;
+  batch?: { number: number; previousBoundary?: string };
+  coverage?: { countries: string[]; languages: string[] };
+  remainingTarget?: number;
+  insertedPerHour?: number | null;
+  collectionWait?: { reason: string; url: string };
   inserted: number;
   manualInserted?: number;
   confirmedInserted?: number;
@@ -199,7 +210,9 @@ export interface ResearchUsage {
   cache_hits: number;
   input_chars: number;
   input_tokens?: number;
+  input_cached_tokens?: number;
   output_tokens?: number;
+  total_tokens?: number;
   omitted_pages?: number;
   truncated_pages?: number;
 }

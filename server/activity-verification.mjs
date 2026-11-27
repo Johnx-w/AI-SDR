@@ -2,6 +2,7 @@
 import { domainKey } from './website-identity.mjs';
 import { readResearchJson } from './company-research.mjs';
 import { researchCacheKey } from './research-reuse.mjs';
+import { addModelTokens } from './research-providers.mjs';
 import { productTerms } from '../src/domain/acquisition-products.mjs';
 
 const decisionSchema = {
@@ -122,13 +123,7 @@ export async function verifyCompanyActivity(model, store, usage, sources, target
   usage.model_calls++;
   usage.input_chars += request.messages[1].content.length;
   const response = await model.research(request);
-  const tokens = response.usage || response.body?.usage || {};
-  for (const [field, n] of [
-    ['input_tokens', tokens.input_tokens ?? tokens.prompt_tokens],
-    ['output_tokens', tokens.output_tokens ?? tokens.completion_tokens],
-  ]) {
-    if (Number.isSafeInteger(n) && n >= 0) usage[field] = (usage[field] || 0) + n;
-  }
+  addModelTokens(usage, response);
   const verdict = readActivityVerdict(response, sources);
   if (key) {
     try {

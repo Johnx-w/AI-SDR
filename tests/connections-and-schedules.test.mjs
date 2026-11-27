@@ -227,12 +227,15 @@ test('搜索预览按范围生成实际查询，全球不把范围标签发给�
     };
     const global = await preview('worldwide');
     const usa = await preview('United States');
-    assert.deepEqual(global[0], { country: '', query: '"zip screens" supplier' });
+    assert.deepEqual(global[0], { country: '', query: '"zip screens" supplier', language: 'en' });
     assert.deepEqual(usa[0], {
       country: 'United States',
       query: '"zip screens" supplier United States',
+      language: 'en',
     });
-    assert.ok(global.every(({ country, query }) => !country && !/worldwide|所有国家/i.test(query)));
+    assert.ok(global.some(({ country, language }) => country === 'France' && language === 'fr'));
+    assert.ok(global.every(({ query }) => !/worldwide|所有国家/i.test(query)));
+    assert.ok(usa.every(({ country }) => country === 'United States'));
   });
 });
 
@@ -348,10 +351,8 @@ test('单国重复计划改为全球后按新范围到期，保留时区及原�
       const second = await run();
       assert.notEqual(second.id, first.id);
       assert.equal(second.input.country, 'worldwide');
-      assert.ok(
-        queries.length > 0 &&
-          queries.every((query) => !/worldwide|所有国家|United States/i.test(query)),
-      );
+      assert.doesNotMatch(queries[0], /United States/i);
+      assert.ok(queries.every((query) => !/worldwide|所有国家/i.test(query)));
       assert.equal((await api('jobs/' + first.id)).input.country, 'United States');
     },
   );

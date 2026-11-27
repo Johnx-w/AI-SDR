@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { acquisitionConfig } from './acquisition-config.mjs';
-import { createResearchProviders } from './research-providers.mjs';
+import { addModelTokens, createResearchProviders } from './research-providers.mjs';
 import { createMapsDiscovery } from './maps-discovery.mjs';
 import { researchCacheKey } from './research-reuse.mjs';
 import {
@@ -49,7 +49,12 @@ import {
 import { websiteAdmissionVersion } from './customer-eligibility.mjs';
 import { pageRelevance } from './relevance.mjs';
 import { validateTarget } from './search-target.mjs';
-import { acquisitionMarkets, countryFor } from '../src/domain/country-catalog.ts';
+import {
+  acquisitionMarkets,
+  countryFor,
+  WORLDWIDE_COUNTRY,
+} from '../src/domain/country-catalog.ts';
+import { unifiedExecutionVersion } from './search-plan.mjs';
 import {
   assessCompany,
   assessmentId,
@@ -563,7 +568,11 @@ export class NativeAcquisition {
     input = { ...input, ...validateTarget(input) };
     const conditionsKey = exclusionConditionsKey(input);
     this.store.backfillExclusions();
-    if (search?.country && !input.market_countries.includes(search.country))
+    const globalTerritory =
+      input.country === WORLDWIDE_COUNTRY &&
+      search?.scope === WORLDWIDE_COUNTRY &&
+      countryFor(search.country);
+    if (search?.country && !globalTerritory && !input.market_countries.includes(search.country))
       throw Object.assign(new Error('搜索国家不在当前支持的市场范围内'), { status: 400 });
     this.ensureConfigured();
     const byUrl = identityVersion === acquisitionIdentityVersion;
@@ -614,7 +623,10 @@ export class NativeAcquisition {
     );
     return compareMapDiscovery(result, lookup, mapsContext);
   }
-  async collect(sourceUrl, { unified = false, now, refresh = false, onAttempt, evidenceUrl } = {}) {
+  async collect(
+    sourceUrl,
+    { unified = false, now, refresh = false, onAttempt, onCollectionQueue, evidenceUrl } = {},
+  ) {
     const initial = websiteUrl(sourceUrl);
     if (!initial) throw new Error('官网地址无效，仅接受公网 HTTPS 企业网站');
     const domain = domainKey(initial.href),
@@ -688,6 +700,7 @@ export class NativeAcquisition {
       acquired_at = new Date(now ?? Date.now()).toISOString(),
       links,
       versions,
+      resource_wait,
     }) => {
       const snapshot = this.store.savePageSnapshot({
         requested_url,
@@ -703,6 +716,7 @@ export class NativeAcquisition {
         gaps: status === 'ok' ? [] : ['page_body'],
         ...(links ? { links } : {}),
         ...(versions ? { versions } : {}),
+        ...(resource_wait ? { resource_wait } : {}),
       });
       retain(snapshot);
     };
@@ -792,6 +806,7 @@ export class NativeAcquisition {
       const result = await this.readScraplingPage(original, {
         reason,
         python: this.env.SCRAPLING_PYTHON,
+        onQueue: onCollectionQueue && ((state) => onCollectionQueue(state, original)),
       }).catch(() => ({ status: 'failed' }));
       const final = websiteUrl(result.final_url);
       const content = typeof result.content === 'string' ? result.content : '';
@@ -1081,12 +1096,18 @@ export class NativeAcquisition {
       bypassExclusion = false,
       admissionVersion = item.target_record_id ? 'legacy' : this.admissionVersion,
       identityVersion,
+      executionVersion,
+      onCollectionQueue,
       review,
     } = {},
   ) {
     // Also validate restored tasks and callers that bypass HTTP validation.
-    const researchTarget = validateTarget(input);
-    input = { ...input, ...researchTarget };
+    const target = validateTarget(input);
+    input = { ...input, ...target };
+    const researchTarget =
+      executionVersion === unifiedExecutionVersion
+        ? { ...target, customer_types: [], customer_type: '', customer_profile: 'all' }
+        : target;
     const conditionsKey = exclusionConditionsKey(input);
     this.ensureConfigured();
     const id = item.operation_id;
@@ -1096,6 +1117,7 @@ export class NativeAcquisition {
       input,
       item,
       ...(identityVersion ? { identityVersion } : {}),
+      ...(executionVersion ? { executionVersion } : {}),
       ...(review ? { review } : {}),
     });
     if (existing) {
@@ -1180,6 +1202,7 @@ export class NativeAcquisition {
         unified,
         refresh: bypassExclusion,
         evidenceUrl: review?.decision?.source_url,
+        onCollectionQueue,
         onAttempt: (attempt) => {
           (op.collection_attempts ||= []).push(attempt);
           this.store.save(op);
@@ -1699,7 +1722,7 @@ export class NativeAcquisition {
         }
         // Replay through today's evidence and policy checks, never cached
         // eligibility, scores, customer writes or a prior operation result.
-        if (response) parsed = parseCompanyResearch(response, page, input);
+        if (response) parsed = parseCompanyResearch(response, page, researchTarget);
       } catch {
         // Corrupt/obsolete cache data is not research evidence. A fresh
         // request may replace it; cache failure must not block valid research.
@@ -1720,15 +1743,9 @@ export class NativeAcquisition {
       else this.store.startModelAttempt(op, conditionsKey, domain);
       response = await this.providers.model.research(request);
       op.research_response = response;
-      const usage = response.usage || response.body?.usage || {};
-      for (const [key, value] of [
-        ['input_tokens', usage.input_tokens ?? usage.prompt_tokens],
-        ['output_tokens', usage.output_tokens ?? usage.completion_tokens],
-      ])
-        if (Number.isSafeInteger(value) && value >= 0)
-          op.research_usage[key] = (op.research_usage[key] || 0) + value;
+      addModelTokens(op.research_usage, response);
       this.store.save(op);
-      parsed = parseCompanyResearch(response, page, input);
+      parsed = parseCompanyResearch(response, page, researchTarget);
     }
     let operatorFacts = [];
     if (review?.decision) {
@@ -1786,7 +1803,7 @@ export class NativeAcquisition {
         evidence('admission_facts', admission_fact, operating_quote),
         { ...evidence('products', product, operating_quote), window_use: 'window_covering' },
       ];
-      parsed = parseCompanyResearch(response, page, input, undefined, operatorFacts);
+      parsed = parseCompanyResearch(response, page, researchTarget, undefined, operatorFacts);
     }
     if (
       parsed.product_match === 'matched' &&
@@ -1860,7 +1877,7 @@ export class NativeAcquisition {
       parsed = parseCompanyResearch(
         response,
         page,
-        input,
+        researchTarget,
         verdict.result === 'relevant' ? verdict.sources : [],
         operatorFacts,
       );
