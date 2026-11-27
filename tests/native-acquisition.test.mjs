@@ -155,6 +155,7 @@ function fixture({
       const evidence = (value, quote) => ({ value, quote, source_url: site });
       const data = {
         company_name: evidence('Acme Screens', sourceText),
+        admission_facts: [evidence('complete_supply', sourceText)],
         entity_type: evidence('business', sourceText),
         production_model: evidence('no_own_factory', sourceText),
         operating_model: evidence('beyond_local', sourceText),
@@ -188,7 +189,8 @@ function fixture({
         ? '<p>' + pageText + '</p><a href="/contact">Contact us</a>'
         : '<p>Contact our team</p><a href="mailto:sales@acme.example.org">Email</a>',
   });
-  const make = (extra = {}) => new NativeAcquisition({ env, fetchImpl, readPage, ...extra });
+  const make = (extra = {}) =>
+    new NativeAcquisition({ admissionVersion: 'legacy', env, fetchImpl, readPage, ...extra });
   return { calls, records, fetchImpl, readPage, make };
 }
 
@@ -1397,5 +1399,295 @@ test('本轮再度出现的既有企业优先排除，客户库超过搜索服�
       manager.close();
       svc.close();
     }
+  }
+});
+test('native acquisition reuses a rendered snapshot and preserves the original attempt evidence', async () => {
+  const { make } = fixture();
+  const rendered = '<p>' + sourceText + '</p>';
+  const svc = make({
+    readPage: async () => ({
+      html: '<noscript>Enable JavaScript to run the application.</noscript>',
+    }),
+    readScraplingPage: async (url) => ({
+      requested_url: url,
+      final_url: site,
+      acquired_at: '2026-11-27T02:03:04.000Z',
+      method: 'scrapling',
+      status: 'ok',
+      content: rendered,
+      raw_content: '<noscript>Enable JavaScript to run the application.</noscript>',
+    }),
+  });
+  try {
+    const first = await svc.collect(site, {
+      unified: true,
+      now: Date.parse('2026-11-27T02:04:00Z'),
+    });
+    assert.match(first.page_text, /Acme Screens imports zip screens/);
+    assert.deepEqual(
+      first.collection_attempts.map((a) => [a.method, a.status, a.reason]),
+      [
+        ['node', 'empty', 'initial_read'],
+        ['scrapling', 'ok', 'missing_page_body'],
+      ],
+    );
+    assert.equal(first.collection_attempts[1].requested_url, site);
+    assert.equal(first.collection_attempts[1].final_url, site);
+    assert.match(first.collection_attempts[1].content_hash, /^[a-f0-9]{64}$/);
+    const second = await svc.collect(site, {
+      unified: true,
+      now: Date.parse('2026-11-27T02:04:01Z'),
+    });
+    assert.equal(second.page_text, first.page_text);
+    assert.deepEqual(second.collection_attempts, [
+      { ...first.collection_attempts[1], reused: true },
+    ]);
+    assert.equal(
+      svc.store.snapshotById(first.collection_attempts[1].snapshot_id).raw_content,
+      '<noscript>Enable JavaScript to run the application.</noscript>',
+    );
+  } finally {
+    svc.close();
+  }
+});
+test('获客任务按官网证据收录两家，空壳与参展商待核实，主办方排除', async () => {
+  // Minimal frozen official excerpts plus a generated exhibitor profile and empty page.
+  const hillarys = 'https://www.hillarys.co.uk/terms-conditions/';
+  const vision = 'https://www.visiondecor.com.au/products/';
+  const organizer =
+    'https://www.galabau-messe.com/en/press/press-releases/2026/09/galabau-2026-opens-its-gates';
+  const exhibitor = 'https://www.fair-preview.example.org/exhibitors/oakleaf';
+  const empty = 'https://empty-shades.example.org/';
+  const hillarysIdentity =
+    'We are Hunter Douglas UK Retail Limited a company registered in England and Wales, trading as Hillarys Blinds.';
+  const hillarysSupply = 'made-to-measure blinds, curtains and shutters';
+  const visionIdentity =
+    'Vision Decor are innovators in providing stylish and unique interior decorating solutions in Perth';
+  const visionSupply = 'Our Range of Blinds, Curtains & Shutters in Perth';
+  const organizerIdentity = 'NürnbergMesse is the organiser of the event.';
+  const exhibitorIdentity =
+    'Oakleaf Shade is listed as an exhibitor showing outdoor roller blinds.';
+  const shell = '<noscript>Enable JavaScript to run the application.</noscript>';
+  const html = (...parts) => parts.map((text) => '<p>' + text + '</p>').join('');
+  const cases = new Map([
+    [
+      hillarys,
+      {
+        name: 'Hunter Douglas UK Retail Limited',
+        identity: hillarysIdentity,
+        supply: hillarysSupply,
+        fact: 'complete_supply',
+        path: 'scrapling',
+        product: 'blinds',
+      },
+    ],
+    [
+      vision,
+      {
+        name: 'Vision Decor',
+        identity: visionIdentity,
+        supply: visionSupply,
+        fact: 'complete_supply',
+        path: 'external',
+        product: 'Curtains',
+      },
+    ],
+    [empty, { name: 'Empty Shades', path: 'empty' }],
+    [
+      organizer,
+      {
+        name: 'NürnbergMesse',
+        identity: organizerIdentity,
+        fact: 'trade_show_operator',
+        path: 'node',
+      },
+    ],
+    [
+      exhibitor,
+      {
+        name: 'Oakleaf Shade',
+        identity: exhibitorIdentity,
+        fact: 'third_party_profile',
+        path: 'node',
+      },
+    ],
+  ]);
+  const f = fixture();
+  const modelResponse = (data) =>
+    json({
+      status: 'completed',
+      output: [{ content: [{ type: 'output_text', text: JSON.stringify(data) }] }],
+    });
+  const siteFetch = async (url, options) => {
+    if (url === 'https://api.tavily.com/search') {
+      const { exclude_domains } = JSON.parse(options.body);
+      return json({
+        results: [...cases]
+          .filter(
+            ([href]) => !exclude_domains.includes(new URL(href).hostname.replace(/^www\./, '')),
+          )
+          .map(([href, data]) => ({ url: href, title: data.name })),
+      });
+    }
+    if (url === 'https://api.tavily.com/extract') {
+      const { urls } = JSON.parse(options.body);
+      return json({
+        results: urls.includes(vision)
+          ? [{ url: vision, raw_content: html(visionIdentity, visionSupply) }]
+          : [],
+      });
+    }
+    if (url === 'https://api.deepseek.com/responses') {
+      const request = JSON.parse(options.body);
+      const { pages, sources } = JSON.parse(request.input[1].content);
+      if (sources)
+        return modelResponse({
+          result: 'relevant',
+          sources: sources.map((s) => s.i),
+          reason: '官网确认供应窗饰',
+        });
+      const source = pages.find((p) => cases.has(p.source_url)).source_url;
+      const data = cases.get(source);
+      const evidence = (value, quote) => ({ value, quote, source_url: source });
+      return modelResponse({
+        company_name: evidence(data.name, data.identity),
+        legal_company_name: source === hillarys ? evidence(data.name, data.identity) : null,
+        entity_type: evidence('business', data.identity),
+        admission_facts: [evidence(data.fact, data.supply || data.identity)],
+        products: data.product
+          ? [{ ...evidence(data.product, data.supply), window_use: 'window_covering' }]
+          : [],
+      });
+    }
+    return f.fetchImpl(url, options);
+  };
+  const svc = f.make({
+    fetchImpl: siteFetch,
+    readPage: async (url) => {
+      const data = cases.get(url.href);
+      return { html: data?.path === 'node' ? html(data.identity) : shell };
+    },
+    readScraplingPage: async (url) =>
+      url === hillarys
+        ? {
+            final_url: url,
+            status: 'ok',
+            content: html(hillarysIdentity, hillarysSupply),
+            raw_content: shell,
+          }
+        : { final_url: null, status: 'unavailable' },
+  });
+  const app = createApp({ env, fetchImpl: siteFetch, nativeImpl: svc });
+  await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
+  const base = 'http://127.0.0.1:' + app.address().port + '/api/v1';
+  try {
+    const response = await fetch(base + '/acquisition/jobs', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'website-admission-regression',
+      },
+      body: JSON.stringify({
+        ...input,
+        product: 'window coverings',
+        product_scope: 'all',
+        target_count: 3,
+      }),
+    });
+    assert.equal(response.status, 202);
+    const created = await response.json();
+    let job;
+    for (let n = 0; n < 100; n++) {
+      job = await (await fetch(base + '/acquisition/jobs/' + created.id)).json();
+      if (job.status !== 'running') break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.equal(job.admissionVersion, 'website-admission-v1');
+    assert.equal(job.inserted, 2);
+    assert.deepEqual(
+      job.rows.map((row) => row.result),
+      ['inserted', 'inserted', 'review', 'rejected', 'review'],
+    );
+    assert.ok(
+      job.rows[0].collection_attempts.some((a) => a.method === 'scrapling' && a.status === 'ok'),
+    );
+    assert.ok(
+      job.rows[1].collection_attempts.some((a) => a.method === 'external' && a.status === 'ok'),
+    );
+    assert.ok(job.rows[2].collection_attempts.every((a) => a.status !== 'ok'));
+    const list = await (await fetch(base + '/leads/real/list')).json();
+    assert.deepEqual(list.leads.map(({ name, website }) => [name, website]).sort(), [
+      ['Hunter Douglas UK Retail Limited', hillarys],
+      ['Vision Decor', vision],
+    ]);
+    const raw = svc.store.snapshotById(
+      job.rows[0].collection_attempts.find((a) => a.method === 'scrapling').snapshot_id,
+    );
+    assert.match(raw.content, /Hunter Douglas UK Retail Limited/);
+    assert.equal(raw.raw_content, shell);
+    const organizerResult = await svc.status(job.rows[3].operation_id);
+    assert.equal(organizerResult.output.research.eligibility.code, 'trade_show_operator');
+    assert.equal(
+      organizerResult.output.research.facts.find((f) => f.field === 'admission_facts').quote,
+      organizerIdentity,
+    );
+    const exhibitorResult = await svc.status(job.rows[4].operation_id);
+    assert.equal(exhibitorResult.output.research.eligibility.code, 'official_site_missing');
+  } finally {
+    await new Promise((resolve) => app.close(resolve));
+  }
+});
+test('缺少主营供货引文时补抓，保留直接取得的主体与经营原文', async () => {
+  const note = 'We sell complete outdoor zip screens as a core product line.';
+  const f = fixture();
+  const svc = f.make({
+    readPage: async () => ({ html: '<p>' + sourceText + '</p>' }),
+    readScraplingPage: async (url) => ({
+      final_url: url,
+      status: 'ok',
+      content: '<p>' + note + '</p>',
+    }),
+  });
+  const research = svc.providers.model.research.bind(svc.providers.model);
+  svc.providers.model.research = async (request) => {
+    const { pages } = JSON.parse(request.messages[1].content);
+    const result = await research(request);
+    if (!pages || !request.schema.properties.admission_facts) return result;
+    const entry = (result.body || result).output[0].content[0];
+    const data = JSON.parse(entry.text);
+    data.admission_facts = pages.some((page) => page.text.includes(note))
+      ? [policyFact('complete_supply', note)]
+      : [];
+    entry.text = JSON.stringify(data);
+    return result;
+  };
+  try {
+    const result = await svc.research(
+      input,
+      { source_url: site, operation_id: 'missing-supply-evidence' },
+      { admissionVersion: 'website-admission-v1' },
+    );
+    assert.equal(result.新增, 1);
+    assert.equal(result.research.company_name, 'Acme Screens');
+    assert.equal(result.research.eligibility.code, 'complete_supply');
+    assert.deepEqual(
+      result.collection_attempts.map((a) => [a.method, a.reason]),
+      [
+        ['node', 'initial_read'],
+        ['scrapling', 'missing_operating_evidence'],
+      ],
+    );
+    const evidence = result.research.facts.filter((f) =>
+      ['company_name', 'admission_facts'].includes(f.field),
+    );
+    assert.deepEqual(
+      evidence.map((f) => [f.quote, f.snapshot_id]),
+      [
+        [sourceText, result.collection_attempts[0].snapshot_id],
+        [note, result.collection_attempts[1].snapshot_id],
+      ],
+    );
+  } finally {
+    svc.close();
   }
 });

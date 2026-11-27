@@ -22,6 +22,7 @@ test('历史配件目录恢复用途后正常入库、读回并保留待核实�
   const calls = { model: 0, write: 0, readback: 0 };
   const store = new AcquisitionStore(':memory:', 'accessory-regression');
   const service = new NativeAcquisition({
+    admissionVersion: 'legacy',
     env: {
       TAVILY_API_KEY: 'fixture-search',
       DEEPSEEK_API_KEY: 'fixture-model',

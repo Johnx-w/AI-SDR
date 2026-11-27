@@ -301,7 +301,7 @@ export function extractWebsiteMetadata({ content, sourceUrl }) {
   };
 }
 
-export function planWebsitePages(sourceUrl, content = '') {
+export function planWebsitePages(sourceUrl, content = '', { includeProducts = false } = {}) {
   const base = websiteScope(sourceUrl);
   if (!base) return [];
   const legalPage = (path) =>
@@ -309,6 +309,10 @@ export function planWebsitePages(sourceUrl, content = '') {
       path,
     );
   const urls = [base.url, base.origin + '/'];
+  const productPage = (path) =>
+    /\/(?:products?|collections?|shop|services?|blinds(?:-range)?|shutters|curtains|awnings)\/?$/i.test(
+      path,
+    );
   const links = [
     ...String(content)
       .replace(/<(script|style|svg|noscript)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
@@ -324,6 +328,7 @@ export function planWebsitePages(sourceUrl, content = '') {
         m[0],
       ) ||
         legalPage(next.path) ||
+        (includeProducts && productPage(next.path)) ||
         /^\/(?:cities|locations)\/?$/i.test(next.path)) &&
       !/\/(?:wp-content|wp-includes|wp-json)\//i.test(next.path) &&
       !/\.(pdf|jpe?g|png|gif|webp|svg|ico|zip|css|js|json|xml|woff2?)$/i.test(next.path)
@@ -335,13 +340,17 @@ export function planWebsitePages(sourceUrl, content = '') {
     .filter((u) => !first.includes(u))
     .sort((a, b) => {
       const priority = (url) =>
-        /contact|联系我们|聯絡/i.test(url)
-          ? 3
-          : /about/i.test(url)
-            ? 2
-            : legalPage(websiteScope(url)?.path || '')
-              ? 1
-              : 0;
+        includeProducts && legalPage(websiteScope(url)?.path || '')
+          ? 5
+          : includeProducts && productPage(websiteScope(url)?.path || '')
+            ? 4
+            : /contact|联系我们|聯絡/i.test(url)
+              ? 3
+              : /about/i.test(url)
+                ? 2
+                : legalPage(websiteScope(url)?.path || '')
+                  ? 1
+                  : 0;
       return priority(b) - priority(a);
     });
   return [...first, ...extra].slice(0, 5);

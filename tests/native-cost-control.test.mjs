@@ -106,6 +106,7 @@ function fixture({
     },
   };
   const service = new NativeAcquisition({
+    admissionVersion: 'legacy',
     env,
     store,
     providers,
@@ -547,6 +548,8 @@ test('发现过滤后批任务继续研究其他网站，历史排除不占研�
       { ...input, search_query: 'zip screens', target_count: 1, research_budget: 1 },
       'exclusion-batch',
     );
+    delete job.admissionVersion;
+    manager.save(job);
     await manager.work(job.id);
     const completed = manager.get(job.id);
     assert.equal(researched, 1);

@@ -68,7 +68,16 @@ export function createAcquisitionProvider({
       if (!operation) return null;
       const groupedFacts = new Map();
       for (const { field, value, quote, source_url } of research.facts || []) {
-        if (!['company_name', 'products', 'entity_type'].includes(field)) continue;
+        if (
+          ![
+            'company_name',
+            'products',
+            'entity_type',
+            'admission_facts',
+            'legal_company_name',
+          ].includes(field)
+        )
+          continue;
         const key = JSON.stringify([field, quote, source_url]);
         const fact = groupedFacts.get(key) || { field, quote, source_url, values: [] };
         const normalizedValue = String(value ?? '').trim();
@@ -83,6 +92,9 @@ export function createAcquisitionProvider({
         product_match: research.product_match || 'unknown',
         products: (research.products || []).slice(0, 20),
         checked_urls: (operation.checked_urls || []).slice(0, 5),
+        ...(operation.collection_attempts
+          ? { collection_attempts: operation.collection_attempts }
+          : {}),
         facts: [...groupedFacts.values()]
           .slice(0, 15)
           .map(({ values, ...fact }) => ({ ...fact, value: values.join('、') })),

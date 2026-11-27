@@ -35,6 +35,7 @@ function fixture({ html = selectShell, readPage, extract, modelData, webProvider
   const calls = { reads: [], extracts: [], models: [], writes: 0 };
   const store = new AcquisitionStore(':memory:', 'collection-regression');
   const service = new NativeAcquisition({
+    admissionVersion: 'legacy',
     env: {
       TAVILY_API_KEY: 'fixture-search',
       DEEPSEEK_API_KEY: 'fixture-model',

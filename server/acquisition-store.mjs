@@ -8,6 +8,7 @@ import { exclusionDecision } from './exclusion-decision.mjs';
 
 const MODEL_RESPONSE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MODEL_RESPONSE_LIMIT = 200;
+const PAGE_SNAPSHOT_TTL_MS = 24 * 60 * 60 * 1000;
 const cacheError = (message) => Object.assign(new Error(message), { status: 400 });
 function modelCacheKey(key) {
   if (typeof key !== 'string' || !/^[a-f0-9]{64}$/i.test(key))
@@ -73,6 +74,52 @@ export class AcquisitionStore {
       model_attempts INTEGER NOT NULL DEFAULT 0, request_key TEXT, operation_id TEXT,
       PRIMARY KEY(scope,conditions_key,domain)
     )`);
+    this.db.exec(`CREATE TABLE IF NOT EXISTS acquisition_page_snapshots (
+      scope TEXT NOT NULL, id TEXT NOT NULL, requested_url TEXT NOT NULL,
+      acquired_at TEXT NOT NULL, status TEXT NOT NULL, data TEXT NOT NULL,
+      PRIMARY KEY(scope,id)
+    ); CREATE INDEX IF NOT EXISTS acquisition_page_snapshots_lookup
+      ON acquisition_page_snapshots(scope,requested_url,acquired_at DESC) WHERE status='ok'`);
+  }
+  pageSnapshot(requestedUrl, { now = Date.now() } = {}) {
+    return this.pageSnapshots(requestedUrl, { now }).at(-1) || null;
+  }
+  pageSnapshots(requestedUrl, { now = Date.now() } = {}) {
+    const rows = this.db
+      .prepare(
+        `SELECT data FROM acquisition_page_snapshots WHERE scope=? AND requested_url=? AND status='ok'
+      AND acquired_at BETWEEN ? AND ? ORDER BY acquired_at DESC, rowid DESC LIMIT 3`,
+      )
+      .all(
+        this.scope,
+        requestedUrl,
+        new Date(now - PAGE_SNAPSHOT_TTL_MS).toISOString(),
+        new Date(now).toISOString(),
+      );
+    const latest = rows.map((row) => JSON.parse(row.data));
+    const directIndex = latest.findIndex(({ method }) => method === 'node');
+    return directIndex < 0 ? latest.slice(0, 1) : latest.slice(0, directIndex + 1).reverse();
+  }
+  savePageSnapshot(snapshot) {
+    const snapshot_id = createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
+    const stored = { ...snapshot, snapshot_id };
+    this.db
+      .prepare('INSERT OR IGNORE INTO acquisition_page_snapshots VALUES(?,?,?,?,?,?)')
+      .run(
+        this.scope,
+        snapshot_id,
+        snapshot.requested_url,
+        snapshot.acquired_at,
+        snapshot.status,
+        JSON.stringify(stored),
+      );
+    return stored;
+  }
+  snapshotById(id) {
+    const row = this.db
+      .prepare('SELECT data FROM acquisition_page_snapshots WHERE scope=? AND id=?')
+      .get(this.scope, id);
+    return row ? JSON.parse(row.data) : null;
   }
   reviewResponse(conditionsKey, domain, requestKey) {
     const row = this.db
@@ -218,7 +265,10 @@ export class AcquisitionStore {
           )
           .run(this.scope, key, domain);
       }
-      const decision = domain ? exclusionDecision(op, output) : 'ignore';
+      const decision =
+        domain && (!op.admission_version || op.admission_version === 'legacy')
+          ? exclusionDecision(op, output)
+          : 'ignore';
       if (decision === 'exclude') {
         this.db
           .prepare(
