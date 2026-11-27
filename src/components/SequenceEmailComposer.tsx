@@ -309,7 +309,7 @@ export function SequenceEmailComposer({
     });
   }
   function putVariable(key: string, custom?: CustomVariable) {
-    const target = first ? field : 'body';
+    const target = field;
     const el = target === 'subject' ? subjectRef.current : bodyRef.current;
     const vars = custom
       ? [...(template.variables || []).filter((v) => v.key !== key), custom]
@@ -352,7 +352,7 @@ export function SequenceEmailComposer({
   function apply() {
     if (!suggestion) return;
     if (panel === 'email')
-      onChange({ ...template, subject: first ? suggestion.subject : '', body: suggestion.text });
+      onChange({ ...template, subject: suggestion.subject, body: suggestion.text });
     else if (panel === 'subject') onChange({ ...template, subject: suggestion.subject });
     else if (panel === 'rewrite') insert('body', selection.start, selection.end, suggestion.text);
     else if (panel === 'opener')
@@ -386,8 +386,8 @@ export function SequenceEmailComposer({
           <input
             ref={subjectRef}
             maxLength={150}
-            value={first ? template.subject : '回复上一封邮件'}
-            readOnly={!first}
+            value={template.subject}
+            placeholder={first ? undefined : '留空则回复上一封邮件'}
             onFocus={() => setField('subject')}
             onChange={(e) => onChange({ ...template, subject: e.target.value })}
           />
@@ -623,8 +623,7 @@ export function SequenceEmailComposer({
                 <PencilLine size={17} />,
                 '添加开场白或附言',
               )}
-              {first &&
-                action('邮件主题', () => open('subject'), <Mail size={17} />, '单独起草主题行')}
+              {action('邮件主题', () => open('subject'), <Mail size={17} />, '单独起草主题行')}
               {action(
                 '自定义 AI 变量',
                 () => editVariable(),
@@ -683,8 +682,7 @@ export function SequenceEmailComposer({
               {Object.entries(variableLabels)
                 .filter(
                   ([k]) =>
-                    (first || k !== 'ai_subject') &&
-                    (field !== 'subject' || !['ai_body', 'ai_opener', 'ai_question'].includes(k)),
+                    field !== 'subject' || !['ai_body', 'ai_opener', 'ai_question'].includes(k),
                 )
                 .map(([key, label]) => (
                   <button

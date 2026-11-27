@@ -6,7 +6,7 @@ export function normalizeTemplate(
   value: EmailTemplate | undefined,
   first: boolean,
 ): EmailTemplate | undefined;
-export function followUpQuestionWarning(body: string, template?: string): string | undefined;
+export function repeatedBodyWarning(template?: string): string | undefined;
 export function expandTemplate(text: string, variables: Record<string, string>): string;
 export function mailVariables(input: {
   company: string;

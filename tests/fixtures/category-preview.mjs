@@ -7,7 +7,7 @@ const modelEnv = {
   RESEARCH_MODEL_API_KEY: 'fixture',
   RESEARCH_MODEL_MODEL: 'fixture',
 };
-export function categoryPreviewFixture(count = 1200) {
+export function categoryPreviewFixture(count = 1200, respond) {
   const library = new LeadLibrary({ scope: 'preview-qa' });
   const brands = [
     ['honeybadgerblinds.com', 'Honey Badger Blinds', 'roller blinds'],
@@ -139,7 +139,7 @@ export function categoryPreviewFixture(count = 1200) {
         }
       : { body_text: `Following up on ${product}. Would a brief product overview help your team?` };
     return Response.json({
-      choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(response) } }],
+      choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(respond ? respond(payload, response) : response) } }],
     });
   };
   const service = new OutreachService({

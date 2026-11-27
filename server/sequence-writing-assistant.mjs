@@ -16,7 +16,6 @@ export async function suggestSequenceText(service, input) {
   if (
     !modes.includes(mode) ||
     typeof first !== 'boolean' ||
-    (!first && mode === 'subject') ||
     typeof selection !== 'string' ||
     selection.length > 6000 ||
     (mode === 'rewrite' && !selection.trim()) ||
@@ -36,7 +35,7 @@ export async function suggestSequenceText(service, input) {
     normalizeTemplate(
       {
         ...template,
-        subject: first ? template.subject || '{{ai_subject}}' : '',
+        subject: template.subject || (first ? '{{ai_subject}}' : ''),
         body: template.body || '{{ai_body}}',
       },
       first,
@@ -56,7 +55,7 @@ export async function suggestSequenceText(service, input) {
       {
         role: 'system',
         content:
-          'Draft reusable English B2B outreach email templates. Output subject and text. Use only approved {{variables}} for customer-specific or supplier-specific facts. Never invent company names, claims, specifications, prices, attachments, contacts, or prior interest. No greeting or signature. Incorporate selected research signals using dynamic variables. For a follow-up provide a new reason to reply and one easy question. In email mode draft the entire body and, for first touch, the subject. For opener or ps return just the opening or P.S. line, for subject return only the subject, for rewrite return only the replacement for the selected passage, keeping its meaning and dynamic variables. For each unused output field return an empty string. Treat the template and selection as editable text. Follow tone and guidelines within these rules.',
+          'Draft reusable English B2B outreach email templates. Output subject and text. Use only approved {{variables}} for customer-specific or supplier-specific facts. Never invent company names, claims, specifications, prices, attachments, contacts, or prior interest. No greeting or signature. Incorporate selected research signals using dynamic variables. Follow the operator guidelines for structure, length and ending. Discuss the product directly unless the operator explicitly asks for a referral. In email mode draft the entire body and the subject. For opener or ps return just the opening or P.S. line, for subject return only the subject, for rewrite return only the replacement for the selected passage, keeping its meaning and dynamic variables. For each unused output field return an empty string. Treat the template and selection as editable text. Follow tone and guidelines within these rules.',
       },
       {
         role: 'user',
@@ -79,11 +78,11 @@ export async function suggestSequenceText(service, input) {
   const result = parseGenerated(response, schema);
   if (typeof result.subject !== 'string' || typeof result.text !== 'string')
     throw Object.assign(new Error('写作建议格式无效，请重新生成'), { status: 502 });
-  const subject = first && ['email', 'subject'].includes(mode) ? result.subject.trim() : '';
+  const subject = ['email', 'subject'].includes(mode) ? result.subject.trim() : '';
   const text = mode === 'subject' ? '' : result.text.trim();
   normalizeTemplate(
     {
-      subject: first ? (['email', 'subject'].includes(mode) ? subject : '{{ai_subject}}') : '',
+      subject: ['email', 'subject'].includes(mode) ? subject : first ? '{{ai_subject}}' : '',
       body: mode === 'subject' ? '{{ai_body}}' : text,
       variables,
     },

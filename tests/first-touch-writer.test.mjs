@@ -182,11 +182,11 @@ test('写作格式只修订一次，修订结果继续通过同样的事实检�
         calls++;
         if (calls === 2) {
           assert.equal(request.messages.at(-2).role, 'assistant');
-          assert.match(request.messages.at(-1).content, /exactly three paragraphs/);
+          assert.match(request.messages.at(-1).content, /configured writing instructions/);
         }
         const result =
           calls === 1 || mode === 'still-invalid'
-            ? { ...draft, body_text: draft.body_text.replaceAll('\n\n', ' ') }
+            ? { ...draft, body_text: draft.body_text + '\n\nBest regards,' }
             : mode === 'unsupported'
               ? { ...draft, body_text: 'We have certified products. ' + draft.body_text }
               : draft;
@@ -273,7 +273,7 @@ test('身份不匹配时不能仅把制造商改成供应商就保留从中国�
   await assert.rejects(generate(input, draft), { code: 'outreach_unsupported_claim' });
 });
 
-test('来源缺失在调用前阻止生成，伪造或重复来源及不符合字数和提问规则的结果不进入发送', async () => {
+test('来源缺失在调用前阻止生成，伪造或重复来源及重复签名等格式错误不进入发送', async () => {
   const { input, draft } = fixture();
   let calls = 0;
   await assert.rejects(
@@ -286,13 +286,9 @@ test('来源缺失在调用前阻止生成，伪造或重复来源及不符合�
     { source_ids: ['invented'] },
     { source_ids: ['source', 'source'] },
     { subject: 'Re: Supply cooperation' },
-    { body_text: 'Would you consider us as a supplier?' },
-    { body_text: draft.body_text + ' More words.'.repeat(30) },
-    { body_text: draft.body_text.replaceAll('\n\n', ' ') },
     {
       body_text: draft.body_text.replace('manufacture and supply', 'supply our confirmed range of'),
     },
-    { body_text: draft.body_text + '\n\nWho is the right contact?' },
     { body_text: draft.body_text + '\n\nBest regards, Sales' },
     { body_text: draft.body_text.replace('\n\nWould', '\nSincerely,\nSender Name\n\nWould') },
     { body_text: 'Dear Example Dealer Team,\n\n' + draft.body_text },
@@ -379,4 +375,26 @@ test('可编辑的首封结尾要求进入写作上下文，与客户和供货�
     );
   });
   assert.ok(result.sourceIds.length);
+});
+
+test('固定模板与自定义变量只校验实际展开的邮件及证据', async () => {
+  const { input, draft } = fixture();
+  input.template = {
+    subject: '{{product}} range',
+    body: 'From {{brand}}. {{custom_reason}}',
+    variables: [
+      { key: 'custom_reason', label: '联系理由', instruction: 'Describe the matching product.' },
+    ],
+  };
+  draft.body_text = '';
+  draft.custom_reason = 'Your range includes ' + input.product.englishName + '.';
+  const result = await generate(input, draft);
+  assert.equal(result.subject, input.product.englishName + ' range');
+  assert.equal(
+    result.bodyText,
+    'Hi Example Dealer team,\n\nFrom ' + input.mailbox.brandName + '. ' + draft.custom_reason,
+  );
+  await assert.rejects(generate(input, { ...draft, custom_reason: 'We guarantee delivery.' }), {
+    code: 'outreach_unsupported_claim',
+  });
 });

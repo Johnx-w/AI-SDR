@@ -890,7 +890,10 @@ test('简化生成直接使用客户信息和已确认产品范围，无需介�
   assert.ok(result.bodyText.startsWith(`Hi ${candidate.companyName} team,\n\n`));
   assert.equal(result.bodyText.includes('\n\nHello,'), false);
   assert.match(request.messages[0].content, /Do not add a greeting or salutation/);
-  assert.match(request.messages[0].content, /Paragraph 1 is one concise, sourced observation/);
+  assert.match(
+    request.messages[0].content,
+    /supported by both the extracted value and its original quotation/,
+  );
   assert.deepEqual(request.response_format.json_schema.schema.required, [
     'subject',
     'body_text',
@@ -936,7 +939,7 @@ test('简化开发信的公司称呼由程序固定，保留正文且不从未�
   }
 });
 
-test('简化开发信按客户观察、品牌供货介绍、容易回复的问题排列', async () => {
+test('允许首段介绍品牌且一次生成合格正文', async () => {
   const input = fixture();
   input.campaign.productScopes = input.products.map(outreachProductScope);
   const [candidate] = selectOutreachCandidates(input).eligible;
@@ -953,13 +956,7 @@ test('简化开发信按客户观察、品牌供货介绍、容易回复的问�
               content: JSON.stringify({
                 subject: 'PVC Shutter Supply Cooperation',
                 body_text:
-                  calls === 1
-                    ? [
-                        'I noticed your website lists PVC shutters among your window furnishings. I am writing from Example Shutters to introduce our PVC shutter supply for your range.',
-                        'If this is relevant, we could discuss the shutter requirements your team works with before exploring a supply arrangement.',
-                        'Would your team be open to considering us as a supplier for PVC shutters?',
-                      ].join('\n\n')
-                    : simpleBody,
+                  'At Example Shutters, we supply PVC shutters. Your range includes PVC shutters.',
                 source_ids: [candidate.evidence[0].id],
               }),
             },
@@ -974,8 +971,11 @@ test('简化开发信按客户观察、品牌供货介绍、容易回复的问�
     product: input.products[0],
     campaign: input.campaign,
   });
-  assert.equal(calls, 2);
-  assert.match(result.bodyText.split('\n\n')[2], /Example Shutters.*supply/);
+  assert.equal(calls, 1);
+  assert.equal(
+    result.bodyText.split('\n\n')[1],
+    'At Example Shutters, we supply PVC shutters. Your range includes PVC shutters.',
+  );
 });
 
 test('首封生成完整正文，凭证和未确认商务参数留在本地', async () => {
