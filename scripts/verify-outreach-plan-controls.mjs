@@ -387,6 +387,7 @@ try {
     } else await row.getByRole('button', { name: '删除计划', exact: true }).click();
     const confirm = page.getByRole('dialog').filter({ hasText: '确认删除' });
     await confirm.waitFor();
+    await confirm.getByText('待首发 1 · 待追信 1 · 待核实 0', { exact: true }).waitFor();
     assert.match(await confirm.innerText(), /待首发 1 · 待追信 1 · 待核实 0/);
     await shot('delete-confirm-' + status);
     await confirm.getByRole('button', { name: '确认删除计划', exact: true }).click();
@@ -425,6 +426,7 @@ try {
     .filter({ hasText: 'QA delete completed' })
     .getByRole('button', { name: '执行详情', exact: true })
     .click();
+  await dialog().getByText('Original completed', { exact: true }).first().waitFor();
   assert.match(await dialog().innerText(), /Original completed/);
   await shot('07-deleted-detail');
   check('AC22 partial deleted list and preserved detail', {
