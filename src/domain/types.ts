@@ -24,6 +24,15 @@ export interface ProductSelection {
   selectAll?: boolean;
   aliases: string[];
 }
+export interface AcquisitionDiscoverySource {
+  kind: 'web' | 'maps';
+  source_url?: string;
+  provider?: string;
+  reference?: string;
+  mentioned_company?: string;
+  job_id: string;
+  discovered_at: string;
+}
 export interface SearchMetric {
   id: string;
   query: string;
@@ -52,6 +61,14 @@ export interface SearchMetric {
     run_reserved_records?: number;
     credits?: number | null;
   } | null;
+  maps?: {
+    status: string;
+    reason?: string;
+    attempts: number;
+    returned: number;
+    resolved: number;
+    usage?: { credits: number };
+  };
 }
 export interface DiscoveryQuery {
   country: string;
@@ -118,6 +135,18 @@ export interface AcquisitionJob {
   review?: number;
   researchUsage?: ResearchUsage;
   searchStats?: SearchMetric[];
+  mapComparison?: {
+    pausedReason?: string;
+    qualifiedNew: {
+      websiteOnly: number;
+      mapsOnly: number;
+      both: number;
+      mapsAndScrapling: number;
+      scraplingOnly: number;
+    };
+    maps: { calls: number; reportedSearches: number; reportedCredits: number };
+    website: { reportedSearches: number; reportedCredits: number };
+  };
   queryPlan?: DiscoveryQuery[];
   message: string;
   createdAt: string;
@@ -125,7 +154,9 @@ export interface AcquisitionJob {
   rows: {
     domain?: string;
     source_url?: string;
-    source_kind?: 'web';
+    source_kind?: 'web' | 'maps';
+    discovery_sources?: AcquisitionDiscoverySource[];
+    unverified_map_sources?: AcquisitionDiscoverySource[];
     result: string;
     name?: string;
     reason?: string;

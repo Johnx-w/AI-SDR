@@ -37,6 +37,79 @@ function knownResearchUsage(value) {
   if (!['model_calls', 'cache_hits', 'input_chars'].every(valid)) return null;
   return Object.fromEntries(researchUsageKeys.filter(valid).map((key) => [key, value[key]]));
 }
+
+function mapDiscoveryContext(job) {
+  const references = new Map();
+  const mapOnlyUrls = new Set();
+  const webUrls = new Set();
+  for (const row of job.rows) {
+    const url = acquisitionUrl(row.source_url);
+    if (row.source_kind === 'maps' && url) mapOnlyUrls.add(url);
+    else if (url) webUrls.add(url);
+    for (const source of row.discovery_sources || []) {
+      if (source.kind === 'maps') references.set(`${source.provider}:${source.reference}`, source);
+    }
+  }
+  for (const url of webUrls) mapOnlyUrls.delete(url);
+  return {
+    jobId: job.id,
+    references,
+    mapOnlyUrls,
+    blocked: job.mapsPaused,
+    used: job.searchStats.filter(({ maps }) => maps?.attempts > 0).length,
+    unknown: !!job.pendingSearch && job.searchStats.at(-1)?.maps?.status === 'running',
+  };
+}
+
+function mapComparison(job) {
+  const newRecords = new Set(
+    job.rows.filter(({ result }) => result === 'inserted').map(({ record_id }) => record_id),
+  );
+  const confirmed = new Map();
+  for (const row of job.rows) {
+    if (!newRecords.has(row.record_id)) continue;
+    if (!confirmed.has(row.record_id))
+      confirmed.set(row.record_id, { web: false, maps: false, scrapling: false });
+    const record = confirmed.get(row.record_id);
+    record.web ||= (row.discovery_sources || [{ kind: row.source_kind }]).some(
+      ({ kind }) => kind === 'web',
+    );
+    record.maps ||= row.discovery_sources?.some(({ kind }) => kind === 'maps');
+    record.scrapling ||= row.scrapling_evidence;
+  }
+  const qualifiedNew = {
+    websiteOnly: 0,
+    mapsOnly: 0,
+    both: 0,
+    mapsAndScrapling: 0,
+    scraplingOnly: 0,
+  };
+  for (const { web, maps, scrapling } of confirmed.values()) {
+    if (web && maps) qualifiedNew.both++;
+    else if (maps) qualifiedNew.mapsOnly++;
+    else if (web) qualifiedNew.websiteOnly++;
+    if (maps && !web && scrapling) qualifiedNew.mapsAndScrapling++;
+    else if (scrapling) qualifiedNew.scraplingOnly++;
+  }
+  const metrics = job.searchStats || [];
+  const usage = (source) => {
+    const amounts = metrics.map(source).filter(Number.isFinite);
+    return {
+      reportedSearches: amounts.length,
+      reportedCredits: amounts.reduce((sum, amount) => sum + amount, 0),
+    };
+  };
+  return {
+    qualifiedNew,
+    ...(job.mapsPaused ? { pausedReason: job.mapsPaused } : {}),
+    maps: {
+      calls: metrics.reduce((sum, { maps }) => sum + (maps?.attempts || 0), 0),
+      ...usage(({ maps }) => maps?.usage?.credits),
+    },
+    website: usage(({ usage }) => usage?.credits),
+  };
+}
+
 export function validateCount(value = 20) {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 200)
     throw fail(400, '本次新增客户目标必须是 1–200 的整数');
@@ -347,7 +420,9 @@ export class BatchJobs {
       inserted: 0,
       countPolicy: 'broad-business-v1',
       admissionVersion: websiteAdmissionVersion,
-      ...(this.identityVersion ? { identityVersion: this.identityVersion } : {}),
+      ...(this.identityVersion
+        ? { identityVersion: this.identityVersion, mapComparisonVersion: 1 }
+        : {}),
       updated: 0,
       skipped: 0,
       rejected: 0,
@@ -797,6 +872,42 @@ export class BatchJobs {
       if (output.collection_attempts) acceptedRow.collection_attempts = output.collection_attempts;
       if (output.collection_gaps) acceptedRow.collection_gaps = output.collection_gaps;
       if (output.research_trace) acceptedRow.research_trace = output.research_trace;
+      if (job.mapComparisonVersion) {
+        if (item.discovery_sources) acceptedRow.discovery_sources = item.discovery_sources;
+        if (output.discovery_sources && acceptedRow.record_id) {
+          acceptedRow.discovery_sources = output.discovery_sources;
+          const unverified = item.discovery_sources.filter(
+            (source) =>
+              !output.discovery_sources.some(
+                ({ kind, provider, reference }) =>
+                  kind === source.kind &&
+                  provider === source.provider &&
+                  reference === source.reference,
+              ),
+          );
+          if (unverified.length) acceptedRow.unverified_map_sources = unverified;
+        }
+        if (output.maps_binding) acceptedRow.maps_binding = output.maps_binding;
+        if (output.maps_binding === 'mismatch') job.mapsPaused = 'binding_mismatch';
+        const cited = new Set(
+          [
+            ...(output.research?.activity_verification?.sources || []).map(
+              ({ snapshot_id }) => snapshot_id,
+            ),
+            ...(output.research?.company_identity?.evidence || []).map(
+              ({ snapshot_id }) => snapshot_id,
+            ),
+          ].filter(Boolean),
+        );
+        if (
+          acceptedRow.record_id &&
+          output.collection_attempts?.some(
+            ({ status, method, snapshot_id }) =>
+              status === 'ok' && method === 'scrapling' && cited.has(snapshot_id),
+          )
+        )
+          acceptedRow.scrapling_evidence = true;
+      }
       if (written) acceptedRow.stored = true;
       const metric = job.searchStats?.find((entry) => entry.id === item.search_id);
       if (metric) {
@@ -893,6 +1004,7 @@ export class BatchJobs {
             this.finish(j, 'exhausted');
             return;
           }
+          const mapsContext = j.mapComparisonVersion ? mapDiscoveryContext(j) : undefined;
           j.searches++;
           j.pendingSearch = search;
           j.searchStats ||= [];
@@ -920,12 +1032,19 @@ export class BatchJobs {
             ratings: { A: 0, B: 0, C: 0, unrated: 0 },
           };
           j.searchStats.push(metric);
+          if (mapsContext) {
+            mapsContext.beforeRequest = (attempts) => {
+              metric.maps = { status: 'running', attempts, returned: 0, resolved: 0 };
+              checkpoint(j);
+            };
+          }
           checkpoint(j);
           let found;
           try {
             found = await this.discover(j.input, search, j.seen, {
               admissionVersion: j.admissionVersion || 'legacy',
               ...(j.identityVersion ? { identityVersion: j.identityVersion } : {}),
+              ...(mapsContext ? { mapsContext } : {}),
             });
           } catch (error) {
             metric.status = 'failed';
@@ -937,6 +1056,14 @@ export class BatchJobs {
           metric.status = 'completed';
           metric.completedAt = new Date(this.now()).toISOString();
           metric.usage = found.usage || null;
+          if (found.maps) {
+            metric.maps = found.maps;
+            if (
+              found.maps.status === 'paused' ||
+              ['permission_denied', 'request_unknown'].includes(found.maps.reason)
+            )
+              j.mapsPaused = found.maps.reason;
+          }
           j.pendingSearch = null;
           for (const c of found.review_candidates || []) {
             j.review++;
@@ -973,11 +1100,11 @@ export class BatchJobs {
           for (const c of found.candidates || []) {
             const domain = domainKey(c.source_url);
             const candidate = j.identityVersion ? acquisitionUrl(c.source_url) : domain;
-            if (candidate && !j.seen.includes(candidate)) {
-              j.seen.push(candidate);
+            if (candidate && (!j.seen.includes(candidate) || c.discovery_sources?.length)) {
+              if (!j.seen.includes(candidate)) j.seen.push(candidate);
               j.queue.push({
                 ...c,
-                source_kind: search.source_kind || 'web',
+                source_kind: c.source_kind === 'maps' ? 'maps' : search.source_kind || 'web',
                 domain,
                 source_url: c.source_url,
                 source_title: c.source_title || '',
@@ -1001,6 +1128,18 @@ export class BatchJobs {
           continue;
         }
         const item = j.queue.shift();
+        if (j.mapsPaused && item.discovery_sources?.some(({ kind }) => kind === 'maps')) {
+          const website = item.discovery_sources.filter(({ kind }) => kind === 'web');
+          if (!website.length) {
+            j.review++;
+            const metric = j.searchStats.find(({ id }) => id === item.search_id);
+            if (metric) metric.review++;
+            j.rows.push({ ...item, result: 'review', reason: '地图路径暂停，待独立核实企业官网' });
+            checkpoint(j);
+            continue;
+          }
+          item.discovery_sources = website;
+        }
         j.current = {
           ...item,
           operation_id: `${j.id}-${j.researched + 1}`,
@@ -1052,6 +1191,7 @@ export class BatchJobs {
       seen: undefined,
       skippedDomains: undefined,
       searchSignatures: undefined,
+      ...(!summary && job.mapComparisonVersion ? { mapComparison: mapComparison(job) } : {}),
       message: labels[job.reason] || '正在搜索与研究客户',
       queued: job.queue.length,
     };

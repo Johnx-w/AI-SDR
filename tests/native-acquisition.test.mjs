@@ -197,6 +197,296 @@ function fixture({
 
 const policyFact = (value, quote) => ({ value, quote, source_url: site });
 
+function mapDiscoveryFixture({
+  lookup,
+  googleResponse,
+  mapSettings,
+  webResults,
+  fakeIdentity = false,
+} = {}) {
+  const sites = new Map([
+    ['https://atlas-shades.example.org/', { name: 'Atlas Shades Limited', number: '08234567' }],
+    ['https://beacon-shades.example.org/', { name: 'Beacon Shades Limited', number: '08345678' }],
+    ['https://atlas-showroom.example.org/', { name: 'Atlas Shades Limited', number: '08234567' }],
+  ]);
+  const [atlas, beacon, showroom] = sites.keys();
+  const identity = ({ name, number }) =>
+    `This website is operated by ${name}, registered in England and Wales, company number ${number}.`;
+  const supply = 'We supply custom roller blinds for residential windows and commercial buildings.';
+  const html = (url) => `<p>${identity(sites.get(url))}</p><p>${supply}</p>`;
+  const requests = [];
+  const googleRequests = [];
+  const fetchImpl = async (url, options) => {
+    const request = JSON.parse(options?.body || '{}');
+    if (url === 'https://api.tavily.com/search') {
+      requests.push(request.query);
+      const urls = webResults?.({ atlas, beacon, showroom, search: requests.length }) || [beacon];
+      return json({
+        results: urls.map((url) => ({ url, title: sites.get(url).name })),
+        usage: { credits: 1 },
+      });
+    }
+    if (url === 'https://places.googleapis.com/v1/places:searchText' && googleResponse) {
+      googleRequests.push({ body: request, headers: options.headers, redirect: options.redirect });
+      return googleResponse();
+    }
+    if (url === 'https://api.deepseek.com/responses') {
+      const { pages, sources } = JSON.parse(request.input[1].content);
+      const quote = pages ? identity(sites.get(pages[0].source_url)) : '';
+      const evidence = (value, quote) => ({ value, quote, source_url: pages[0].source_url });
+      const data = sources
+        ? { result: 'relevant', sources: sources.map(({ i }) => i), reason: '官网确认经营' }
+        : {
+            company_name: evidence(
+              sites.get(pages[0].source_url).name,
+              fakeIdentity ? `${quote} Invalid model quote.` : quote,
+            ),
+            legal_company_name: evidence(
+              sites.get(pages[0].source_url).name,
+              fakeIdentity ? `${quote} Invalid model quote.` : quote,
+            ),
+            entity_type: evidence('business', quote),
+            admission_facts: [evidence('complete_supply', supply)],
+            products: [{ ...evidence('roller blinds', supply), window_use: 'window_covering' }],
+          };
+      return json({
+        status: 'completed',
+        output: [{ content: [{ type: 'output_text', text: JSON.stringify(data) }] }],
+      });
+    }
+    throw new Error('非隔离端点 ' + url);
+  };
+  const mapQueries = [];
+  const fixtureEnv = { ...env, ...mapSettings };
+  const nativeImpl = new NativeAcquisition({
+    env: fixtureEnv,
+    fetchImpl,
+    readPage: async ({ href }) => ({
+      html: href === atlas ? '<noscript>Enable JavaScript</noscript>' : html(href),
+    }),
+    readScraplingPage: async (url) => ({ final_url: url, status: 'ok', content: html(url) }),
+    mapsProvider: mapSettings
+      ? undefined
+      : {
+          name: 'permitted_fixture',
+          async search({ query, country }) {
+            mapQueries.push({ query, country });
+            return (
+              lookup?.({ atlas, beacon, showroom, sites, attempt: mapQueries.length }) ?? {
+                places: [
+                  { id: 'venue-a', name: sites.get(atlas).name, website: atlas },
+                  { id: 'venue-b', name: sites.get(beacon).name, website: beacon },
+                  { id: 'venue-c', name: 'Cedar Shades' },
+                  { id: 'venue-a2', name: sites.get(showroom).name, website: showroom },
+                ],
+                usage: { credits: 3 },
+              }
+            );
+          },
+        },
+  });
+  return {
+    app: { env: fixtureEnv, fetchImpl, nativeImpl },
+    atlas,
+    beacon,
+    showroom,
+    mapQueries,
+    requests,
+    googleRequests,
+  };
+}
+
+async function runMapDiscoveryJob(base, target = 3) {
+  const api = base + '/api/v1';
+  const response = await fetch(api + '/acquisition/jobs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'maps-discovery-pair' },
+    body: JSON.stringify({
+      ...input,
+      product: 'window coverings',
+      product_scope: 'all',
+      target_count: target,
+    }),
+  });
+  assert.equal(response.status, 202);
+  const { id } = await response.json();
+  let job;
+  for (let n = 0; n < 400; n++) {
+    job = await (await fetch(api + '/acquisition/jobs/' + id)).json();
+    if (job.status !== 'running') return job;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.fail(`隔离任务 ${id} 未结束（已研究 ${job.researched} 家）`);
+}
+
+test('地图和官网从同一任务归并主体，门店保留各自来源，无法定位官网的地点待核实', async () => {
+  const { app, requests, mapQueries, showroom } = mapDiscoveryFixture();
+  await withApp(app, async (base) => {
+    const job = await runMapDiscoveryJob(base);
+    const api = base + '/api/v1';
+    assert.equal(job.inserted, 2, JSON.stringify(job.rows));
+    assert.equal(Boolean(job.input.auto_first_touch), false);
+    assert.equal(mapQueries[0].query, requests[0]);
+    assert.equal(mapQueries[0].country, 'United States');
+    const missing = job.rows.find((row) =>
+      row.discovery_sources?.some(({ reference }) => reference === 'venue-c'),
+    );
+    assert.equal(missing?.result, 'review');
+    assert.equal(missing.source_url, undefined);
+    const { leads } = await (await fetch(api + '/leads/real/list')).json();
+    assert.deepEqual(leads.map(({ name }) => name).sort(), [
+      'Atlas Shades Limited',
+      'Beacon Shades Limited',
+    ]);
+    for (const { id, name } of leads) {
+      const { lead } = await (await fetch(api + '/leads/real/' + id)).json();
+      const sources = lead.acquisitionSources.flatMap(({ discovery_sources }) => discovery_sources);
+      assert.deepEqual(
+        sources.map(({ kind, reference }) => reference || kind).sort(),
+        name === 'Atlas Shades Limited' ? ['venue-a', 'venue-a2'] : ['venue-b', 'web'],
+      );
+    }
+    assert.equal(job.rows.find(({ source_url }) => source_url === showroom).result, 'duplicate');
+    assert.equal(
+      job.rows.find(({ source_url }) => source_url === showroom).research_trace[0].stage,
+      'known_subject',
+    );
+    assert.equal(job.searchStats[0].maps.status, 'completed');
+    assert.equal(job.searchStats[0].maps.usage.credits, 3);
+    assert.deepEqual(job.mapComparison.qualifiedNew, {
+      websiteOnly: 0,
+      mapsOnly: 1,
+      both: 1,
+      mapsAndScrapling: 1,
+      scraplingOnly: 0,
+    });
+  });
+});
+
+test('地图错绑待核实并暂停地图，后续独立官网仍可收录', async () => {
+  const { app, atlas, mapQueries } = mapDiscoveryFixture({
+    lookup: ({ atlas, showroom, sites }) => ({
+      places: [
+        { id: 'wrong-binding', name: 'Wrong Company Limited', website: atlas },
+        { id: 'later-binding', name: sites.get(showroom).name, website: showroom },
+      ],
+    }),
+    webResults: ({ beacon, atlas, search }) => (search === 1 ? [beacon] : [beacon, atlas]),
+  });
+  await withApp(app, async (base) => {
+    const job = await runMapDiscoveryJob(base, 2);
+    assert.equal(job.inserted, 2);
+    assert.equal(mapQueries.length, 1);
+    assert.equal(job.mapComparison.pausedReason, 'binding_mismatch');
+    assert.equal(job.searchStats[1].maps.status, 'paused');
+    assert.deepEqual(
+      job.rows.filter(({ source_url }) => source_url === atlas).map(({ result }) => result),
+      ['review', 'inserted'],
+    );
+    assert.equal(
+      job.rows.find(({ maps_binding }) => maps_binding === 'mismatch').record_id,
+      undefined,
+    );
+    const { record_id } = job.rows.find(
+      ({ source_url, result }) => source_url === atlas && result === 'inserted',
+    );
+    const { lead } = await (await fetch(base + '/api/v1/leads/real/' + record_id)).json();
+    assert.deepEqual(
+      lead.acquisitionSources.flatMap(({ discovery_sources }) =>
+        discovery_sources.map(({ kind }) => kind),
+      ),
+      ['web'],
+    );
+  });
+});
+
+test('地图限流按短等待提示只重试一次，权限不足仅暂停地图', async () => {
+  for (const [status, expectedAttempts, expectedMapsStatus, reason] of [
+    [429, 2, 'completed', undefined],
+    [403, 1, 'unavailable', 'permission_denied'],
+  ]) {
+    const { app, mapQueries } = mapDiscoveryFixture({
+      lookup({ atlas, sites, attempt }) {
+        if (attempt === 1)
+          throw Object.assign(new Error('供应商敏感内容'), { status, retryAfter: '0' });
+        return { places: [{ id: 'verified', name: sites.get(atlas).name, website: atlas }] };
+      },
+    });
+    await withApp(app, async (base) => {
+      const job = await runMapDiscoveryJob(base, status === 429 ? 2 : 3);
+      assert.equal(job.inserted, status === 429 ? 2 : 1);
+      assert.equal(mapQueries.length, expectedAttempts);
+      assert.equal(job.searchStats[0].maps.status, expectedMapsStatus);
+      assert.equal(job.searchStats[0].maps.attempts, expectedAttempts);
+      assert.equal(job.searchStats[0].maps.reason, reason);
+      assert.equal(job.rows[0].name, 'Beacon Shades Limited');
+      assert.ok(!JSON.stringify(job).includes('供应商敏感内容'));
+    });
+  }
+});
+
+test('地图供应商超时后保留不确定状态，官网正常结束且不重放地图查询', async () => {
+  const { app, mapQueries } = mapDiscoveryFixture({ lookup: () => new Promise(() => {}) });
+  await withApp(app, async (base) => {
+    const job = await runMapDiscoveryJob(base);
+    assert.equal(job.inserted, 1);
+    assert.equal(job.rows[0].name, 'Beacon Shades Limited');
+    assert.equal(job.searchStats[0].maps.status, 'failed');
+    assert.equal(job.mapComparison.pausedReason, 'request_unknown');
+    assert.equal(mapQueries.length, 1);
+  });
+});
+
+test('Google 配置只读地点编号，供应商夹带的名称、网站和原始响应不会进入候选或客户档案', async () => {
+  for (const flag of [undefined, 'true']) {
+    const { app, googleRequests } = mapDiscoveryFixture({
+      mapSettings: { GOOGLE_PLACES_API_KEY: 'fixture-places-key', GOOGLE_PLACES_IDS_ONLY: flag },
+      googleResponse: () =>
+        json({
+          places: [
+            {
+              id: 'google-identifier',
+              displayName: 'unlicensed label',
+              websiteUri: 'https://never-store.example.org',
+            },
+          ],
+        }),
+    });
+    await withApp(app, async (base) => {
+      const job = await runMapDiscoveryJob(base, 1);
+      assert.equal(job.inserted, 1);
+      assert.equal(job.rows[0].name, 'Beacon Shades Limited');
+      assert.equal(job.searchStats[0].maps.status, flag ? 'identifiers_only' : 'unavailable');
+      assert.equal(job.searchStats[0].maps.reason, 'website_mapping_unavailable');
+      assert.equal(googleRequests.length, flag ? 1 : 0);
+      if (flag) {
+        assert.equal(googleRequests[0].headers['X-Goog-FieldMask'], 'places.id');
+        assert.equal(googleRequests[0].redirect, 'error');
+      }
+      assert.doesNotMatch(JSON.stringify(job), /unlicensed label|never-store|fixture-places-key/);
+      const { lead } = await (
+        await fetch(base + '/api/v1/leads/real/' + job.rows[0].record_id)
+      ).json();
+      assert.equal(lead.acquisitionSources[0].source_kind, 'web');
+      assert.equal(lead.acquisitionSources[0].discovery_sources, undefined);
+    });
+  }
+});
+
+test('地图和官网均拒绝无法从原文核对的模型身份引文', async () => {
+  const { app } = mapDiscoveryFixture({ fakeIdentity: true });
+  await withApp(app, async (base) => {
+    const job = await runMapDiscoveryJob(base);
+    assert.equal(job.inserted, 0);
+    assert.deepEqual(
+      job.rows.filter(({ source_url }) => source_url).map(({ result }) => result),
+      ['review', 'review', 'review'],
+    );
+    const { leads } = await (await fetch(base + '/api/v1/leads/real/list')).json();
+    assert.deepEqual(leads, []);
+  });
+});
+
 test('到期的全球计划收录美国和法国的窗饰商，同样输入的美国计划只收录美国企业', async (t) => {
   t.mock.timers.enable({
     apis: ['Date', 'setInterval'],
