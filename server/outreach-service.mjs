@@ -129,6 +129,7 @@ export class OutreachService {
     );
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
       CREATE TABLE IF NOT EXISTS outreach_campaigns(id TEXT PRIMARY KEY,data TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS outreach_acquisition_round ON outreach_campaigns(json_extract(data,'$.acquisitionSource.roundId'));
       CREATE TABLE IF NOT EXISTS outreach_deliveries(id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,state TEXT NOT NULL,data TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS outreach_delivery_campaign ON outreach_deliveries(campaign_id,state);
       CREATE INDEX IF NOT EXISTS outreach_counts ON outreach_deliveries(campaign_id,state,${outcomeSql},${draftSql});
@@ -624,8 +625,9 @@ export class OutreachService {
     const campaigns = new Map(this.campaigns().map((campaign) => [campaign.id, campaign]));
     for (const source of sources) {
       if (source.scope !== this.getScope()) continue;
-      const id = `acquisition-${source.jobId}`;
+      const id = `acquisition-${source.jobId}${source.generation ? `-g${source.generation}` : ''}`;
       const prior = campaigns.get(id);
+      if (prior?.deleteRequestedAt) continue;
       const campaign = prior || {
         id,
         name: source.name,
@@ -669,6 +671,7 @@ export class OutreachService {
       };
       const acquisitionSource = {
         jobId: source.jobId,
+        generation: source.generation || 0,
         scheduleId: source.scheduleId,
         roundId: source.roundId,
       };
@@ -712,6 +715,7 @@ export class OutreachService {
       this.acquisitionSources().some(
         (source) =>
           source.jobId === campaign.acquisitionSource.jobId &&
+          (source.generation || 0) === (campaign.acquisitionSource.generation || 0) &&
           source.scope === this.getScope() &&
           (source.status === 'active' ||
             (followUp && source.status === 'completed' && source.followUpsAllowed)),
@@ -963,6 +967,19 @@ export class OutreachService {
     );
     eligibleLeads = eligibleLeads.filter((lead) => !skipped.has(lead.id));
     if (c.acquisitionSource) {
+      // A new authorization is still the same acquisition round.
+      const attempted = new Set(
+        this.db
+          .prepare(
+            `SELECT json_extract(d.data,'$.customerId') AS customerId
+        FROM outreach_deliveries d JOIN outreach_campaigns p ON p.id=d.campaign_id
+        WHERE d.campaign_id<>? AND json_extract(p.data,'$.acquisitionSource.roundId')=?
+        AND d.state IN ('skipped','accepted','unknown','failed')`,
+          )
+          .all(c.id, c.acquisitionSource.roundId)
+          .map((row) => row.customerId),
+      );
+      eligibleLeads = eligibleLeads.filter((lead) => !attempted.has(lead.id));
       const members = new Set(c.customerIds);
       const prepared = this.deliveries(c.id, ['blocked']).filter(
         (delivery) =>

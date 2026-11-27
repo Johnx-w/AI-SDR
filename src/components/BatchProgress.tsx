@@ -363,6 +363,64 @@ function AutomaticFirstTouchProgress({ job }: { job: AcquisitionJob }) {
   );
 }
 
+function SourceFirstTouchAuthorization({ job }: { job: AcquisitionJob }) {
+  const [enabled, setEnabled] = useState(job.input.auto_first_touch === true);
+  const [saved, setSaved] = useState(job);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    setSaved(job);
+    setEnabled(job.input.auto_first_touch === true);
+  }, [job.id, job.sourceControlRevision]);
+  async function save() {
+    setBusy(true);
+    setError('');
+    try {
+      setSaved(
+        (await acquisitionApi.setAutomaticFirstTouch(
+          'jobs',
+          job.id,
+          enabled,
+          saved.sourceControlRevision || 0,
+        )) as AcquisitionJob,
+      );
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '保存失败');
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div>
+      <label>
+        <input
+          type="checkbox"
+          checked={enabled}
+          disabled={busy || !!job.sourceDeletedAt || !!job.scheduleId}
+          onChange={(event) => setEnabled(event.target.checked)}
+        />
+        获客后自动首发
+      </label>
+      {!job.scheduleId && (
+        <button
+          className="btn secondary"
+          disabled={
+            busy || !!job.sourceDeletedAt || enabled === (saved.input.auto_first_touch === true)
+          }
+          onClick={() => void save()}
+        >
+          保存自动首发设置
+        </button>
+      )}
+      <p className="muted">
+        直接继续仅获客。重新勾选并保存后建立新触达安排；来源暂停时等待人工继续。
+        {job.scheduleId ? '请在所属定时计划中保存授权。' : ''}
+      </p>
+      {error && <p role="alert">{error}</p>}
+    </div>
+  );
+}
+
 type BatchProgressProps = {
   job: AcquisitionJob;
   control: (action: 'stop' | 'resume' | 'pause' | 'delete') => void;
@@ -453,12 +511,7 @@ function BatchProgressDetail({ job, control, busy }: BatchProgressProps) {
           )}
         </p>
       )}
-      {job.sourcePause?.outreachPlanId && (
-        <label>
-          <input type="checkbox" checked={job.input.auto_first_touch === true} disabled />
-          获客后自动首发（继续获客保持关闭）
-        </label>
-      )}
+      {job.sourcePause?.outreachPlanId && <SourceFirstTouchAuthorization job={job} />}
       {job.input.auto_first_touch && <AutomaticFirstTouchProgress job={job} />}
       {job.countPolicy === 'sales-handoff-v1' && (
         <p className="muted">
@@ -504,6 +557,13 @@ function BatchProgressDetail({ job, control, busy }: BatchProgressProps) {
       )}
       <p className="muted">发现来源：官网搜索</p>
       <div className="result-actions">
+        {!job.scheduleId &&
+          !job.sourceDeletedAt &&
+          ['completed', 'partial'].includes(job.status) && (
+            <Link className="btn secondary" to={`/automation?rerun=${encodeURIComponent(job.id)}`}>
+              重新执行
+            </Link>
+          )}
         {job.status === 'running' && (
           <button
             type="button"

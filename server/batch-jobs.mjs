@@ -132,6 +132,8 @@ export class BatchJobs {
     if ((latest?.sourceControlRevision || 0) > (job.sourceControlRevision || 0)) {
       for (const key of [
         'sourceControlRevision',
+        'outreachGeneration',
+        'outreachAuthorizationRevision',
         'manualPaused',
         'sourcePause',
         'sourceDeletedAt',
@@ -248,13 +250,34 @@ export class BatchJobs {
       .all()
       .map((row) => JSON.parse(row.data)));
   }
-  controlOutreach(id, enabled) {
+  controlOutreach(id, enabled, { sourceControlRevision, fromSchedule = false } = {}) {
     if (typeof enabled !== 'boolean') throw fail(400, '请明确选择开启或暂停自动首发');
     const job = this.get(id);
-    if (!job.input.auto_first_touch || job.scheduleId)
-      throw fail(409, '请在所属获客计划中管理自动首发');
+    if (job.sourceDeletedAt) throw fail(409, '来源已删除');
+    if (job.scheduleId && !fromSchedule) throw fail(409, '请在所属获客计划中管理自动首发');
     if (job.autoFirstTouchCancelled) throw fail(409, '自动首发已取消，不能恢复');
-    job.autoFirstTouchPaused = !validateAutoFirstTouch(enabled);
+    if (job.sourcePause?.outreachPlanId) {
+      const revision = job.sourceControlRevision || 0;
+      if (sourceControlRevision !== revision) {
+        if (
+          enabled &&
+          job.input.auto_first_touch &&
+          job.outreachAuthorizationRevision === sourceControlRevision
+        )
+          return job;
+        throw fail(409, '来源已更新，请刷新后重新保存自动首发授权');
+      }
+      if (enabled && !job.input.auto_first_touch) {
+        job.outreachGeneration = (job.outreachGeneration || 0) + 1;
+        job.outreachAuthorizationRevision = revision;
+      }
+      job.input.auto_first_touch = enabled;
+      job.sourceControlRevision = revision + 1;
+      job.autoFirstTouchPaused = !enabled;
+    } else {
+      if (!job.input.auto_first_touch) throw fail(409, '该任务未授权自动首发');
+      job.autoFirstTouchPaused = !validateAutoFirstTouch(enabled);
+    }
     this.save(job, { outreachControl: true });
     this.onOutreachChange();
     return job;
@@ -470,6 +493,14 @@ export class BatchJobs {
   }
   async resume(id, { automatic = false } = {}) {
     if (this.closed) throw fail(409, '服务已关闭');
+    const current = this.get(id);
+    if (
+      current.sourcePause?.outreachPlanId &&
+      !current.sourceDeletedAt &&
+      !current.manualPaused &&
+      ['running', 'completed', 'partial'].includes(current.status)
+    )
+      return current;
     if (this.working.has(id) || this.resuming.has(id) || (this.recovering && !automatic))
       throw fail(409, '当前企业仍在处理中');
     this.resuming.add(id);
@@ -495,7 +526,8 @@ export class BatchJobs {
       job.status = 'running';
       job.reason = '';
       job.manualPaused = false;
-      if (!job.sourcePause?.outreachPlanId) job.autoFirstTouchPaused = false;
+      if (!job.sourcePause?.outreachPlanId || job.input.auto_first_touch)
+        job.autoFirstTouchPaused = false;
       job.sourceControlRevision = revision + 1;
       this.save(job, { outreachControl: true });
       if (automatic && this.isMaintaining()) {
@@ -599,7 +631,8 @@ export class BatchJobs {
     )
       return job;
     job.manualPaused = true;
-    job.sourcePause = { outreachPlanId, reason };
+    if (outreachPlanId || !job.sourcePause?.outreachPlanId)
+      job.sourcePause = { outreachPlanId, reason };
     job.sourceControlRevision = (job.sourceControlRevision || 0) + 1;
     if (disableFirstTouch) job.input.auto_first_touch = false;
     if (disableFirstTouch || !job.scheduleId) job.autoFirstTouchPaused = true;

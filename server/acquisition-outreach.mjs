@@ -7,6 +7,7 @@ export function acquisitionOutreachSources(jobs, plans) {
       job.autoFirstTouchCancelled || (job.scheduleId && (!plan || plan.status === 'closed'));
     const paused =
       job.autoFirstTouchPaused ||
+      (job.manualPaused && (!job.scheduleId || job.sourcePause?.outreachPlanId)) ||
       (plan && (plan.status === 'paused' || !plan.input.auto_first_touch));
     const superseded = plan?.lastJobId && plan.lastJobId !== job.id;
     const status = cancelled
@@ -18,6 +19,7 @@ export function acquisitionOutreachSources(jobs, plans) {
           : 'active';
     return {
       jobId: job.id,
+      generation: job.outreachGeneration || 0,
       followUpEnabled: Boolean((plan?.input || job.input).auto_follow_up),
       scheduleId: job.scheduleId,
       scope: job.scope,

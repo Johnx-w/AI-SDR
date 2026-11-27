@@ -240,7 +240,7 @@ test('正常HTTP入口读取来源、暂停、继续、删除与不存在对象�
     readLeads: async () => [],
   });
   const a = seed.create({ ...input, auto_first_touch: false }, 'http-source-target');
-  seed.pause(a.id);
+  seed.pause(a.id, { outreachPlanId: 'deleted-http-plan', disableFirstTouch: true });
   seed.close();
   try {
     await withApp(
@@ -276,12 +276,31 @@ test('正常HTTP入口读取来源、暂停、继续、删除与不存在对象�
         const resumed = await post('resume');
         assert.equal(resumed.status, 200);
         assert.equal((await resumed.json()).input.auto_first_touch, false);
+        assert.equal((await post('resume')).status, 200);
+        const before = await (await fetch(url)).json();
+        const authorize = (sourceControlRevision) =>
+          fetch(`${url}/auto-first-touch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: true, sourceControlRevision }),
+          });
+        assert.equal((await authorize()).status, 409);
+        const [first, duplicate] = await Promise.all([
+          authorize(before.sourceControlRevision),
+          authorize(before.sourceControlRevision),
+        ]);
+        assert.equal(first.status, 200);
+        assert.equal(duplicate.status, 200);
+        const authorized = await (await fetch(url)).json();
+        assert.equal(authorized.outreachGeneration, 1);
+        assert.equal(authorized.input.auto_first_touch, true);
         const deleted = await post('delete');
         assert.equal(deleted.status, 200);
         assert.ok((await deleted.json()).sourceDeletedAt);
         const read = await (await fetch(url)).json();
         assert.equal(read.reason, 'source_deleted');
         assert.equal((await post('resume')).status, 409);
+        assert.equal((await authorize(before.sourceControlRevision)).status, 409);
         assert.equal(
           (await fetch(`${base}/api/v1/acquisition/jobs/missing/pause`, { method: 'POST' })).status,
           404,
@@ -289,6 +308,51 @@ test('正常HTTP入口读取来源、暂停、继续、删除与不存在对象�
       },
     );
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('两个来源重新授权分别持久化，空来源保持关闭且旧检查点不能覆盖generation', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'authorization-restart-'));
+  const path = join(dir, 'jobs.sqlite');
+  let jobs = new BatchJobs({ path, schedule: false });
+  try {
+    const a = jobs.create({ ...input }, 'reauthorization-a');
+    jobs.save({ ...a, status: 'completed' });
+    const b = jobs.create({ ...input, country: 'Canada' }, 'reauthorization-b');
+    jobs.save({ ...b, status: 'completed' });
+    const empty = jobs.create(
+      { ...input, country: 'Australia', auto_first_touch: false },
+      'reauthorization-empty',
+    );
+    const stale = jobs.get(a.id);
+    for (const source of [a, b]) {
+      jobs.pause(source.id, { outreachPlanId: `deleted-${source.id}`, disableFirstTouch: true });
+      const revision = jobs.get(source.id).sourceControlRevision;
+      jobs.controlOutreach(source.id, true, { sourceControlRevision: revision });
+      jobs.controlOutreach(source.id, true, { sourceControlRevision: revision });
+    }
+    jobs.save(stale);
+    jobs.close();
+    jobs = new BatchJobs({ path, schedule: false });
+    assert.deepEqual(
+      [jobs.get(a.id).outreachGeneration, jobs.get(b.id).outreachGeneration],
+      [1, 1],
+    );
+    assert.equal(jobs.get(a.id).manualPaused, true);
+    assert.equal(jobs.get(a.id).input.auto_first_touch, true);
+    assert.equal(jobs.get(empty.id).input.auto_first_touch, false);
+    assert.equal(jobs.get(empty.id).outreachGeneration, undefined);
+    jobs.delete(a.id);
+    assert.throws(
+      () =>
+        jobs.controlOutreach(a.id, true, {
+          sourceControlRevision: jobs.get(a.id).sourceControlRevision,
+        }),
+      { status: 409 },
+    );
+  } finally {
+    jobs.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });

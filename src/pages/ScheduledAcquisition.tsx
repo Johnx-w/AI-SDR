@@ -35,6 +35,9 @@ export function ScheduledAcquisition() {
   const [error, setError] = useState('');
   const [filter, setFilter] = useState('active');
   const [expanded, setExpanded] = useState('');
+  const [firstTouchDrafts, setFirstTouchDrafts] = useState<
+    Record<string, { enabled: boolean; revision: number }>
+  >({});
   const readVersion = useRef(0);
   const reading = useRef(false);
   async function load(background = false) {
@@ -105,11 +108,17 @@ export function ScheduledAcquisition() {
       const updated = (await acquisitionApi.setAutomaticFirstTouch(
         'schedules',
         plan.id,
-        !plan.input.auto_first_touch,
+        firstTouchDrafts[plan.id]?.enabled ?? !plan.input.auto_first_touch,
+        firstTouchDrafts[plan.id]?.revision ?? plan.sourceControlRevision ?? 0,
       )) as AcquisitionSchedule;
       readVersion.current++;
       reading.current = false;
       setPlans((current) => current.map((item) => (item.id === plan.id ? updated : item)));
+      setFirstTouchDrafts((current) => {
+        const next = { ...current };
+        delete next[plan.id];
+        return next;
+      });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '自动首发设置失败');
     } finally {
@@ -230,12 +239,31 @@ export function ScheduledAcquisition() {
             <label>
               <input
                 type="checkbox"
-                checked={plan.input.auto_first_touch === true}
+                checked={firstTouchDrafts[plan.id]?.enabled ?? plan.input.auto_first_touch === true}
                 disabled={Boolean(busy) || plan.status === 'closed'}
-                onChange={() => void toggleFirstTouch(plan)}
+                onChange={(event) =>
+                  plan.sourcePause?.outreachPlanId
+                    ? setFirstTouchDrafts((current) => ({
+                        ...current,
+                        [plan.id]: {
+                          enabled: event.target.checked,
+                          revision: plan.sourceControlRevision || 0,
+                        },
+                      }))
+                    : void toggleFirstTouch(plan)
+                }
               />
               获客后自动首发
             </label>
+            {plan.sourcePause?.outreachPlanId && (
+              <button
+                className="btn secondary"
+                disabled={Boolean(busy) || !firstTouchDrafts[plan.id] || !!plan.sourceDeletedAt}
+                onClick={() => void toggleFirstTouch(plan)}
+              >
+                保存自动首发设置
+              </button>
+            )}
             <p className="muted">
               开启后续轮次的自动首发；按最新已审核产品和可用邮箱匹配，无可用商务邮箱跳过本次，其他缺项保留原因。关闭开关同时停止待发邮件。
             </p>
