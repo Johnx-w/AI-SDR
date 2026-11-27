@@ -19,7 +19,7 @@ import {
   validateAutoFirstTouch,
 } from './batch-jobs.mjs';
 import { acquisitionOutreachSources } from './acquisition-outreach.mjs';
-import { AcquisitionReviews } from './acquisition-reviews.mjs';
+import { AcquisitionReviews, acquisitionReviewSubmission } from './acquisition-reviews.mjs';
 import { createAcquisitionProvider } from './acquisition-provider.mjs';
 import { ApiConnections } from './api-connections.mjs';
 import { AcquisitionSchedules } from './acquisition-schedules.mjs';
@@ -182,7 +182,9 @@ export function createApp({
       discover: (...args) => provider.discover(...args),
       research: (...args) => provider.research(...args),
       status: (id) => provider.status(id),
+      identityVersion: provider.identityVersion,
       readLeads: verifiedLeads,
+      readAcquisitionCaptures: () => provider.acquisitionCaptures(),
       isMaintaining,
       onOutreachChange: () => wakeAutomaticOutreach(),
     }));
@@ -191,10 +193,13 @@ export function createApp({
     (acquisitionReviews ??= new AcquisitionReviews(jobs().db, acquisitionScope()));
   const reviewJob = (job, summary = false) => {
     const snapshot = jobs().view(job, { summary });
-    if (summary) return snapshot;
+    const manualInserted = reviews().manualCount(job.id);
+    const totals = { manualInserted, confirmedInserted: (snapshot.inserted || 0) + manualInserted };
+    if (summary) return { ...snapshot, ...totals };
     const resolutions = reviews().forJob(job.id);
     return {
       ...snapshot,
+      ...totals,
       rows: snapshot.rows.map((row, index) => ({
         ...row,
         ...(resolutions.has(index) ? { review_resolution: resolutions.get(index) } : {}),
@@ -433,7 +438,12 @@ export function createApp({
   const renderPage = pageRenderer(dist);
   const localDossier = (id) => {
     const data = library().localDetail(id);
-    return { ...data, lead: provider.decorateLeads({ leads: [data.lead] }).leads[0] };
+    const lead = provider.decorateLeads({ leads: [data.lead] }).leads[0];
+    const sources = provider.acquisitionSources(id);
+    return {
+      ...data,
+      lead: { ...lead, ...(sources.length ? { acquisitionSources: sources } : {}) },
+    };
   };
   const server = createServer(async (request, response) => {
     let admitted = false;
@@ -912,7 +922,12 @@ export function createApp({
           return await leadJson(response, 'detail', async () => {
             if (url.searchParams.has('local')) return localDossier(leadRoute[1]);
             const data = await library().detail(leadRoute[1]);
-            return { ...data, lead: provider.decorateLeads({ leads: [data.lead] }).leads[0] };
+            const lead = provider.decorateLeads({ leads: [data.lead] }).leads[0];
+            const sources = provider.acquisitionSources(lead.id);
+            return {
+              ...data,
+              lead: { ...lead, ...(sources.length ? { acquisitionSources: sources } : {}) },
+            };
           });
         const supplementRoute = url.pathname.match(
           /^\/api\/v1\/leads\/real\/([\w-]{1,100})\/supplements$/,
@@ -1094,6 +1109,7 @@ export function createApp({
               const resolution = reviews().get(job.id, index);
               return json(response, 200, {
                 resolution,
+                attempts: reviews().attempts(job.id, index),
                 evidence:
                   provider.reviewEvidence?.(resolution?.operation_id || row.operation_id) || null,
               });
@@ -1101,17 +1117,25 @@ export function createApp({
             if (request.method !== 'POST') throw new ApiError(405, '不支持的核实操作');
             if (!provider.info.configured)
               throw new ApiError(503, '待核实企业需要已配置的直连获客引擎');
-            if (running || manager.active())
-              throw new ApiError(409, '当前获客任务正在处理，请完成后再核实该企业');
             const body = await readJson(request);
             const source = websiteScope(body?.source_url);
             if (!source) throw new ApiError(400, '请填写公网 HTTPS 企业官网');
             const key = request.headers['idempotency-key'];
             if (typeof key !== 'string' || !/^[\w-]{8,80}$/.test(key))
               throw new ApiError(400, '核实操作需要有效 Idempotency-Key');
-            const prior = reviews().get(job.id, index);
-            const attempt = reviews().begin(job.id, index, key, source.url);
-            if (prior?.key === key) {
+            const submission = acquisitionReviewSubmission(body, source);
+            const prior = reviews().attempt(job.id, index, key);
+            if (!prior && (running || manager.active()))
+              throw new ApiError(409, '当前获客任务正在处理，请完成后再核实该企业');
+            const attempt = reviews().begin(
+              job.id,
+              index,
+              key,
+              source.url,
+              submission,
+              row.source_url,
+            );
+            if (prior) {
               if (!['pending', 'uncertain'].includes(attempt.status))
                 return json(response, 200, { resolution: attempt });
               const result = await provider.status(attempt.operation_id);
@@ -1138,7 +1162,23 @@ export function createApp({
                   source_title: '',
                   operation_id: attempt.operation_id,
                 },
-                { bypassExclusion: true, admissionVersion: websiteAdmissionVersion },
+                {
+                  bypassExclusion: true,
+                  admissionVersion: websiteAdmissionVersion,
+                  ...(provider.identityVersion
+                    ? {
+                        identityVersion: provider.identityVersion,
+                        review: {
+                          ...submission,
+                          actor: attempt.actor,
+                          submitted_at: attempt.submitted_at,
+                          job_id: job.id,
+                          row_index: index,
+                          original_source_url: attempt.original_source_url,
+                        },
+                      }
+                    : {}),
+                },
               );
               const resolution = reviews().settle(job.id, index, output);
               return json(response, 200, { resolution });

@@ -105,8 +105,9 @@ function CapturedCompanies() {
       {data && (
         <>
           <p className="acq-capture-note">
-            共 {data.metrics.newCompanies} 家 · {data.coverage.note}。
-            每家企业按实际收录记录计数，后续更新和重复发现不计新增。
+            共 {data.metrics.newCompanies} 家 · 人工补录{' '}
+            {data.captures.filter(({ mode }) => mode === 'manual').length} 家 · {data.coverage.note}
+            。 每家企业按实际收录记录计数，后续更新和重复发现不计新增。
           </p>
           {data.sources.acquisition.state === 'stale' && (
             <p className="error-message" role="status">
@@ -148,6 +149,9 @@ function CapturedCompanies() {
                         <time dateTime={capture.capturedAt}>{dateText(capture.capturedAt)}</time>
                       </td>
                       <td>
+                        {capture.mode && (
+                          <small>{capture.mode === 'manual' ? '人工补录' : '自动获客'}</small>
+                        )}
                         {capture.jobId ? (
                           <Link
                             className="text-link"

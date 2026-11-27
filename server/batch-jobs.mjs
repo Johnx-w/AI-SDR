@@ -7,6 +7,7 @@ import { regionalSearchAfter, searchPlan } from './search-plan.mjs';
 import { exclusionConditionsKey } from './exclusion-conditions.mjs';
 import { validateCountryScope } from './search-target.mjs';
 import { websiteAdmissionVersion } from './customer-eligibility.mjs';
+import { acquisitionUrl } from './acquisition-subject.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 function discoveryPlanKey(input, plan) {
@@ -71,10 +72,12 @@ export class BatchJobs {
     research,
     status,
     readLeads,
+    readAcquisitionCaptures = () => [],
     now = Date.now,
     schedule = true,
     provider = 'native',
     scope = '',
+    identityVersion,
     onOutreachChange = () => {},
     recoveryIntervalMs = 15000,
     isMaintaining = () => false,
@@ -98,10 +101,12 @@ export class BatchJobs {
     this.research = research;
     this.remoteStatus = status;
     this.readLeads = readLeads;
+    this.readAcquisitionCaptures = readAcquisitionCaptures;
     this.now = now;
     this.schedule = schedule;
     this.provider = provider;
     this.scope = scope || provider;
+    this.identityVersion = identityVersion;
     this.onOutreachChange = onOutreachChange;
     this.isMaintaining = isMaintaining;
     this.working = new Set();
@@ -219,7 +224,10 @@ export class BatchJobs {
         capturedAt: row.data.captured_at,
         jobId: row.data.created_job || '',
       }));
-    return { jobs, captures, scope: this.scope };
+    const uniqueCaptures = new Map(captures.map((capture) => [capture.customerId, capture]));
+    for (const capture of this.readAcquisitionCaptures())
+      if (!uniqueCaptures.has(capture.customerId)) uniqueCaptures.set(capture.customerId, capture);
+    return { jobs, captures: [...uniqueCaptures.values()], scope: this.scope };
   }
   get busy() {
     return this.working.size > 0 || this.resuming.size > 0;
@@ -339,6 +347,7 @@ export class BatchJobs {
       inserted: 0,
       countPolicy: 'broad-business-v1',
       admissionVersion: websiteAdmissionVersion,
+      ...(this.identityVersion ? { identityVersion: this.identityVersion } : {}),
       updated: 0,
       skipped: 0,
       rejected: 0,
@@ -480,6 +489,14 @@ export class BatchJobs {
     }
   }
   claimCapture(job, item, row) {
+    if (job.identityVersion)
+      return row.capture?.operation_id === item.operation_id &&
+        row.capture.record_id === row.record_id &&
+        row.capture.mode === 'automatic' &&
+        row.capture.job_id === job.id &&
+        row.capture.confirmed_at
+        ? { newRecord: true, reason: 'new_business_record' }
+        : { newRecord: false, reason: 'already_in_lead_library' };
     // Count a company only once across all jobs in the customer library.
     const existing = this.db
       .prepare('SELECT * FROM handoff_entities WHERE scope=? AND (record_id=? OR domain=?)')
@@ -697,6 +714,15 @@ export class BatchJobs {
     }
     this.db.exec('BEGIN IMMEDIATE');
     try {
+      const latestBeforeAccept = this.get(job.id);
+      if (
+        item.operation_id &&
+        latestBeforeAccept.rows.some((row) => row.operation_id === item.operation_id)
+      ) {
+        this.db.exec('COMMIT');
+        Object.assign(job, latestBeforeAccept);
+        return;
+      }
       if (output?.新增 === 1 && row?.result === 'inserted' && row.record_id) {
         // A target is the number of genuinely new, deduplicated company records.
         // Handoff readiness and completeness remain detail fields, not admission gates.
@@ -713,6 +739,7 @@ export class BatchJobs {
           handoff: output.handoff || null,
           inserted_new: claim.newRecord,
           qualification_reason: claim.reason,
+          ...(row.capture ? { capture: row.capture } : {}),
         });
       } else if (output?.更新 === 1 || output?.skipped_existing_count > 0) {
         job.skipped++;
@@ -726,6 +753,7 @@ export class BatchJobs {
           handoff: output.handoff || null,
           inserted_new: false,
           qualification_reason: 'already_in_lead_library',
+          ...(output.research?.company_name ? { name: output.research.company_name } : {}),
         });
       } else if (
         output?.outcome === 'review' ||
@@ -768,13 +796,14 @@ export class BatchJobs {
       const acceptedRow = job.rows.at(-1);
       if (output.collection_attempts) acceptedRow.collection_attempts = output.collection_attempts;
       if (output.collection_gaps) acceptedRow.collection_gaps = output.collection_gaps;
+      if (output.research_trace) acceptedRow.research_trace = output.research_trace;
       if (written) acceptedRow.stored = true;
       const metric = job.searchStats?.find((entry) => entry.id === item.search_id);
       if (metric) {
         metric.researched++;
         const key = {
           inserted: 'inserted',
-          duplicate: 'updated',
+          duplicate: job.identityVersion && output?.更新 !== 1 ? 'duplicates' : 'updated',
           rejected: 'rejected',
           review: 'review',
           failed: 'failed',
@@ -896,6 +925,7 @@ export class BatchJobs {
           try {
             found = await this.discover(j.input, search, j.seen, {
               admissionVersion: j.admissionVersion || 'legacy',
+              ...(j.identityVersion ? { identityVersion: j.identityVersion } : {}),
             });
           } catch (error) {
             metric.status = 'failed';
@@ -934,7 +964,7 @@ export class BatchJobs {
           j.status = fresh.status;
           for (const c of found.skipped_existing || []) {
             metric.duplicates++;
-            const d = domainKey(c.url);
+            const d = j.identityVersion ? acquisitionUrl(c.url) : domainKey(c.url);
             if (d && !j.skippedDomains.includes(d)) {
               j.skippedDomains.push(d);
               j.skipped++;
@@ -942,8 +972,9 @@ export class BatchJobs {
           }
           for (const c of found.candidates || []) {
             const domain = domainKey(c.source_url);
-            if (domain && !j.seen.includes(domain)) {
-              j.seen.push(domain);
+            const candidate = j.identityVersion ? acquisitionUrl(c.source_url) : domain;
+            if (candidate && !j.seen.includes(candidate)) {
+              j.seen.push(candidate);
               j.queue.push({
                 ...c,
                 source_kind: search.source_kind || 'web',
@@ -960,7 +991,9 @@ export class BatchJobs {
           }
           // Give the domains just returned by search priority in its bounded exclusion list.
           const repeated = new Set(
-            (found.skipped_existing || []).map((c) => domainKey(c.url)).filter(Boolean),
+            (found.skipped_existing || [])
+              .map((c) => (j.identityVersion ? acquisitionUrl(c.url) : domainKey(c.url)))
+              .filter(Boolean),
           );
           if (repeated.size)
             j.seen = [...j.seen.filter((domain) => !repeated.has(domain)), ...repeated];
@@ -968,12 +1001,17 @@ export class BatchJobs {
           continue;
         }
         const item = j.queue.shift();
-        j.current = { ...item, operation_id: `${j.id}-${j.researched + 1}` };
+        j.current = {
+          ...item,
+          operation_id: `${j.id}-${j.researched + 1}`,
+          ...(j.identityVersion ? { job_id: j.id } : {}),
+        };
         j.researched++;
         checkpoint(j);
         try {
           const output = await this.research(j.input, j.current, {
             admissionVersion: j.admissionVersion || 'legacy',
+            ...(j.identityVersion ? { identityVersion: j.identityVersion } : {}),
           });
           const latest = this.get(id);
           j.status = latest.status;

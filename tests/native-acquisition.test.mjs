@@ -1818,6 +1818,322 @@ test('获客任务按官网证据收录两家，空壳与参展商待核实，�
     await new Promise((resolve) => app.close(resolve));
   }
 });
+test('正常任务按营业登记主体区分同域企业，补证、并发核对和版本复用均只认原主库归属', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2030-02-01T12:00:00Z') });
+  const north = 'https://shade-hub.example.org/north/';
+  const south = 'https://shade-hub.example.org/south/';
+  const alias = 'https://north-showroom.example.org/';
+  const collision = 'https://similar-shade.example.org/';
+  const corrected = 'https://central-shade.example.org/';
+  const incomplete = 'https://unconfirmed-shade.example.org/';
+  const automaticCorrection = 'https://west-shade.example.org/';
+  const canopy = 'https://shade-hub.example.org/canopy/';
+  const canopyVenue = 'https://canopy-showroom.example.org/';
+  const registeredOffice = {
+    country: 'New Zealand',
+    region: 'Auckland',
+    city: 'Auckland',
+    street: '72 Sample Way',
+    postal_code: '1010',
+  };
+  const fixtures = new Map([
+    [north, { name: 'North Shade Limited', registration: '07123456' }],
+    [south, { name: 'South Shade Limited', registration: '07987654', browser: true }],
+    [alias, { name: 'North Shade Limited', registration: '07123456' }],
+    [collision, { name: 'North Shade Limited' }],
+    [corrected, { name: 'Central Shade Limited', registration: '07555555', manual: true }],
+    [incomplete, { name: 'West Shade', omitActivity: true }],
+    [automaticCorrection, { name: 'West Shade Limited', registration: '07666666', hidden: true }],
+    [canopy, { name: 'Canopy Shade Limited', registeredOffice }],
+    [canopyVenue, { name: 'Canopy Shade Limited', registeredOffice }],
+  ]);
+  const identity = ({ name, registration }) =>
+    registration
+      ? `This website is operated by ${name}, registered in England and Wales, company number ${registration}.`
+      : name === 'Canopy Shade Limited'
+        ? `This website is operated by ${name}.`
+        : `Welcome to ${name}, your window coverings specialist.`;
+  const office = ({ name, registeredOffice }) =>
+    registeredOffice
+      ? `Registered office of ${name}: ${registeredOffice.street}, ${registeredOffice.city} ${registeredOffice.postal_code}, ${registeredOffice.country}.`
+      : '';
+  const supply =
+    'We supply made-to-measure roller blinds for residential windows and commercial buildings.';
+  const html = (data) =>
+    `<p>${identity(data)}</p><p>${data.updatedSupply || supply}</p><p>${office(data)}</p>`;
+  const modelResponse = (data) =>
+    json({
+      status: 'completed',
+      output: [{ content: [{ type: 'output_text', text: JSON.stringify(data) }] }],
+    });
+  const fixtureService = fixture();
+  const paidRequests = [];
+  const siteFetch = async (url, options) => {
+    if (url === 'https://api.tavily.com/search') {
+      const { exclude_domains } = JSON.parse(options.body);
+      return json({
+        results: [...fixtures].flatMap(([href, data]) =>
+          data.manual || data.hidden || exclude_domains.includes(new URL(href).hostname)
+            ? []
+            : [{ url: href, title: data.name }],
+        ),
+      });
+    }
+    if (url === 'https://api.tavily.com/extract') return json({ results: [] });
+    if (url === 'https://api.deepseek.com/responses') {
+      const request = JSON.parse(options.body);
+      const { pages, sources } = JSON.parse(request.input[1].content);
+      paidRequests.push(request);
+      if (sources)
+        return modelResponse({
+          result: 'relevant',
+          sources: sources.map(({ i }) => i),
+          reason: '官网原文确认经营',
+        });
+      const source = pages[0].source_url;
+      const data = fixtures.get(source);
+      const evidence = (value, quote) => ({ value, quote, source_url: source });
+      const currentSupply = data.updatedSupply || supply;
+      return modelResponse({
+        company_name: evidence(data.name, identity(data)),
+        legal_company_name:
+          data.registration || data.registeredOffice ? evidence(data.name, identity(data)) : null,
+        address: data.registeredOffice ? evidence(data.registeredOffice, office(data)) : null,
+        actual_country: data.registeredOffice
+          ? evidence(data.registeredOffice.country, office(data))
+          : null,
+        entity_type: evidence('business', identity(data)),
+        admission_facts:
+          data.manual || data.omitActivity ? [] : [evidence('complete_supply', currentSupply)],
+        products:
+          data.manual || data.omitActivity
+            ? []
+            : [{ ...evidence('roller blinds', currentSupply), window_use: 'window_covering' }],
+      });
+    }
+    throw new Error('镜像离线');
+  };
+  const service = fixtureService.make({
+    fetchImpl: siteFetch,
+    readPage: async ({ href }) => {
+      const data = fixtures.get(href);
+      return {
+        html: data && !data.browser ? html(data) : '<noscript>Enable JavaScript</noscript>',
+      };
+    },
+    readScraplingPage: async (url) =>
+      url === south
+        ? { final_url: url, status: 'ok', content: html(fixtures.get(south)) }
+        : { final_url: null, status: 'unavailable' },
+  });
+  const app = createApp({ env, fetchImpl: siteFetch, nativeImpl: service });
+  const archive = service.feishu;
+  const archiveWrite = archive.write.bind(archive);
+  let writes = 0;
+  archive.write = async (...args) => {
+    const result = await archiveWrite(...args);
+    if (args[4]?.source_url === north && ++writes === 1) throw new Error('SQLite 写入应答丢失');
+    return result;
+  };
+  await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
+  const base = 'http://127.0.0.1:' + app.address().port + '/api/v1';
+  const startJob = async (key) => {
+    const response = await fetch(base + '/acquisition/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+      body: JSON.stringify({
+        ...input,
+        country: 'worldwide',
+        product: 'window coverings',
+        product_scope: 'all',
+        target_count: 4,
+      }),
+    });
+    assert.equal(response.status, 202);
+    return (await response.json()).id;
+  };
+  const readJob = async (id) => {
+    let job;
+    for (let n = 0; n < 120; n++) {
+      job = await (await fetch(base + '/acquisition/jobs/' + id)).json();
+      if (job.status !== 'running') break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    return job;
+  };
+  try {
+    const jobId = await startJob('subject-credit-fixture');
+    const paused = await readJob(jobId);
+    assert.equal(paused.status, 'paused');
+    assert.equal(paused.pending, 1);
+    assert.equal(paused.inserted, 0);
+    const { leads: committed } = await (await fetch(base + '/leads/real/list')).json();
+    assert.deepEqual(
+      committed.map(({ name }) => name),
+      ['North Shade Limited'],
+    );
+    const resume = () => fetch(base + `/acquisition/jobs/${jobId}/resume`, { method: 'POST' });
+    const resumed = await Promise.all([resume(), resume()]);
+    assert.ok(resumed.some(({ status }) => status === 200));
+    const job = await readJob(jobId);
+    assert.equal(writes, 1);
+    assert.equal(
+      job.inserted,
+      3,
+      JSON.stringify({
+        status: job.status,
+        reason: job.reason,
+        rows: job.rows.map(({ result, reason }) => ({ result, reason })),
+      }),
+    );
+    assert.deepEqual(
+      job.rows.map(({ source_url, result }) => [source_url, result]),
+      [
+        [north, 'inserted'],
+        [south, 'inserted'],
+        [alias, 'duplicate'],
+        [collision, 'review'],
+        [incomplete, 'review'],
+        [canopy, 'inserted'],
+        [canopyVenue, 'duplicate'],
+      ],
+    );
+    assert.equal(job.rows[0].record_id, job.rows[2].record_id);
+    assert.equal(job.rows[2].research_trace[0].stage, 'known_subject');
+    assert.equal(job.rows[5].record_id, job.rows[6].record_id);
+    assert.notEqual(job.rows[0].record_id, job.rows[1].record_id);
+    assert.ok(job.rows[1].collection_attempts.some(({ method }) => method === 'scrapling'));
+    assert.deepEqual(
+      job.rows[0].research_trace.map(({ stage, reused }) => [stage, reused]),
+      [
+        ['extraction', false],
+        ['activity', false],
+      ],
+    );
+    assert.ok(job.rows[0].capture.confirmed_at);
+    const { leads } = await (await fetch(base + '/leads/real/list')).json();
+    assert.deepEqual(leads.map(({ name, website }) => [name, website]).sort(), [
+      ['Canopy Shade Limited', canopy],
+      ['North Shade Limited', north],
+      ['South Shade Limited', south],
+    ]);
+    const { lead } = await (await fetch(base + '/leads/real/' + job.rows[0].record_id)).json();
+    assert.deepEqual(
+      lead.acquisitionSources.map(({ source_url, registration }) => [source_url, registration.key]),
+      [
+        [north, 'gb-company:07123456'],
+        [alias, 'gb-company:07123456'],
+      ],
+    );
+    assert.equal(
+      lead.acquisitionSources[0].registration.evidence.snapshot_id,
+      job.rows[0].collection_attempts[0].snapshot_id,
+    );
+    assert.equal(
+      (await (await fetch(base + '/leads/real/list?page=1')).json()).sync.pendingWrites,
+      3,
+    );
+
+    const firstPaid = paidRequests.length;
+    const repeated = await readJob(await startJob('subject-credit-repeat'));
+    assert.equal(repeated.inserted, 0);
+    assert.equal(paidRequests.length, firstPaid);
+    assert.deepEqual(
+      repeated.rows[1].research_trace.map(({ stage, reused }) => [stage, reused]),
+      [
+        ['extraction', true],
+        ['activity', true],
+      ],
+    );
+    t.mock.timers.tick(25 * 60 * 60 * 1000);
+    fixtures.get(north).updatedSupply =
+      'We supply made-to-measure roller blinds for commercial buildings. We also cover residential windows.';
+    const changed = await readJob(await startJob('subject-credit-changed'));
+    assert.equal(changed.inserted, 0);
+    assert.equal(changed.rows[0].record_id, job.rows[0].record_id);
+    assert.equal(paidRequests.length - firstPaid, 2);
+    assert.notEqual(
+      changed.rows[0].research_trace[0].request_key,
+      job.rows[0].research_trace[0].request_key,
+    );
+    assert.equal(changed.rows[1].research_trace[0].reused, true);
+    const reviewPath = base + `/acquisition/jobs/${job.id}/reviews/3`;
+    const submission = {
+      source_url: corrected,
+      actor: '林销售',
+      decision: {
+        company_name: 'Central Shade Limited',
+        identity_quote: identity(fixtures.get(corrected)),
+        source_url: corrected,
+        operating_quote: supply,
+        product: 'roller blinds',
+        admission_fact: 'complete_supply',
+        reason: '官网条款确认法人，产品介绍确认住宅和商业建筑供货',
+      },
+    };
+    const postReview = (body, key, path = reviewPath) =>
+      fetch(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+        body: JSON.stringify(body),
+      });
+    const invalid = {
+      ...submission,
+      decision: { ...submission.decision, operating_quote: '不存在的官网段落' },
+    };
+    const unsupported = await postReview(invalid, 'manual-invalid-quote');
+    assert.equal((await unsupported.json()).resolution.status, 'review');
+    assert.equal((await postReview(submission, 'manual-invalid-quote')).status, 409);
+    const reviewResponse = await postReview(submission, 'manual-subject-ruling');
+    assert.equal(reviewResponse.status, 200);
+    const { resolution } = await reviewResponse.json();
+    assert.equal(resolution.status, 'inserted');
+    assert.equal(resolution.actor, '林销售');
+    assert.equal(resolution.decision.reason, submission.decision.reason);
+    assert.ok(Date.parse(resolution.capture.confirmed_at));
+    assert.deepEqual(
+      (await (await postReview(submission, 'manual-subject-ruling')).json()).resolution,
+      resolution,
+    );
+    const refreshed = await (await fetch(base + '/acquisition/jobs/' + job.id)).json();
+    assert.equal(refreshed.inserted, 3);
+    assert.equal(refreshed.manualInserted, 1);
+    assert.equal(refreshed.confirmedInserted, 4);
+    const previous = (await (await fetch(reviewPath)).json()).attempts;
+    assert.deepEqual(
+      previous.map(({ status }) => status),
+      ['review', 'inserted'],
+    );
+    assert.equal(previous[1].original_source_url, collision);
+    const automaticReview = await postReview(
+      { source_url: automaticCorrection, actor: '周销售' },
+      'automatic-url-correction',
+      base + `/acquisition/jobs/${job.id}/reviews/4`,
+    );
+    const { resolution: verified } = await automaticReview.json();
+    assert.equal(verified.status, 'inserted');
+    assert.equal(verified.actor, '周销售');
+    assert.equal(verified.original_source_url, incomplete);
+    assert.ok(verified.decided_at);
+    t.mock.timers.tick(1000);
+    const overview = await (await fetch(base + '/overview?period=7d')).json();
+    assert.equal(
+      overview.metrics.newCompanies,
+      5,
+      JSON.stringify({ captures: overview.captures, range: overview.range }),
+    );
+    assert.deepEqual(overview.captures.map(({ name, mode, jobId }) => [name, mode, jobId]).sort(), [
+      ['Canopy Shade Limited', 'automatic', job.id],
+      ['Central Shade Limited', 'manual', job.id],
+      ['North Shade Limited', 'automatic', job.id],
+      ['South Shade Limited', 'automatic', job.id],
+      ['West Shade Limited', 'manual', job.id],
+    ]);
+  } finally {
+    await new Promise((resolve) => app.close(resolve));
+  }
+});
+
 test('缺少主营供货引文时补抓，保留直接取得的主体与经营原文', async () => {
   const note = 'We sell complete outdoor zip screens as a core product line.';
   const f = fixture();

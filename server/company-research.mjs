@@ -90,7 +90,13 @@ export function readResearchJson(response) {
   return JSON.parse(String(choice.message?.content || '').replace(/^```(?:json)?\s*|```\s*$/g, ''));
 }
 
-export function parseCompanyResearch(response, page, target = {}, approvedSources) {
+export function parseCompanyResearch(
+  response,
+  page,
+  target = {},
+  approvedSources,
+  suppliedFacts = [],
+) {
   const raw = readResearchJson(response);
   const unified = page.admission_version === websiteAdmissionVersion;
   // Each nested value carries its own evidence, avoiding parallel fields drifting apart.
@@ -161,6 +167,8 @@ export function parseCompanyResearch(response, page, target = {}, approvedSource
     page.research_pages || [{ source_url: page.source_url, text: page.page_text }],
   );
   const compact = (s) => String(s).replace(/\s+/g, ' ').trim();
+  if (suppliedFacts.length)
+    raw.facts = [...(Array.isArray(raw.facts) ? raw.facts : []), ...suppliedFacts];
   const candidateFacts = (Array.isArray(raw.facts) ? raw.facts : []).flatMap((f) => {
     if (
       !f ||
