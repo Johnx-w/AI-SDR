@@ -1139,11 +1139,9 @@ export function createApp({
               throw new ApiError(400, '核实操作需要有效 Idempotency-Key');
             const submission = acquisitionReviewSubmission(body, source);
             const prior = reviews().attempt(job.id, index, key);
-            if (
-              !prior &&
-              (running ||
-                manager.activeJobs().some(({ reason }) => reason !== 'identity_integrity'))
-            )
+            const reviewBusy = () =>
+              running || manager.activeJobs().some(({ reason }) => reason !== 'identity_integrity');
+            if (!prior && reviewBusy())
               throw new ApiError(409, '当前获客任务正在处理，请完成后再核实该企业');
             const attempt = reviews().begin(
               job.id,
@@ -1168,7 +1166,9 @@ export function createApp({
                     reason: '上次核实操作未建立，请重新提交',
                   }),
                 });
-              throw new ApiError(409, '核实结果尚待确认，未重复执行');
+              if (!result?.resumeSafe) throw new ApiError(409, '核实结果尚待确认，未重复执行');
+              if (isMaintaining() || reviewBusy())
+                throw new ApiError(409, '当前获客任务正在处理，请完成后继续核实该企业');
             }
             running++;
             try {
@@ -1176,19 +1176,21 @@ export function createApp({
                 job.input,
                 {
                   ...row,
-                  source_url: source.url,
+                  source_url: attempt.source_url,
                   source_title: '',
                   operation_id: attempt.operation_id,
                 },
                 {
                   bypassExclusion: true,
                   admissionVersion: websiteAdmissionVersion,
-                  ...(job.executionVersion ? { executionVersion: job.executionVersion } : {}),
+                  ...(job.executionVersion
+                    ? { executionVersion: job.executionVersion, isMaintaining }
+                    : {}),
                   ...(provider.identityVersion
                     ? {
                         identityVersion: provider.identityVersion,
                         review: {
-                          ...submission,
+                          ...(attempt.decision ? { decision: attempt.decision } : {}),
                           actor: attempt.actor,
                           submitted_at: attempt.submitted_at,
                           job_id: job.id,
