@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import { setImmediate as yieldToRequests } from 'node:timers/promises';
 import { domainKey } from './website-identity.mjs';
 import {
   productiveSearch,
@@ -994,8 +995,10 @@ export class BatchJobs {
       this.save(j);
     };
     try {
-      if (!this.get(id).identityVersion) await this.initializeBaseline();
+      const initial = this.get(id);
+      if (!initial.identityVersion) await this.initializeBaseline();
       while (true) {
+        if (initial.batch) await yieldToRequests();
         const j = this.get(id);
         stamp(j);
         if (!['running', 'stopping'].includes(j.status)) {
