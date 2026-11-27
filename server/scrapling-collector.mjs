@@ -12,6 +12,7 @@ import {
 } from './branding.mjs';
 import { domainKey } from './website-identity.mjs';
 import { researchPageText, hasUsableResearchText } from './research-pages.mjs';
+import { releaseChromiumDirectory } from './scrapling-runtime.mjs';
 
 const worker = fileURLToPath(new URL('./scrapling/worker.py', import.meta.url));
 const bundledWorker = fileURLToPath(new URL('./scrapling/runtime-linux/worker', import.meta.url));
@@ -103,7 +104,7 @@ function runWorker(python, input, signal) {
     ),
   );
   safeEnv.PYTHONUTF8 = '1';
-  if (!python) safeEnv.PLAYWRIGHT_BROWSERS_PATH = bundledBrowsers;
+  if (!python) safeEnv.PLAYWRIGHT_BROWSERS_PATH = releaseChromiumDirectory(bundledBrowsers);
   return new Promise((resolve, reject) => {
     const grouped = process.platform !== 'win32';
     const child = execFile(
