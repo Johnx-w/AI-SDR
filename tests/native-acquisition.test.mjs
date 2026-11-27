@@ -865,6 +865,10 @@ test('快照保留期和缓存容量只清理未引用页面，保留在途和�
 });
 
 async function runMapDiscoveryJob(base, target = 3, key = 'maps-discovery-pair') {
+  return settledAcquisitionJob(base, await startWebsiteJob(base, target, key));
+}
+
+async function startWebsiteJob(base, target, key) {
   const api = base + '/api/v1';
   const response = await fetch(api + '/acquisition/jobs', {
     method: 'POST',
@@ -877,8 +881,7 @@ async function runMapDiscoveryJob(base, target = 3, key = 'maps-discovery-pair')
     }),
   });
   assert.equal(response.status, 202);
-  const { id } = await response.json();
-  return settledAcquisitionJob(base, id);
+  return (await response.json()).id;
 }
 
 async function settledAcquisitionJob(base, id) {
@@ -911,6 +914,22 @@ function mockOfficialSites(t, html) {
     return request;
   });
   syncBuiltinESMExports();
+}
+
+function damageSnapshot(path, snapshotId) {
+  const db = new DatabaseSync(path);
+  try {
+    const changed = db
+      .prepare(
+        `UPDATE acquisition_page_snapshots
+       SET data=json_set(data,'$.content',json_extract(data,'$.content') || '<!-- altered -->')
+       WHERE id=?`,
+      )
+      .run(snapshotId);
+    assert.equal(changed.changes, 1);
+  } finally {
+    db.close();
+  }
 }
 
 test('正常官网任务忽略 Places 环境配置，重启后可读回两个网站档案和缺证结果', async (t) => {
@@ -977,14 +996,15 @@ test('共享身份快照损坏时两个市场均暂停自动入库，重启不�
   t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.parse('2030-01-01T08:59:45Z') });
   const directory = mkdtempSync(join(tmpdir(), 'acquisition-identity-integrity-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
+  let compare = false;
   const { app, atlas, beacon, html } = mapDiscoveryFixture({
-    webResults: ({ atlas, beacon, query }) => [/Canada/i.test(query) ? beacon : atlas],
+    webResults: ({ atlas, beacon, cedar, query }) =>
+      !compare ? [cedar, atlas] : [/Canada/i.test(query) ? beacon : atlas],
   });
   app.nativeImpl.close();
   mockOfficialSites(t, html);
   const canadaEnteredModel = Promise.withResolvers();
   const releaseCanadaModel = Promise.withResolvers();
-  let compare = false;
   const options = {
     env: {
       TAVILY_API_KEY: env.TAVILY_API_KEY,
@@ -1012,26 +1032,16 @@ test('共享身份快照损坏时两个市场均暂停自动入库，重启不�
   const jobs = '/api/v1/acquisition/jobs';
   let ids;
   let recordId;
+  let originalId;
   await withApp(options, async (base) => {
     const original = await runMapDiscoveryJob(base, 1, 'identity-seed-atlas');
     assert.equal(original.inserted, 1);
-    recordId = original.rows[0].record_id;
-    const { snapshot_id } = original.rows[0].collection_attempts.find(
-      ({ status }) => status === 'ok',
-    );
-    const db = new DatabaseSync(options.env.ACQUISITION_DB_PATH);
-    try {
-      assert.equal(
-        db
-          .prepare(
-            "UPDATE acquisition_page_snapshots SET data=json_set(data,'$.content',json_extract(data,'$.content') || '<!-- altered -->') WHERE id=?",
-          )
-          .run(snapshot_id).changes,
-        1,
-      );
-    } finally {
-      db.close();
-    }
+    assert.equal(original.rows[0].result, 'review');
+    originalId = original.id;
+    const captured = original.rows.find(({ result }) => result === 'inserted');
+    recordId = captured.record_id;
+    const { snapshot_id } = captured.collection_attempts.find(({ status }) => status === 'ok');
+    damageSnapshot(options.env.ACQUISITION_DB_PATH, snapshot_id);
     for (const country of ['United States', 'Canada']) {
       const response = await fetch(base + schedules, {
         method: 'POST',
@@ -1080,10 +1090,12 @@ test('共享身份快照损坏时两个市场均暂停自动入库，重启不�
     );
   });
   const external = [];
+  let manualReview = false;
   await withApp(
     {
       ...options,
-      fetchImpl: async (url) => {
+      fetchImpl: async (url, request) => {
+        if (manualReview) return options.fetchImpl(url, request);
         external.push(url);
         throw new Error('仅从本地数据库读回');
       },
@@ -1111,8 +1123,93 @@ test('共享身份快照损坏时两个市场均暂停自动入库，重启不�
         [atlas],
       );
       assert.deepEqual(external, []);
+      manualReview = true;
+      const review = await fetch(`${base}${jobs}/${originalId}/reviews/0`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'identity-manual-review',
+        },
+        body: JSON.stringify({ source_url: beacon, actor: 'Test reviewer' }),
+      });
+      assert.equal(review.status, 200);
+      const { resolution } = await review.json();
+      assert.equal(resolution.status, 'inserted', JSON.stringify(resolution));
+      const archive = await (
+        await fetch(base + '/api/v1/leads/real/' + resolution.record_id)
+      ).json();
+      assert.deepEqual(
+        archive.lead.acquisitionSources.map(({ source_url, mode }) => [source_url, mode]),
+        [[beacon, 'manual']],
+      );
+      assert.equal((await settledAcquisitionJob(base, ids[1])).reason, 'identity_integrity');
     },
   );
+});
+
+test('续跑引用超出缓存期限的损坏身份快照时暂停原操作', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.parse('2030-01-01T00:00:00Z') });
+  const directory = mkdtempSync(join(tmpdir(), 'acquisition-identity-resume-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const { app, html } = mapDiscoveryFixture();
+  app.nativeImpl.close();
+  mockOfficialSites(t, html);
+  const modelEntered = Promise.withResolvers();
+  const releaseModel = Promise.withResolvers();
+  const env = {
+    ...app.env,
+    FEISHU_APP_ID: '',
+    BATCH_DB_PATH: join(directory, 'jobs.sqlite'),
+    ACQUISITION_DB_PATH: join(directory, 'acquisition.sqlite'),
+  };
+  const server = createApp({
+    env,
+    fetchImpl: async (url, request) => {
+      if (url === 'https://api.deepseek.com/responses') {
+        modelEntered.resolve();
+        await releaseModel.promise;
+      }
+      return app.fetchImpl(url, request);
+    },
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  let id;
+  let snapshotId;
+  try {
+    const base = 'http://127.0.0.1:' + server.address().port;
+    id = await startWebsiteJob(base, 1, 'identity-pinned-snapshot');
+    await modelEntered.promise;
+    const job = await (await fetch(`${base}/api/v1/acquisition/jobs/${id}`)).json();
+    snapshotId = job.currentProgress.collection_attempts.find(
+      ({ status }) => status === 'ok',
+    ).snapshot_id;
+    const shutdown = server.shutdown();
+    releaseModel.resolve();
+    await shutdown;
+  } finally {
+    releaseModel.resolve();
+    if (server.listening) await new Promise((resolve) => server.close(resolve));
+  }
+  damageSnapshot(env.ACQUISITION_DB_PATH, snapshotId);
+  t.mock.timers.setTime(Date.now() + 25 * 60 * 60 * 1000);
+  await withApp({ env, fetchImpl: app.fetchImpl }, async (base) => {
+    const url = `${base}/api/v1/acquisition/jobs/${id}`;
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const job = await (await fetch(url)).json();
+      if (job.reason !== 'checkpointed' && job.status !== 'running') {
+        assert.deepEqual(
+          [job.status, job.reason, job.inserted],
+          ['paused', 'identity_integrity', 0],
+        );
+        assert.equal(job.current.operation_id, `${id}-1`);
+        const { leads } = await (await fetch(base + '/api/v1/leads/real/list')).json();
+        assert.deepEqual(leads, []);
+        return;
+      }
+      await delay(10);
+    }
+    assert.fail('同一操作未恢复到身份核验暂停');
+  });
 });
 
 async function withWebsiteCustodyJob(candidates, pages, target, verify) {
