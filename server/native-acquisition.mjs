@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { acquisitionConfig } from './acquisition-config.mjs';
 import { addModelTokens, createResearchProviders } from './research-providers.mjs';
 import { createMapsDiscovery } from './maps-discovery.mjs';
-import { researchCacheKey } from './research-reuse.mjs';
+import { canonicalJson, researchCacheKey } from './research-reuse.mjs';
 import {
   acquisitionIdentityVersion,
   acquisitionUrl,
@@ -2610,7 +2610,7 @@ export class NativeAcquisition {
       }),
     ).output;
   }
-  async status(id, { isMaintaining = () => false } = {}) {
+  async status(id, { isMaintaining = () => false, review, sourceUrl } = {}) {
     const op = this.store.get(id);
     if (!op) return { settled: false, missing: true, reason: '操作记录不存在，未自动重放' };
     if (op.state === 'completed') return { settled: true, output: op.output };
@@ -2641,7 +2641,13 @@ export class NativeAcquisition {
             op.identity_version === acquisitionIdentityVersion &&
             op.admission_version === websiteAdmissionVersion &&
             op.action === 'insert' &&
-            op.acquisition.mode === 'automatic' &&
+            (op.acquisition.mode === 'automatic' ||
+              (op.acquisition.mode === 'manual' &&
+                review &&
+                sourceUrl === op.source_url &&
+                op.acquisition.job_id === review.job_id &&
+                canonicalJson(review) === canonicalJson(op.input.review || null) &&
+                canonicalJson(review) === canonicalJson(op.acquisition.review || null))) &&
             op.acquisition.operation_id === id &&
             op.acquisition.source_url === op.source_url &&
             op.input.item?.source_url === op.source_url &&
@@ -2650,7 +2656,7 @@ export class NativeAcquisition {
             !op.local_write_blocked &&
             !isMaintaining()
           ) {
-            this.assertAutomaticIdentityIntegrity();
+            if (op.acquisition.mode === 'automatic') this.assertAutomaticIdentityIntegrity();
             return { settled: true, output: await this.writePreparedAssessment(op) };
           }
         } else if (!op.recordId && op.action === 'insert') {

@@ -800,141 +800,184 @@ test('主库写入前中断后按原操作保存准备好的资料，不重复�
   }
 });
 
-test('人工补证重启后沿用原编号及已保存官网，应答未知保持原请求待核对', async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), 'acquisition-manual-resume-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
-  const maintenance = join(dir, 'maintenance.json');
-  const runtimeEnv = {
-    ...env,
-    BATCH_DB_PATH: join(dir, 'acquisition.sqlite'),
-    LEAD_LIBRARY_DB_PATH: join(dir, 'customers.sqlite'),
-    RELEASE_MAINTENANCE_PATH: maintenance,
-  };
-  const fixture = mapDiscoveryFixture();
-  const shells = [
-    'https://manual-recovery-north.example.org/',
-    'https://manual-recovery-south.example.org/',
-    'https://manual-recovery-control.example.org/',
-  ];
-  const fetches = [];
-  let loss = false;
-  let interrupt = true;
-  let controls = 0;
-  const fetchImpl = async (url, options) => {
-    if (url === 'https://api.tavily.com/search')
-      return json({ results: shells.map((url) => ({ url, title: url })) });
-    if (url === 'https://api.tavily.com/extract') return json({ results: [] });
-    if (url === 'https://api.deepseek.com/responses') {
-      const { pages } = JSON.parse(JSON.parse(options.body).input[1].content);
-      if (pages?.[0].source_url === fixture.showroom) {
-        controls++;
-        assert.equal(loss, true);
-        throw new Error('供应商已收到请求但应答丢失');
-      }
-    }
-    return fixture.app.fetchImpl(url, options);
-  };
-  const options = () => {
-    const nativeImpl = new NativeAcquisition({
-      env: runtimeEnv,
-      fetchImpl,
-      readPage: async (url) => {
-        fetches.push(url.href);
-        if (shells.includes(url.href)) return { html: '<noscript>Enable JavaScript</noscript>' };
-        if (interrupt && url.href === fixture.beacon) writeFileSync(maintenance, '{}');
-        return fixture.app.nativeImpl.readPage(url);
-      },
-      readScraplingPage: async (url) =>
-        shells.includes(url)
-          ? { status: 'unavailable' }
-          : fixture.app.nativeImpl.readScraplingPage(url),
-    });
-    return { env: runtimeEnv, fetchImpl, nativeImpl };
-  };
-  const post = (route, key, source_url, actor = 'Operator') =>
-    fetch(route, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
-      body: JSON.stringify({ source_url, actor }),
-    });
-  let id;
-  let beaconOperation;
-  await withApp(options(), async (origin) => {
-    const jobs = origin + '/api/v1/acquisition/jobs';
-    const response = await fetch(jobs, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'manual-checkpoint-job' },
-      body: JSON.stringify({
-        ...input,
-        product: 'roller blinds',
-        target_count: 1,
-        research_budget: 3,
-      }),
-    });
-    assert.equal(response.status, 202);
-    ({ id } = await response.json());
-    const url = jobs + '/' + id;
-    let before;
-    for (let attempt = 0; attempt < 125; attempt++) {
-      before = await (await fetch(url)).json();
-      if (before.status === 'partial') break;
-      await delay(10);
-    }
-    assert.deepEqual(
-      before.rows.map(({ source_url, result }) => [source_url, result]),
-      shells.map((url) => [url, 'review']),
-    );
-    const review = url + '/reviews/0';
-    assert.equal((await post(review, 'manual-original-beacon', fixture.beacon)).status, 409);
-    rmSync(maintenance);
-    const { resolution, evidence } = await (await fetch(review)).json();
-    beaconOperation = resolution.operation_id;
-    assert.equal(resolution.status, 'uncertain');
-    assert.deepEqual(
-      evidence.collection_attempts.map(({ status }) => status),
-      ['ok'],
-    );
-  });
-  interrupt = false;
-  await withApp(options(), async (origin) => {
-    const api = origin + '/api/v1';
-    const url = api + '/acquisition/jobs/' + id;
-    const review = url + '/reviews/0';
-    assert.equal((await post(review, 'manual-fork-beacon', fixture.beacon)).status, 409);
-    assert.equal(
-      (await post(review, 'manual-original-beacon', fixture.beacon, 'Changed Actor')).status,
-      409,
-    );
-    const responses = await Promise.all([
-      post(review, 'manual-original-beacon', fixture.beacon),
-      post(review, 'manual-original-beacon', fixture.beacon),
-    ]);
-    assert.ok(responses.some(({ status }) => status === 200));
-    const { resolution, attempts } = await (await fetch(review)).json();
-    assert.deepEqual(
-      [resolution.operation_id, resolution.status, attempts.length],
-      [beaconOperation, 'inserted', 1],
-    );
-    assert.equal(fetches.filter((url) => url === fixture.beacon).length, 1);
-    const another = await post(url + '/reviews/1', 'manual-atlas', fixture.atlas);
-    assert.equal(another.status, 200);
-    assert.equal((await another.json()).resolution.status, 'inserted');
-    loss = true;
-    const control = url + '/reviews/2';
-    assert.equal((await post(control, 'manual-invalid', 'http://127.0.0.1/')).status, 400);
-    assert.equal((await post(control, 'manual-uncertain', fixture.showroom)).status, 409);
-    assert.equal((await post(control, 'manual-uncertain', fixture.showroom)).status, 409);
-    assert.equal(controls, 1);
-    const job = await (await fetch(url)).json();
-    assert.deepEqual([job.inserted, job.manualInserted, job.confirmedInserted], [0, 2, 2]);
-    assert.deepEqual(
-      (await (await fetch(api + '/leads/real/list')).json()).leads
-        .map(({ website }) => website)
-        .sort(),
-      [fixture.atlas, fixture.beacon],
-    );
-  });
-});
+for (const interruptedStage of ['extract', 'persist'])
+  test(
+    '人工补证重启后沿用原编号及已保存官网，应答未知保持原请求待核对：' + interruptedStage,
+    async (t) => {
+      const dir = mkdtempSync(join(tmpdir(), 'acquisition-manual-resume-'));
+      t.after(() => rmSync(dir, { recursive: true, force: true }));
+      const maintenance = join(dir, 'maintenance.json');
+      const runtimeEnv = {
+        ...env,
+        BATCH_DB_PATH: join(dir, 'acquisition.sqlite'),
+        LEAD_LIBRARY_DB_PATH: join(dir, 'customers.sqlite'),
+        RELEASE_MAINTENANCE_PATH: maintenance,
+      };
+      const fixture = mapDiscoveryFixture();
+      const shells = [
+        'https://manual-recovery-north.example.org/',
+        'https://manual-recovery-south.example.org/',
+        'https://manual-recovery-control.example.org/',
+      ];
+      const fetches = [];
+      let loss = false;
+      let interrupt = true;
+      let controls = 0;
+      let beaconPaid = 0;
+      const fetchImpl = async (url, options) => {
+        if (url === 'https://api.tavily.com/search')
+          return json({ results: shells.map((url) => ({ url, title: url })) });
+        if (url === 'https://api.tavily.com/extract') return json({ results: [] });
+        if (url === 'https://api.deepseek.com/responses') {
+          const { pages, company } = JSON.parse(JSON.parse(options.body).input[1].content);
+          if ((pages?.[0].source_url || company?.website) === fixture.beacon) beaconPaid++;
+          if (pages?.[0].source_url === fixture.showroom) {
+            controls++;
+            assert.equal(loss, true);
+            throw new Error('供应商已收到请求但应答丢失');
+          }
+        }
+        return fixture.app.fetchImpl(url, options);
+      };
+      const options = () => {
+        const nativeImpl = new NativeAcquisition({
+          env: runtimeEnv,
+          fetchImpl,
+          readPage: async (url) => {
+            fetches.push(url.href);
+            if (shells.includes(url.href))
+              return { html: '<noscript>Enable JavaScript</noscript>' };
+            if (interrupt && interruptedStage === 'extract' && url.href === fixture.beacon)
+              writeFileSync(maintenance, '{}');
+            return fixture.app.nativeImpl.readPage(url);
+          },
+          readScraplingPage: async (url) =>
+            shells.includes(url)
+              ? { status: 'unavailable' }
+              : fixture.app.nativeImpl.readScraplingPage(url),
+        });
+        return { env: runtimeEnv, fetchImpl, nativeImpl };
+      };
+      const post = (route, key, source_url, actor = 'Operator') =>
+        fetch(route, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+          body: JSON.stringify({ source_url, actor }),
+        });
+      let id;
+      let beaconOperation;
+      const first = options();
+      await withApp(first, async (origin) => {
+        const jobs = origin + '/api/v1/acquisition/jobs';
+        const response = await fetch(jobs, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Idempotency-Key': 'manual-checkpoint-job',
+          },
+          body: JSON.stringify({
+            ...input,
+            product: 'roller blinds',
+            target_count: 1,
+            research_budget: 3,
+          }),
+        });
+        assert.equal(response.status, 202);
+        ({ id } = await response.json());
+        const url = jobs + '/' + id;
+        let before;
+        for (let attempt = 0; attempt < 125; attempt++) {
+          before = await (await fetch(url)).json();
+          if (before.status === 'partial') break;
+          await delay(10);
+        }
+        assert.deepEqual(
+          before.rows.map(({ source_url, result }) => [source_url, result]),
+          shells.map((url) => [url, 'review']),
+        );
+        const review = url + '/reviews/0';
+        if (interruptedStage === 'persist') {
+          first.nativeImpl.feishu.write = async () => {
+            throw new Error('本地主库尚未写入时中断');
+          };
+        }
+        assert.equal((await post(review, 'manual-original-beacon', fixture.beacon)).status, 409);
+        if (interruptedStage === 'extract') rmSync(maintenance);
+        const { resolution, evidence } = await (await fetch(review)).json();
+        beaconOperation = resolution.operation_id;
+        assert.equal(resolution.status, 'uncertain');
+        assert.equal(first.nativeImpl.store.get(beaconOperation).stage, interruptedStage);
+        assert.equal(beaconPaid, interruptedStage === 'persist' ? 2 : 0);
+        assert.equal(
+          (await (await fetch(origin + '/api/v1/leads/real/list')).json()).leads.length,
+          0,
+        );
+        assert.deepEqual(
+          evidence.collection_attempts.map(({ status }) => status),
+          ['ok'],
+        );
+      });
+      interrupt = false;
+      const second = options();
+      await withApp(second, async (origin) => {
+        const api = origin + '/api/v1';
+        const url = api + '/acquisition/jobs/' + id;
+        const review = url + '/reviews/0';
+        assert.equal((await post(review, 'manual-fork-beacon', fixture.beacon)).status, 409);
+        assert.equal(
+          (await post(review, 'manual-original-beacon', fixture.beacon, 'Changed Actor')).status,
+          409,
+        );
+        const archive = second.nativeImpl.feishu;
+        const readOwner = archive.acquisitionWrite.bind(archive);
+        const write = archive.write.bind(archive);
+        let attemptsToWrite = 0;
+        archive.write = async (...args) => {
+          if (args[4]?.operation_id === beaconOperation) attemptsToWrite++;
+          return write(...args);
+        };
+        if (interruptedStage === 'persist') {
+          archive.acquisitionWrite = () => {
+            throw new Error('归属暂时不可读');
+          };
+          assert.equal((await post(review, 'manual-original-beacon', fixture.beacon)).status, 409);
+          assert.equal(attemptsToWrite, 0);
+          archive.acquisitionWrite = readOwner;
+        }
+        const responses = await Promise.all([
+          post(review, 'manual-original-beacon', fixture.beacon),
+          post(review, 'manual-original-beacon', fixture.beacon),
+        ]);
+        assert.ok(responses.some(({ status }) => status === 200));
+        const { resolution, attempts } = await (await fetch(review)).json();
+        assert.deepEqual(
+          [resolution.operation_id, resolution.status, attempts.length],
+          [beaconOperation, 'inserted', 1],
+        );
+        assert.equal(fetches.filter((url) => url === fixture.beacon).length, 1);
+        assert.equal(beaconPaid, 2);
+        assert.equal(attemptsToWrite, 1);
+        assert.equal(resolution.capture.operation_id, beaconOperation);
+        const another = await post(url + '/reviews/1', 'manual-atlas', fixture.atlas);
+        assert.equal(another.status, 200);
+        assert.equal((await another.json()).resolution.status, 'inserted');
+        loss = true;
+        const control = url + '/reviews/2';
+        assert.equal((await post(control, 'manual-invalid', 'http://127.0.0.1/')).status, 400);
+        assert.equal((await post(control, 'manual-uncertain', fixture.showroom)).status, 409);
+        assert.equal((await post(control, 'manual-uncertain', fixture.showroom)).status, 409);
+        assert.equal(controls, 1);
+        const job = await (await fetch(url)).json();
+        assert.deepEqual([job.inserted, job.manualInserted, job.confirmedInserted], [0, 2, 2]);
+        assert.deepEqual(
+          (await (await fetch(api + '/leads/real/list')).json()).leads
+            .map(({ website }) => website)
+            .sort(),
+          [fixture.atlas, fixture.beacon],
+        );
+      });
+    },
+  );
 
 test('付费模型应答丢失后继续只核对原请求，取回结果后收录一次', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'acquisition-paid-'));
