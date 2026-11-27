@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import type {
   AcquisitionJob,
+  AcquisitionPaidRequest,
   AcquisitionReviewDecision,
   WebsiteCollectionAttempt,
 } from '../domain/types';
@@ -28,6 +29,7 @@ const metricState: Record<string, string> = {
   completed: '搜索完成',
   failed: '搜索失败',
   interrupted: '服务中断',
+  uncertain: '供应商请求待核对',
 };
 const mapsStates: Record<string, string> = {
   running: '查询中',
@@ -127,6 +129,8 @@ const collectionStatuses: Record<string, string> = {
   unavailable: '暂不可用',
   deferred: '已延后',
   timeout: '超时',
+  memory_limit: '已达内存上限',
+  unknown: '供应商结果待核对',
   failed: '读取失败',
 };
 const collectionReasons: Record<string, string> = {
@@ -142,6 +146,38 @@ const collectionWaitReasons: Record<string, string> = {
   queue_full: '浏览器队列已满',
   queue_timeout: '等待超时',
   aborted: '等待已取消',
+};
+const collectionFailures: Record<string, string> = {
+  ...collectionWaitReasons,
+  worker_crashed: '浏览器工作进程退出',
+  worker_failed: '浏览器工作进程失败',
+  worker_timeout: '工作进程响应超时',
+  page_timeout: '单页超时',
+  worker_memory_limit: '内存超限',
+  worker_isolation_unavailable: '资源隔离暂不可用',
+  provider_request_unknown: '外部提取结果待核对',
+  provider_extract_failed: '外部提取失败',
+  snapshot_capacity: '快照存储空间不足',
+};
+const acquisitionStages: Record<string, string> = {
+  select: '搜索或准备候选',
+  extract: '采集官网',
+  research: '研究及核对官网证据',
+  prepare: '核对主体并准备保存',
+  persist: '保存客户档案并读回',
+  assessment: '保存并核对评估',
+};
+const paidKinds: Record<string, string> = {
+  web_search: '官网搜索',
+  web_extract: '外部提取',
+  model_extraction: '模型取证',
+  model_activity: '模型复核经营证据',
+};
+const paidStatuses = {
+  pending: '等待应答',
+  completed: '已取得应答',
+  failed: '已确认失败',
+  unknown: '结果待供应商核对',
 };
 const batchBoundaries: Record<string, string> = {
   batch_capacity: '上一批已新增 200 家',
@@ -161,6 +197,9 @@ function CollectionAttempts({ attempts }: { attempts?: WebsiteCollectionAttempt[
           {collectionStatuses[attempt.status] || attempt.status}
           {attempt.reused ? ' · 已复用' : ''}
           {collectionReasons[attempt.reason] ? ' · ' + collectionReasons[attempt.reason] : ''}
+          {attempt.failure_reason && collectionFailures[attempt.failure_reason]
+            ? ' · ' + collectionFailures[attempt.failure_reason]
+            : ''}
           {attempt.resource_wait && (
             <>
               {' '}
@@ -183,6 +222,20 @@ function CollectionAttempts({ attempts }: { attempts?: WebsiteCollectionAttempt[
           ) : (
             '来源不可打开'
           )}
+        </small>
+      ))}
+    </details>
+  );
+}
+function PaidRequests({ requests }: { requests?: AcquisitionPaidRequest[] }) {
+  if (!requests?.length) return null;
+  return (
+    <details>
+      <summary>供应商请求（{requests.length}）</summary>
+      {requests.map(({ id, kind, provider, status, usage }) => (
+        <small key={id}>
+          {paidKinds[kind] || kind} · {provider} · {paidStatuses[status]}
+          {usage && <> · {usage.credits} 额度</>} · <code>{id}</code>
         </small>
       ))}
     </details>
@@ -473,6 +526,7 @@ function DetailRows({
               {row.search_query && <small>发现词：{row.search_query}</small>}
               <HandoffContacts contacts={row.handoff?.contacts} />
               <CollectionAttempts attempts={row.collection_attempts} />
+              <PaidRequests requests={row.paid_requests} />
               {row.result === 'review' && (
                 <ReviewAction
                   jobId={jobId}
@@ -724,6 +778,7 @@ function BatchProgressDetail({ job: snapshot, control, busy }: BatchProgressProp
       .map((source) => ({ ...source, query: metric.query })),
   );
   const usage = job.researchUsage;
+  const progress = job.currentProgress;
   const reportedTokens =
     usage?.total_tokens ??
     (!job.executionVersion && usage?.input_tokens !== undefined && usage.output_tokens !== undefined
@@ -751,6 +806,21 @@ function BatchProgressDetail({ job: snapshot, control, busy }: BatchProgressProp
       {job.collectionWait && (
         <p role="status">{collectionWaitReasons[job.collectionWait.reason]}</p>
       )}
+      {progress && (
+        <div>
+          <p className="muted">
+            当前步骤 · {acquisitionStages[progress.stage] || progress.stage}
+            {!!progress.research_usage?.model_calls && (
+              <> · 模型请求 {progress.research_usage.model_calls} 次</>
+            )}
+            {!!progress.web_usage?.web_extract_calls && (
+              <> · 外部提取 {progress.web_usage.web_extract_calls} 次</>
+            )}
+          </p>
+          <CollectionAttempts attempts={progress.collection_attempts} />
+          <PaidRequests requests={progress.requests} />
+        </div>
+      )}
       {job.sourcePause && (
         <p role="status">
           {job.sourcePause.reason}。当前企业完成保存或核对后暂停，剩余队列与进度保留。
@@ -773,8 +843,8 @@ function BatchProgressDetail({ job: snapshot, control, busy }: BatchProgressProp
       <p className="muted">
         自动新增 {job.inserted} · 人工补录新增 {job.manualInserted || 0} · 确认新增合计{' '}
         {job.confirmedInserted ?? job.inserted} · 更新 {job.updated} · 重复或既有 {job.skipped} ·
-        待核实 {job.review || 0} · 不符合条件 {job.rejected} · 失败 {job.failed} · 写入待确认{' '}
-        {job.pending}
+        待核实 {job.review || 0} · 不符合条件 {job.rejected} · 失败 {job.failed} ·{' '}
+        {job.batch ? '执行待确认' : '写入待确认'} {job.pending}
       </p>
       <p className="muted">
         已搜索 {job.searches} 次 · 已研究 {job.researched} 家

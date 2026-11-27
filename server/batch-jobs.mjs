@@ -142,11 +142,16 @@ const labels = {
   exhausted: '当前筛选条件下的候选已处理完',
   stopped: '已停止，已入库客户保留',
   interrupted: '服务中断，继续前需核对当前企业',
+  checkpointed: '已保存执行进度，等待继续',
   uncertain: '执行结果待确认，已暂停，未自动重复写入',
+  write_uncertain: '主库写入结果待核对，已保留原操作编号',
+  paid_uncertain: '供应商请求结果待核对，已保留原请求编号',
   manual_pause: '已人工暂停，保留执行进度',
   outreach_deleted: '关联触达计划已删除，自动首发已关闭；等待人工继续获客或删除来源',
   source_deleted: '来源任务已删除，执行历史保留',
 };
+const interruptedReason = (job) => (job.batch ? 'checkpointed' : 'interrupted');
+const uncertainReason = (job) => (job.batch ? 'write_uncertain' : 'uncertain');
 const batchCapacity = 200;
 const nextBatch = (job, reason) => ({
   number: (job.batch?.number || 0) + 1,
@@ -163,6 +168,7 @@ export class BatchJobs {
     discover,
     research,
     status,
+    discoveryReady,
     readLeads,
     readLead,
     readAcquisitionCaptures = () => [],
@@ -194,6 +200,7 @@ export class BatchJobs {
     this.discover = discover;
     this.research = research;
     this.remoteStatus = status;
+    this.discoveryReady = discoveryReady;
     this.readLeads = readLeads;
     this.readLead = readLead;
     this.readAcquisitionCaptures = readAcquisitionCaptures;
@@ -206,12 +213,14 @@ export class BatchJobs {
     this.onOutreachChange = onOutreachChange;
     this.isMaintaining = isMaintaining;
     this.working = new Set();
+    this.workPromises = new Map();
+    this.collecting = new Map();
     this.resuming = new Set();
     this.closed = false;
     for (const job of this.activeJobs())
       if (['running', 'stopping'].includes(job.status)) {
         job.status = 'paused';
-        job.reason = 'interrupted';
+        job.reason = interruptedReason(job);
         job.pending = job.current ? 1 : 0;
         delete job.collectionWait;
         for (const metric of job.searchStats || [])
@@ -509,19 +518,23 @@ export class BatchJobs {
             this.finish(j, 'stopped');
           } else if (j.status === 'running') {
             j.status = 'paused';
-            j.reason = j.current ? 'uncertain' : 'interrupted';
+            j.reason = j.current ? uncertainReason(j) : interruptedReason(j);
             j.pending = j.current ? 1 : 0;
             this.save(j);
           }
           return;
         }
-        this.work(id).catch(() => {
-          if (this.closed) return;
-          const j = this.get(id);
-          j.status = 'paused';
-          j.reason = 'uncertain';
-          this.save(j);
-        });
+        if (this.workPromises.has(id)) return;
+        const work = this.work(id)
+          .catch(() => {
+            if (this.closed) return;
+            const j = this.get(id);
+            j.status = 'paused';
+            j.reason = uncertainReason(j);
+            this.save(j);
+          })
+          .finally(() => this.workPromises.delete(id));
+        this.workPromises.set(id, work);
       });
   }
   finish(job, reason) {
@@ -564,9 +577,19 @@ export class BatchJobs {
     }
   }
   async reconcile(job) {
+    if (job.batch && job.pendingSearch && this.discoveryReady) {
+      const id = job.searchStats.at(-1)?.discoveryRequestId;
+      if (!id || !(await this.discoveryReady(id)))
+        throw fail(409, '当前搜索请求结果待供应商核对，暂未开启下一次搜索');
+    }
     if (!job.current) return;
     const result = await this.remoteStatus(job.current.operation_id);
-    if (!result?.settled) throw fail(409, '尚未确认当前企业的执行结果，请稍后继续；未重复执行');
+    if (job.batch && (result?.resumeSafe || result?.missing)) return;
+    if (!result?.settled)
+      throw fail(
+        409,
+        result?.paidUnknown ? result.reason : '尚未确认当前企业的执行结果，请稍后继续；未重复执行',
+      );
     await this.accept(job, result.output);
   }
   async initializeBaseline() {
@@ -662,7 +685,7 @@ export class BatchJobs {
         throw fail(409, '来源控制已变化，请刷新后继续');
       // Reconcile any prior write first, then forbid new work in retired markets.
       validateCountryScope(job.input);
-      job.status = 'running';
+      job.status = job.stopRequested ? 'stopping' : 'running';
       job.reason = '';
       job.manualPaused = false;
       if (!job.sourcePause?.outreachPlanId || job.input.auto_first_touch)
@@ -672,7 +695,7 @@ export class BatchJobs {
       this.save(job, { outreachControl: true });
       if (automatic && this.isMaintaining()) {
         job.status = 'paused';
-        job.reason = 'interrupted';
+        job.reason = interruptedReason(job);
         return this.save(job);
       }
       if (job.input.auto_first_touch) this.onOutreachChange();
@@ -705,7 +728,9 @@ export class BatchJobs {
       this.resuming.has(job.id) ||
       this.provider !== 'native' ||
       job.status !== 'paused' ||
-      !['interrupted', 'uncertain'].includes(job.reason) ||
+      !['interrupted', 'uncertain', 'checkpointed', 'write_uncertain', 'paid_uncertain'].includes(
+        job.reason,
+      ) ||
       job.provider !== this.provider ||
       job.scope !== this.scope
     )
@@ -720,6 +745,10 @@ export class BatchJobs {
         latest.current?.operation_id !== job.current.operation_id
       )
         return;
+      if (latest.batch && (result?.resumeSafe || result?.missing)) {
+        await this.resume(job.id, { automatic: true });
+        return;
+      }
       if (result?.missing === true) {
         await this.accept(latest, {
           stage: 'status',
@@ -759,7 +788,9 @@ export class BatchJobs {
     }
     if (['running', 'stopping'].includes(j.status)) {
       j.status = 'stopping';
+      if (j.batch) j.stopRequested = true;
       this.save(j);
+      this.collecting.get(id)?.abort('stopped');
     } else if (j.status === 'paused') this.finish(j, 'stopped');
     if (j.input.auto_first_touch) this.onOutreachChange();
     return this.get(id);
@@ -780,6 +811,7 @@ export class BatchJobs {
     if (disableFirstTouch) job.input.auto_first_touch = false;
     if (disableFirstTouch || !job.scheduleId) job.autoFirstTouchPaused = true;
     this.save(job, { outreachControl: true });
+    this.collecting.get(id)?.abort();
     this.onOutreachChange();
     return this.get(id);
   }
@@ -791,6 +823,7 @@ export class BatchJobs {
     job.input.auto_first_touch = false;
     job.autoFirstTouchPaused = true;
     this.save(job, { outreachControl: true });
+    this.collecting.get(id)?.abort();
     this.onOutreachChange();
     return this.get(id);
   }
@@ -944,6 +977,11 @@ export class BatchJobs {
           acceptedRow.scrapling_evidence = true;
       }
       if (written) acceptedRow.stored = true;
+      const unresolved = output?.paid_requests?.filter(({ status }) =>
+        ['pending', 'unknown'].includes(status),
+      );
+      if (unresolved?.length) acceptedRow.paid_requests = unresolved;
+      if (output?.web_usage?.web_extract_calls) acceptedRow.web_usage = output.web_usage;
       const metric = job.searchStats?.find((entry) => entry.id === item.search_id);
       if (metric) {
         metric.researched++;
@@ -1006,7 +1044,7 @@ export class BatchJobs {
           this.save(j);
           return;
         }
-        if ((j.inserted || 0) >= j.target) {
+        if (!j.current && (j.inserted || 0) >= j.target) {
           this.finish(j, 'target_reached');
           return;
         }
@@ -1016,7 +1054,14 @@ export class BatchJobs {
         }
         validateCountryScope(j.input);
         const batch = j.executionVersion === unifiedExecutionVersion && j.batch;
-        if (batch) {
+        if (batch && this.isMaintaining()) {
+          j.status = 'paused';
+          j.reason = interruptedReason(j);
+          j.pending = j.current ? 1 : 0;
+          checkpoint(j);
+          return;
+        }
+        if (batch && !j.current) {
           if (j.input.research_budget !== undefined && j.researched >= j.input.research_budget) {
             this.finish(j, 'research_limit');
             return;
@@ -1034,7 +1079,7 @@ export class BatchJobs {
           if (boundary) {
             j.batch = nextBatch(j, boundary);
           }
-        } else {
+        } else if (!batch) {
           const limit =
             j.elapsedMs >= j.limits.timeMs
               ? 'time_limit'
@@ -1048,7 +1093,7 @@ export class BatchJobs {
             return;
           }
         }
-        if (!j.queue.length) {
+        if (!j.current && !j.queue.length) {
           const plan = j.queryPlan || searchPlan(j.input);
           j.searchSignatures ||= [];
           const unusedSearch = (candidate) => {
@@ -1077,34 +1122,42 @@ export class BatchJobs {
             j.mapComparisonVersion && this.mapComparisonEnabled
               ? mapDiscoveryContext(j)
               : undefined;
-          j.searches++;
-          j.pendingSearch = search;
           j.searchStats ||= [];
-          const metric = {
-            id: `${j.id}:search:${j.searches}`,
-            query: search.query,
-            country: search.country,
-            ...(batch ? { batch: j.batch.number, language: search.language || 'en' } : {}),
-            ...(search.searchRegion ? { searchRegion: search.searchRegion } : {}),
-            source_kind: search.source_kind || 'web',
-            family: search.family,
-            startedAt: new Date(this.now()).toISOString(),
-            status: 'running',
-            discovered: 0,
-            filtered: 0,
-            filterReasons: {},
-            filteredSources: [],
-            duplicates: 0,
-            queued: 0,
-            researched: 0,
-            inserted: 0,
-            updated: 0,
-            rejected: 0,
-            review: 0,
-            failed: 0,
-            ratings: { A: 0, B: 0, C: 0, unrated: 0 },
-          };
-          j.searchStats.push(metric);
+          const previous = batch && j.pendingSearch && j.searchStats.at(-1);
+          if (!previous?.discoveryRequestId) j.searches++;
+          j.pendingSearch = search;
+          const metric = previous?.discoveryRequestId
+            ? previous
+            : {
+                id: `${j.id}:search:${j.searches}`,
+                query: search.query,
+                country: search.country,
+                ...(batch ? { batch: j.batch.number, language: search.language || 'en' } : {}),
+                ...(search.searchRegion ? { searchRegion: search.searchRegion } : {}),
+                source_kind: search.source_kind || 'web',
+                family: search.family,
+                startedAt: new Date(this.now()).toISOString(),
+                status: 'running',
+                discovered: 0,
+                filtered: 0,
+                filterReasons: {},
+                filteredSources: [],
+                duplicates: 0,
+                queued: 0,
+                researched: 0,
+                inserted: 0,
+                updated: 0,
+                rejected: 0,
+                review: 0,
+                failed: 0,
+                ratings: { A: 0, B: 0, C: 0, unrated: 0 },
+              };
+          if (!previous?.discoveryRequestId) {
+            if (batch && this.discoveryReady) metric.discoveryRequestId = metric.id + ':request';
+            j.searchStats.push(metric);
+          }
+          metric.status = 'running';
+          delete metric.error;
           if (mapsContext) {
             mapsContext.beforeRequest = (attempts) => {
               metric.maps = { status: 'running', attempts, returned: 0, resolved: 0 };
@@ -1118,11 +1171,22 @@ export class BatchJobs {
               admissionVersion: j.admissionVersion || 'legacy',
               ...(j.identityVersion ? { identityVersion: j.identityVersion } : {}),
               ...(mapsContext ? { mapsContext } : {}),
+              ...(metric.discoveryRequestId
+                ? { discoveryRequestId: metric.discoveryRequestId }
+                : {}),
             });
           } catch (error) {
-            metric.status = 'failed';
-            metric.error = error.status ? error.message : '本次搜索未取得结果';
+            metric.status = error.code === 'ACQUISITION_PAID_UNKNOWN' ? 'uncertain' : 'failed';
+            metric.error =
+              error.status || error.code?.startsWith('ACQUISITION_PAID')
+                ? error.message
+                : '本次搜索未取得结果';
             metric.completedAt = new Date(this.now()).toISOString();
+            if (metric.discoveryRequestId && error.code === 'ACQUISITION_PAID_FAILED') {
+              j.pendingSearch = null;
+              checkpoint(j);
+              continue;
+            }
             checkpoint(j);
             throw error;
           }
@@ -1200,8 +1264,12 @@ export class BatchJobs {
           checkpoint(j);
           continue;
         }
-        const item = j.queue.shift();
-        if (j.mapsPaused && item.discovery_sources?.some(({ kind }) => kind === 'maps')) {
+        const item = j.current || j.queue.shift();
+        if (
+          !j.current &&
+          j.mapsPaused &&
+          item.discovery_sources?.some(({ kind }) => kind === 'maps')
+        ) {
           const website = item.discovery_sources.filter(({ kind }) => kind === 'web');
           if (!website.length) {
             j.review++;
@@ -1214,18 +1282,28 @@ export class BatchJobs {
           item.discovery_sources = website;
         }
         // Keeping one operation in flight per job reserves its final slot until readback.
-        j.current = {
-          ...item,
-          operation_id: `${j.id}-${j.researched + 1}`,
-          ...(j.identityVersion ? { job_id: j.id } : {}),
-        };
-        j.researched++;
-        checkpoint(j);
+        if (!j.current) {
+          j.current = {
+            ...item,
+            operation_id: `${j.id}-${j.researched + 1}`,
+            ...(j.identityVersion ? { job_id: j.id } : {}),
+          };
+          j.researched++;
+          checkpoint(j);
+        }
+        const controller = batch ? new AbortController() : null;
+        if (controller) this.collecting.set(id, controller);
         try {
           const output = await this.research(j.input, j.current, {
             admissionVersion: j.admissionVersion || 'legacy',
             ...(j.identityVersion ? { identityVersion: j.identityVersion } : {}),
-            ...(batch ? { executionVersion: j.executionVersion } : {}),
+            ...(batch
+              ? {
+                  executionVersion: j.executionVersion,
+                  isMaintaining: this.isMaintaining,
+                  signal: controller.signal,
+                }
+              : {}),
             onCollectionQueue: (state, url) => {
               if (this.closed) return;
               const current = this.get(id);
@@ -1239,18 +1317,35 @@ export class BatchJobs {
           j.status = latest.status;
           stamp(j);
           await this.accept(j, output);
-        } catch {
+        } catch (error) {
+          if (error.code === 'ACQUISITION_INTERRUPTED' && this.get(id).status === 'stopping') {
+            this.finish(j, 'stopped');
+            return;
+          }
           j.status = 'paused';
-          j.reason = 'uncertain';
+          j.reason =
+            error.code === 'ACQUISITION_INTERRUPTED'
+              ? interruptedReason(j)
+              : error.code === 'ACQUISITION_PAID_UNKNOWN'
+                ? 'paid_uncertain'
+                : uncertainReason(j);
           j.pending = 1;
+          delete j.collectionWait;
           checkpoint(j);
           return;
+        } finally {
+          this.collecting.delete(id);
         }
       }
-    } catch {
+    } catch (error) {
       const j = this.get(id);
       j.status = 'paused';
-      j.reason = j.current ? 'uncertain' : 'interrupted';
+      j.reason =
+        error.code === 'ACQUISITION_PAID_UNKNOWN'
+          ? 'paid_uncertain'
+          : j.current
+            ? uncertainReason(j)
+            : interruptedReason(j);
       j.pending = j.current ? 1 : 0;
       checkpoint(j);
     } finally {
@@ -1290,12 +1385,17 @@ export class BatchJobs {
       queued: job.queue.length,
     };
   }
+  abortCollectors() {
+    for (const controller of this.collecting.values()) controller.abort();
+  }
   close() {
     if (this.closed) return this.closePromise;
     this.closed = true;
     clearInterval(this.recoveryTimer);
-    if (this.recoveryPromise) {
-      this.closePromise = this.recoveryPromise.finally(() => this.db.close());
+    this.abortCollectors();
+    const pending = [this.recoveryPromise, ...this.workPromises.values()].filter(Boolean);
+    if (pending.length) {
+      this.closePromise = Promise.allSettled(pending).finally(() => this.db.close());
       return this.closePromise;
     }
     this.db.close();

@@ -97,6 +97,7 @@ export interface WebsiteCollectionAttempt {
   method: string;
   status: string;
   reason: string;
+  failure_reason?: string;
   reused?: boolean;
   resource_wait?: { reason: string; wait_ms: number; end?: string };
 }
@@ -108,6 +109,22 @@ export interface AcquisitionReviewDecision {
   product: string;
   admission_fact: string;
   reason: string;
+}
+export interface AcquisitionPaidRequest {
+  id: string;
+  kind: string;
+  provider: string;
+  status: 'pending' | 'completed' | 'failed' | 'unknown';
+  started_at: string;
+  usage?: { credits: number };
+}
+export interface AcquisitionCurrentProgress {
+  id: string;
+  stage: string;
+  collection_attempts: WebsiteCollectionAttempt[];
+  requests: AcquisitionPaidRequest[];
+  research_usage?: ResearchUsage;
+  web_usage?: { web_extract_calls: number; web_extract_credits?: number };
 }
 export interface AcquisitionJob {
   manualPaused?: boolean;
@@ -132,6 +149,7 @@ export interface AcquisitionJob {
   remainingTarget?: number;
   insertedPerHour?: number | null;
   collectionWait?: { reason: string; url: string };
+  currentProgress?: AcquisitionCurrentProgress;
   inserted: number;
   manualInserted?: number;
   confirmedInserted?: number;
@@ -176,6 +194,8 @@ export interface AcquisitionJob {
     search_id?: string;
     search_query?: string;
     collection_attempts?: WebsiteCollectionAttempt[];
+    paid_requests?: AcquisitionPaidRequest[];
+    web_usage?: { web_extract_calls: number; web_extract_credits?: number };
     assessment?: { grade?: string | null; score: number; status: string } | null;
     handoff?: {
       ready: boolean;

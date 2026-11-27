@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, statfsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { domainKey } from './website-identity.mjs';
@@ -9,6 +9,10 @@ import { exclusionDecision } from './exclusion-decision.mjs';
 const MODEL_RESPONSE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MODEL_RESPONSE_LIMIT = 200;
 const PAGE_SNAPSHOT_TTL_MS = 24 * 60 * 60 * 1000;
+const PAGE_SNAPSHOT_RETENTION_MS = 7 * PAGE_SNAPSHOT_TTL_MS;
+const SNAPSHOT_CACHE_BYTES = 64 * 1024 ** 2;
+const MAX_SNAPSHOT_BYTES = 12 * 1024 ** 2;
+const SNAPSHOT_DISK_RESERVE_BYTES = 512 * 1024 ** 2;
 const cacheError = (message) => Object.assign(new Error(message), { status: 400 });
 function modelCacheKey(key) {
   if (typeof key !== 'string' || !/^[a-f0-9]{64}$/i.test(key))
@@ -40,10 +44,12 @@ function modelResponseJson(response) {
 }
 
 export class AcquisitionStore {
-  constructor(path = ':memory:', scope = '') {
+  constructor(path = ':memory:', scope = '', { snapshotCacheBytes = SNAPSHOT_CACHE_BYTES } = {}) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
     this.scope = scope;
+    this.snapshotFolder = path === ':memory:' ? null : dirname(path);
+    this.snapshotCacheBytes = snapshotCacheBytes;
     this.db.exec(
       'PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS acquisition_operations (id TEXT PRIMARY KEY, hash TEXT NOT NULL, data TEXT NOT NULL);',
     );
@@ -79,7 +85,13 @@ export class AcquisitionStore {
       acquired_at TEXT NOT NULL, status TEXT NOT NULL, data TEXT NOT NULL,
       PRIMARY KEY(scope,id)
     ); CREATE INDEX IF NOT EXISTS acquisition_page_snapshots_lookup
-      ON acquisition_page_snapshots(scope,requested_url,acquired_at DESC) WHERE status='ok'`);
+      ON acquisition_page_snapshots(scope,requested_url,acquired_at DESC) WHERE status='ok';
+      CREATE TABLE IF NOT EXISTS acquisition_snapshot_refs (
+        scope TEXT NOT NULL, snapshot_id TEXT NOT NULL, operation_id TEXT NOT NULL,
+        PRIMARY KEY(scope,snapshot_id,operation_id)
+      ) WITHOUT ROWID;
+      CREATE INDEX IF NOT EXISTS acquisition_snapshot_refs_operation
+        ON acquisition_snapshot_refs(scope,operation_id,snapshot_id)`);
   }
   pageSnapshot(requestedUrl, { now = Date.now() } = {}) {
     return this.pageSnapshots(requestedUrl, { now }).at(-1) || null;
@@ -100,20 +112,124 @@ export class AcquisitionStore {
     const directIndex = latest.findIndex(({ method }) => method === 'node');
     return directIndex < 0 ? latest.slice(0, 1) : latest.slice(0, directIndex + 1).reverse();
   }
-  savePageSnapshot(snapshot) {
-    const snapshot_id = createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
+  savePageSnapshot(snapshot, { operationId } = {}) {
+    let data = JSON.stringify(snapshot);
+    if (
+      (snapshot.content || snapshot.raw_content) &&
+      (Buffer.byteLength(data) > MAX_SNAPSHOT_BYTES || !this.canPersistPageBodies())
+    ) {
+      snapshot = {
+        ...snapshot,
+        status: 'deferred',
+        failure_reason: 'snapshot_capacity',
+        content: '',
+        raw_content: '',
+        content_hash: null,
+        gaps: ['page_body'],
+      };
+      data = JSON.stringify(snapshot);
+    }
+    const snapshot_id = createHash('sha256').update(data).digest('hex');
     const stored = { ...snapshot, snapshot_id };
-    this.db
-      .prepare('INSERT OR IGNORE INTO acquisition_page_snapshots VALUES(?,?,?,?,?,?)')
-      .run(
-        this.scope,
-        snapshot_id,
-        snapshot.requested_url,
-        snapshot.acquired_at,
-        snapshot.status,
-        JSON.stringify(stored),
-      );
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db
+        .prepare('INSERT OR IGNORE INTO acquisition_page_snapshots VALUES(?,?,?,?,?,?)')
+        .run(
+          this.scope,
+          snapshot_id,
+          snapshot.requested_url,
+          snapshot.acquired_at,
+          snapshot.status,
+          JSON.stringify(stored),
+        );
+      if (operationId) this.referencePageSnapshot(operationId, snapshot_id);
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
     return stored;
+  }
+  referencePageSnapshot(operationId, snapshotId) {
+    this.db
+      .prepare('INSERT OR IGNORE INTO acquisition_snapshot_refs VALUES(?,?,?)')
+      .run(this.scope, snapshotId, operationId);
+  }
+  referencedPageSnapshots(operationId) {
+    return this.db
+      .prepare(
+        `SELECT p.data FROM acquisition_snapshot_refs r
+        JOIN acquisition_page_snapshots p ON p.scope=r.scope AND p.id=r.snapshot_id
+        WHERE r.scope=? AND r.operation_id=? ORDER BY p.acquired_at,p.rowid`,
+      )
+      .all(this.scope, operationId)
+      .map(({ data }) => JSON.parse(data));
+  }
+  canPersistPageBodies() {
+    if (!this.snapshotFolder) return true;
+    const now = Date.now();
+    if (!this.snapshotDiskCheck || now >= this.snapshotDiskCheck.at + 5000) {
+      const fs = statfsSync(this.snapshotFolder);
+      this.snapshotDiskCheck = {
+        at: now,
+        sufficient: fs.bavail * fs.bsize >= SNAPSHOT_DISK_RESERVE_BYTES,
+      };
+    }
+    return this.snapshotDiskCheck.sufficient;
+  }
+  maintainPageSnapshots() {
+    const now = Date.now();
+    if (this.lastSnapshotCleanup === undefined || now >= this.lastSnapshotCleanup + 3600000) {
+      this.prunePageSnapshots({ now });
+      this.lastSnapshotCleanup = now;
+    }
+  }
+  prunePageSnapshots({ now = Date.now() } = {}) {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const migration = 'snapshot-references-v1';
+      if (
+        !this.db
+          .prepare('SELECT 1 FROM acquisition_migrations WHERE scope=? AND name=?')
+          .get(this.scope, migration)
+      ) {
+        this.db
+          .prepare(
+            `INSERT OR IGNORE INTO acquisition_snapshot_refs
+          SELECT ?, j.atom, o.id FROM acquisition_operations o, json_tree(o.data) j
+          WHERE COALESCE(json_extract(o.data,'$.scope'),'')=? AND j.type='text'
+            AND (j.key='snapshot_id' OR j.path LIKE '%.snapshot_ids')`,
+          )
+          .run(this.scope, this.scope);
+        this.db
+          .prepare('INSERT INTO acquisition_migrations(scope,name) VALUES(?,?)')
+          .run(this.scope, migration);
+      }
+      this.db
+        .prepare(
+          `WITH unreferenced AS (
+        SELECT id, acquired_at,
+          SUM(length(CAST(data AS BLOB))) OVER (ORDER BY acquired_at DESC,rowid DESC) AS total
+        FROM acquisition_page_snapshots p
+        WHERE scope=? AND NOT EXISTS (
+          SELECT 1 FROM acquisition_snapshot_refs r WHERE r.scope=p.scope AND r.snapshot_id=p.id
+        )
+      ) DELETE FROM acquisition_page_snapshots WHERE scope=? AND id IN (
+        SELECT id FROM unreferenced WHERE acquired_at<? OR total>?
+      )`,
+        )
+        .run(
+          this.scope,
+          this.scope,
+          new Date(now - PAGE_SNAPSHOT_RETENTION_MS).toISOString(),
+          this.canPersistPageBodies() ? this.snapshotCacheBytes : 0,
+        );
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
   snapshotById(id) {
     const row = this.db
@@ -377,6 +493,7 @@ export class AcquisitionStore {
   complete(operation, output) {
     operation.state = 'completed';
     operation.output = output;
+    for (const request of Object.values(operation.paid_requests || {})) delete request.response;
     return this.save(operation);
   }
   byAssessment(id) {

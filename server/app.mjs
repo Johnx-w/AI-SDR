@@ -126,7 +126,9 @@ export function createApp({
     if (parsed?.protocol !== 'https:' || parsed.origin !== publicOrigin)
       throw new Error('PUBLIC_ORIGIN 只接受不带路径的 HTTPS 来源');
   }
+  let shuttingDown = false;
   const isMaintaining = () =>
+    shuttingDown ||
     Boolean(env.RELEASE_MAINTENANCE_PATH && existsSync(env.RELEASE_MAINTENANCE_PATH));
   let apiRequests = 0;
   const connections = new ApiConnections({ env, path: env.CONNECTIONS_PATH });
@@ -182,6 +184,7 @@ export function createApp({
       discover: (...args) => provider.discover(...args),
       research: (...args) => provider.research(...args),
       status: (id) => provider.status(id),
+      discoveryReady: (id) => provider.discoveryReady(id),
       identityVersion: provider.identityVersion,
       mapComparisonEnabled: provider.mapComparisonEnabled,
       readLeads: verifiedLeads,
@@ -199,9 +202,15 @@ export function createApp({
     const totals = { manualInserted, confirmedInserted: (snapshot.inserted || 0) + manualInserted };
     if (summary) return { ...snapshot, ...totals };
     const resolutions = reviews().forJob(job.id);
+    const progressId =
+      job.current?.operation_id ||
+      (job.pendingSearch && job.searchStats.at(-1)?.discoveryRequestId);
     return {
       ...snapshot,
       ...totals,
+      ...(job.batch && progressId && job.scope === acquisitionScope()
+        ? { currentProgress: provider.operationProgress(progressId) }
+        : {}),
       rows: snapshot.rows.map((row, index) => ({
         ...row,
         ...(resolutions.has(index) ? { review_resolution: resolutions.get(index) } : {}),
@@ -1353,6 +1362,8 @@ export function createApp({
   });
   let backgroundStarted = false;
   let maintenanceTimer;
+  let cleanupWork;
+  let shutdownWork;
   const startBackground = () => {
     if (backgroundStarted || isMaintaining()) return;
     backgroundStarted = true;
@@ -1363,30 +1374,50 @@ export function createApp({
   server.on('listening', () => {
     if (localMailInspection) return;
     startBackground();
-    maintenanceTimer = setInterval(startBackground, 1000);
+    maintenanceTimer = setInterval(() => {
+      if (isMaintaining()) batch?.abortCollectors();
+      else {
+        startBackground();
+        try {
+          provider.maintainPageSnapshots();
+        } catch (error) {
+          console.error('官网快照清理失败：' + error.message);
+        }
+      }
+    }, 1000);
     maintenanceTimer.unref();
     operationalTimer = setInterval(syncOperations, 60000);
     operationalTimer.unref();
   });
   server.on('close', () => {
+    shuttingDown = true;
     for (const { timer } of materialUploads.values()) clearTimeout(timer);
     materialUploads.clear();
     clearInterval(maintenanceTimer);
     clearInterval(operationalTimer);
     void brandingCache.close();
     if (outbound) void outbound.close();
-    const cleanup = () => {
+    const cleanup = async () => {
       const customerSync = provider.closeArchive?.();
-      if (customerSync) void customerSync.finally(() => leadLibrary?.close());
-      else leadLibrary?.close();
+      if (customerSync) await Promise.allSettled([customerSync]);
+      leadLibrary?.close();
       products?.close();
       productKnowledge?.close();
-      if (!batch?.busy && !running) provider.close();
+      await provider.close();
     };
-    const pending = [batch && !batch.busy ? batch.close() : null, business.close()].filter(Boolean);
-    if (pending.length) void Promise.allSettled(pending).then(cleanup);
-    else cleanup();
+    const pending = [batch?.close(), business.close()].filter(Boolean);
+    cleanupWork = Promise.allSettled(pending).then(cleanup);
+    void cleanupWork.catch((error) => console.error(error.message));
     schedules?.close();
   });
+  server.shutdown = () => {
+    if (shutdownWork) return shutdownWork;
+    shuttingDown = true;
+    batch?.abortCollectors();
+    shutdownWork = new Promise((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    ).then(() => cleanupWork);
+    return shutdownWork;
+  };
   return server;
 }
