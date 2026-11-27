@@ -64,3 +64,5 @@ Hillarys 的介绍页和首页受访问挑战拦截，继续保留待核实。�
 澳大利亚配对试跑的基线组曾将 NSW 采购门户的供应商档案链接写为 PAMIDO PTY LTD 官网。原文明确表明内容由被列示供应商自报，且另列了企业独立域名。正式任务现将可识别的供应商档案留待核实。隔离主库回归使用该档案、另一家资料门户及独立经营者官网，收录 1 家、待核实 2 家，并确认只有独立官网进入模型研究。同站跳转至供应商档案也按待核实处理。
 
 修复版 `834f240` 通过正式任务 API 回放了原 AU-1-A 的四条候选、页面快照和模型结果。预期收录 Camerons、ONESOLOMON 和 The Blind Factory，NSW 供应商档案待核实。新建的隔离主库实际读回 3 家及各自官网。执行记录另保留 1 条待核实。原运行共有 4 家入库，差异为去除错误官网绑定的 1 家。采购档案未再调用提取和模型，整个回放未使用真实供应商调用。受限本地复验记录为 `ai-sdr-834f240-au1-custody-BoWYxd/result.json`。
+
+美国自然试跑 US-1-B 曾把 ExcellentContractor 商家目录记录写为 Window Products 官网。同一立即任务 API 在隔离 SQLite 使用该次的档案、首页原文节选和模型替身重现 1 条错绑。修复后原输入产生 0 条新增和 1 条待核实，模型替身未收到研究请求。第二组使用 ContractorsUp 的首页原文节选、生成的商家档案、NSW 采购档案、Window Products 独立官网原文节选和带评价控件的自营数字产品页。两个档案均待核实，两个独立官网各读回一条档案，只有独立官网进入模型研究。验证命令为 `node --test --test-name-pattern='自然搜索中的承包商目录|经营目录及采购档案' tests/native-acquisition.test.mjs`。原自然试跑与离线复验分开统计。[独立官网联系页](https://www.windowproductsct.com/window-products-contact/)
