@@ -60,6 +60,18 @@ const senderVersion = (m) =>
     m.signature,
     ...(m.signatureDesign ? [m.signatureDesign] : []),
   ]);
+// Only the exact former digest proves that identity and coverage are unchanged.
+const legacySenderVersion = (m) =>
+  hash([
+    m.id,
+    m.email,
+    m.displayName,
+    m.signature,
+    ...(m.signatureDesign ? [m.signatureDesign] : []),
+    [...(m.productIds || [])].sort(),
+  ]);
+const matchesSender = (m, version) =>
+  version === senderVersion(m) || version === legacySenderVersion(m);
 const dayFormat = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' });
 const day = (date) => dayFormat.format(new Date(date));
 function sendWindowError(w) {
@@ -995,7 +1007,7 @@ export class OutreachService {
         const draft = prepared.find((delivery) => delivery.customerId === lead.id);
         const mailbox = draft && this.mailboxes.get(draft.mailboxId);
         // Same-round configuration repairs cannot change a prepared email's sender identity.
-        return !draft || (mailbox && draft.senderVersion === senderVersion(mailbox));
+        return !draft || (mailbox && matchesSender(mailbox, draft.senderVersion));
       });
     }
     const existing = ignoreDelivery ? this.delivery(ignoreDelivery) : null;
@@ -1839,6 +1851,10 @@ export class OutreachService {
       this.delivery(d.id).status !== 'queued'
     )
       return;
+    if (d.senderVersion === legacySenderVersion(m)) {
+      d = { ...d, senderVersion: senderVersion(m) };
+      this.putDelivery(d);
+    }
     if (senderVersion(m) !== d.senderVersion) {
       this.putDelivery({
         ...d,

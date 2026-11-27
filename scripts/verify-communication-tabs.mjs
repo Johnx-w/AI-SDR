@@ -99,10 +99,18 @@ const boxes = new OutreachMailboxes({
   }),
   imapFactory: assert.fail,
 });
+const saleProduct = {
+  id: 'qa-product',
+  name: 'QA 供货产品',
+  direction: 'finished',
+  status: 'approved',
+  sourceUrl: 'https://brand.example',
+};
 const customer = { id: 'test-buyer', name: 'QA buyer', email: 'buyer@dealer.example' };
 const service = new OutreachService({
   path: join(directory, 'outreach.sqlite'),
   mailboxes: boxes,
+  products: () => [saleProduct],
   customers: () => [customer],
   now: () => Date.parse('2026-01-01T12:00:00Z'),
 });
@@ -126,7 +134,18 @@ try {
     })),
   );
   const box = mailboxes[0];
-  for (const mailbox of mailboxes) await boxes.verify(mailbox.id);
+  for (const mailbox of mailboxes) {
+    await boxes.save(
+      {
+        id: mailbox.id,
+        revision: boxes.get(mailbox.id).revision,
+        website: 'https://brand.example',
+        productIds: [saleProduct.id],
+      },
+      () => [saleProduct],
+    );
+    await boxes.verify(mailbox.id);
+  }
   while (!app.listening) {
     try {
       await new Promise((resolve, reject) => {
@@ -204,6 +223,7 @@ try {
   assert.equal(await rules.locator('ol li').count(), 3);
   const campaign = service.saveCampaign({
     name: 'QA follow-up sequence',
+    filters: { products: [saleProduct.id] },
     mailboxIds: [box.id],
     followUpEnabled: true,
   });

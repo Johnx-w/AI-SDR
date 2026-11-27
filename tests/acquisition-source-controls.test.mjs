@@ -80,12 +80,17 @@ test('删除关联触达只暂停目标来源，关闭两处首发并保留队�
     open();
     assert.equal(jobs.get(a.id).manualPaused, true);
     assert.equal(plans.get(plan.id).input.auto_first_touch, false);
-    const resumed = await jobs.resume(a.id);
+    const resumed = await jobs.resume(a.id, {
+      sourceControlRevision: jobs.get(a.id).sourceControlRevision || 0,
+    });
     assert.equal(resumed.status, 'running');
     assert.equal(resumed.input.auto_first_touch, false);
     jobs.delete(a.id);
     assert.equal(jobs.get(a.id).reason, 'source_deleted');
-    await assert.rejects(jobs.resume(a.id), { status: 409 });
+    await assert.rejects(
+      jobs.resume(a.id, { sourceControlRevision: jobs.get(a.id).sourceControlRevision || 0 }),
+      { status: 409 },
+    );
   } finally {
     plans.close();
     jobs.close();
@@ -139,7 +144,7 @@ test('当前企业保存期间暂停：只接受该企业结果，不启动下�
     assert.equal(paused.input.auto_first_touch, false);
     await jobs.resumeInterrupted();
     assert.equal(calls, 1);
-    await jobs.resume(job.id);
+    await jobs.resume(job.id, { sourceControlRevision: paused.sourceControlRevision || 0 });
     await jobs.work(job.id);
     assert.equal(jobs.get(job.id).inserted, 2);
     assert.equal(calls, 2);
@@ -174,7 +179,9 @@ test('定时来源暂停后旧调度检查点不能恢复开关，人工恢复�
     assert.equal(plans.get(plan.id).status, 'paused');
     assert.equal(plans.get(plan.id).input.auto_first_touch, false);
     jobs.delete(job.id);
-    plans.control(plan.id, 'resume');
+    plans.control(plan.id, 'resume', {
+      sourceControlRevision: plans.get(plan.id).sourceControlRevision || 0,
+    });
     now = Date.parse('2030-01-01T01:00:00Z');
     plans.tick();
     const next = jobs.get(plans.get(plan.id).lastJobId);
@@ -271,12 +278,19 @@ test('正常HTTP入口读取来源、暂停、继续、删除与不存在对象�
       },
       async (base) => {
         const url = `${base}/api/v1/acquisition/jobs/${a.id}`;
-        const post = (action) => fetch(`${url}/${action}`, { method: 'POST' });
-        assert.equal((await post('pause')).status, 200);
-        const resumed = await post('resume');
+        const post = (action, sourceControlRevision) =>
+          fetch(`${url}/${action}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sourceControlRevision }),
+          });
+        const pausedResponse = await post('pause');
+        assert.equal(pausedResponse.status, 200);
+        const pausedSnapshot = await pausedResponse.json();
+        const resumed = await post('resume', pausedSnapshot.sourceControlRevision);
         assert.equal(resumed.status, 200);
         assert.equal((await resumed.json()).input.auto_first_touch, false);
-        assert.equal((await post('resume')).status, 200);
+        assert.equal((await post('resume', pausedSnapshot.sourceControlRevision)).status, 200);
         const before = await (await fetch(url)).json();
         const authorize = (sourceControlRevision) =>
           fetch(`${url}/auto-first-touch`, {

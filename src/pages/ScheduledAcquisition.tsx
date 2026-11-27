@@ -77,7 +77,11 @@ export function ScheduledAcquisition() {
     setBusy(plan.id);
     setError('');
     try {
-      const updated = await acquisitionApi.controlSchedule(plan.id, action);
+      const updated = await acquisitionApi.controlSchedule(
+        plan.id,
+        action,
+        plan.sourceControlRevision || 0,
+      );
       readVersion.current++;
       reading.current = false;
       setPlans((current) => current.map((p) => (p.id === plan.id ? updated : p)));
@@ -91,7 +95,11 @@ export function ScheduledAcquisition() {
     setBusy(id);
     setError('');
     try {
-      await acquisitionApi.controlJob(id, action);
+      await acquisitionApi.controlJob(
+        id,
+        action,
+        plans.find((plan) => plan.lastJob?.id === id)?.lastJob?.sourceControlRevision || 0,
+      );
       readVersion.current++;
       reading.current = false;
       await load(true);

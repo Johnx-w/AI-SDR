@@ -132,6 +132,7 @@ export class BatchJobs {
     if ((latest?.sourceControlRevision || 0) > (job.sourceControlRevision || 0)) {
       for (const key of [
         'sourceControlRevision',
+        'sourceResumeRevision',
         'outreachGeneration',
         'outreachAuthorizationRevision',
         'manualPaused',
@@ -250,7 +251,11 @@ export class BatchJobs {
       .all()
       .map((row) => JSON.parse(row.data)));
   }
-  controlOutreach(id, enabled, { sourceControlRevision, fromSchedule = false } = {}) {
+  controlOutreach(
+    id,
+    enabled,
+    { sourceControlRevision, fromSchedule = false, notify = true } = {},
+  ) {
     if (typeof enabled !== 'boolean') throw fail(400, '请明确选择开启或暂停自动首发');
     const job = this.get(id);
     if (job.sourceDeletedAt) throw fail(409, '来源已删除');
@@ -279,7 +284,7 @@ export class BatchJobs {
       job.autoFirstTouchPaused = !validateAutoFirstTouch(enabled);
     }
     this.save(job, { outreachControl: true });
-    this.onOutreachChange();
+    if (notify) this.onOutreachChange();
     return job;
   }
   cancelOutreach(id, confirmed) {
@@ -491,9 +496,21 @@ export class BatchJobs {
     );
     return { newRecord: true, reason: 'new_business_record' };
   }
-  async resume(id, { automatic = false } = {}) {
+  async resume(id, { automatic = false, sourceControlRevision } = {}) {
     if (this.closed) throw fail(409, '服务已关闭');
     const current = this.get(id);
+    if (
+      !automatic &&
+      current.sourcePause?.outreachPlanId &&
+      sourceControlRevision !== (current.sourceControlRevision || 0) &&
+      !(
+        sourceControlRevision !== undefined &&
+        sourceControlRevision === current.sourceResumeRevision &&
+        !current.manualPaused &&
+        ['running', 'completed', 'partial'].includes(current.status)
+      )
+    )
+      throw fail(409, '来源控制已变化，请刷新后继续');
     if (
       current.sourcePause?.outreachPlanId &&
       !current.sourceDeletedAt &&
@@ -528,6 +545,7 @@ export class BatchJobs {
       job.manualPaused = false;
       if (!job.sourcePause?.outreachPlanId || job.input.auto_first_touch)
         job.autoFirstTouchPaused = false;
+      job.sourceResumeRevision = revision;
       job.sourceControlRevision = revision + 1;
       this.save(job, { outreachControl: true });
       if (automatic && this.isMaintaining()) {

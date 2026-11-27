@@ -33,14 +33,54 @@ export class AcquisitionSchedules {
     this.scope = scope;
     this.onOutreachChange = onOutreachChange;
     this.isMaintaining = isMaintaining;
+    this.db.exec(
+      'CREATE TABLE IF NOT EXISTS outreach_authorizations(id TEXT PRIMARY KEY, data TEXT NOT NULL)',
+    );
+    this.recoverAuthorizations();
+  }
+  recoverAuthorizations() {
+    for (const row of this.db.prepare('SELECT data FROM outreach_authorizations').all()) {
+      const { plan, job } = JSON.parse(row.data);
+      // A crash before completion rolls the unacknowledged authorization back.
+      if (job) {
+        const manager = this.jobs();
+        const current = manager.get(job.id);
+        if ((current.sourceControlRevision || 0) <= (job.sourceControlRevision || 0) + 1) {
+          for (const key of [
+            'sourceControlRevision',
+            'sourceResumeRevision',
+            'outreachGeneration',
+            'outreachAuthorizationRevision',
+            'autoFirstTouchPaused',
+          ]) {
+            if (Object.hasOwn(job, key)) current[key] = job[key];
+            else delete current[key];
+          }
+          current.input.auto_first_touch = job.input.auto_first_touch;
+          manager.db
+            .prepare('UPDATE jobs SET data=? WHERE id=?')
+            .run(JSON.stringify(current), job.id);
+        }
+        manager.outreachSnapshot = null;
+      }
+      const stored = this.db.prepare('SELECT data FROM schedules WHERE id=?').get(plan.id);
+      const latest = stored && JSON.parse(stored.data);
+      if (latest && (latest.sourceControlRevision || 0) <= (plan.sourceControlRevision || 0) + 1)
+        this.db
+          .prepare('UPDATE schedules SET data=? WHERE id=?')
+          .run(JSON.stringify(plan), plan.id);
+      this.db.prepare('DELETE FROM outreach_authorizations WHERE id=?').run(plan.id);
+    }
   }
   list() {
+    this.recoverAuthorizations();
     return this.db
       .prepare('SELECT data FROM schedules ORDER BY rowid DESC')
       .all()
       .map((row) => JSON.parse(row.data));
   }
   get(id) {
+    this.recoverAuthorizations();
     const row = this.db.prepare('SELECT data FROM schedules WHERE id=?').get(id);
     if (!row) throw fail(404, '定时计划不存在');
     return JSON.parse(row.data);
@@ -134,7 +174,10 @@ export class AcquisitionSchedules {
       plan.sourcePause?.outreachPlanId &&
       input.auto_first_touch !== plan.input.auto_first_touch
     ) {
-      plan = this.controlOutreach(id, input.auto_first_touch === true, { sourceControlRevision });
+      return this.controlOutreach(id, input.auto_first_touch === true, {
+        sourceControlRevision,
+        changes: { name: name.trim(), input, timing: normalized, nextRunAt, lastError: '' },
+      });
     }
     plan.name = name.trim();
     plan.input = input;
@@ -145,7 +188,7 @@ export class AcquisitionSchedules {
     this.onOutreachChange();
     return plan;
   }
-  control(id, action) {
+  control(id, action, { sourceControlRevision } = {}) {
     const plan = this.get(id);
     if (!['pause', 'resume', 'close', 'delete'].includes(action))
       throw fail(400, '不支持的计划操作');
@@ -159,6 +202,17 @@ export class AcquisitionSchedules {
     )
       throw fail(409, '该计划已结束');
     if (action === 'resume') {
+      if (
+        plan.sourcePause?.outreachPlanId &&
+        sourceControlRevision !== (plan.sourceControlRevision || 0) &&
+        !(
+          sourceControlRevision !== undefined &&
+          plan.status === 'enabled' &&
+          sourceControlRevision === plan.sourceResumeRevision
+        )
+      )
+        throw fail(409, '来源已更新，请刷新后继续');
+      plan.sourceResumeRevision = plan.sourceControlRevision || 0;
       if (plan.sourcePause?.outreachPlanId && plan.status === 'enabled') return plan;
       if (!['paused', 'closed'].includes(plan.status))
         throw fail(409, '只有暂停或关闭的计划可以恢复');
@@ -196,9 +250,11 @@ export class AcquisitionSchedules {
     this.onOutreachChange();
     return plan;
   }
-  controlOutreach(id, enabled, { sourceControlRevision } = {}) {
+  controlOutreach(id, enabled, { sourceControlRevision, changes } = {}) {
     if (typeof enabled !== 'boolean') throw fail(400, '请明确选择开启或关闭自动首发');
+    this.recoverAuthorizations();
     const plan = this.get(id);
+    const original = structuredClone(plan);
     if (plan.status === 'closed' || plan.sourceDeletedAt) throw fail(409, '该计划已关闭');
     if (plan.sourcePause?.outreachPlanId) {
       const revision = plan.sourceControlRevision || 0;
@@ -212,18 +268,30 @@ export class AcquisitionSchedules {
         throw fail(409, '来源已更新，请刷新后重新保存自动首发授权');
       }
       if (plan.input.auto_first_touch === enabled) return plan;
-      if (plan.lastJobId) {
-        const job = this.jobs().get(plan.lastJobId);
-        this.jobs().controlOutreach(job.id, enabled, {
-          sourceControlRevision: job.sourceControlRevision || 0,
-          fromSchedule: true,
-        });
-      }
       if (enabled) plan.outreachAuthorizationRevision = revision;
       plan.sourceControlRevision = revision + 1;
     }
-    plan.input.auto_first_touch = validateAutoFirstTouch(enabled);
-    this.save(plan);
+    const manager = this.jobs();
+    const job =
+      plan.sourcePause?.outreachPlanId && plan.lastJobId ? manager.get(plan.lastJobId) : null;
+    this.db
+      .prepare('INSERT INTO outreach_authorizations VALUES(?,?)')
+      .run(id, JSON.stringify({ plan: original, job }));
+    try {
+      if (job)
+        manager.controlOutreach(job.id, enabled, {
+          sourceControlRevision: job.sourceControlRevision || 0,
+          fromSchedule: true,
+          notify: false,
+        });
+      if (changes) Object.assign(plan, changes);
+      plan.input.auto_first_touch = validateAutoFirstTouch(enabled);
+      this.save(plan);
+      this.db.prepare('DELETE FROM outreach_authorizations WHERE id=?').run(id);
+    } catch (error) {
+      this.recoverAuthorizations();
+      throw error;
+    }
     this.onOutreachChange();
     return plan;
   }
