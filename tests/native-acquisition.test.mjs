@@ -1904,3 +1904,111 @@ test('新版官网采集记录跨站和非公网来源，禁止交给外部补�
     svc.close();
   }
 });
+test('主办方官网从法律声明取得身份后排除，参展与匿名对照保持待核实', async () => {
+  const role = 'Become an exhibitor at GaLaBau';
+  const roleForVendor = 'Oakleaf Shade is listed as an exhibitor showing outdoor roller blinds.';
+  for (const [domain, noticePath, exhibitor, outcome] of [
+    ['www.galabau-messe.com', '/en/legal-notice', false, 'rejected'],
+    ['event-owner.example.org', '/imprint', false, 'rejected'],
+    ['www.galabau-messe.com', '/en/legal-notice', true, 'review'],
+    ['event-unverified.example.org', '', false, 'review'],
+  ]) {
+    const origin = 'https://' + domain;
+    const source = origin + (exhibitor ? '/en/exhibitors/oakleaf' : '/en/exhibit');
+    const imprint = origin + noticePath;
+    const name = domain.startsWith('www.galabau') ? 'NürnbergMesse GmbH' : 'Arc Event Owner GmbH';
+    const quote = noticePath === '/imprint' ? 'Copyright ' + name : name;
+    const mainText = exhibitor ? roleForVendor : role;
+    const { make, fetchImpl } = fixture();
+    const native = make({
+      readPage: async (url) => ({
+        html:
+          url.href === source
+            ? [
+                '<p>' + mainText + '</p>',
+                '<a href="/en/contact">Contact</a><a href="/en/contact/partners">Sales partners</a>',
+                '<a href="/en/about">About</a>',
+                noticePath ? '<a href="' + noticePath + '"><span>Imprint</span></a>' : '',
+              ].join('')
+            : noticePath && url.href === imprint
+              ? '<h1>Imprint</h1><p>' + quote + '</p>'
+              : '<p>Information for visitors.</p>',
+      }),
+      fetchImpl: async (url, options) => {
+        if (url !== 'https://api.deepseek.com/responses') return fetchImpl(url, options);
+        const request = JSON.parse(options.body);
+        const { pages } = JSON.parse(request.input[1].content);
+        const notice =
+          noticePath &&
+          pages.find((page) => page.source_url === imprint && page.text.includes(quote));
+        const evidence = (value, quote, source_url = source) => ({ value, quote, source_url });
+        return json({
+          status: 'completed',
+          output: [
+            {
+              content: [
+                {
+                  type: 'output_text',
+                  text: JSON.stringify({
+                    company_name: notice ? evidence(name, quote, imprint) : null,
+                    legal_company_name: notice ? evidence(name, quote, imprint) : null,
+                    entity_type: evidence('business', mainText),
+                    admission_facts: [
+                      evidence(exhibitor ? 'third_party_profile' : 'trade_show_operator', mainText),
+                    ],
+                  }),
+                },
+              ],
+            },
+          ],
+        });
+      },
+    });
+    try {
+      const result = await native.research(
+        { ...input, product_scope: 'all', product: 'window coverings' },
+        { source_url: source, operation_id: 'legal-notice-selection' },
+        { admissionVersion: 'website-admission-v1' },
+      );
+      assert.equal(result.outcome, outcome, source);
+      assert.equal(result.新增, 0, source);
+      if (noticePath)
+        assert.equal(
+          result.collection_attempts.find((attempt) => attempt.requested_url === imprint)?.status,
+          'ok',
+          source,
+        );
+      if (outcome === 'rejected') {
+        assert.equal(result.research.company_name, name, source);
+        assert.equal(
+          result.research.facts.find((fact) => fact.field === 'legal_company_name').source_url,
+          imprint,
+        );
+      }
+    } finally {
+      native.close();
+    }
+  }
+});
+test('官网研究正文解码法人名称和标点，保留数值字符与短页原文', async () => {
+  const { make } = fixture();
+  const pages = new Map([
+    ['https://organizer.example.org/', ['<p>N&uuml;rnbergMesse GmbH</p>', 'NürnbergMesse GmbH']],
+    [
+      'https://dealer.example.org/',
+      ['<p>Dealer&rsquo;s blinds &#x2013; &#x1f31e;</p>', 'Dealer’s blinds – 🌞'],
+    ],
+    ['https://plain.example.org/', ['<p>Plain Blinds</p>', 'Plain Blinds']],
+  ]);
+  const native = make({
+    readPage: async (url) => ({ html: pages.get(url.href)[0] }),
+  });
+  try {
+    for (const [url, [, expected]] of pages) {
+      const collected = await native.collect(url, { unified: true });
+      assert.equal(collected.page_text, expected, url);
+    }
+  } finally {
+    native.close();
+  }
+});

@@ -304,7 +304,9 @@ export function extractWebsiteMetadata({ content, sourceUrl }) {
 export function planWebsitePages(sourceUrl, content = '', { includeProducts = false } = {}) {
   const base = websiteScope(sourceUrl);
   if (!base) return [];
+  const imprint = (path) => /\/(?:impressum|imprint|legal[-_]notice)\/?$/i.test(path);
   const legalPage = (path) =>
+    (includeProducts && imprint(path)) ||
     /\/(?:privacy(?:[-_/](?:policy|notice|statement))?|terms(?:[-_/](?:and|conditions|of|service|use))*|legal|impressum)\/?$/i.test(
       path,
     );
@@ -340,17 +342,19 @@ export function planWebsitePages(sourceUrl, content = '', { includeProducts = fa
     .filter((u) => !first.includes(u))
     .sort((a, b) => {
       const priority = (url) =>
-        includeProducts && legalPage(websiteScope(url)?.path || '')
-          ? 5
-          : includeProducts && productPage(websiteScope(url)?.path || '')
-            ? 4
-            : /contact|联系我们|聯絡/i.test(url)
-              ? 3
-              : /about/i.test(url)
-                ? 2
-                : legalPage(websiteScope(url)?.path || '')
-                  ? 1
-                  : 0;
+        includeProducts && imprint(websiteScope(url)?.path || '')
+          ? 6
+          : includeProducts && legalPage(websiteScope(url)?.path || '')
+            ? 5
+            : includeProducts && productPage(websiteScope(url)?.path || '')
+              ? 4
+              : /contact|联系我们|聯絡/i.test(url)
+                ? 3
+                : /about/i.test(url)
+                  ? 2
+                  : legalPage(websiteScope(url)?.path || '')
+                    ? 1
+                    : 0;
       return priority(b) - priority(a);
     });
   return [...first, ...extra].slice(0, 5);
