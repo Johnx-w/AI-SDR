@@ -79,6 +79,15 @@ export interface WebsiteCollectionAttempt {
   reason: string;
   reused?: boolean;
 }
+export interface AcquisitionReviewDecision {
+  source_url: string;
+  company_name: string;
+  identity_quote: string;
+  operating_quote: string;
+  product: string;
+  admission_fact: string;
+  reason: string;
+}
 export interface AcquisitionJob {
   manualPaused?: boolean;
   sourcePause?: { outreachPlanId?: string; reason: string };
@@ -96,6 +105,8 @@ export interface AcquisitionJob {
   countPolicy?: string;
   admissionVersion?: string;
   inserted: number;
+  manualInserted?: number;
+  confirmedInserted?: number;
   updated: number;
   skipped: number;
   rejected: number;
@@ -144,6 +155,10 @@ export interface AcquisitionJob {
       record_id?: string | null;
       reason?: string;
       updated_at: string;
+      actor?: string;
+      submitted_at?: string;
+      decided_at?: string;
+      decision?: AcquisitionReviewDecision;
     };
   }[];
 }

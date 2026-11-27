@@ -426,7 +426,10 @@ export class LeadLibrary {
         .run(this.scope, lead.id, position, summary, detail, projection.version);
       if (mirror)
         this.db
-          .prepare('INSERT OR REPLACE INTO customer_archive_sync VALUES(?,?,?)')
+          .prepare(
+            `INSERT INTO customer_archive_sync VALUES(?,?,?)
+            ON CONFLICT(scope,record_id) DO UPDATE SET data=excluded.data`,
+          )
           .run(this.scope, lead.id, JSON.stringify(mirror));
       this.db
         .prepare('INSERT OR REPLACE INTO lead_library_sync VALUES(?,?,?,?)')

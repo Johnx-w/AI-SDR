@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import type { AcquisitionJob, WebsiteCollectionAttempt } from '../domain/types';
+import type {
+  AcquisitionJob,
+  AcquisitionReviewDecision,
+  WebsiteCollectionAttempt,
+} from '../domain/types';
 import { WORLDWIDE_COUNTRY, WORLDWIDE_LABEL } from '../domain/country-catalog';
 import { acquisitionApi } from '../services/acquisition';
 import { Modal } from './ui';
@@ -38,6 +42,7 @@ function safeUrl(value?: string | null) {
   }
 }
 type ReviewRow = AcquisitionJob['rows'][number];
+type ReviewResolution = NonNullable<ReviewRow['review_resolution']>;
 type HandoffContact = NonNullable<NonNullable<ReviewRow['handoff']>['contacts']>[number];
 function HandoffContacts({ contacts = [] }: { contacts?: HandoffContact[] }) {
   const presented: { contact: HandoffContact; href: string }[] = [];
@@ -134,7 +139,17 @@ function CollectionAttempts({ attempts }: { attempts?: WebsiteCollectionAttempt[
     </details>
   );
 }
-function ReviewAction({ jobId, index, row }: { jobId: string; index: number; row: ReviewRow }) {
+function ReviewAction({
+  jobId,
+  index,
+  row,
+  onResolved,
+}: {
+  jobId: string;
+  index: number;
+  row: ReviewRow;
+  onResolved: (index: number, resolution: ReviewResolution) => void;
+}) {
   const [sourceUrl, setSourceUrl] = useState(
     row.review_resolution?.source_url || row.source_url || '',
   );
@@ -143,6 +158,7 @@ function ReviewAction({ jobId, index, row }: { jobId: string; index: number; row
     useState<Awaited<ReturnType<typeof acquisitionApi.reviewEvidence>>['evidence']>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [manual, setManual] = useState(false);
   const key = useRef(row.review_resolution?.key || '');
   useEffect(() => {
     if (!row.review_resolution) return;
@@ -176,18 +192,42 @@ function ReviewAction({ jobId, index, row }: { jobId: string; index: number; row
     setBusy(true);
     setError('');
     if (!uncertain) key.current = crypto.randomUUID();
+    const form = new FormData(event.currentTarget as HTMLFormElement);
+    const field = (name: string) => String(form.get(name) || '').trim();
+    const actor = uncertain ? resolution?.actor : field('actor');
+    const decision: AcquisitionReviewDecision | undefined = uncertain
+      ? resolution?.decision
+      : manual
+        ? {
+            source_url: field('evidence_url') || sourceUrl,
+            company_name: field('company_name'),
+            identity_quote: field('identity_quote'),
+            operating_quote: field('operating_quote'),
+            product: field('product'),
+            admission_fact: field('admission_fact'),
+            reason: field('reason'),
+          }
+        : undefined;
     try {
       const result = await acquisitionApi.reviewCandidate(
         jobId,
         index,
         uncertain ? resolution!.source_url : sourceUrl,
         key.current,
+        actor,
+        decision,
       );
       setResolution(result.resolution);
+      onResolved(index, result.resolution);
       const latest = await acquisitionApi.reviewEvidence(jobId, index).catch(() => null);
       if (latest) setEvidence(latest.evidence);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '核实失败');
+      const latest = await acquisitionApi.reviewEvidence(jobId, index).catch(() => null);
+      if (latest?.resolution) {
+        setResolution(latest.resolution);
+        key.current = latest.resolution.key;
+      }
     } finally {
       setBusy(false);
     }
@@ -227,6 +267,15 @@ function ReviewAction({ jobId, index, row }: { jobId: string; index: number; row
         </small>
       )}
       {resolution?.reason && <small>{resolution.reason}</small>}
+      {resolution?.actor && (
+        <small>
+          操作者 {resolution.actor} ·{' '}
+          {resolution.decided_at
+            ? new Date(resolution.decided_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
+            : '结果待确认'}
+        </small>
+      )}
+      {resolution?.decision && <small>人工依据 {resolution.decision.reason}</small>}
       {recorded ? (
         <small>
           {resolution?.record_id ? (
@@ -248,6 +297,66 @@ function ReviewAction({ jobId, index, row }: { jobId: string; index: number; row
               onChange={(event) => setSourceUrl(event.target.value)}
             />
           </label>
+          {!uncertain && (
+            <>
+              <label>
+                操作者
+                <input
+                  name="actor"
+                  required
+                  maxLength={100}
+                  defaultValue={resolution?.actor === '未署名' ? '' : resolution?.actor}
+                />
+              </label>
+              <label>
+                <span>
+                  <input
+                    type="checkbox"
+                    checked={manual}
+                    onChange={(event) => setManual(event.target.checked)}
+                  />{' '}
+                  提交人工裁定依据
+                </span>
+              </label>
+              {manual && (
+                <fieldset className="acquisition-review-evidence">
+                  <legend>官网原文</legend>
+                  <label>
+                    证据页面（留空使用企业官网）
+                    <input type="url" name="evidence_url" />
+                  </label>
+                  <label>
+                    经营主体名称
+                    <input name="company_name" required maxLength={200} />
+                  </label>
+                  <label>
+                    经营主体原文
+                    <textarea name="identity_quote" required maxLength={1500} />
+                  </label>
+                  <label>
+                    窗饰产品
+                    <input name="product" required maxLength={300} />
+                  </label>
+                  <label>
+                    主营供货原文
+                    <textarea name="operating_quote" required maxLength={1500} />
+                  </label>
+                  <label>
+                    供货方式
+                    <select name="admission_fact">
+                      <option value="complete_supply">经营合格完整窗饰或户外遮阳</option>
+                      <option value="component_resale">经销窗饰专用配件或面料</option>
+                      <option value="commercial_custom_supply">承接商业窗饰定制供货</option>
+                    </select>
+                  </label>
+                  <label>
+                    裁定理由
+                    <textarea name="reason" required maxLength={500} />
+                  </label>
+                </fieldset>
+              )}
+            </>
+          )}
           <button type="submit" className="btn secondary" disabled={busy}>
             {busy ? '核实中…' : uncertain ? '核对上次结果' : '核实并尝试入库'}
           </button>
@@ -265,10 +374,12 @@ function DetailRows({
   rows,
   allRows,
   jobId,
+  onResolved,
 }: {
   rows: AcquisitionJob['rows'];
   allRows: AcquisitionJob['rows'];
   jobId: string;
+  onResolved: (index: number, resolution: ReviewResolution) => void;
 }) {
   return (
     <table className="lead-table">
@@ -301,7 +412,12 @@ function DetailRows({
               <HandoffContacts contacts={row.handoff?.contacts} />
               <CollectionAttempts attempts={row.collection_attempts} />
               {row.result === 'review' && (
-                <ReviewAction jobId={jobId} index={allRows.indexOf(row)} row={row} />
+                <ReviewAction
+                  jobId={jobId}
+                  index={allRows.indexOf(row)}
+                  row={row}
+                  onResolved={onResolved}
+                />
               )}
             </td>
             <td>
@@ -525,7 +641,21 @@ export function BatchProgress(props: BatchProgressProps) {
   );
 }
 
-function BatchProgressDetail({ job, control, busy }: BatchProgressProps) {
+function BatchProgressDetail({ job: snapshot, control, busy }: BatchProgressProps) {
+  const [reviewedJob, setReviewedJob] = useState<AcquisitionJob | null>(null);
+  const job =
+    reviewedJob?.id === snapshot.id && (reviewedJob.updatedAt || '') >= (snapshot.updatedAt || '')
+      ? reviewedJob
+      : snapshot;
+  function refreshReview(index: number, resolution: ReviewResolution) {
+    setReviewedJob({
+      ...job,
+      rows: job.rows.map((row, rowIndex) =>
+        rowIndex === index ? { ...row, review_resolution: resolution } : row,
+      ),
+    });
+    void acquisitionApi.job(job.id).then(setReviewedJob, () => {});
+  }
   const filteredPlatforms = (job.searchStats || []).flatMap((metric) =>
     (metric.filteredSources || [])
       .filter((source) => source.reason === '第三方平台或目录')
@@ -570,8 +700,10 @@ function BatchProgressDetail({ job, control, busy }: BatchProgressProps) {
         </p>
       )}
       <p className="muted">
-        新增入库 {job.inserted} · 更新 {job.updated} · 重复或既有 {job.skipped} · 待核实{' '}
-        {job.review || 0} · 不符合条件 {job.rejected} · 失败 {job.failed} · 写入待确认 {job.pending}
+        自动新增 {job.inserted} · 人工补录新增 {job.manualInserted || 0} · 确认新增合计{' '}
+        {job.confirmedInserted ?? job.inserted} · 更新 {job.updated} · 重复或既有 {job.skipped} ·
+        待核实 {job.review || 0} · 不符合条件 {job.rejected} · 失败 {job.failed} · 写入待确认{' '}
+        {job.pending}
       </p>
       <p className="muted">
         已搜索 {job.searches} 次 · 已研究 {job.researched} 家
@@ -781,7 +913,12 @@ function BatchProgressDetail({ job, control, busy }: BatchProgressProps) {
                   aria-label="本轮新增结果列表"
                   tabIndex={0}
                 >
-                  <DetailRows rows={insertedRows} allRows={job.rows} jobId={job.id} />
+                  <DetailRows
+                    rows={insertedRows}
+                    allRows={job.rows}
+                    jobId={job.id}
+                    onResolved={refreshReview}
+                  />
                 </div>
               </details>
             )}
@@ -794,7 +931,12 @@ function BatchProgressDetail({ job, control, busy }: BatchProgressProps) {
                   aria-label="其他处理结果列表"
                   tabIndex={0}
                 >
-                  <DetailRows rows={otherRows} allRows={job.rows} jobId={job.id} />
+                  <DetailRows
+                    rows={otherRows}
+                    allRows={job.rows}
+                    jobId={job.id}
+                    onResolved={refreshReview}
+                  />
                 </div>
               </details>
             )}
