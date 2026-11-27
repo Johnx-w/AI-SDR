@@ -5,7 +5,7 @@ const searchLimit = 3;
 const placeLimit = 20;
 const mapTimeoutMs = 2500;
 
-function googlePlaces({ env, fetchImpl }) {
+export function createGooglePlacesDiagnosticProvider({ env, fetchImpl }) {
   const key = env.GOOGLE_PLACES_API_KEY;
   if (!key) return { unavailable: 'credentials_missing' };
   if (env.GOOGLE_PLACES_IDS_ONLY !== 'true') return { unavailable: 'website_mapping_unavailable' };
@@ -63,11 +63,7 @@ async function readPlaces(provider, search, deadline) {
   }
 }
 
-export function createMapsDiscovery({
-  env,
-  fetchImpl,
-  provider = googlePlaces({ env, fetchImpl }),
-}) {
+export function createMapsDiscovery(provider) {
   let active = false;
   let cooldownUntil = 0;
   return async (search, context) => {

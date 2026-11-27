@@ -4,6 +4,11 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import dns from 'node:dns/promises';
+import https from 'node:https';
+import { EventEmitter } from 'node:events';
+import { syncBuiltinESMExports } from 'node:module';
+import { Readable } from 'node:stream';
 import { NativeAcquisition, selectWebsiteCandidates } from '../server/native-acquisition.mjs';
 import { AcquisitionStore } from '../server/acquisition-store.mjs';
 import { FeishuClient } from '../server/feishu-direct.mjs';
@@ -11,6 +16,7 @@ import { BatchJobs } from '../server/batch-jobs.mjs';
 import { createApp } from '../server/app.mjs';
 import { mapFeishuRecord } from '../server/feishu.mjs';
 import { collectScraplingPage } from '../server/scrapling-collector.mjs';
+import { createGooglePlacesDiagnosticProvider } from '../server/maps-discovery.mjs';
 import { withApp } from './helpers/http.mjs';
 
 const site = 'https://acme.example.org/';
@@ -349,19 +355,23 @@ function mapDiscoveryFixture({
     ['https://atlas-shades.example.org/', { name: 'Atlas Shades Limited', number: '08234567' }],
     ['https://beacon-shades.example.org/', { name: 'Beacon Shades Limited', number: '08345678' }],
     ['https://atlas-showroom.example.org/', { name: 'Atlas Shades Limited', number: '08234567' }],
+    ['https://cedar-shades.example.org/', { name: 'Cedar Shades Limited', number: '08456789' }],
   ]);
-  const [atlas, beacon, showroom] = sites.keys();
+  const [atlas, beacon, showroom, cedar] = sites.keys();
   const identity = ({ name, number }) =>
     `This website is operated by ${name}, registered in England and Wales, company number ${number}.`;
   const supply = 'We supply custom roller blinds for residential windows and commercial buildings.';
-  const html = (url) => `<p>${identity(sites.get(url))}</p><p>${supply}</p>`;
+  const html = (url) =>
+    `<p>${identity(sites.get(url))}</p>${url === cedar ? '' : `<p>${supply}</p>`}`;
   const requests = [];
   const googleRequests = [];
   const fetchImpl = async (url, options) => {
     const request = JSON.parse(options?.body || '{}');
     if (url === 'https://api.tavily.com/search') {
       requests.push(request.query);
-      const urls = webResults?.({ atlas, beacon, showroom, search: requests.length }) || [beacon];
+      const urls = webResults?.({ atlas, beacon, showroom, cedar, search: requests.length }) || [
+        beacon,
+      ];
       return json({
         results: urls.map((url) => ({ url, title: sites.get(url).name })),
         usage: { credits: 1 },
@@ -407,7 +417,7 @@ function mapDiscoveryFixture({
     }),
     readScraplingPage: async (url) => ({ final_url: url, status: 'ok', content: html(url) }),
     mapsProvider: mapSettings
-      ? undefined
+      ? createGooglePlacesDiagnosticProvider({ env: fixtureEnv, fetchImpl })
       : {
           name: 'permitted_fixture',
           async search({ query, country }) {
@@ -434,6 +444,7 @@ function mapDiscoveryFixture({
     mapQueries,
     requests,
     googleRequests,
+    html,
   };
 }
 
@@ -842,6 +853,82 @@ async function runMapDiscoveryJob(base, target = 3) {
   }
   assert.fail(`隔离任务 ${id} 未结束（已研究 ${job.researched} 家）`);
 }
+
+test('正常官网任务忽略 Places 环境配置，重启后可读回两个网站档案和缺证结果', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'website-only-acquisition-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const { app, atlas, beacon, googleRequests, html } = mapDiscoveryFixture({
+    mapSettings: { GOOGLE_PLACES_API_KEY: 'fixture-places-key', GOOGLE_PLACES_IDS_ONLY: 'true' },
+    googleResponse: () => json({ places: [{ id: 'unexpected-map-diagnostic' }] }),
+    webResults: ({ atlas, beacon, cedar }) => [atlas, beacon, cedar],
+  });
+  app.nativeImpl.close();
+  const options = {
+    env: {
+      ...app.env,
+      BATCH_DB_PATH: join(directory, 'jobs.sqlite'),
+      ACQUISITION_DB_PATH: join(directory, 'acquisition.sqlite'),
+    },
+    fetchImpl: app.fetchImpl,
+  };
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
+  t.mock.method(dns, 'lookup', async () => [{ address: '23.37.80.10', family: 4 }]);
+  t.mock.method(https, 'request', (url, { headers }, respond) => {
+    const request = new EventEmitter();
+    request.end = () => {
+      const response = Readable.from([
+        Buffer.from(html(new URL(url.pathname, `https://${headers.Host}`).href)),
+      ]);
+      response.statusCode = 200;
+      response.headers = { 'content-type': 'text/html; charset=utf-8' };
+      respond(response);
+    };
+    return request;
+  });
+  syncBuiltinESMExports();
+  let completedId;
+  await withApp(options, async (base) => {
+    const job = await runMapDiscoveryJob(base);
+    assert.deepEqual(googleRequests, []);
+    assert.equal(job.inserted, 2);
+    assert.equal(job.mapComparison, undefined);
+    assert.ok(job.searchStats.every(({ maps }) => maps === undefined));
+    assert.deepEqual(
+      job.rows.map(({ source_url, result }) => [source_url, result]),
+      [
+        [atlas, 'inserted'],
+        [beacon, 'inserted'],
+        ['https://cedar-shades.example.org/', 'review'],
+      ],
+    );
+    completedId = job.id;
+  });
+  await withApp(
+    { ...options, fetchImpl: async (url) => assert.fail(`档案读回发起了请求 ${url}`) },
+    async (base) => {
+      const api = base + '/api/v1';
+      assert.equal(
+        (await (await fetch(api + '/acquisition/jobs/' + completedId)).json()).inserted,
+        2,
+      );
+      const { leads } = await (await fetch(api + '/leads/real/list')).json();
+      assert.deepEqual(leads.map(({ name }) => name).sort(), [
+        'Atlas Shades Limited',
+        'Beacon Shades Limited',
+      ]);
+      for (const { id, name } of leads) {
+        const { lead } = await (await fetch(api + '/leads/real/' + id)).json();
+        assert.deepEqual(
+          lead.acquisitionSources.map(({ source_kind, source_url }) => [source_kind, source_url]),
+          [['web', name === 'Atlas Shades Limited' ? atlas : beacon]],
+        );
+      }
+    },
+  );
+});
 
 test('地图和官网从同一任务归并主体，门店保留各自来源，无法定位官网的地点待核实', async () => {
   const { app, requests, mapQueries, showroom } = mapDiscoveryFixture();
@@ -3122,13 +3209,18 @@ test('正常任务按营业登记主体区分同域企业，补证、并发核�
     return (await response.json()).id;
   };
   const readJob = async (id) => {
+    const deadline = performance.now() + 30_000;
     let job;
-    for (let n = 0; n < 600; n++) {
-      job = await (await fetch(base + '/acquisition/jobs/' + id)).json();
-      if (job.status !== 'running') break;
+    do {
+      const response = await fetch(base + '/acquisition/jobs/' + id);
+      assert.equal(response.status, 200);
+      job = await response.json();
+      if (['completed', 'partial', 'paused'].includes(job.status)) return job;
       await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    return job;
+    } while (performance.now() < deadline);
+    assert.fail(
+      `隔离任务 ${id} 在 30 秒内未结束或暂停（${job.status}，已搜索 ${job.searches} 次）`,
+    );
   };
   try {
     const jobId = await startJob('subject-credit-fixture');

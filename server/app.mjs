@@ -186,6 +186,7 @@ export function createApp({
       status: (id) => provider.status(id),
       discoveryReady: (id) => provider.discoveryReady(id),
       identityVersion: provider.identityVersion,
+      mapComparisonEnabled: provider.mapComparisonEnabled,
       readLeads: verifiedLeads,
       readLead: (id) => library().localDetail(id).lead,
       readAcquisitionCaptures: () => provider.acquisitionCaptures(),

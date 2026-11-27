@@ -173,6 +173,7 @@ export class BatchJobs {
     provider = 'native',
     scope = '',
     identityVersion,
+    mapComparisonEnabled = false,
     onOutreachChange = () => {},
     recoveryIntervalMs = 15000,
     isMaintaining = () => false,
@@ -204,6 +205,7 @@ export class BatchJobs {
     this.provider = provider;
     this.scope = scope || provider;
     this.identityVersion = identityVersion;
+    this.mapComparisonEnabled = mapComparisonEnabled;
     this.onOutreachChange = onOutreachChange;
     this.isMaintaining = isMaintaining;
     this.working = new Set();
@@ -448,9 +450,8 @@ export class BatchJobs {
       inserted: 0,
       countPolicy: 'broad-business-v1',
       admissionVersion: websiteAdmissionVersion,
-      ...(this.identityVersion
-        ? { identityVersion: this.identityVersion, mapComparisonVersion: 1 }
-        : {}),
+      ...(this.identityVersion ? { identityVersion: this.identityVersion } : {}),
+      ...(this.identityVersion && this.mapComparisonEnabled ? { mapComparisonVersion: 1 } : {}),
       ...(executionVersion ? { executionVersion } : {}),
       updated: 0,
       skipped: 0,
@@ -1111,7 +1112,10 @@ export class BatchJobs {
             this.finish(j, 'exhausted');
             return;
           }
-          const mapsContext = j.mapComparisonVersion ? mapDiscoveryContext(j) : undefined;
+          const mapsContext =
+            j.mapComparisonVersion && this.mapComparisonEnabled
+              ? mapDiscoveryContext(j)
+              : undefined;
           j.searchStats ||= [];
           const previous = batch && j.pendingSearch && j.searchStats.at(-1);
           if (!previous?.discoveryRequestId) j.searches++;
