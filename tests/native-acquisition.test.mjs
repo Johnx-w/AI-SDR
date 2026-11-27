@@ -308,11 +308,11 @@ function mapDiscoveryFixture({
   };
 }
 
-async function runMapDiscoveryJob(base, target = 3) {
+async function runMapDiscoveryJob(base, target = 3, key = 'maps-discovery-pair') {
   const api = base + '/api/v1';
   const response = await fetch(api + '/acquisition/jobs', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'maps-discovery-pair' },
+    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
     body: JSON.stringify({
       ...input,
       product: 'window coverings',
@@ -406,6 +406,177 @@ test('正常官网任务忽略 Places 环境配置，重启后可读回两个网
       }
     },
   );
+});
+
+async function withWebsiteCustodyJob(candidates, pages, target, verify) {
+  const researched = [];
+  const fetchImpl = async (url, options) => {
+    if (url === 'https://api.tavily.com/search')
+      return json({
+        results: [...candidates].map(([url, { name, identity }]) => ({
+          url,
+          title: identity || name,
+        })),
+      });
+    if (url === 'https://api.tavily.com/extract') return json({ results: [] });
+    if (url === 'https://api.deepseek.com/responses') {
+      const request = JSON.parse(options.body);
+      const { pages, sources } = JSON.parse(request.input[1].content);
+      const source = pages?.find(({ source_url }) => candidates.has(source_url))?.source_url;
+      const extraction = () => {
+        researched.push(source);
+        const { name, identity, supply } = candidates.get(source);
+        const evidence = (value, quote) => ({ value, quote, source_url: source });
+        return {
+          company_name: evidence(name, identity),
+          entity_type: evidence('business', supply),
+          admission_facts: [evidence('complete_supply', supply)],
+          products: [{ ...evidence('blinds', supply), window_use: 'window_covering' }],
+        };
+      };
+      return json({
+        status: 'completed',
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify(
+                  sources
+                    ? {
+                        result: 'relevant',
+                        sources: sources.map(({ i }) => i),
+                        reason: '当前文案描述供应窗饰',
+                      }
+                    : extraction(),
+                ),
+              },
+            ],
+          },
+        ],
+      });
+    }
+    throw new Error('非隔离端点 ' + url);
+  };
+  const nativeImpl = new NativeAcquisition({
+    env,
+    fetchImpl,
+    readPage: async ({ href }) => ({ html: pages.get(href) || '' }),
+    readScraplingPage: async () => ({ final_url: null, status: 'unavailable' }),
+  });
+  await withApp({ env, fetchImpl, nativeImpl }, async (base) => {
+    const job = await runMapDiscoveryJob(base, target, 'website-custody');
+    const { leads } = await (await fetch(base + '/api/v1/leads/real/list')).json();
+    verify(job, leads, researched);
+  });
+}
+
+test('自然搜索中的承包商目录商家档案保持待核实，客户库没有官网错绑', async () => {
+  const root = 'https://www.excellentcontractor.com/';
+  const profile = root + '71004/window-products-awning-blind-shade-company';
+  const name = 'Window Products Awning, Blind & Shade Company';
+  const title = name + ' Awning, Blind & Shade Company | Custom Blinds & Awnings in Branford, CT';
+  const supply =
+    'Our expertise spans blinds, shades, shutters, draperies, and exterior solar solutions, serving residential and commercial clients across the state.';
+  const profileHtml = `<title>${title}</title><h1>Custom Window Coverings & Awnings in Branford, CT</h1>
+    <p>${supply}</p><a href="/contact?business_id=71004">Contact</a>
+    <a href="https://www.windowproductsct.com" rel="nofollow">${name}</a>
+    <button data-modal="/modals/review.php?business_id=71004&amp;review_id=0">Write a Review</button>
+    <a data-modal="/modals/business-menu.php?business_id=71004">Update<span> Listing</span></a>
+    <div>Get in touch with local recommended door and window contractors</div>`;
+  const homeHtml = `<title>Compare Local Construction Contractors Near You</title>
+    <h1>Compare Local Construction Contractors</h1>
+    <p>Browse construction contractor profiles to see which building services are offered locally.
+    Examine company details, read customer experiences and contact suitable contractors to discuss your construction project and request an estimate.</p>`;
+  const candidates = new Map([[profile, { name, identity: title, supply }]]);
+  const pages = new Map([
+    [profile, profileHtml],
+    [root, homeHtml],
+  ]);
+  await withWebsiteCustodyJob(candidates, pages, 1, (job, leads, researched) => {
+    assert.deepEqual(
+      leads.map(({ website }) => website),
+      [],
+    );
+    assert.equal(job.inserted, 0);
+    assert.deepEqual(
+      job.rows.map(({ source_url, result }) => [source_url, result]),
+      [[profile, 'review']],
+    );
+    assert.match(job.rows[0].reason, /第三方.*独立官网/);
+    assert.deepEqual(researched, []);
+    assert.deepEqual(
+      job.rows[0].collection_attempts
+        .filter(({ status }) => status === 'ok')
+        .map(({ requested_url }) => requested_url),
+      [profile, root],
+    );
+  });
+});
+
+test('经营目录及采购档案待核实，独立官网和带数字与评价的自营产品页分别入库', async () => {
+  const directoryRoot = 'https://www.contractorsup.com/';
+  const directory = directoryRoot + '140956/';
+  const procurement = 'https://buy.nsw.gov.au/supplier/profile/12468764';
+  const officialRoot = 'https://www.windowproductsct.com/';
+  const official = officialRoot + 'window-products-contact/';
+  const productRoot = 'https://shadeatelier.example.org/';
+  const product = productRoot + '71004/roller-blind';
+  const directoryName = 'Directory Fixture Shades';
+  const officialName = 'Window Products, Awning, Blind & Shade Company';
+  const productName = 'Shade Atelier';
+  const generalSupply =
+    'We supply custom roller blinds for residential windows and commercial buildings.';
+  const officialSupply = `${officialName} is your source for custom blinds, shades, sheer shades, shutters, draperies, awnings, and more.`;
+  const candidates = new Map([
+    [directory, { name: directoryName, identity: directoryName, supply: generalSupply }],
+    [procurement, { name: 'PAMIDO PTY LTD' }],
+    [official, { name: officialName, identity: officialName, supply: officialSupply }],
+    [product, { name: productName, identity: productName, supply: generalSupply }],
+  ]);
+  const pages = new Map([
+    [directory, `<h1>${directoryName}</h1><p>${generalSupply}</p>`],
+    [
+      directoryRoot,
+      `<h1>Looking for Remodeling Contractors Near You?</h1>
+      <p>Explore remodeling businesses in your area offering home renovations, interior upgrades and property improvements.
+      Read customer feedback, check which projects each provider handles and reach out to contractors about estimates and availability.</p>
+      <a href="/signup">Add Your Business</a>`,
+    ],
+    [
+      procurement,
+      '<h1>PAMIDO PTY LTD</h1><p>This supplier has self-identified in the following products and services.</p>',
+    ],
+    [
+      official,
+      `<h1>Contact Window Products Awning Blind &amp; Shade Co Branford CT</h1>
+      <p>Our new address: 3 Research Drive, Unit 9, Branford CT 06405</p><p>${officialSupply}</p>`,
+    ],
+    [
+      product,
+      `<h1>${productName}</h1><p>${generalSupply}</p>
+      <button data-review="/products/review?business_id=71004">Write a Review</button>
+      <p>Customer review: Explore independent contractor profiles at your local trade fair.</p>`,
+    ],
+    [productRoot, `<h1>${productName}</h1><p>Explore our custom roller blind profiles.</p>`],
+  ]);
+  await withWebsiteCustodyJob(candidates, pages, 2, (job, leads, researched) => {
+    assert.deepEqual(leads.map(({ name, website }) => [name, website]).sort(), [
+      [productName, product],
+      [officialName, official],
+    ]);
+    assert.equal(job.inserted, 2);
+    assert.deepEqual(researched, [official, product]);
+    assert.deepEqual(
+      job.rows.map(({ source_url, result }) => [source_url, result]),
+      [
+        [directory, 'review'],
+        [procurement, 'review'],
+        [official, 'inserted'],
+        [product, 'inserted'],
+      ],
+    );
+  });
 });
 
 test('地图和官网从同一任务归并主体，门店保留各自来源，无法定位官网的地点待核实', async () => {

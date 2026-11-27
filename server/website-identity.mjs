@@ -51,6 +51,24 @@ export function thirdPartySupplierProfile({ url = '', title = '', text = '' } = 
   );
 }
 
+export function businessDirectoryEvidence(text) {
+  const content = text.normalize('NFKC').replace(/\s+/g, ' ');
+  return {
+    browseProfiles:
+      /\b(?:browse|review|compare|explore) (?:[\w&-]+ ){0,5}(?:(?:business|company|contractor|provider|supplier|vendor|merchant) (?:profiles|listings)|(?:businesses|companies|contractors|providers|suppliers|vendors|merchants) in your area)\b/i.test(
+        content,
+      ),
+    publishListings:
+      /\b(?:claim or add your business|add your business|submit a business listing|list your business)\b/i.test(
+        content,
+      ),
+    manageProfile:
+      /\b(?:update (?:this |the )?listing|claim (?:this|your) (?:business|listing|profile))\b/i.test(
+        content,
+      ) && /\b(?:write|leave|submit) a review\b/i.test(content),
+  };
+}
+
 // A supplier's product card on a marketplace belongs to the marketplace
 // operator. Its membership, legal address and customer-service contacts must
 // never be attributed to the merchant named in that card.
