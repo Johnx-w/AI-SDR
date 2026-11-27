@@ -16,7 +16,9 @@ export PLAYWRIGHT_BROWSERS_PATH="$PWD/.codex-tmp/browsers"
 node --test tests/scrapling-collector.test.mjs tests/acquisition-evidence-selection.test.mjs
 ```
 
-Windows 用同一个 Playwright 命令并省去 `--with-deps`。本地安装的 Windows 浏览器来自 [Chrome for Testing 官方存储](https://storage.googleapis.com/chrome-for-testing-public/159.0.8154.6/win64/chrome-headless-shell-win64.zip)，SHA-256 为 `5db6a6948e6d1299ea3bc87c420d467bf343feae186a316921c930ce02056af5`。Linux CI release 作业创建单独虚拟环境，运行安装、依赖检查、沙箱启动和固定页面检查。目标机的实际运行用户、系统依赖及正常业务负载仍需实测。未配置 `SCRAPLING_PYTHON` 时返回采集不可用。
+Windows 用同一个 Playwright 命令并省去 `--with-deps`。本地安装的 Windows 浏览器来自 [Chrome for Testing 官方存储](https://storage.googleapis.com/chrome-for-testing-public/159.0.8154.6/win64/chrome-headless-shell-win64.zip)，SHA-256 为 `5db6a6948e6d1299ea3bc87c420d467bf343feae186a316921c930ce02056af5`。Linux CI release 作业创建单独虚拟环境，运行安装、依赖检查、沙箱启动和固定页面检查。目标机的实际运行用户、系统依赖及正常业务负载仍需实测。没有随版本安装的运行时且未设置 `SCRAPLING_PYTHON` 时返回采集不可用。
+
+正式打包从通过 CI 的同一次运行取得 Docling 和 Scrapling 运行时。采集包随发布携带内置 Python 的 PEX 工作进程和压缩的固定 Chromium。手工发布和 CD 均先检查合包小于 512 MiB。新版本在独立目录安装时，由运行用户解包并通过同一采集接口渲染固定页面，校验两种工具及浏览器和 Python 版本。系统共享依赖由目标机提供，缺依赖或沙箱启动失败会在切换前暴露。旧版本回退使用自己的发布目录和运行时。开发环境可指定 `SCRAPLING_PYTHON`，带离线包的 Linux 发布目录默认使用随版本交付的运行时。
 
 每次只打开一个新页面和独立上下文。浏览器的网络请求由本机网关按允许的资源类型返回，网关只向校验后的同站公网 HTTPS 地址发 GET 请求，连接固定到已核验的 DNS 地址。拒绝跨域跳转、跨域资源、私网、图片、媒体、字体、额外页面和 WebSocket。跨站 CDN 托管的脚本可能影响渲染结果，记录为此路径仍缺证。直接请求和浏览器请求共用同一套 HTTPS 地址和代理校验。
 
@@ -38,3 +40,20 @@ node scripts/compare-acquisition-collectors.mjs samples.json artifacts/acquisiti
 输入为 JSON 数组。每条包含 `market`、`group`、唯一官网 `url`，以及可选的预先独立标注原文 `facts`。同样 URL 两次运行 Node 直读和受限 Chromium 渲染，交叉顺序。试验目录保存原始样本、各次时延和结果、按 SHA-256 去重的压缩快照以及分组统计。采集器在每次写入后验证快照可以按该摘要回读。两次未渲染 HTML 哈希差异单独列为网页变化线索。文本匹配用于发现证据缺失，主体归属和采购判断仍需核查原文。
 
 此入口测量单页采集和正文保留。完整业务路径的外部提取回退、模型费用、企业全文证据齐备率和主库新增由统一验收取得。四家合作校准单列。跨市场代表性和生产运行负载仍待验证。
+
+## 2026-11-27 锁定版本初试
+
+在 Windows x64、Node 24.22.2 上运行 `204cb71`。按[样本清单](collection-pilot.json)先从官网公开版本标注可逐字核对的事实，再执行现场采集。三家美国、三家澳大利亚企业各测同一页面；加拿大和美国各两家合作样本另列。每条路径各 20 次读取，共 40 次。合作样本只作经营模式校准。
+
+| 样本          | Node 正文成功 | 强制浏览器正文成功 | Node 预标事实齐备 | 强制浏览器预标事实齐备 |
+| ------------- | ------------: | -----------------: | ----------------: | ---------------------: |
+| 美国 3 家     |           2/6 |                2/6 |               2/6 |                    2/6 |
+| 澳大利亚 3 家 |           6/6 |                6/6 |               6/6 |                    4/6 |
+| 合作 4 家     |           6/8 |                6/8 |               4/4 |                    2/4 |
+| 合计          |         14/20 |              14/20 |             12/16 |                   8/16 |
+
+预标事实齐备指一次读页保留该页的全部标注，分母只含有标注的页面读取。Clearview 和 Builders Supply 各两次保留于原始 HTML 的事实在渲染 DOM 中缺失，导致四次齐备指标下降。这两例支持直接读取后按缺口补抓和保留原始 HTML。The Shade Store、ShadeMonster FAQ 的浏览器路径返回阻断；Smart Shades Utah 两路均未得到正文。各路径分别有两个目标的重复原始 HTML 哈希发生变化，仍保留两次快照。
+
+两路单页耗时中位数及 P95 分别为 Node 2.112／3.134 秒，强制浏览器 8.235／15.895 秒。采样所得 Python 和子进程 RSS 之和峰值约 532 MiB，最多 6 个进程；Windows 整机用量峰值 14.47 GiB。22 份按摘要去重的压缩快照共 1,178,907 字节，已由入口逐次按 SHA-256 回读校验。本地证据目录位于 `artifacts/collection-pilot-locked-20261127`，含原始样本、代码版本、逐次结果和快照。
+
+样本来自静态页面及合作校准。独立动态样本与曾失败样本的分层、美国和澳大利亚各 30 家、完整业务路径和生产资源读数仍由后续验收取得。此次现场初试只读取公开页面，没有模型调用、外部提取费用或写入。

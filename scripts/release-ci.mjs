@@ -1,7 +1,19 @@
 import assert from 'node:assert/strict';
+import { statSync } from 'node:fs';
+import { join } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 
 const repository = 'Johnx-w/AI-SDR';
+
+export function appendReleaseRuntimes(run, runId, directory, archive, tarOptions = []) {
+  for (const name of ['docling-runtime', 'scrapling-runtime']) {
+    run('gh', ['run', 'download', String(runId), '-n', name, '-D', directory]);
+    const runtime = join(directory, name + '.tar');
+    if (process.platform === 'win32') run('tar', [...tarOptions, '-rf', archive, '@' + runtime]);
+    else run('tar', ['-Af', archive, runtime]);
+  }
+  assert(statSync(archive).size < 512 * 1024 * 1024, '发布包必须小于 512 MiB');
+}
 
 export async function waitForCI(revision, request, { now = Date.now, wait = setTimeout } = {}) {
   assert(/^[a-f0-9]{40}$/.test(revision), 'CI检查需要完整提交号');
