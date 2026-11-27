@@ -211,6 +211,12 @@ const count = async (n) =>
   assert.match(await dialog().innerText(), new RegExp('供货产品 · 已选择 ' + n + ' 项'));
 try {
   await page.goto(base + '/inbox?tab=campaigns');
+  await page.getByRole('button', { name: '已删除', exact: true }).click();
+  await page.getByText('暂无已删除计划', { exact: true }).waitFor();
+  assert.equal(await page.getByText('暂无公司试发计划', { exact: true }).count(), 0);
+  await shot('00-deleted-empty');
+  check('Deleted empty view uses its own label', { expected: '暂无已删除计划' });
+  await page.getByRole('button', { name: '当前计划', exact: true }).click();
   await page.getByRole('button', { name: '新建计划', exact: true }).click();
   await dialog().getByLabel('计划名称', { exact: true }).fill('QA explicit product plan');
   await setBoxes(['hb']);
