@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { Readable } from 'node:stream';
+import { gzipSync } from 'node:zlib';
 import { readHtmlResponse } from '../server/branding.mjs';
 import {
   combineWebsiteEvidence,
@@ -64,6 +65,18 @@ test('完整读取大于512KB页面的页尾；超过4MB明确失败而非成功
     readHtmlResponse(Readable.from([Buffer.alloc(4 * 1024 * 1024), Buffer.from('x')])),
     /读取上限/,
   );
+});
+test('官网返回声明为 gzip 的正文时解压读取，展开超限或损坏时返回失败', async () => {
+  const readGzip = (body, maxBytes = 4096) =>
+    readHtmlResponse(
+      Object.assign(Readable.from([body]), { headers: { 'content-encoding': 'gzip' } }),
+      maxBytes,
+    );
+  const html = '<html><body>ONESOLOMON supplies outdoor blinds.</body></html>';
+  const encoded = gzipSync(html);
+  assert.deepEqual(await readGzip(encoded), { html });
+  await assert.rejects(readGzip(gzipSync(Buffer.alloc(4097))), /读取上限/);
+  await assert.rejects(readGzip(encoded.subarray(0, -1)), /压缩正文/);
 });
 test('内嵌图片不占用 Dify 正文窗口，保留真实联系证据及来源；同地址跨页合并不丢地图链接', () => {
   const content =
