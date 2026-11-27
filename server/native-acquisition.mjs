@@ -24,7 +24,11 @@ import {
   resolveConfirmedPending,
 } from './lead-supplement-service.mjs';
 import { applySupplementsToResearch } from './lead-supplements.mjs';
-import { domainKey, thirdPartyCompanySource } from './website-identity.mjs';
+import {
+  domainKey,
+  thirdPartyCompanySource,
+  thirdPartySupplierProfile,
+} from './website-identity.mjs';
 import { calculateHandoffReadiness } from './handoff-readiness.mjs';
 import { readPublicHtml, websiteRedirectUrl, websiteUrl } from './branding.mjs';
 import { planWebsitePages, combineWebsiteEvidence, websiteScope } from './website-metadata.mjs';
@@ -84,6 +88,8 @@ const blockedMedia = [
 function companyWebsiteSource(value, evidence = {}) {
   const url = websiteUrl(value);
   if (!url) return { url: null, reason: '网址无效或不安全' };
+  if (thirdPartySupplierProfile({ ...evidence, url: url.href }))
+    return { url: null, profileUrl: url, reason: '第三方供应商档案' };
   const domain = domainKey(url.href);
   if (
     blockedHosts.test(url.hostname) ||
@@ -118,7 +124,13 @@ function companyWebsiteSourceUrl(value, evidence = {}) {
   return companyWebsiteSource(value, evidence).url;
 }
 
-export function selectWebsiteCandidates(results, knownDomains = [], limit = 20, byUrl = false) {
+export function selectWebsiteCandidates(
+  results,
+  knownDomains = [],
+  limit = 20,
+  byUrl = false,
+  retainSupplierProfiles = false,
+) {
   const known = new Set(knownDomains),
     seen = new Set(),
     candidates = [],
@@ -129,11 +141,11 @@ export function selectWebsiteCandidates(results, knownDomains = [], limit = 20, 
       title: result?.title,
       text: [result?.content, result?.raw_content].filter(Boolean).join(' '),
     });
-    if (!source.url) {
+    const url = source.url || (retainSupplierProfiles ? source.profileUrl : null);
+    if (!url) {
       filtered.push({ url: result?.url || '', reason: source.reason });
       continue;
     }
-    const url = source.url;
     const domain = domainKey(url.href);
     const candidateKey = byUrl ? acquisitionUrl(url.href) : domain;
     if (known.has(candidateKey)) {
@@ -147,6 +159,7 @@ export function selectWebsiteCandidates(results, knownDomains = [], limit = 20, 
       source_title: result.title || '',
       source_kind: 'website',
       domain,
+      ...(source.profileUrl ? { third_party_profile_url: url.href } : {}),
     });
     if (candidates.length >= limit) break;
   }
@@ -570,7 +583,13 @@ export class NativeAcquisition {
       auto_parameters: false,
       exclude_domains: byUrl ? [] : excluded.slice(-150),
     });
-    const selected = selectWebsiteCandidates(data.results, excluded, 20, byUrl);
+    const selected = selectWebsiteCandidates(
+      data.results,
+      excluded,
+      20,
+      byUrl,
+      admissionVersion === websiteAdmissionVersion,
+    );
     selected.candidates = selected.candidates.filter((candidate) => {
       const prior =
         admissionVersion === 'legacy' && this.store.exclusion(conditionsKey, candidate.source_url);
@@ -1091,6 +1110,7 @@ export class NativeAcquisition {
     this.active.add(id);
     try {
       const domain = domainKey(item.source_url);
+      const candidateUrl = websiteUrl(item.source_url)?.href;
       if (!websiteScope(item.source_url) || !domain) throw new Error('企业网址无效');
       let matching = scopedIdentity ? [] : recordsForDomain(await this.feishu.records(), domain);
       if (
@@ -1106,7 +1126,10 @@ export class NativeAcquisition {
         this.store.complete(op, output);
         return output;
       }
-      if (!companyWebsiteSourceUrl(item.source_url, { title: item.source_title })) {
+      if (
+        item.third_party_profile_url === candidateUrl ||
+        !companyWebsiteSourceUrl(item.source_url, { title: item.source_title })
+      ) {
         const reason =
           '现有来源为第三方贸易/平台档案或其他非官网页面，不是企业官网；尚未核实企业独立官网，本轮不据此判定高等级';
         if (item.target_record_id)
@@ -1177,6 +1200,10 @@ export class NativeAcquisition {
       op.evidence = page.website_metadata;
       this.store.save(op);
       if (
+        op.collection_attempts?.some(
+          ({ requested_url, final_url }) =>
+            requested_url === candidateUrl && thirdPartySupplierProfile({ url: final_url }),
+        ) ||
         thirdPartyCompanySource({
           url: item.source_url,
           title: item.source_title,
@@ -1184,7 +1211,7 @@ export class NativeAcquisition {
         })
       ) {
         const reason =
-          '采集正文表明当前页面为第三方贸易档案或B2B平台商家资料，尚未取得企业独立官网';
+          '采集正文表明当前页面为第三方贸易、采购或平台供应商档案，尚未取得企业独立官网';
         if (item.target_record_id)
           return await this.persistIncompleteAssessment(op, input, item, reason, page.checked_urls);
         const output = this.output(op, {
