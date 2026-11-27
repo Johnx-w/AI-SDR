@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validateArchiveEntries } from './release-server.mjs';
-import { waitForCI } from './release-ci.mjs';
+import { appendReleaseRuntimes, waitForCI } from './release-ci.mjs';
 
 const project = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const host = 'ai-sdr';
@@ -76,10 +76,7 @@ export async function release(args = process.argv.slice(2), run = runCommand) {
     );
     console.log(`CI 已通过：${ci.html_url}`);
     assert.equal(git('rev-parse', 'HEAD'), revision, '等待CI期间分支已产生新提交，请重新发布');
-    run('gh', ['run', 'download', String(ci.id), '-n', 'docling-runtime', '-D', temporary]);
-    const runtime = join(temporary, 'docling-runtime.tar');
-    if (process.platform === 'win32') run('tar', [...tarOptions, '-rf', archive, '@' + runtime]);
-    else run('tar', ['-Af', archive, runtime]);
+    appendReleaseRuntimes(run, ci.id, temporary, archive, tarOptions);
     const upload = randomUUID() + '.tar';
     const digest = createHash('sha256').update(readFileSync(archive)).digest('hex');
     run('ssh', ['-o', 'BatchMode=yes', host, 'install -d -m 700 /srv/shadeflow/incoming']);

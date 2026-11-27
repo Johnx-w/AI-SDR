@@ -16,7 +16,9 @@ export PLAYWRIGHT_BROWSERS_PATH="$PWD/.codex-tmp/browsers"
 node --test tests/scrapling-collector.test.mjs tests/acquisition-evidence-selection.test.mjs
 ```
 
-Windows 用同一个 Playwright 命令并省去 `--with-deps`。本地安装的 Windows 浏览器来自 [Chrome for Testing 官方存储](https://storage.googleapis.com/chrome-for-testing-public/159.0.8154.6/win64/chrome-headless-shell-win64.zip)，SHA-256 为 `5db6a6948e6d1299ea3bc87c420d467bf343feae186a316921c930ce02056af5`。Linux CI release 作业创建单独虚拟环境，运行安装、依赖检查、沙箱启动和固定页面检查。目标机的实际运行用户、系统依赖及正常业务负载仍需实测。未配置 `SCRAPLING_PYTHON` 时返回采集不可用。
+Windows 用同一个 Playwright 命令并省去 `--with-deps`。本地安装的 Windows 浏览器来自 [Chrome for Testing 官方存储](https://storage.googleapis.com/chrome-for-testing-public/159.0.8154.6/win64/chrome-headless-shell-win64.zip)，SHA-256 为 `5db6a6948e6d1299ea3bc87c420d467bf343feae186a316921c930ce02056af5`。Linux CI release 作业创建单独虚拟环境，运行安装、依赖检查、沙箱启动和固定页面检查。目标机的实际运行用户、系统依赖及正常业务负载仍需实测。没有随版本安装的运行时且未设置 `SCRAPLING_PYTHON` 时返回采集不可用。
+
+正式打包从通过 CI 的同一次运行取得 Docling 和 Scrapling 运行时。采集包随发布携带内置 Python 的 PEX 工作进程和压缩的固定 Chromium。手工发布和 CD 均先检查合包小于 512 MiB。新版本在独立目录安装时，由运行用户解包并通过同一采集接口渲染固定页面，校验两种工具及浏览器和 Python 版本。系统共享依赖由目标机提供，缺依赖或沙箱启动失败会在切换前暴露。旧版本回退使用自己的发布目录和运行时。开发环境可指定 `SCRAPLING_PYTHON`，带离线包的 Linux 发布目录默认使用随版本交付的运行时。
 
 每次只打开一个新页面和独立上下文。浏览器的网络请求由本机网关按允许的资源类型返回，网关只向校验后的同站公网 HTTPS 地址发 GET 请求，连接固定到已核验的 DNS 地址。拒绝跨域跳转、跨域资源、私网、图片、媒体、字体、额外页面和 WebSocket。跨站 CDN 托管的脚本可能影响渲染结果，记录为此路径仍缺证。直接请求和浏览器请求共用同一套 HTTPS 地址和代理校验。
 
