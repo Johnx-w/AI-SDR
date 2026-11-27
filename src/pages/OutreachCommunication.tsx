@@ -56,7 +56,14 @@ import '../outreach.css';
 type Tab = 'mailboxes' | 'campaigns' | 'inbox' | 'sequences';
 type MailboxInput = Omit<
   OutreachMailbox,
-  'id' | 'configured' | 'smtpStatus' | 'lastCheckedAt' | 'lastError' | 'signature' | 'productIds'
+  | 'id'
+  | 'configured'
+  | 'smtpStatus'
+  | 'lastCheckedAt'
+  | 'lastError'
+  | 'signature'
+  | 'revision'
+  | 'productIds'
 > & { signature?: string; clientPassword?: string };
 type CampaignInput = Pick<
   OutreachCampaign,
@@ -228,6 +235,32 @@ function MailboxEditor({
   onClose: () => void;
   onSave: (input: Partial<MailboxInput> | null, businessNote?: string) => Promise<void>;
 }) {
+  const [products, setProducts] = useState<OutreachProduct[]>([]);
+  useEffect(() => {
+    if (!mailbox) return;
+    const controller = new AbortController();
+    outreachApi<OutreachProduct[]>(pathFor('mailboxes', mailbox.id) + '/coverage-products', {
+      signal: controller.signal,
+    })
+      .then(setProducts)
+      .catch((reason) => {
+        if (!controller.signal.aborted) setError(message(reason));
+      });
+    return () => controller.abort();
+  }, [mailbox?.id]);
+  const [productIds, setProductIds] = useState<string[]>(mailbox?.productIds || []);
+  const [coverage, setCoverage] = useState<{
+    added: string[];
+    removed: string[];
+    campaigns: {
+      id: string;
+      name: string;
+      automatic: boolean;
+      added: string[];
+      removed: string[];
+    }[];
+  } | null>(null);
+  const productName = (id: string) => products.find((p) => p.id === id)?.name || id;
   const [businessNote, setBusinessNote] = useState(mailbox?.businessNote || '');
   const initialSettings = useRef<MailboxInput | null>(null);
   const [fileIds, setFileIds] = useState<string[]>(mailbox?.knowledgeProductIds ?? []);
@@ -240,6 +273,12 @@ function MailboxEditor({
   const domain = email.split('@')[1] || '';
   const website = site || (domain ? 'https://' + domain : '');
   const identity = { website, email, brandName: brand || siteBrand(website) || domain };
+  const eligible = products.filter(
+    (p) =>
+      !p.materialOnly &&
+      (p.status ? p.status === 'approved' : p.approved === true) &&
+      siteAllowsProduct(p, identity, true),
+  );
   const [displayName, setDisplayName] = useState(mailbox?.displayName || '');
   const [signature, setSignature] = useState(mailbox?.signature || '');
   const [signatureDesign, setSignatureDesign] = useState<MailSignatureDesign | null>(
@@ -256,6 +295,7 @@ function MailboxEditor({
     const displayName = String(form.get('displayName')).trim();
     return {
       email: address,
+      ...(mailbox ? { productIds } : {}),
       website,
       brandName: identity.brandName,
       owner: String(form.get('owner') || displayName),
@@ -295,6 +335,26 @@ function MailboxEditor({
     setBusy(true);
     setError(null);
     try {
+      if (
+        mailbox &&
+        !coverage &&
+        (edits.includes('productIds') ||
+          edits.some((key) => ['website', 'email', 'brandName'].includes(key)))
+      ) {
+        setCoverage(
+          await outreachApi(pathFor('mailboxes', mailbox.id) + '/coverage-preview', {
+            method: 'POST',
+            body: JSON.stringify({
+              revision: mailbox.revision,
+              productIds,
+              website,
+              email,
+              brandName: identity.brandName,
+            }),
+          }),
+        );
+        return;
+      }
       const note = businessNote.trim();
       await onSave(
         edits.length ? changed : null,
@@ -337,7 +397,10 @@ function MailboxEditor({
               name="email"
               type="email"
               value={email}
-              onChange={(event) => setEmail(event.target.value)}
+              onChange={(event) => {
+                setEmail(event.target.value);
+                setCoverage(null);
+              }}
               required
               placeholder="sales@example.com"
               autoComplete="off"
@@ -359,7 +422,10 @@ function MailboxEditor({
             <input
               type="url"
               value={website}
-              onChange={(event) => setSite(event.target.value)}
+              onChange={(event) => {
+                setSite(event.target.value);
+                setCoverage(null);
+              }}
               placeholder="https://company.com"
               required
             />
@@ -368,7 +434,10 @@ function MailboxEditor({
             官网品牌
             <input
               value={brand || siteBrand(website)}
-              onChange={(event) => setBrand(event.target.value)}
+              onChange={(event) => {
+                setBrand(event.target.value);
+                setCoverage(null);
+              }}
               placeholder={domain}
             />
           </label>
@@ -394,6 +463,64 @@ function MailboxEditor({
             <small>仅提交到服务器，不保存在浏览器本地。</small>
           </label>
         </div>
+        {mailbox && (
+          <section className="outreach-form-section">
+            <h3>负责产品</h3>
+            <p>仅可选择本品牌已审核的供货产品。新增覆盖不会扩大已有手动计划。</p>
+            {eligible.map((p) => (
+              <label key={p.id}>
+                <input
+                  type="checkbox"
+                  checked={productIds.includes(p.id)}
+                  onChange={(e) => {
+                    setProductIds(
+                      e.target.checked
+                        ? [...productIds, p.id]
+                        : productIds.filter((id) => id !== p.id),
+                    );
+                    setCoverage(null);
+                  }}
+                />
+                {p.name || p.id}
+              </label>
+            ))}
+            {productIds
+              .filter((id) => !eligible.some((p) => p.id === id))
+              .map((id) => (
+                <label key={id}>
+                  <input
+                    type="checkbox"
+                    checked
+                    onChange={() => {
+                      setProductIds(productIds.filter((value) => value !== id));
+                      setCoverage(null);
+                    }}
+                  />
+                  {productName(id)}（已失效，请移除或恢复许可）
+                </label>
+              ))}
+            {!eligible.length && <p>当前品牌没有可选的已审核产品。</p>}
+            {coverage && (
+              <div role="status">
+                <h4>确认负责范围影响</h4>
+                <p>
+                  新增：{coverage.added.map(productName).join('、') || '无'}；撤销：
+                  {coverage.removed.map(productName).join('、') || '无'}
+                </p>
+                {coverage.campaigns.map((c) => (
+                  <p key={c.id}>
+                    {c.name}：撤销 {c.removed.map(productName).join('、') || '无'}；
+                    {c.automatic
+                      ? '持续授权新增 ' + (c.added.map(productName).join('、') || '无')
+                      : '手动计划保持原产品集合'}
+                  </p>
+                ))}
+                {!coverage.campaigns.length && <p>没有受影响的计划。</p>}
+                <p>撤销范围将阻止相关未提交邮件，已准备邮件保留原产品与发件身份。</p>
+              </div>
+            )}
+          </section>
+        )}
         <div className="outreach-form-section">
           <label>
             业务备注
@@ -495,7 +622,7 @@ function MailboxEditor({
             <BusyIcon busy={busy}>
               <Check size={15} />
             </BusyIcon>
-            保存邮箱
+            {coverage ? '确认影响并保存邮箱' : '保存邮箱'}
           </button>
         </div>
       </form>
@@ -1482,7 +1609,11 @@ export function OutreachCommunication({
         Object.keys(input).every((key) => ['draftPersona', 'knowledgeProductIds'].includes(key));
       await outreachApi(writingOnly ? path + '/writing' : path, {
         method: writingOnly ? 'PATCH' : mailbox ? 'PUT' : 'POST',
-        body: JSON.stringify({ ...input, businessNote }),
+        body: JSON.stringify({
+          ...input,
+          ...(mailbox && !writingOnly ? { revision: mailbox.revision } : {}),
+          businessNote,
+        }),
       });
       setSignatureRefresh((current) => current + 1);
     } else if (mailbox && businessNote !== undefined) {

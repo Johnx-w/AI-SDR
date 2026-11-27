@@ -2226,3 +2226,64 @@ test('两个明确产品计划经正常启动仅向各自邮箱提交所选产�
     false,
   );
 });
+
+test('新增邮箱产品覆盖不作废原手动计划已准备的产品与发件身份', async (t) => {
+  const h = harness();
+  t.after(() => h.service.close());
+  await runInternalTest(h);
+  const campaign = await prepare(h, { filters: { products: ['pvc'] } });
+  const draft = h.service.deliveries(campaign.id)[0];
+  h.boxes.find((box) => box.id === draft.mailboxId).productIds.push('new-product');
+  h.service.activate(campaign.id, campaign.revision);
+  await h.service.tick();
+  assert.equal(h.service.delivery(draft.id).status, 'accepted');
+  assert.equal(h.service.delivery(draft.id).mailboxId, draft.mailboxId);
+  assert.equal(h.service.delivery(draft.id).candidate.productId, 'pvc');
+  assert.deepEqual(h.service.campaign(campaign.id).filters.products, ['pvc']);
+});
+
+test('原邮箱消失时保留原产品和身份并阻止未提交邮件，其他覆盖邮箱不接替', async (t) => {
+  const h = harness();
+  t.after(() => h.service.close());
+  const campaign = await prepare(h, {
+    mailboxIds: ['brand-a', 'brand-b'],
+    filters: { products: ['pvc'] },
+  });
+  const draft = h.service.deliveries(campaign.id)[0];
+  h.boxes.splice(
+    h.boxes.findIndex((box) => box.id === draft.mailboxId),
+    1,
+  );
+  h.service.refreshProductMaterials();
+  const actual = h.service.delivery(draft.id);
+  assert.equal(actual.status, 'blocked');
+  assert.match(actual.reason, /产品范围/);
+  assert.equal(actual.mailboxId, draft.mailboxId);
+  assert.equal(actual.candidate.productId, 'pvc');
+  assert.equal(h.deliveries.length, 0);
+});
+
+test('SMTP准备中撤销邮箱覆盖后提交数为零且保留原产品和发件身份', async (t) => {
+  const h = await materialHarness(t);
+  const entered = deferred(),
+    release = deferred();
+  h.service.mailboxes.send = async (id, message, { beforeSend }) => {
+    entered.resolve();
+    await release.promise;
+    beforeSend();
+    h.deliveries.push({ mailboxId: id, ...message });
+    return { accepted: [message.to] };
+  };
+  const tick = h.service.tick();
+  await entered.promise;
+  const mailbox = h.boxes.find((box) => box.id === h.original.mailboxId);
+  mailbox.productIds = mailbox.productIds.filter((id) => id !== h.original.candidate.productId);
+  release.resolve();
+  await tick;
+  const actual = h.service.delivery(h.original.id);
+  assert.equal(actual.status, 'blocked');
+  assert.match(actual.reason, /产品范围/);
+  assert.equal(actual.mailboxId, h.original.mailboxId);
+  assert.equal(actual.candidate.productId, h.original.candidate.productId);
+  assert.equal(h.deliveries.filter((row) => row.to === h.original.to).length, 0);
+});

@@ -59,7 +59,6 @@ const senderVersion = (m) =>
     m.displayName,
     m.signature,
     ...(m.signatureDesign ? [m.signatureDesign] : []),
-    [...(m.productIds || [])].sort(),
   ]);
 const dayFormat = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' });
 const day = (date) => dayFormat.format(new Date(date));
@@ -849,6 +848,32 @@ export class OutreachService {
         throw fail(400, `${product.name || id} 超出所选邮箱负责范围或品牌许可`);
     }
   }
+  async mailboxCoveragePreview(id, input) {
+    const current = this.mailboxes.get(id);
+    const next = await this.mailboxes.prepare({ ...input, id }, this.mailboxes.records, () =>
+      this.salesProducts(),
+    );
+    const added = next.productIds.filter((id) => !current.productIds.includes(id));
+    const removed = current.productIds.filter((id) => !next.productIds.includes(id));
+    const campaigns = this.db
+      .prepare(
+        `SELECT data FROM outreach_campaigns WHERE json_extract(data,'$.mode')='production' AND json_extract(data,'$.deleteRequestedAt') IS NULL AND EXISTS (SELECT 1 FROM json_each(data,'$.mailboxIds') WHERE value=?) ORDER BY rowid DESC`,
+      )
+      .all(id)
+      .map((r) => JSON.parse(r.data))
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        automatic: Boolean(c.acquisitionSource),
+        removed: removed.filter(
+          (id) =>
+            c.acquisitionSource || !c.filters?.products?.length || c.filters.products.includes(id),
+        ),
+        added: c.acquisitionSource ? added : [],
+      }))
+      .filter((c) => c.removed.length || c.added.length);
+    return { revision: current.revision, added, removed, campaigns };
+  }
   salesProducts() {
     return this.products().filter((p) => !p.materialOnly);
   }
@@ -862,6 +887,8 @@ export class OutreachService {
     const product = this.products().find((row) => row.id === delivery.candidate.productId);
     const version = outreachMaterialVersion(product, campaign, new Date(this.now()));
     const mailbox = this.mailboxes.get(delivery.mailboxId);
+    if (!mailbox?.productIds?.includes(delivery.candidate.productId))
+      return '邮箱已撤销该产品范围，邮件尚未提交发送';
     if (
       product &&
       mailbox &&

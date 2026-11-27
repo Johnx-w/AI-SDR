@@ -30,6 +30,7 @@ export interface OutreachProduct {
 
 export interface OutreachMailbox {
   id: string;
+  revision: number;
   email: string;
   website: string;
   brandName: string;
