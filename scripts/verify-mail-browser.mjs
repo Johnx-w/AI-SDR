@@ -271,6 +271,48 @@ try {
   console.log('PASS 官网匹配可推产品，备注编辑与清空仅提交备注，不改发件配置');
   await button('验证连接').click();
   await page.getByText('SMTP 发件与 IMAP 收件、已发送文件夹均已验证。', { exact: true }).waitFor();
+  await tab('触达计划').click();
+  await button('新建计划').first().click();
+  await label('计划名称').fill('多市场草稿');
+  const marketInput = page.getByRole('combobox', { name: '目标市场' });
+  for (const [query, country] of [
+    ['DE', '德国'],
+    ['澳洲', '澳大利亚'],
+  ]) {
+    await marketInput.fill(query);
+    await page.getByRole('option', { name: new RegExp(country) }).click();
+  }
+  await button('保存计划草稿').click();
+  await page.getByRole('dialog').waitFor({ state: 'hidden' });
+  const draft = service.campaigns().find((c) => c.name === '多市场草稿');
+  assert.deepEqual(draft.filters.markets, ['DE', 'AU']);
+  await page.reload();
+  const row = page.getByRole('row').filter({ hasText: '多市场草稿' });
+  await row.getByText('更多', { exact: true }).click();
+  await row.getByRole('button', { name: '编辑', exact: true }).click();
+  const selections = page.locator('.outreach-market-field .geo__multi-value__label');
+  assert.deepEqual(await selections.allTextContents(), ['德国.Germany', '澳大利亚.Australia']);
+  await marketInput.focus();
+  await marketInput.press('Backspace');
+  await marketInput.press('Backspace');
+  await button('保存计划草稿').click();
+  await page.getByRole('dialog').waitFor({ state: 'hidden' });
+  assert.deepEqual(service.campaign(draft.id).filters.markets, []);
+  const legacy = service.saveCampaign({
+    name: '既有市场草稿',
+    mailboxIds: [configuration.id],
+    filters: { markets: ['Australia', 'France'] },
+  });
+  await page.reload();
+  const legacyRow = page.getByRole('row').filter({ hasText: '既有市场草稿' });
+  await legacyRow.getByText('更多', { exact: true }).click();
+  await legacyRow.getByRole('button', { name: '编辑', exact: true }).click();
+  await marketInput.waitFor();
+  assert.deepEqual(await selections.allTextContents(), ['澳大利亚.Australia', 'France']);
+  await button('保存计划草稿').click();
+  await page.getByRole('dialog').waitFor({ state: 'hidden' });
+  assert.deepEqual(service.campaign(legacy.id).filters.markets, ['AU', 'France']);
+  console.log('PASS 触达计划按获客国家搜索、多选、回读和清空，保留旧草稿的目录外市场');
   await page.goto(base + '/materials');
   await page.getByLabel('筛选文件').click();
   await label('品牌邮箱筛选').selectOption('honeybadgerblinds.com');

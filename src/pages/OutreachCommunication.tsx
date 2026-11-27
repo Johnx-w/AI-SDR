@@ -37,6 +37,8 @@ import { MailKnowledgeScope } from '../components/MailKnowledgeScope';
 import { siteBrand } from '../domain/mail-site.mjs';
 import { deliveryGroup, deliveryGroupLabels } from '../domain/outreach-status.mjs';
 import type { MailSignatureDesign } from '../domain/mail-signature.mjs';
+import { SearchableLocation } from '../components/SearchableLocation';
+import { countryFor, outreachMarkets } from '../domain/country-catalog';
 import { Badge, Empty, Modal } from '../components/ui';
 import { outreachApi } from '../outreachApi';
 import type {
@@ -127,14 +129,6 @@ const productCategories = [
 const priorityGrades = ['A', 'B', 'C'];
 const message = (error: unknown) =>
   error instanceof Error ? error.message : '操作未完成，请稍后重试。';
-const split = (value: string) => [
-  ...new Set(
-    value
-      .split(/[,，\n]/)
-      .map((item) => item.trim())
-      .filter(Boolean),
-  ),
-];
 const formatTime = (value?: string | null) => {
   if (!value) return '—';
   const time = new Date(value);
@@ -641,6 +635,14 @@ function CampaignEditor({
   );
   const [selectedProducts, setSelectedProducts] = useState(campaign?.filters?.products || []);
   const [selectedCategories, setSelectedCategories] = useState(campaign?.filters?.categories || []);
+  const [markets, setMarkets] = useState(() => [
+    ...new Set(
+      (campaign?.filters?.markets || []).map((market) => {
+        const code = countryFor(market)?.code;
+        return outreachMarkets.find((option) => option.value === code)?.value ?? market;
+      }),
+    ),
+  ]);
   const [grades, setGrades] = useState(campaign?.filters?.grades || []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -676,7 +678,7 @@ function CampaignEditor({
         mode: 'production',
         targetCount: Number(form.get('targetCount')),
         filters: {
-          markets: split(String(form.get('markets') || '')),
+          markets,
           grades,
           products: selectedProducts.filter((id) =>
             categoryProducts.some((product) => product.id === id && productApproved(product)),
@@ -740,15 +742,18 @@ function CampaignEditor({
               defaultValue={campaign?.intervalSeconds ?? 180}
             />
           </label>
-          <label className="outreach-full">
-            目标市场
-            <input
-              name="markets"
-              defaultValue={campaign?.filters?.markets.join('，')}
-              placeholder="不限制市场；或填写 US、AU，以逗号分隔"
+          <div className="outreach-full outreach-market-field">
+            <label htmlFor="campaign-markets">目标市场</label>
+            <SearchableLocation
+              id="campaign-markets"
+              label="目标市场"
+              multiple
+              options={outreachMarkets}
+              value={markets}
+              onChange={setMarkets}
             />
-            <small>使用客户资料中的国家代码；留空表示全部市场。</small>
-          </label>
+            <small>可多选获客范围内的国家，支持搜索国家名称或代码。留空表示全部市场。</small>
+          </div>
         </div>
         <div className="outreach-form-section">
           <h3>客户范围</h3>
@@ -2494,8 +2499,9 @@ export function OutreachCommunication({
                                   <div>
                                     <dt>市场</dt>
                                     <dd>
-                                      {shownDetail.campaign.filters?.markets.join('、') ||
-                                        '全部市场'}
+                                      {shownDetail.campaign.filters?.markets
+                                        .map((market) => countryFor(market)?.zh || market)
+                                        .join('、') || '全部市场'}
                                     </dd>
                                   </div>
                                   <div>
