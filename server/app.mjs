@@ -187,6 +187,7 @@ export function createApp({
       discoveryReady: (id) => provider.discoveryReady(id),
       identityVersion: provider.identityVersion,
       mapComparisonEnabled: provider.mapComparisonEnabled,
+      assertAutomaticIdentityIntegrity: () => provider.assertAutomaticIdentityIntegrity(),
       readLeads: verifiedLeads,
       readLead: (id) => library().localDetail(id).lead,
       readAcquisitionCaptures: () => provider.acquisitionCaptures(),
@@ -1138,7 +1139,11 @@ export function createApp({
               throw new ApiError(400, '核实操作需要有效 Idempotency-Key');
             const submission = acquisitionReviewSubmission(body, source);
             const prior = reviews().attempt(job.id, index, key);
-            if (!prior && (running || manager.active()))
+            if (
+              !prior &&
+              (running ||
+                manager.activeJobs().some(({ reason }) => reason !== 'identity_integrity'))
+            )
               throw new ApiError(409, '当前获客任务正在处理，请完成后再核实该企业');
             const attempt = reviews().begin(
               job.id,

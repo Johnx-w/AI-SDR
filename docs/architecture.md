@@ -223,6 +223,10 @@ npm run release:rollback
 
 备份和旧版本不自动删除，按磁盘使用情况人工保留或清理。若断电或进程被强制结束导致 `.release-lock` 遗留，先核对其中 PID 已不再运行，再移除锁并检查服务／版本状态，不能在另一次发布仍运行时解锁。依赖安装失败会清理临时版本，可重新执行发布；已准备完成的同一提交可复用，正在运行的同一提交通过健康检查后直接完成，不重复重启服务。
 
+### 身份核验暂停恢复
+
+共享身份核验证据损坏时，获客 SQLite 的 `acquisition_identity_hold` 保留受影响的作用域、首个异常快照编号及发现时间。先备份数据库并保全异常快照。用可信原件恢复原快照，核对快照 JSON 去掉 `snapshot_id` 后的 SHA-256 与原编号一致。在隔离副本复跑原错例和独立样本，核对运营主体、来源归属与实际新增。验证通过后，在维护窗口只清除该作用域和快照编号对应的暂停记录，再从原执行详情继续。已确认档案、其他作用域及原任务检查点一并保留。
+
 ## 在线备份与运维邮件
 
 云端使用 `scripts/ops-backup.mjs` 和 `scripts/ops-monitor.mjs`，独立安装到 `/srv/shadeflow/ops/`，不随应用发布自动更新。对应 systemd service/timer 源文件在 `scripts/systemd/`。运维脚本更新后重新复制；更改 unit 才执行 `systemctl daemon-reload`，无需重启 `shadeflow.service`。`/srv/shadeflow/ops/node` 链接到服务器实际 Node.js 可执行文件，Node 升级时核对该链接。

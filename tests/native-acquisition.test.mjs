@@ -9,6 +9,7 @@ import https from 'node:https';
 import { EventEmitter } from 'node:events';
 import { syncBuiltinESMExports } from 'node:module';
 import { Readable } from 'node:stream';
+import { DatabaseSync } from 'node:sqlite';
 import { NativeAcquisition, selectWebsiteCandidates } from '../server/native-acquisition.mjs';
 import { AcquisitionStore } from '../server/acquisition-store.mjs';
 import { FeishuClient } from '../server/feishu-direct.mjs';
@@ -373,9 +374,14 @@ function mapDiscoveryFixture({
     const request = JSON.parse(options?.body || '{}');
     if (url === 'https://api.tavily.com/search') {
       requests.push(request.query);
-      const urls = webResults?.({ atlas, beacon, showroom, cedar, search: requests.length }) || [
+      const urls = webResults?.({
+        atlas,
         beacon,
-      ];
+        showroom,
+        cedar,
+        search: requests.length,
+        query: request.query,
+      }) || [beacon];
       return json({
         results: urls.map((url) => ({ url, title: sites.get(url).name })),
         usage: { credits: 1 },
@@ -872,6 +878,11 @@ async function runMapDiscoveryJob(base, target = 3, key = 'maps-discovery-pair')
   });
   assert.equal(response.status, 202);
   const { id } = await response.json();
+  return settledAcquisitionJob(base, id);
+}
+
+async function settledAcquisitionJob(base, id) {
+  const api = base + '/api/v1';
   let job;
   for (let n = 0; n < 400; n++) {
     job = await (await fetch(api + '/acquisition/jobs/' + id)).json();
@@ -879,6 +890,27 @@ async function runMapDiscoveryJob(base, target = 3, key = 'maps-discovery-pair')
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   assert.fail(`隔离任务 ${id} 未结束（已研究 ${job.researched} 家）`);
+}
+
+function mockOfficialSites(t, html) {
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
+  t.mock.method(dns, 'lookup', async () => [{ address: '23.37.80.10', family: 4 }]);
+  t.mock.method(https, 'request', (url, { headers }, respond) => {
+    const request = new EventEmitter();
+    request.end = () => {
+      const response = Readable.from([
+        Buffer.from(html(new URL(url.pathname, `https://${headers.Host}`).href)),
+      ]);
+      response.statusCode = 200;
+      response.headers = { 'content-type': 'text/html; charset=utf-8' };
+      respond(response);
+    };
+    return request;
+  });
+  syncBuiltinESMExports();
 }
 
 test('正常官网任务忽略 Places 环境配置，重启后可读回两个网站档案和缺证结果', async (t) => {
@@ -898,24 +930,7 @@ test('正常官网任务忽略 Places 环境配置，重启后可读回两个网
     },
     fetchImpl: app.fetchImpl,
   };
-  t.after(() => {
-    t.mock.restoreAll();
-    syncBuiltinESMExports();
-  });
-  t.mock.method(dns, 'lookup', async () => [{ address: '23.37.80.10', family: 4 }]);
-  t.mock.method(https, 'request', (url, { headers }, respond) => {
-    const request = new EventEmitter();
-    request.end = () => {
-      const response = Readable.from([
-        Buffer.from(html(new URL(url.pathname, `https://${headers.Host}`).href)),
-      ]);
-      response.statusCode = 200;
-      response.headers = { 'content-type': 'text/html; charset=utf-8' };
-      respond(response);
-    };
-    return request;
-  });
-  syncBuiltinESMExports();
+  mockOfficialSites(t, html);
   let completedId;
   await withApp(options, async (base) => {
     const job = await runMapDiscoveryJob(base, 2);
@@ -954,6 +969,148 @@ test('正常官网任务忽略 Places 环境配置，重启后可读回两个网
           [['web', name === 'Atlas Shades Limited' ? atlas : beacon]],
         );
       }
+    },
+  );
+});
+
+test('共享身份快照损坏时两个市场均暂停自动入库，重启不重放并保留原档案', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.parse('2030-01-01T08:59:45Z') });
+  const directory = mkdtempSync(join(tmpdir(), 'acquisition-identity-integrity-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const { app, atlas, beacon, html } = mapDiscoveryFixture({
+    webResults: ({ atlas, beacon, query }) => [/Canada/i.test(query) ? beacon : atlas],
+  });
+  app.nativeImpl.close();
+  mockOfficialSites(t, html);
+  const canadaEnteredModel = Promise.withResolvers();
+  const releaseCanadaModel = Promise.withResolvers();
+  let compare = false;
+  const options = {
+    env: {
+      TAVILY_API_KEY: env.TAVILY_API_KEY,
+      DEEPSEEK_API_KEY: env.DEEPSEEK_API_KEY,
+      DEEPSEEK_MODEL: env.DEEPSEEK_MODEL,
+      BATCH_DB_PATH: join(directory, 'jobs.sqlite'),
+      ACQUISITION_DB_PATH: join(directory, 'acquisition.sqlite'),
+      SCHEDULE_DB_PATH: join(directory, 'schedules.sqlite'),
+    },
+    async fetchImpl(url, request) {
+      if (compare && url === 'https://api.tavily.com/search' && /United States/.test(request.body))
+        await canadaEnteredModel.promise;
+      if (
+        compare &&
+        url === 'https://api.deepseek.com/responses' &&
+        request.body.includes(beacon)
+      ) {
+        canadaEnteredModel.resolve();
+        await releaseCanadaModel.promise;
+      }
+      return app.fetchImpl(url, request);
+    },
+  };
+  const schedules = '/api/v1/acquisition/schedules';
+  const jobs = '/api/v1/acquisition/jobs';
+  let ids;
+  let recordId;
+  await withApp(options, async (base) => {
+    const original = await runMapDiscoveryJob(base, 1, 'identity-seed-atlas');
+    assert.equal(original.inserted, 1);
+    recordId = original.rows[0].record_id;
+    const { snapshot_id } = original.rows[0].collection_attempts.find(
+      ({ status }) => status === 'ok',
+    );
+    const db = new DatabaseSync(options.env.ACQUISITION_DB_PATH);
+    try {
+      assert.equal(
+        db
+          .prepare(
+            "UPDATE acquisition_page_snapshots SET data=json_set(data,'$.content',json_extract(data,'$.content') || '<!-- altered -->') WHERE id=?",
+          )
+          .run(snapshot_id).changes,
+        1,
+      );
+    } finally {
+      db.close();
+    }
+    for (const country of ['United States', 'Canada']) {
+      const response = await fetch(base + schedules, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': `identity-plan-${country.replaceAll(' ', '-')}`,
+        },
+        body: JSON.stringify({
+          name: `Identity ${country}`,
+          input: {
+            ...input,
+            country,
+            product: 'window coverings',
+            product_scope: 'all',
+            search_query: `window coverings ${country}`,
+            target_count: 1,
+            research_budget: 1,
+          },
+          timing: { repeat: 'once', startDate: '2030-01-01', times: ['09:00'], timezone: 'UTC' },
+        }),
+      });
+      assert.equal(response.status, 201, JSON.stringify(await response.json()));
+    }
+    compare = true;
+    t.mock.timers.tick(15000);
+    const { schedules: triggered } = await (await fetch(base + schedules)).json();
+    const usa = triggered.find(({ input }) => input.country === 'United States');
+    const canada = triggered.find(({ input }) => input.country === 'Canada');
+    assert.equal(usa.runs, 1);
+    assert.equal(canada.runs, 1);
+    ids = [usa.lastJobId, canada.lastJobId];
+    let detected;
+    try {
+      detected = await settledAcquisitionJob(base, ids[0]);
+    } finally {
+      releaseCanadaModel.resolve();
+    }
+    const independent = await settledAcquisitionJob(base, ids[1]);
+    assert.deepEqual(
+      [detected, independent].map(({ status, reason, inserted }) => [status, reason, inserted]),
+      [
+        ['paused', 'identity_integrity', 0],
+        ['paused', 'identity_integrity', 0],
+      ],
+      JSON.stringify([detected, independent].map(({ rows }) => rows.map(({ result }) => result))),
+    );
+  });
+  const external = [];
+  await withApp(
+    {
+      ...options,
+      fetchImpl: async (url) => {
+        external.push(url);
+        throw new Error('仅从本地数据库读回');
+      },
+    },
+    async (base) => {
+      assert.equal((await fetch(base + '/api/health')).status, 200);
+      for (const id of ids) {
+        const job = await settledAcquisitionJob(base, id);
+        assert.deepEqual(
+          [job.status, job.reason, job.inserted],
+          ['paused', 'identity_integrity', 0],
+        );
+        const resume = await fetch(`${base}${jobs}/${id}/resume`, { method: 'POST' });
+        assert.equal(resume.status, 409);
+        assert.match((await resume.json()).error, /共享身份核验/);
+      }
+      const { leads } = await (await fetch(base + '/api/v1/leads/real/list')).json();
+      assert.deepEqual(
+        leads.map(({ id, name }) => [id, name]),
+        [[recordId, 'Atlas Shades Limited']],
+      );
+      const { lead } = await (await fetch(base + '/api/v1/leads/real/' + recordId)).json();
+      assert.deepEqual(
+        lead.acquisitionSources.map(({ source_url }) => source_url),
+        [atlas],
+      );
+      assert.deepEqual(external, []);
     },
   );
 });

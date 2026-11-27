@@ -5,6 +5,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { domainKey } from './website-identity.mjs';
 import { exclusionConditionsKey } from './exclusion-conditions.mjs';
 import { exclusionDecision } from './exclusion-decision.mjs';
+import { identityIntegrityCode, identityIntegrityMessage } from './acquisition-subject.mjs';
+
+const identityIntegrityError = () =>
+  Object.assign(new Error(identityIntegrityMessage), { status: 409, code: identityIntegrityCode });
 
 const MODEL_RESPONSE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MODEL_RESPONSE_LIMIT = 200;
@@ -91,7 +95,33 @@ export class AcquisitionStore {
         PRIMARY KEY(scope,snapshot_id,operation_id)
       ) WITHOUT ROWID;
       CREATE INDEX IF NOT EXISTS acquisition_snapshot_refs_operation
-        ON acquisition_snapshot_refs(scope,operation_id,snapshot_id)`);
+        ON acquisition_snapshot_refs(scope,operation_id,snapshot_id);
+      CREATE TABLE IF NOT EXISTS acquisition_identity_hold (
+        scope TEXT PRIMARY KEY, snapshot_id TEXT NOT NULL, detected_at TEXT NOT NULL
+      )`);
+  }
+  assertAutomaticIdentityIntegrity() {
+    if (this.db.prepare('SELECT 1 FROM acquisition_identity_hold WHERE scope=?').get(this.scope))
+      throw identityIntegrityError();
+  }
+  verifiedPageSnapshot({ id, data }) {
+    let page;
+    try {
+      page = JSON.parse(data);
+    } catch {
+      // A stored snapshot that cannot be decoded has lost its immutable evidence.
+    }
+    const { snapshot_id, ...body } = page || {};
+    if (body.body_pruned === true) return null;
+    if (
+      snapshot_id === id &&
+      createHash('sha256').update(JSON.stringify(body)).digest('hex') === id
+    )
+      return page;
+    this.db
+      .prepare('INSERT OR IGNORE INTO acquisition_identity_hold VALUES(?,?,?)')
+      .run(this.scope, id, new Date().toISOString());
+    throw identityIntegrityError();
   }
   pageSnapshot(requestedUrl, { now = Date.now() } = {}) {
     return this.pageSnapshots(requestedUrl, { now }).at(-1) || null;
@@ -99,7 +129,7 @@ export class AcquisitionStore {
   pageSnapshots(requestedUrl, { now = Date.now() } = {}) {
     const rows = this.db
       .prepare(
-        `SELECT data FROM acquisition_page_snapshots WHERE scope=? AND requested_url=? AND status='ok'
+        `SELECT id,data FROM acquisition_page_snapshots WHERE scope=? AND requested_url=? AND status='ok'
       AND acquired_at BETWEEN ? AND ? ORDER BY acquired_at DESC, rowid DESC LIMIT 3`,
       )
       .all(
@@ -108,7 +138,7 @@ export class AcquisitionStore {
         new Date(now - PAGE_SNAPSHOT_TTL_MS).toISOString(),
         new Date(now).toISOString(),
       );
-    const latest = rows.map((row) => JSON.parse(row.data));
+    const latest = rows.map((row) => this.verifiedPageSnapshot(row)).filter(Boolean);
     const directIndex = latest.findIndex(({ method }) => method === 'node');
     return directIndex < 0 ? latest.slice(0, 1) : latest.slice(0, directIndex + 1).reverse();
   }
@@ -159,12 +189,13 @@ export class AcquisitionStore {
   referencedPageSnapshots(operationId) {
     return this.db
       .prepare(
-        `SELECT p.data FROM acquisition_snapshot_refs r
+        `SELECT p.id,p.data FROM acquisition_snapshot_refs r
         JOIN acquisition_page_snapshots p ON p.scope=r.scope AND p.id=r.snapshot_id
         WHERE r.scope=? AND r.operation_id=? ORDER BY p.acquired_at,p.rowid`,
       )
       .all(this.scope, operationId)
-      .map(({ data }) => JSON.parse(data));
+      .map((row) => this.verifiedPageSnapshot(row))
+      .filter(Boolean);
   }
   canPersistPageBodies() {
     if (!this.snapshotFolder) return true;
@@ -231,11 +262,12 @@ export class AcquisitionStore {
       throw error;
     }
   }
-  snapshotById(id) {
+  snapshotById(id, { verify = false } = {}) {
     const row = this.db
       .prepare('SELECT data FROM acquisition_page_snapshots WHERE scope=? AND id=?')
       .get(this.scope, id);
-    return row ? JSON.parse(row.data) : null;
+    if (!row) return null;
+    return verify ? this.verifiedPageSnapshot({ id, data: row.data }) : JSON.parse(row.data);
   }
   reviewResponse(conditionsKey, domain, requestKey) {
     const row = this.db

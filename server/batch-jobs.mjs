@@ -14,7 +14,11 @@ import {
 import { exclusionConditionsKey } from './exclusion-conditions.mjs';
 import { validateCountryScope } from './search-target.mjs';
 import { websiteAdmissionVersion } from './customer-eligibility.mjs';
-import { acquisitionUrl } from './acquisition-subject.mjs';
+import {
+  acquisitionUrl,
+  identityIntegrityCode,
+  identityIntegrityMessage,
+} from './acquisition-subject.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 function discoveryPlanKey(input, plan) {
@@ -146,6 +150,7 @@ const labels = {
   uncertain: '执行结果待确认，已暂停，未自动重复写入',
   write_uncertain: '主库写入结果待核对，已保留原操作编号',
   paid_uncertain: '供应商请求结果待核对，已保留原请求编号',
+  identity_integrity: identityIntegrityMessage,
   manual_pause: '已人工暂停，保留执行进度',
   outreach_deleted: '关联触达计划已删除，自动首发已关闭；等待人工继续获客或删除来源',
   source_deleted: '来源任务已删除，执行历史保留',
@@ -178,6 +183,7 @@ export class BatchJobs {
     scope = '',
     identityVersion,
     mapComparisonEnabled = false,
+    assertAutomaticIdentityIntegrity = () => {},
     onOutreachChange = () => {},
     recoveryIntervalMs = 15000,
     isMaintaining = () => false,
@@ -210,6 +216,7 @@ export class BatchJobs {
     this.scope = scope || provider;
     this.identityVersion = identityVersion;
     this.mapComparisonEnabled = mapComparisonEnabled;
+    this.assertAutomaticIdentityIntegrity = assertAutomaticIdentityIntegrity;
     this.onOutreachChange = onOutreachChange;
     this.isMaintaining = isMaintaining;
     this.working = new Set();
@@ -429,6 +436,7 @@ export class BatchJobs {
       if (old.hash !== hash) throw fail(409, '同一请求编号不能使用不同参数');
       return JSON.parse(old.data);
     }
+    this.assertAutomaticIdentityIntegrity();
     if (this.blockingJob(input, scheduleId))
       throw fail(409, '已有未结束任务，请先继续或停止该任务');
     const executionVersion = this.identityVersion && unifiedExecutionVersion;
@@ -678,6 +686,7 @@ export class BatchJobs {
       if (job.provider !== this.provider)
         throw fail(409, '该任务由其他执行引擎创建，已停止支持，请核对历史结果');
       if (automatic && this.isMaintaining()) return job;
+      this.assertAutomaticIdentityIntegrity();
       await this.reconcile(job);
       if (automatic && (this.closed || this.isMaintaining())) return job;
       job = this.get(id);
@@ -1052,6 +1061,7 @@ export class BatchJobs {
           this.finish(j, 'stopped');
           return;
         }
+        this.assertAutomaticIdentityIntegrity();
         validateCountryScope(j.input);
         const batch = j.executionVersion === unifiedExecutionVersion && j.batch;
         if (batch && this.isMaintaining()) {
@@ -1324,11 +1334,13 @@ export class BatchJobs {
           }
           j.status = 'paused';
           j.reason =
-            error.code === 'ACQUISITION_INTERRUPTED'
-              ? interruptedReason(j)
-              : error.code === 'ACQUISITION_PAID_UNKNOWN'
-                ? 'paid_uncertain'
-                : uncertainReason(j);
+            error.code === identityIntegrityCode
+              ? 'identity_integrity'
+              : error.code === 'ACQUISITION_INTERRUPTED'
+                ? interruptedReason(j)
+                : error.code === 'ACQUISITION_PAID_UNKNOWN'
+                  ? 'paid_uncertain'
+                  : uncertainReason(j);
           j.pending = 1;
           delete j.collectionWait;
           checkpoint(j);
@@ -1341,11 +1353,13 @@ export class BatchJobs {
       const j = this.get(id);
       j.status = 'paused';
       j.reason =
-        error.code === 'ACQUISITION_PAID_UNKNOWN'
-          ? 'paid_uncertain'
-          : j.current
-            ? uncertainReason(j)
-            : interruptedReason(j);
+        error.code === identityIntegrityCode
+          ? 'identity_integrity'
+          : error.code === 'ACQUISITION_PAID_UNKNOWN'
+            ? 'paid_uncertain'
+            : j.current
+              ? uncertainReason(j)
+              : interruptedReason(j);
       j.pending = j.current ? 1 : 0;
       checkpoint(j);
     } finally {
