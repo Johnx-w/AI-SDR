@@ -18,7 +18,17 @@ const sameFields = (record, fields) =>
   );
 
 const companyName = (record) => fieldText(record.fields.公司名称 || record.fields.客户名称).trim();
+const recordCustomerId = (record) => fieldText(record.fields.customer_id);
+const unclearMirror = (record) =>
+  fail(409, `客户「${companyName(record)}」的飞书经营主体归属不明确，请核对`);
+const ownedMirror = (record) =>
+  fail(409, `客户「${companyName(record)}」的飞书记录已属于另一份本地档案，请核对`);
 const reportColumns = new Set(['评级依据摘要', '最近联系时间', '最近回复时间', '邮箱有效性']);
+
+function matchesMirrorInsert(record, fields, customerId) {
+  const savedId = recordCustomerId(record);
+  return fields && (!savedId || savedId === customerId) && sameFields(record, fields);
+}
 
 function firstLinkPatch(local, saved, fields) {
   const name = companyName(local);
@@ -311,6 +321,34 @@ export class CustomerArchive {
   remoteId(id) {
     return this.entry(id)?.remoteId || (id.startsWith('local_') ? null : id);
   }
+  mirrorOwner(remoteId, id) {
+    return this.library.db
+      .prepare(
+        `SELECT NULL AS registration_key FROM lead_library_customers WHERE scope=? AND record_id=?
+        UNION ALL SELECT json_extract(data, '$.acquisition.registration.key') FROM customer_archive_sync
+        WHERE scope=? AND json_extract(data, '$.remoteId')=? AND record_id<>? LIMIT 1`,
+      )
+      .get(this.library.scope, remoteId, this.library.scope, remoteId, id);
+  }
+  registeredMirror(queued, records, customerId) {
+    const registration = queued.acquisition.registration.key;
+    const stableMatches = records.filter((record) => recordCustomerId(record) === customerId);
+    if (stableMatches.length > 1) throw unclearMirror(queued.record);
+    if (stableMatches.length === 1) return stableMatches[0];
+    const website = acquisitionUrl(customerWebsite(queued.record));
+    const candidates = records.filter((record) => {
+      if (acquisitionUrl(customerWebsite(record)) !== website) return false;
+      const owner = this.mirrorOwner(record.record_id, queued.record.record_id);
+      return !owner?.registration_key || owner.registration_key === registration;
+    });
+    if (
+      candidates.length === 1 &&
+      matchesMirrorInsert(candidates[0], queued.mirrorInsert, customerId)
+    )
+      return candidates[0];
+    if (candidates.length) throw unclearMirror(queued.record);
+    return null;
+  }
   sync() {
     if (this.closed) return Promise.resolve();
     if (this.syncing) return this.syncing;
@@ -330,21 +368,30 @@ export class CustomerArchive {
           Object.entries(queued.fields).filter(([name]) => resolveCustomerField(definitions, name)),
         );
         const fields = encodeCustomerFields(projected, definitions);
+        const registration = queued.acquisition?.registration?.key;
+        const customerId = registration && `web_${registration}`;
         let remoteId = queued.remoteId;
         if (!remoteId) {
           if (!customerWebsite(fields))
             throw fail(409, '飞书客户表缺少可写的官网字段，无法核对新增记录');
           // Reconcile every insert before creating, including responses lost across a restart.
-          const domain = domainKey(customerWebsite(queued.record));
-          const matches = (await this.remote.records()).filter((record) =>
-            queued.acquisition?.registration
-              ? acquisitionUrl(customerWebsite(record)) ===
-                acquisitionUrl(customerWebsite(queued.record))
-              : domainKey(customerWebsite(record)) === domain,
-          );
-          if (matches.length > 1)
-            throw fail(409, `客户「${companyName(queued.record)}」在飞书有多条同官网记录，请核对`);
-          remoteId = matches[0]?.record_id;
+          const records = await this.remote.records();
+          if (registration) {
+            if (!companyName({ fields }))
+              throw fail(409, '飞书客户表缺少可写的公司名称，无法核对新增记录');
+            remoteId = this.registeredMirror(queued, records, customerId)?.record_id;
+          } else {
+            const domain = domainKey(customerWebsite(queued.record));
+            const matches = records.filter(
+              (record) => domainKey(customerWebsite(record)) === domain,
+            );
+            if (matches.length > 1)
+              throw fail(
+                409,
+                `客户「${companyName(queued.record)}」在飞书有多条同官网记录，请核对`,
+              );
+            remoteId = matches[0]?.record_id;
+          }
         }
         let saved = remoteId ? await this.remote.record(remoteId) : null;
         if (
@@ -355,36 +402,37 @@ export class CustomerArchive {
           throw fail(409, '飞书客户官网已变更，本地档案已保留，请核对客户身份');
         let patch = fields;
         if (!queued.remoteId && remoteId) {
-          if (!saved) throw fail(409, '飞书候选记录已不存在，请重新核对');
-          const owner = this.library.db
-            .prepare(
-              `
-            SELECT 1 FROM lead_library_customers WHERE scope=? AND record_id=?
-            UNION ALL SELECT 1 FROM customer_archive_sync
-            WHERE scope=? AND json_extract(data, '$.remoteId')=? AND record_id<>? LIMIT 1
-          `,
-            )
-            .get(this.library.scope, remoteId, this.library.scope, remoteId, id);
-          if (owner)
-            throw fail(
-              409,
-              `客户「${companyName(queued.record)}」的飞书记录已属于另一份本地档案，请核对`,
-            );
-          patch = firstLinkPatch(queued.record, saved, fields);
+          if (saved?.record_id !== remoteId) throw fail(409, '飞书候选记录已不存在，请重新核对');
+          if (this.mirrorOwner(remoteId, id)) throw ownedMirror(queued.record);
+          if (registration && matchesMirrorInsert(saved, queued.mirrorInsert, customerId)) {
+            this.put({ ...this.entry(id), remoteId });
+          } else {
+            if (registration && recordCustomerId(saved) !== customerId)
+              throw unclearMirror(queued.record);
+            patch = firstLinkPatch(queued.record, saved, fields);
+          }
         }
         if (!saved || !sameFields(saved, fields)) {
+          if (registration && !remoteId) {
+            if (queued.mirrorInsert)
+              throw fail(409, `客户「${companyName(queued.record)}」的飞书新增结果待核对`);
+            // Preserve the projected insert so a compact T2 row can be verified after a lost reply.
+            this.put({ ...this.entry(id), mirrorInsert: fields });
+          }
           const written = await this.remote.write(
             remoteId ? 'update' : 'insert',
             patch,
             remoteId,
             queued.clientToken,
           );
+          if (registration && !remoteId && this.mirrorOwner(written.record_id, id))
+            throw ownedMirror(queued.record);
           remoteId = written.record_id;
           this.put({ ...this.entry(id), remoteId });
           saved = await this.remote.record(remoteId);
         }
         if (!sameFields(saved, fields)) throw fail(502, '飞书读回与本地档案不一致');
-        const latest = this.entry(id);
+        const { mirrorInsert, ...latest } = this.entry(id);
         this.put({
           ...latest,
           remoteId,
