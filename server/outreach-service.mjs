@@ -110,6 +110,8 @@ export class OutreachService {
     now = Date.now,
     tickMs = 2000,
     acquisitionSources = () => [],
+    pauseAcquisitionSource,
+    acquisitionDeletionImpact,
     isMaintaining = () => false,
   } = {}) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
@@ -129,6 +131,7 @@ export class OutreachService {
     );
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
       CREATE TABLE IF NOT EXISTS outreach_campaigns(id TEXT PRIMARY KEY,data TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS outreach_pending_deletions ON outreach_campaigns(id) WHERE json_extract(data,'$.deleteRequestedAt') IS NOT NULL AND json_extract(data,'$.deletedAt') IS NULL;
       CREATE INDEX IF NOT EXISTS outreach_acquisition_round ON outreach_campaigns(json_extract(data,'$.acquisitionSource.roundId'));
       CREATE TABLE IF NOT EXISTS outreach_deliveries(id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,state TEXT NOT NULL,data TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS outreach_delivery_campaign ON outreach_deliveries(campaign_id,state);
@@ -159,6 +162,8 @@ export class OutreachService {
       now,
       tickMs,
       acquisitionSources,
+      pauseAcquisitionSource,
+      acquisitionDeletionImpact,
       isMaintaining,
     });
     this.customerMailState =
@@ -1494,7 +1499,7 @@ export class OutreachService {
     return this.detail(id);
   }
   deletionPreview(id) {
-    this.campaign(id);
+    const campaign = this.campaign(id);
     const counts = this.deliveryCounts(id).stats;
     const pendingFollowUps = this.db
       .prepare(
@@ -1502,6 +1507,13 @@ export class OutreachService {
       )
       .get(id).count;
     return {
+      ...(campaign.acquisitionSource
+        ? {
+            source:
+              this.acquisitionDeletionImpact?.(campaign.acquisitionSource.jobId) ||
+              campaign.acquisitionSource,
+          }
+        : {}),
       pendingFirst: counts.draft + counts.queued + counts.blocked,
       pendingFollowUps,
       unknown: counts.unknown,
@@ -1543,9 +1555,28 @@ export class OutreachService {
     return this.detail(id);
   }
   deleteCampaign(id, revision, confirmed) {
-    if (this.campaign(id).acquisitionSource) throw fail(409, '来源暂停尚未接通，请稍后重试');
     this.requestCampaignDeletion(id, revision, confirmed);
-    return this.completeCampaignDeletion(id);
+    return this.finishCampaignDeletion(id);
+  }
+  finishCampaignDeletion(id) {
+    const c = this.campaign(id);
+    if (c.deletedAt) return this.detail(id);
+    try {
+      if (c.acquisitionSource) {
+        if (!this.pauseAcquisitionSource) throw new Error('来源暂停服务暂不可用');
+        this.pauseAcquisitionSource(c.acquisitionSource.jobId, {
+          outreachPlanId: id,
+          reason: '关联触达计划已删除，获客后自动首发已关闭',
+        });
+      }
+      return this.completeCampaignDeletion(id);
+    } catch (error) {
+      this.putCampaign({
+        ...this.campaign(id),
+        deletionError: error.message || '来源暂停尚未完成',
+      });
+      return this.detail(id);
+    }
   }
   suppress(input) {
     const reason = text(input.reason) || '人工标记不再联系';
@@ -1697,6 +1728,12 @@ export class OutreachService {
     return this.running;
   }
   async runTick() {
+    for (const { id } of this.db
+      .prepare(
+        "SELECT id FROM outreach_campaigns WHERE json_extract(data,'$.deleteRequestedAt') IS NOT NULL AND json_extract(data,'$.deletedAt') IS NULL",
+      )
+      .all())
+      this.finishCampaignDeletion(id);
     if (
       typeof this.mailboxes.readMailbox === 'function' &&
       (!this.lastMailboxSync || this.now() - this.lastMailboxSync >= 60000)

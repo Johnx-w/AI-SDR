@@ -270,6 +270,18 @@ export function createApp({
           getEnv: () => connections.environment(),
           getScope: acquisitionScope,
           acquisitionSources: () => acquisitionOutreachSources(jobs(), plans()),
+          pauseAcquisitionSource: (id, context) => plans().pauseSourceForOutreach(id, context),
+          acquisitionDeletionImpact: (id) => {
+            const job = jobs().get(id);
+            const schedule = job.scheduleId ? plans().get(job.scheduleId) : null;
+            return {
+              jobId: id,
+              roundId: id,
+              scheduleId: job.scheduleId,
+              scheduleName: schedule?.name,
+              currentJobId: schedule?.lastJobId || id,
+            };
+          },
           businessState: () => business.state().store.view(),
           customerMailState: (id) => {
             const store = business.state().store;

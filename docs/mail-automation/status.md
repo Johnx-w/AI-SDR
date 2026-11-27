@@ -234,3 +234,7 @@ BW Shutters 的 11 月 17 日已发邮件引用两张 PNG。阿里邮箱将它�
 ## #87 邮箱负责产品维护（2026-11-27 本地实施，未发布）
 
 邮箱配置已接入品牌已审核产品的增减、提交前影响确认、配置修订冲突和持久化回读；撤销对应未发任务在提交前复核，新增覆盖保持手动计划原产品范围。独立回归入口为 `node scripts/verify-mailbox-coverage-browser.mjs`，使用双品牌邮箱及空覆盖对照。完整规格集成与最终检查由 #85 统一完成，实际命令及red/green证据记录在工作区外的 T2-evidence.md，不表示已部署。升级前旧摘要草稿可能需重新准备，详见邮件沟通主题。
+
+### #91 来源删除联动（本地，未发布）
+
+触达列表与详情可删除获客来源计划，确认来源任务、轮次、定时安排及发送影响。请求持久化后停止旧安排，来源和关联定时安排暂停且自动首发关闭；失败保留删除处理中及原因，后台跨重启补齐。直接继续只获客，重新勾选保存建立新 generation，暂停时不执行。隔离 HTTP、真实 SQLite 写失败/重启、SMTP 替身及可复跑浏览器见 `tests/outreach-source-deletion.test.mjs`、`tests/acquisition-outreach.test.mjs`、`node scripts/verify-outreach-source-controls.mjs`（先 build）。浏览器验证删除→未勾选→直接继续零新安排→重新授权新旧分离→单次重新执行新 job 继承关闭。不是生产全量验收，未真实外发。
