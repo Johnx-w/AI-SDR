@@ -35,6 +35,9 @@ export function ScheduledAcquisition() {
   const [error, setError] = useState('');
   const [filter, setFilter] = useState('active');
   const [expanded, setExpanded] = useState('');
+  const [firstTouchDrafts, setFirstTouchDrafts] = useState<
+    Record<string, { enabled: boolean; revision: number }>
+  >({});
   const readVersion = useRef(0);
   const reading = useRef(false);
   async function load(background = false) {
@@ -67,11 +70,18 @@ export function ScheduledAcquisition() {
       reading.current = false;
     };
   }, []);
-  async function control(plan: AcquisitionSchedule, action: 'pause' | 'resume' | 'close') {
+  async function control(
+    plan: AcquisitionSchedule,
+    action: 'pause' | 'resume' | 'close' | 'delete',
+  ) {
     setBusy(plan.id);
     setError('');
     try {
-      const updated = await acquisitionApi.controlSchedule(plan.id, action);
+      const updated = await acquisitionApi.controlSchedule(
+        plan.id,
+        action,
+        plan.sourceControlRevision || 0,
+      );
       readVersion.current++;
       reading.current = false;
       setPlans((current) => current.map((p) => (p.id === plan.id ? updated : p)));
@@ -81,11 +91,15 @@ export function ScheduledAcquisition() {
       setBusy('');
     }
   }
-  async function controlJob(id: string, action: 'stop' | 'resume') {
+  async function controlJob(id: string, action: 'stop' | 'resume' | 'pause' | 'delete') {
     setBusy(id);
     setError('');
     try {
-      await acquisitionApi.controlJob(id, action);
+      await acquisitionApi.controlJob(
+        id,
+        action,
+        plans.find((plan) => plan.lastJob?.id === id)?.lastJob?.sourceControlRevision || 0,
+      );
       readVersion.current++;
       reading.current = false;
       await load(true);
@@ -102,11 +116,17 @@ export function ScheduledAcquisition() {
       const updated = (await acquisitionApi.setAutomaticFirstTouch(
         'schedules',
         plan.id,
-        !plan.input.auto_first_touch,
+        firstTouchDrafts[plan.id]?.enabled ?? !plan.input.auto_first_touch,
+        firstTouchDrafts[plan.id]?.revision ?? plan.sourceControlRevision ?? 0,
       )) as AcquisitionSchedule;
       readVersion.current++;
       reading.current = false;
       setPlans((current) => current.map((item) => (item.id === plan.id ? updated : item)));
+      setFirstTouchDrafts((current) => {
+        const next = { ...current };
+        delete next[plan.id];
+        return next;
+      });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '自动首发设置失败');
     } finally {
@@ -227,12 +247,31 @@ export function ScheduledAcquisition() {
             <label>
               <input
                 type="checkbox"
-                checked={plan.input.auto_first_touch === true}
+                checked={firstTouchDrafts[plan.id]?.enabled ?? plan.input.auto_first_touch === true}
                 disabled={Boolean(busy) || plan.status === 'closed'}
-                onChange={() => void toggleFirstTouch(plan)}
+                onChange={(event) =>
+                  plan.sourcePause?.outreachPlanId
+                    ? setFirstTouchDrafts((current) => ({
+                        ...current,
+                        [plan.id]: {
+                          enabled: event.target.checked,
+                          revision: plan.sourceControlRevision || 0,
+                        },
+                      }))
+                    : void toggleFirstTouch(plan)
+                }
               />
               获客后自动首发
             </label>
+            {plan.sourcePause?.outreachPlanId && (
+              <button
+                className="btn secondary"
+                disabled={Boolean(busy) || !firstTouchDrafts[plan.id] || !!plan.sourceDeletedAt}
+                onClick={() => void toggleFirstTouch(plan)}
+              >
+                保存自动首发设置
+              </button>
+            )}
             <p className="muted">
               开启后续轮次的自动首发；按最新已审核产品和可用邮箱匹配，无可用商务邮箱跳过本次，其他缺项保留原因。关闭开关同时停止待发邮件。
             </p>
@@ -261,7 +300,7 @@ export function ScheduledAcquisition() {
                   暂停计划
                 </button>
               )}
-              {['paused', 'closed'].includes(plan.status) && (
+              {['paused', 'closed'].includes(plan.status) && !plan.sourceDeletedAt && (
                 <button
                   className="btn secondary"
                   disabled={Boolean(busy)}
@@ -279,6 +318,18 @@ export function ScheduledAcquisition() {
                 >
                   <X size={15} />
                   关闭计划
+                </button>
+              )}
+              {!plan.sourceDeletedAt && (
+                <button
+                  className="btn subtle"
+                  disabled={Boolean(busy)}
+                  onClick={() => {
+                    if (window.confirm('删除来源计划将结束当前及后续执行，保留历史。确认删除？'))
+                      void control(plan, 'delete');
+                  }}
+                >
+                  删除来源计划
                 </button>
               )}
               {plan.lastJob && (

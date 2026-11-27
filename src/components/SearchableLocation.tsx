@@ -1,49 +1,60 @@
-import Select, { createFilter } from 'react-select';
+import Select, { createFilter, type Theme } from 'react-select';
 import './SearchableLocation.css';
 export type LocationOption = { value: string; label: string; keywords?: string };
 const filterOption = createFilter<LocationOption>({
   stringify: ({ data }) => [data.label, data.value, data.keywords].filter(Boolean).join(' '),
 });
-export function SearchableLocation({
-  label,
-  id,
-  options,
-  value,
-  onChange,
-  disabled = false,
-}: {
+type LocationProps = {
   label: string;
   id: string;
   options: readonly LocationOption[];
-  value: string;
-  onChange: (value: string) => void;
   disabled?: boolean;
-}) {
-  const selected = options.find((item) => item.value === value) || null;
+} & (
+  | { multiple?: false; value: string; onChange: (value: string) => void }
+  | { multiple: true; value: string[]; onChange: (value: string[]) => void }
+);
+
+export function SearchableLocation(props: LocationProps) {
+  const { id, label, options, disabled } = props;
+  const shared = {
+    instanceId: id,
+    inputId: id,
+    'aria-label': label,
+    className: 'location-select',
+    classNamePrefix: 'geo',
+    isDisabled: disabled,
+    options,
+    filterOption,
+    noOptionsMessage: () => '没有匹配的选项',
+    menuPlacement: 'auto' as const,
+    theme: (theme: Theme) => ({
+      ...theme,
+      colors: {
+        ...theme.colors,
+        primary: 'var(--color-primary)',
+        primary25: 'var(--color-primary-soft)',
+      },
+    }),
+  };
+  if (props.multiple) {
+    return (
+      <Select<LocationOption, true>
+        {...shared}
+        isMulti
+        placeholder="全部市场"
+        value={props.value.map(
+          (value) => options.find((item) => item.value === value) || { value, label: value },
+        )}
+        onChange={(selected) => props.onChange(selected.map((item) => item.value))}
+      />
+    );
+  }
   return (
     <Select<LocationOption, false>
-      instanceId={id}
-      inputId={id}
-      aria-label={label}
-      className="location-select"
-      classNamePrefix="geo"
-      isDisabled={disabled}
-      isSearchable
-      options={options}
-      value={selected}
+      {...shared}
       placeholder={'请选择' + label}
-      filterOption={filterOption}
-      onChange={(option) => option && onChange(option.value)}
-      noOptionsMessage={() => '没有匹配的选项'}
-      menuPlacement="auto"
-      theme={(theme) => ({
-        ...theme,
-        colors: {
-          ...theme.colors,
-          primary: 'var(--color-primary)',
-          primary25: 'var(--color-primary-soft)',
-        },
-      })}
+      value={options.find((item) => item.value === props.value) || null}
+      onChange={(option) => option && props.onChange(option.value)}
     />
   );
 }

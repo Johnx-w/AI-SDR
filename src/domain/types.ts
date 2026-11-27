@@ -70,6 +70,10 @@ export interface IntegrationStatus {
   modelProvider?: string;
 }
 export interface AcquisitionJob {
+  manualPaused?: boolean;
+  sourcePause?: { outreachPlanId?: string; reason: string };
+  sourceControlRevision?: number;
+  sourceDeletedAt?: string;
   summary?: boolean;
   updatedAt?: string;
   scheduleId?: string;
@@ -168,6 +172,9 @@ export interface ScheduleTiming {
 }
 
 export interface AcquisitionSchedule {
+  sourcePause?: { outreachPlanId?: string; reason: string };
+  sourceControlRevision?: number;
+  sourceDeletedAt?: string;
   id: string;
   name: string;
   input: WorkflowInput & { target_count: number };

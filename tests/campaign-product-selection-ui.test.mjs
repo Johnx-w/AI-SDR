@@ -120,6 +120,16 @@ test('计划只展示邮箱负责的产品，不再填写旧介绍文案', async
   assert.match(text(render(null)), /自动发送/);
   assert.equal(elements(render(null)).filter((node) => node.type === 'textarea').length, 0);
   states.editor = [];
+  assert.deepEqual(
+    elements(render())
+      .filter(
+        (node) =>
+          node.type === 'button' &&
+          /^(透气窗|百叶窗|室内窗饰|户外遮阳|其他|未分类)（/.test(text(node)),
+      )
+      .map(text),
+    ['透气窗（1）', '室内窗饰（1）'],
+  );
   const picker = elements(render()).find((node) =>
     node.props.emptyText?.startsWith('所选邮箱与品类范围内'),
   );
@@ -142,8 +152,39 @@ test('计划只展示邮箱负责的产品，不再填写旧介绍文案', async
     .find((node) => node.type === 'form')
     .props.onSubmit({ preventDefault() {}, currentTarget: {} });
   await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(saved, undefined);
+  assert.match(
+    elements(render()).find((node) => node.type?.name === 'InlineError').props.value,
+    /至少选择一个供货产品/,
+  );
+  picker.props.onChange(['facts-product', 'curtains-product']);
+  elements(render())
+    .find((node) => node.type === 'form')
+    .props.onSubmit({ preventDefault() {}, currentTarget: {} });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(saved.filters.products, ['facts-product', 'curtains-product']);
   assert.equal(saved.outreachClaims, undefined);
   assert.deepEqual(saved.mailboxIds, ['mailbox-one']);
+  const mailboxCheckbox = elements(render()).find(
+    (node) => node.type === 'input' && node.props.checked === true && !node.props.name,
+  );
+  mailboxCheckbox.props.onChange({ target: { checked: false } });
+  assert.match(text(render()), /Shutters：超出所选邮箱负责范围/);
+  assert.match(text(render()), /Curtains：超出所选邮箱负责范围/);
+  mailboxCheckbox.props.onChange({ target: { checked: true } });
+  const groupButton = elements(render()).find(
+    (node) => node.type === 'button' && text(node).startsWith('室内窗饰'),
+  );
+  groupButton.props.onClick();
+  const grouped = elements(render()).find((node) =>
+    node.props.emptyText?.startsWith('所选邮箱与品类范围内'),
+  );
+  assert.deepEqual(grouped.props.selected, ['facts-product', 'curtains-product']);
+  assert.deepEqual(
+    grouped.props.products.map((p) => p.id),
+    ['curtains-product'],
+  );
+
   states.editor = [];
   assert.equal(elements(render(saved)).filter((node) => node.type === 'textarea').length, 0);
 });

@@ -214,11 +214,24 @@ export async function handleOutreach({
     return { mailboxes: await service.mailboxes.import(body.items, () => service.salesProducts()) };
   }
   const mailbox = path.match(
-    /^\/mailboxes\/([\w-]+)(?:\/(verify|preview|note|writing|reply-settings))?$/,
+    /^\/mailboxes\/([\w-]+)(?:\/(verify|preview|note|writing|reply-settings|coverage-preview|coverage-products))?$/,
   );
   if (mailbox) {
     const [, id, action] = mailbox;
     if (!action && method === 'GET') return service.mailboxes.get(id, { withBusinessNote: true });
+    if (action === 'coverage-products' && method === 'GET') {
+      service.mailboxes.get(id);
+      return service.salesProducts().map(({ id, name, status, approved, sourceUrl, brands }) => ({
+        id,
+        name,
+        status,
+        approved,
+        sourceUrl,
+        brands,
+      }));
+    }
+    if (action === 'coverage-preview' && method === 'POST')
+      return service.mailboxCoveragePreview(id, await readJson(request));
     if (action === 'note' && method === 'PATCH')
       return service.mailboxes.saveNote(id, await readJson(request));
     if (action === 'writing' && method === 'PATCH') {
@@ -312,12 +325,17 @@ export async function handleOutreach({
     }
     if (!action && method === 'PUT') {
       const body = await readJson(request);
-      return service.mailboxes.save({ ...body, id }, () => service.salesProducts());
+      const saved = await service.mailboxes.save({ ...body, id }, () => service.salesProducts());
+      if (['productIds', 'website', 'email', 'brandName'].some((key) => Object.hasOwn(body, key)))
+        service.refreshProductMaterials();
+      return saved;
     }
   }
   if (path === '/campaigns' && method === 'POST')
     return service.saveCampaign(await readJson(request));
-  const campaign = path.match(/^\/campaigns\/([\w-]+)(?:\/(start|pause|cancel|follow-ups))?$/);
+  const campaign = path.match(
+    /^\/campaigns\/([\w-]+)(?:\/(start|pause|cancel|delete|deletion-preview|follow-ups))?$/,
+  );
   if (campaign) {
     const [, id, action] = campaign;
     if (!action && method === 'GET') {
@@ -327,6 +345,11 @@ export async function handleOutreach({
         ...detail,
         deliveries: detail.deliveries.map(({ bodyHtml, candidate, ...item }) => item),
       };
+    }
+    if (action === 'deletion-preview' && method === 'GET') return service.deletionPreview(id);
+    if (action === 'delete' && method === 'POST') {
+      const body = await readJson(request);
+      return service.deleteCampaign(id, body.revision, body.confirmed);
     }
     if (action === 'follow-ups' && method === 'POST')
       return service.followUps.control(id, (await readJson(request)).action);

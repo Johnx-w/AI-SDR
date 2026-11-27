@@ -76,6 +76,22 @@ function fixture() {
   return { leads: [lead], products: [product], mailboxes: [mailbox], campaign };
 }
 
+test('计划多选市场匹配任一所选国家，清空后覆盖全部市场', () => {
+  const input = fixture();
+  const markets = ['德国', 'Australia', 'Canada', ''];
+  input.leads = distinctLeads(input.leads[0], markets.length).map((lead, index) => ({
+    ...lead,
+    market: markets[index],
+  }));
+  input.products[0].markets = [];
+  input.campaign.productScopes = input.products.map(outreachProductScope);
+  const eligibleIds = () => selectOutreachCandidates(input).eligible.map((lead) => lead.customerId);
+  input.campaign.filters.markets = ['DE', 'AU'];
+  assert.deepEqual(eligibleIds(), ['buyer-0', 'buyer-1']);
+  input.campaign.filters.markets = [];
+  assert.deepEqual(eligibleIds(), ['buyer-0', 'buyer-1', 'buyer-2', 'buyer-3']);
+});
+
 test('首封按有来源的经营产品及当前审核版本匹配，不把评级当作采购意向', () => {
   const input = fixture();
   input.leads[0].grade = 'C';

@@ -46,13 +46,18 @@ export const acquisitionApi = {
       signal,
     }),
   schedules: () => list<{ schedules: AcquisitionSchedule[] }>('schedules'),
-  setAutomaticFirstTouch: (kind: 'schedules' | 'jobs', id: string, enabled: boolean) =>
+  setAutomaticFirstTouch: (
+    kind: 'schedules' | 'jobs',
+    id: string,
+    enabled: boolean,
+    sourceControlRevision?: number,
+  ) =>
     request<AcquisitionSchedule | AcquisitionJob>(
       `/${kind}/${encodeURIComponent(id)}/auto-first-touch`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled }),
+        body: JSON.stringify({ enabled, sourceControlRevision }),
       },
     ),
   cancelAutomaticFirstTouch: (id: string) =>
@@ -79,15 +84,27 @@ export const acquisitionApi = {
     input: WorkflowInput,
     target_count: number,
     timing: ScheduleTiming,
+    sourceControlRevision?: number,
   ) =>
     request<AcquisitionSchedule>(`/schedules/${encodeURIComponent(id)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, input: { ...input, target_count }, timing }),
+      body: JSON.stringify({
+        name,
+        input: { ...input, target_count },
+        timing,
+        sourceControlRevision,
+      }),
     }),
-  controlSchedule: (id: string, action: 'pause' | 'resume' | 'close') =>
+  controlSchedule: (
+    id: string,
+    action: 'pause' | 'resume' | 'close' | 'delete',
+    sourceControlRevision?: number,
+  ) =>
     request<AcquisitionSchedule>(`/schedules/${encodeURIComponent(id)}/${action}`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourceControlRevision }),
     }),
   jobs: () => list<{ jobs: AcquisitionJob[] }>('jobs'),
   job: (id: string, signal?: AbortSignal) =>
@@ -119,8 +136,16 @@ export const acquisitionApi = {
       headers: { 'Content-Type': 'application/json', 'Idempotency-Key': requestId },
       body: JSON.stringify({ ...input, target_count }),
     }),
-  controlJob: (id: string, action: 'stop' | 'resume') =>
-    request<AcquisitionJob>(`/jobs/${encodeURIComponent(id)}/${action}`, { method: 'POST' }),
+  controlJob: (
+    id: string,
+    action: 'stop' | 'resume' | 'pause' | 'delete',
+    sourceControlRevision?: number,
+  ) =>
+    request<AcquisitionJob>(`/jobs/${encodeURIComponent(id)}/${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourceControlRevision }),
+    }),
   status: () => request<IntegrationStatus>('/status'),
 };
 

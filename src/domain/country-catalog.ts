@@ -91,6 +91,10 @@ export const acquisitionMarkets = targetCountries.map((c) => ({
   value: c.name,
   keywords: [c.code, c.iso3, ...(aliases[c.code] || [])].join(' '),
 }));
+export const outreachMarkets = acquisitionMarkets.map((option, i) => ({
+  ...option,
+  value: targetCountries[i].code,
+}));
 export const countryFilters = [
   { label: '全部国家', value: '' },
   ...acquisitionMarkets.map((option, i) => ({ ...option, value: targetCountries[i].zh })),

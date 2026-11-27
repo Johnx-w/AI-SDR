@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync, statSync 
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { OutreachMailboxes } from '../server/outreach-mailboxes.mjs';
+import { OutreachService } from '../server/outreach-service.mjs';
 import { createApp } from '../server/app.mjs';
 import { simpleParser } from 'mailparser';
 import { renderMailboxSignature } from '../src/domain/mail-signature.mjs';
@@ -835,4 +836,104 @@ test('read-only access rejects missing credentials and hides reader/decryption p
     registry.readMailbox(settings.id),
     (error) => error.code === 'MAILBOX_CREDENTIAL_FAILED' && !String(error).includes(secret),
   );
+});
+
+test('邮箱负责范围通过 API 校验版本、品牌及审核，两个邮箱和空覆盖保存后回读', async (t) => {
+  const { registry, config } = fixture(t);
+  const products = [
+    {
+      id: 'curtain',
+      name: '布艺帘',
+      status: 'approved',
+      sourceUrl: 'https://honeybadgerblinds.com',
+    },
+    { id: 'track', name: '轨道', status: 'approved', sourceUrl: 'https://honeybadgerblinds.com' },
+    {
+      id: 'blind',
+      name: '横百叶',
+      status: 'approved',
+      sourceUrl: 'https://shutterblindssolutions.com',
+    },
+    { id: 'draft', status: 'draft', sourceUrl: 'https://honeybadgerblinds.com' },
+    { id: 'outdoor', status: 'approved' },
+  ];
+  const a = await registry.save({ email: 'a@honeybadgerblinds.com', productIds: ['curtain'] });
+  const b = await registry.save({ email: 'b@shutterblindssolutions.com', productIds: ['blind'] });
+  const empty = await registry.save({ email: 'c@shuangshengshutter.com', productIds: [] });
+  const service = new OutreachService({ mailboxes: registry, products: () => products });
+  const campaign = service.saveCampaign({
+    name: '原手动范围',
+    mode: 'production',
+    mailboxIds: [a.id],
+    filters: { products: ['curtain'] },
+    productIds: ['curtain'],
+  });
+  const server = createApp({ env: {}, outreachServiceFactory: () => service });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}/api/v1/outreach/mailboxes/`;
+  const update = (id, body, action = '') =>
+    fetch(base + id + action, {
+      method: action ? 'POST' : 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  const preview = await update(
+    a.id,
+    { revision: a.revision, productIds: ['track'] },
+    '/coverage-preview',
+  );
+  assert.equal(preview.status, 200);
+  assert.deepEqual(await preview.json(), {
+    revision: a.revision,
+    added: ['track'],
+    removed: ['curtain'],
+    campaigns: [
+      { id: campaign.id, name: '原手动范围', removed: ['curtain'], added: [], automatic: false },
+    ],
+  });
+  const saved = await update(a.id, { revision: a.revision, productIds: ['track'] });
+  assert.equal(saved.status, 200);
+  const latest = await saved.json();
+  assert.equal(latest.revision, a.revision + 1);
+  assert.equal((await update(a.id, { revision: a.revision, productIds: ['curtain'] })).status, 409);
+  for (const productIds of [['blind'], ['draft'], ['outdoor'], ['missing']])
+    assert.equal((await update(a.id, { revision: latest.revision, productIds })).status, 400);
+  assert.equal((await update(b.id, { revision: b.revision, productIds: [] })).status, 200);
+  assert.deepEqual((await (await fetch(base + a.id)).json()).productIds, ['track']);
+  const reopened = new OutreachMailboxes(config);
+  assert.deepEqual(reopened.get(a.id).productIds, ['track']);
+  assert.deepEqual(reopened.get(b.id).productIds, []);
+  assert.deepEqual(reopened.get(empty.id).productIds, []);
+  assert.equal(reopened.get(a.id).revision, latest.revision);
+});
+
+test('相同邮箱修订同时提交两份覆盖时仅一份生效，重开读取保留胜出的输入', async (t) => {
+  const { registry, config } = fixture(t);
+  const box = await registry.save({ email: 'a@honeybadgerblinds.com', productIds: [] });
+  const products = ['curtain', 'track'].map((id) => ({
+    id,
+    status: 'approved',
+    sourceUrl: 'https://honeybadgerblinds.com',
+  }));
+  const service = new OutreachService({ mailboxes: registry, products: () => products });
+  const server = createApp({ env: {}, outreachServiceFactory: () => service });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const url = `http://127.0.0.1:${server.address().port}/api/v1/outreach/mailboxes/${box.id}`;
+  const selections = [['curtain'], ['track']];
+  const results = await Promise.all(
+    selections.map((productIds) =>
+      fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ revision: box.revision, productIds }),
+      }),
+    ),
+  );
+  assert.deepEqual(results.map((r) => r.status).sort(), [200, 409]);
+  const expected = selections[results.findIndex((r) => r.status === 200)];
+  assert.deepEqual((await (await fetch(url)).json()).productIds, expected);
+  assert.deepEqual(new OutreachMailboxes(config).get(box.id).productIds, expected);
+  assert.equal(new OutreachMailboxes(config).get(box.id).revision, box.revision + 1);
 });

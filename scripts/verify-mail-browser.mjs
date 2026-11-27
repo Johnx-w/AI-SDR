@@ -271,6 +271,49 @@ try {
   console.log('PASS 官网匹配可推产品，备注编辑与清空仅提交备注，不改发件配置');
   await button('验证连接').click();
   await page.getByText('SMTP 发件与 IMAP 收件、已发送文件夹均已验证。', { exact: true }).waitFor();
+  await tab('触达计划').click();
+  await button('新建计划').first().click();
+  await label('计划名称').fill('多市场草稿');
+  await page.getByRole('checkbox', { name: /^QA 布艺帘轨道/ }).check();
+  const marketInput = page.getByRole('combobox', { name: '目标市场' });
+  for (const [query, country] of [
+    ['DE', '德国'],
+    ['澳洲', '澳大利亚'],
+  ]) {
+    await marketInput.fill(query);
+    await page.getByRole('option', { name: new RegExp(country) }).click();
+  }
+  await button('保存计划草稿').click();
+  await page.getByRole('dialog').waitFor({ state: 'hidden' });
+  const draft = service.campaigns().find((c) => c.name === '多市场草稿');
+  assert.deepEqual(draft.filters.markets, ['DE', 'AU']);
+  await page.reload();
+  const row = page.getByRole('row').filter({ hasText: '多市场草稿' });
+  await row.getByText('更多', { exact: true }).click();
+  await row.getByRole('button', { name: '编辑', exact: true }).click();
+  const selections = page.locator('.outreach-market-field .geo__multi-value__label');
+  assert.deepEqual(await selections.allTextContents(), ['德国.Germany', '澳大利亚.Australia']);
+  await marketInput.focus();
+  await marketInput.press('Backspace');
+  await marketInput.press('Backspace');
+  await button('保存计划草稿').click();
+  await page.getByRole('dialog').waitFor({ state: 'hidden' });
+  assert.deepEqual(service.campaign(draft.id).filters.markets, []);
+  const legacy = service.saveCampaign({
+    name: '既有市场草稿',
+    mailboxIds: [configuration.id],
+    filters: { markets: ['Australia', 'France'], products: [saleProduct.id] },
+  });
+  await page.reload();
+  const legacyRow = page.getByRole('row').filter({ hasText: '既有市场草稿' });
+  await legacyRow.getByText('更多', { exact: true }).click();
+  await legacyRow.getByRole('button', { name: '编辑', exact: true }).click();
+  await marketInput.waitFor();
+  assert.deepEqual(await selections.allTextContents(), ['澳大利亚.Australia', 'France']);
+  await button('保存计划草稿').click();
+  await page.getByRole('dialog').waitFor({ state: 'hidden' });
+  assert.deepEqual(service.campaign(legacy.id).filters.markets, ['AU', 'France']);
+  console.log('PASS 触达计划按获客国家搜索、多选、回读和清空，保留旧草稿的目录外市场');
   await page.goto(base + '/materials');
   await page.getByLabel('筛选文件').click();
   await label('品牌邮箱筛选').selectOption('honeybadgerblinds.com');
@@ -289,6 +332,7 @@ try {
       buffer: readFileSync(resolve('tests/fixtures/material-mixed-catalog.pdf')),
     },
   ]);
+  await button('预览 clean-parameters').waitFor({ state: 'visible', timeout: 180000 });
   await button('预览 clean-parameters').click();
   await page.getByText('已关联 · catalog.pdf（3 页）').waitFor();
   await button('全选正常项').click();
@@ -327,10 +371,12 @@ try {
   const choosing = page.waitForEvent('filechooser');
   await page.getByRole('button', { name: /选择文件上传/u }).click();
   await (await choosing).setFiles(resolve('tests/fixtures/mail-specimen.xlsx'));
+  await button('预览 mail-specimen').waitFor({ state: 'visible', timeout: 180000 });
   await button('预览 mail-specimen').click();
   const material = page.getByRole('region', { name: '素材详情' });
   await label('查找型号或主题').fill('ZX-01');
   await material.getByText('2 · ZX-01', { exact: true }).click();
+  await button('校对单元格').click();
   assert.equal(await label('规格!B2').inputValue(), 'Aluminium');
   await label('规格!B2').fill('Aluminium alloy');
   await label('审核人').fill('QA');
@@ -367,6 +413,7 @@ try {
   const choosePdf = page.waitForEvent('filechooser');
   await page.getByRole('button', { name: /选择文件上传/u }).click();
   await (await choosePdf).setFiles(resolve('tests/fixtures/material-mixed-catalog.pdf'));
+  await button('预览 material-mixed-catalog').waitFor({ state: 'visible', timeout: 180000 });
   await button('预览 material-mixed-catalog').click();
   await material.getByText(/原件共 3 页/u).waitFor();
   const spec = material.locator('.kb-chunk').filter({ hasText: 'MX42 track width is 73 mm.' });
@@ -691,6 +738,7 @@ try {
   assert.match(await editor.innerText(), /^Revised: Hello Jordan,/);
   assert.equal(sent.length, sentBeforeWriting);
   console.log('PASS 长回复展开编辑、回首行修改、收起和 Esc 保留光标，桌面与手机全文保存且未发信');
+  const callsBeforeExistingDraft = modelCalls;
   const manual = 'We are reviewing your request.';
   await editor.fill(manual);
   assert.ok(await assist.isDisabled());
@@ -709,7 +757,7 @@ try {
   await page.getByRole('alert').filter({ hasText: '已有草稿' }).waitFor();
   assert.equal(await editor.innerText(), competing);
   assert.equal(service.replies.draft(thread.id).bodyText, competing);
-  assert.equal(modelCalls, 0);
+  assert.equal(modelCalls, callsBeforeExistingDraft);
   await button('丢弃草稿').click();
   const sentBefore = sent.length;
   await page.setViewportSize({ width: 1100, height: 713 });
@@ -735,7 +783,7 @@ try {
   await assertReadingSpace();
   assert.match(await editor.innerText(), /Aluminium alloy/);
   assert.ok(await assist.isDisabled());
-  assert.equal(modelCalls, 1);
+  assert.equal(modelCalls, callsBeforeExistingDraft + 1);
   assert.equal(sent.length, sentBefore);
   assert.deepEqual(service.replies.operations(thread.id), []);
   assert.deepEqual(pageErrors, []);

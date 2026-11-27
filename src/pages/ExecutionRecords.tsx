@@ -233,10 +233,14 @@ function AcquisitionExecutionList({ selectedId }: { selectedId?: string }) {
       }
     }
   }, [loading, selectedId, jobs]);
-  async function control(id: string, action: 'stop' | 'resume') {
+  async function control(id: string, action: 'stop' | 'resume' | 'pause' | 'delete') {
     setBusy(id);
     try {
-      const job = await acquisitionApi.controlJob(id, action);
+      const job = await acquisitionApi.controlJob(
+        id,
+        action,
+        jobs.find((job) => job.id === id)?.sourceControlRevision || 0,
+      );
       setJobs((current) => current.map((j) => (j.id === id ? job : j)));
       setError('');
     } catch (e) {
@@ -294,7 +298,11 @@ function AcquisitionExecutionList({ selectedId }: { selectedId?: string }) {
             </span>
             <span>
               <Badge tone={job.status === 'completed' ? 'green' : 'neutral'}>
-                {states[job.status]}
+                {job.sourceDeletedAt
+                  ? '来源已删除'
+                  : job.manualPaused && job.status === 'paused'
+                    ? '已人工暂停'
+                    : states[job.status]}
               </Badge>
               <strong>
                 新增收录 {job.inserted} / {job.target} 家

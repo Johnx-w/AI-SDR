@@ -2,10 +2,18 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../server/app.mjs';
 import { OutreachService } from '../server/outreach-service.mjs';
+function fixtureService() {
+  const mailbox = { id: 'sales', website: 'https://seller.example', productIds: ['product'] };
+  return new OutreachService({
+    mailboxes: { list: () => [mailbox], get: (id) => (id === 'sales' ? mailbox : undefined) },
+    products: () => [{ id: 'product', name: 'Product', status: 'approved' }],
+  });
+}
+const selection = { mailboxIds: ['sales'], filters: { products: ['product'] } };
 
 test('计划摘要省略批量HTML和候选快照，单封读取保留原文且不修改数据', async (t) => {
-  const service = new OutreachService({ mailboxes: { list: () => [] } });
-  const campaign = service.saveCampaign({ name: 'Large historical plan', mailboxIds: [] });
+  const service = fixtureService();
+  const campaign = service.saveCampaign({ name: 'Large historical plan', ...selection });
   service.putCampaign({ ...campaign, status: 'completed' });
   for (let i = 0; i < 3; i++)
     service.putDelivery({
@@ -177,9 +185,9 @@ test('多邮箱接口可直接访问并限制本机来源，内部测试需要�
 });
 
 test('取消触达接口核对确认和版本并可重复请求，保留详情且不能再次启动或编辑', async (t) => {
-  const service = new OutreachService({ mailboxes: { list: () => [], get: () => undefined } });
-  const campaign = service.saveCampaign({ name: 'API cancellation', mailboxIds: [] });
-  const completed = service.saveCampaign({ name: 'Completed', mailboxIds: [] });
+  const service = fixtureService();
+  const campaign = service.saveCampaign({ name: 'API cancellation', ...selection });
+  const completed = service.saveCampaign({ name: 'Completed', ...selection });
   service.putCampaign({ ...completed, status: 'completed' });
   const server = createApp({
     env: {},

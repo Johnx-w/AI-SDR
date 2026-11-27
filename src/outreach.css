@@ -533,6 +533,10 @@
 .outreach-full {
   grid-column: 1 / -1;
 }
+.outreach-market-field {
+  display: grid;
+  gap: 8px;
+}
 .outreach-form-section {
   margin-top: 8px;
   padding-top: 18px;

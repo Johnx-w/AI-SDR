@@ -1,3 +1,4 @@
+import { siteAllowsProduct } from '../domain/mail-site.mjs';
 import { SectionWorkspace } from '../components/SectionWorkspace';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
@@ -37,6 +38,8 @@ import { MailKnowledgeScope } from '../components/MailKnowledgeScope';
 import { siteBrand } from '../domain/mail-site.mjs';
 import { deliveryGroup, deliveryGroupLabels } from '../domain/outreach-status.mjs';
 import type { MailSignatureDesign } from '../domain/mail-signature.mjs';
+import { SearchableLocation } from '../components/SearchableLocation';
+import { countryFor, outreachMarkets } from '../domain/country-catalog';
 import { Badge, Empty, Modal } from '../components/ui';
 import { outreachApi } from '../outreachApi';
 import type {
@@ -53,7 +56,14 @@ import '../outreach.css';
 type Tab = 'mailboxes' | 'campaigns' | 'inbox' | 'sequences';
 type MailboxInput = Omit<
   OutreachMailbox,
-  'id' | 'configured' | 'smtpStatus' | 'lastCheckedAt' | 'lastError' | 'signature' | 'productIds'
+  | 'id'
+  | 'configured'
+  | 'smtpStatus'
+  | 'lastCheckedAt'
+  | 'lastError'
+  | 'signature'
+  | 'revision'
+  | 'productIds'
 > & { signature?: string; clientPassword?: string };
 type CampaignInput = Pick<
   OutreachCampaign,
@@ -98,18 +108,22 @@ const deliveryDetailLabel = (delivery: OutreachDelivery) =>
       ? '正在生成'
       : statusLabel(delivery.status);
 const campaignStatusLabel = (campaign: OutreachCampaign) =>
-  campaign.status === 'ready' &&
-  !campaign.stats?.draft &&
-  !campaign.stats?.queued &&
-  !campaign.stats?.accepted
-    ? campaign.stats?.skipped && !campaign.stats?.blocked
-      ? '本次客户已跳过'
-      : '待补齐条件'
-    : campaign.status === 'draft'
-      ? '未启动'
-      : campaign.status === 'preparing'
-        ? '正在生成'
-        : statusLabel(campaign.status);
+  campaign.deleteRequestedAt
+    ? campaign.deletedAt
+      ? '已删除'
+      : '删除处理中'
+    : campaign.status === 'ready' &&
+        !campaign.stats?.draft &&
+        !campaign.stats?.queued &&
+        !campaign.stats?.accepted
+      ? campaign.stats?.skipped && !campaign.stats?.blocked
+        ? '本次客户已跳过'
+        : '待补齐条件'
+      : campaign.status === 'draft'
+        ? '未启动'
+        : campaign.status === 'preparing'
+          ? '正在生成'
+          : statusLabel(campaign.status);
 const productName = (product: OutreachProduct) => product.label || product.name || product.id;
 const productApproved = (product: OutreachProduct) =>
   product.status === 'approved' || product.approved === true;
@@ -121,20 +135,12 @@ const mailboxProductNames = (mailbox: OutreachMailbox, products: OutreachProduct
 const productCategories = [
   { id: 'ventilation', label: '透气窗' },
   { id: 'shutters', label: '百叶窗' },
-  { id: 'indoor', label: '室内成品帘' },
+  { id: 'indoor', label: '室内窗饰' },
   { id: 'outdoor', label: '户外遮阳' },
 ];
 const priorityGrades = ['A', 'B', 'C'];
 const message = (error: unknown) =>
   error instanceof Error ? error.message : '操作未完成，请稍后重试。';
-const split = (value: string) => [
-  ...new Set(
-    value
-      .split(/[,，\n]/)
-      .map((item) => item.trim())
-      .filter(Boolean),
-  ),
-];
 const formatTime = (value?: string | null) => {
   if (!value) return '—';
   const time = new Date(value);
@@ -159,7 +165,11 @@ const tone = (status: string) =>
 const pathFor = (kind: string, id: string, action?: string) =>
   `/${kind}/${encodeURIComponent(id)}${action ? `/${action}` : ''}`;
 const canCancelCampaign = (campaign: OutreachCampaign) =>
-  !campaign.acquisitionSource && !['completed', 'cancelled'].includes(campaign.status);
+  !campaign.deleteRequestedAt &&
+  !campaign.acquisitionSource &&
+  !['completed', 'cancelled'].includes(campaign.status);
+const canDeleteCampaign = (campaign: OutreachCampaign) =>
+  campaign.mode === 'production' && !campaign.deleteRequestedAt;
 
 function InlineError({ value }: { value: string | null }) {
   return value ? (
@@ -225,6 +235,32 @@ function MailboxEditor({
   onClose: () => void;
   onSave: (input: Partial<MailboxInput> | null, businessNote?: string) => Promise<void>;
 }) {
+  const [products, setProducts] = useState<OutreachProduct[]>([]);
+  useEffect(() => {
+    if (!mailbox) return;
+    const controller = new AbortController();
+    outreachApi<OutreachProduct[]>(pathFor('mailboxes', mailbox.id) + '/coverage-products', {
+      signal: controller.signal,
+    })
+      .then(setProducts)
+      .catch((reason) => {
+        if (!controller.signal.aborted) setError(message(reason));
+      });
+    return () => controller.abort();
+  }, [mailbox?.id]);
+  const [productIds, setProductIds] = useState<string[]>(mailbox?.productIds || []);
+  const [coverage, setCoverage] = useState<{
+    added: string[];
+    removed: string[];
+    campaigns: {
+      id: string;
+      name: string;
+      automatic: boolean;
+      added: string[];
+      removed: string[];
+    }[];
+  } | null>(null);
+  const productName = (id: string) => products.find((p) => p.id === id)?.name || id;
   const [businessNote, setBusinessNote] = useState(mailbox?.businessNote || '');
   const initialSettings = useRef<MailboxInput | null>(null);
   const [fileIds, setFileIds] = useState<string[]>(mailbox?.knowledgeProductIds ?? []);
@@ -237,6 +273,12 @@ function MailboxEditor({
   const domain = email.split('@')[1] || '';
   const website = site || (domain ? 'https://' + domain : '');
   const identity = { website, email, brandName: brand || siteBrand(website) || domain };
+  const eligible = products.filter(
+    (p) =>
+      !p.materialOnly &&
+      (p.status ? p.status === 'approved' : p.approved === true) &&
+      siteAllowsProduct(p, identity, true),
+  );
   const [displayName, setDisplayName] = useState(mailbox?.displayName || '');
   const [signature, setSignature] = useState(mailbox?.signature || '');
   const [signatureDesign, setSignatureDesign] = useState<MailSignatureDesign | null>(
@@ -253,6 +295,7 @@ function MailboxEditor({
     const displayName = String(form.get('displayName')).trim();
     return {
       email: address,
+      ...(mailbox ? { productIds } : {}),
       website,
       brandName: identity.brandName,
       owner: String(form.get('owner') || displayName),
@@ -292,6 +335,26 @@ function MailboxEditor({
     setBusy(true);
     setError(null);
     try {
+      if (
+        mailbox &&
+        !coverage &&
+        (edits.includes('productIds') ||
+          edits.some((key) => ['website', 'email', 'brandName'].includes(key)))
+      ) {
+        setCoverage(
+          await outreachApi(pathFor('mailboxes', mailbox.id) + '/coverage-preview', {
+            method: 'POST',
+            body: JSON.stringify({
+              revision: mailbox.revision,
+              productIds,
+              website,
+              email,
+              brandName: identity.brandName,
+            }),
+          }),
+        );
+        return;
+      }
       const note = businessNote.trim();
       await onSave(
         edits.length ? changed : null,
@@ -334,7 +397,10 @@ function MailboxEditor({
               name="email"
               type="email"
               value={email}
-              onChange={(event) => setEmail(event.target.value)}
+              onChange={(event) => {
+                setEmail(event.target.value);
+                setCoverage(null);
+              }}
               required
               placeholder="sales@example.com"
               autoComplete="off"
@@ -356,7 +422,10 @@ function MailboxEditor({
             <input
               type="url"
               value={website}
-              onChange={(event) => setSite(event.target.value)}
+              onChange={(event) => {
+                setSite(event.target.value);
+                setCoverage(null);
+              }}
               placeholder="https://company.com"
               required
             />
@@ -365,7 +434,10 @@ function MailboxEditor({
             官网品牌
             <input
               value={brand || siteBrand(website)}
-              onChange={(event) => setBrand(event.target.value)}
+              onChange={(event) => {
+                setBrand(event.target.value);
+                setCoverage(null);
+              }}
               placeholder={domain}
             />
           </label>
@@ -391,6 +463,64 @@ function MailboxEditor({
             <small>仅提交到服务器，不保存在浏览器本地。</small>
           </label>
         </div>
+        {mailbox && (
+          <section className="outreach-form-section">
+            <h3>负责产品</h3>
+            <p>仅可选择本品牌已审核的供货产品。新增覆盖不会扩大已有手动计划。</p>
+            {eligible.map((p) => (
+              <label key={p.id}>
+                <input
+                  type="checkbox"
+                  checked={productIds.includes(p.id)}
+                  onChange={(e) => {
+                    setProductIds(
+                      e.target.checked
+                        ? [...productIds, p.id]
+                        : productIds.filter((id) => id !== p.id),
+                    );
+                    setCoverage(null);
+                  }}
+                />
+                {p.name || p.id}
+              </label>
+            ))}
+            {productIds
+              .filter((id) => !eligible.some((p) => p.id === id))
+              .map((id) => (
+                <label key={id}>
+                  <input
+                    type="checkbox"
+                    checked
+                    onChange={() => {
+                      setProductIds(productIds.filter((value) => value !== id));
+                      setCoverage(null);
+                    }}
+                  />
+                  {productName(id)}（已失效，请移除或恢复许可）
+                </label>
+              ))}
+            {!eligible.length && <p>当前品牌没有可选的已审核产品。</p>}
+            {coverage && (
+              <div role="status">
+                <h4>确认负责范围影响</h4>
+                <p>
+                  新增：{coverage.added.map(productName).join('、') || '无'}；撤销：
+                  {coverage.removed.map(productName).join('、') || '无'}
+                </p>
+                {coverage.campaigns.map((c) => (
+                  <p key={c.id}>
+                    {c.name}：撤销 {c.removed.map(productName).join('、') || '无'}；
+                    {c.automatic
+                      ? '持续授权新增 ' + (c.added.map(productName).join('、') || '无')
+                      : '手动计划保持原产品集合'}
+                  </p>
+                ))}
+                {!coverage.campaigns.length && <p>没有受影响的计划。</p>}
+                <p>撤销范围将阻止相关未提交邮件，已准备邮件保留原产品与发件身份。</p>
+              </div>
+            )}
+          </section>
+        )}
         <div className="outreach-form-section">
           <label>
             业务备注
@@ -492,7 +622,7 @@ function MailboxEditor({
             <BusyIcon busy={busy}>
               <Check size={15} />
             </BusyIcon>
-            保存邮箱
+            {coverage ? '确认影响并保存邮箱' : '保存邮箱'}
           </button>
         </div>
       </form>
@@ -641,21 +771,52 @@ function CampaignEditor({
   );
   const [selectedProducts, setSelectedProducts] = useState(campaign?.filters?.products || []);
   const [selectedCategories, setSelectedCategories] = useState(campaign?.filters?.categories || []);
+  const [markets, setMarkets] = useState(() => [
+    ...new Set(
+      (campaign?.filters?.markets || []).map((market) => {
+        const code = countryFor(market)?.code;
+        return outreachMarkets.find((option) => option.value === code)?.value ?? market;
+      }),
+    ),
+  ]);
   const [grades, setGrades] = useState(campaign?.filters?.grades || []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const coveredProductIds = new Set(
-    mailboxes
-      .filter((mailbox) => selectedMailboxes.includes(mailbox.id))
-      .flatMap((mailbox) => mailbox.productIds || []),
+  const productReason = (product: OutreachProduct | undefined) => {
+    if (!product || product.materialOnly) return '产品不存在或不是供货产品';
+    if (!productApproved(product)) return '尚未审核';
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(
+      new Date(),
+    );
+    if (product.effectiveDate && product.effectiveDate > today) return '尚未生效';
+    if (
+      !mailboxes.some(
+        (box) =>
+          selectedMailboxes.includes(box.id) &&
+          box.productIds?.includes(product.id) &&
+          siteAllowsProduct(product, box),
+      )
+    )
+      return '超出所选邮箱负责范围或品牌许可';
+    return '';
+  };
+  const availableProducts = products.filter((product) => !productReason(product));
+  const groups = [
+    ...productCategories,
+    { id: 'other', label: '其他' },
+    { id: '', label: '未分类' },
+  ];
+  const groupId = (product: OutreachProduct) =>
+    !product.category
+      ? ''
+      : groups.some((group) => group.id === product.category)
+        ? product.category
+        : 'other';
+  const categoryProducts = availableProducts.filter(
+    (product) => !selectedCategories.length || selectedCategories.includes(groupId(product)),
   );
-  const categoryProducts = products.filter(
-    (product) =>
-      coveredProductIds.has(product.id) &&
-      (!selectedCategories.length || selectedCategories.includes(product.category || '')),
-  );
-  const unavailableSelections = selectedProducts.filter(
-    (id) => !categoryProducts.some((product) => product.id === id && productApproved(product)),
+  const unavailableSelections = selectedProducts.filter((id) =>
+    productReason(products.find((product) => product.id === id)),
   );
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -663,8 +824,12 @@ function CampaignEditor({
       setError('请至少选择一个发件邮箱。');
       return;
     }
+    if (!selectedProducts.length) {
+      setError('请至少选择一个供货产品。');
+      return;
+    }
     if (unavailableSelections.length) {
-      setError('请先移除超出邮箱负责范围、品类范围或尚未审核的产品选择。');
+      setError('请先移除不可用产品，或补回负责邮箱并核对审核与生效条件。');
       return;
     }
     const form = new FormData(event.currentTarget);
@@ -676,12 +841,10 @@ function CampaignEditor({
         mode: 'production',
         targetCount: Number(form.get('targetCount')),
         filters: {
-          markets: split(String(form.get('markets') || '')),
+          markets,
           grades,
-          products: selectedProducts.filter((id) =>
-            categoryProducts.some((product) => product.id === id && productApproved(product)),
-          ),
-          categories: selectedCategories,
+          products: selectedProducts,
+          categories: [],
         },
         mailboxIds: selectedMailboxes,
         includeExisting: form.get('includeExisting') === 'on',
@@ -740,15 +903,18 @@ function CampaignEditor({
               defaultValue={campaign?.intervalSeconds ?? 180}
             />
           </label>
-          <label className="outreach-full">
-            目标市场
-            <input
-              name="markets"
-              defaultValue={campaign?.filters?.markets.join('，')}
-              placeholder="不限制市场；或填写 US、AU，以逗号分隔"
+          <div className="outreach-full outreach-market-field">
+            <label htmlFor="campaign-markets">目标市场</label>
+            <SearchableLocation
+              id="campaign-markets"
+              label="目标市场"
+              multiple
+              options={outreachMarkets}
+              value={markets}
+              onChange={setMarkets}
             />
-            <small>使用客户资料中的国家代码；留空表示全部市场。</small>
-          </label>
+            <small>可多选获客范围内的国家，支持搜索国家名称或代码。留空表示全部市场。</small>
+          </div>
         </div>
         <div className="outreach-form-section">
           <h3>客户范围</h3>
@@ -793,13 +959,7 @@ function CampaignEditor({
                   const next = event.target.checked
                     ? [...selectedMailboxes, mailbox.id]
                     : selectedMailboxes.filter((id) => id !== mailbox.id);
-                  const nextCoverage = new Set(
-                    mailboxes
-                      .filter((item) => next.includes(item.id))
-                      .flatMap((item) => item.productIds || []),
-                  );
                   setSelectedMailboxes(next);
-                  setSelectedProducts(selectedProducts.filter((id) => nextCoverage.has(id)));
                 }}
               />
               <span>
@@ -814,41 +974,72 @@ function CampaignEditor({
           ))}
         </div>
         {!mailboxes.length && <p className="outreach-hint">请先在邮箱管理中添加邮箱。</p>}
-        <span className="outreach-field-label">产品品类 · 不选则在所选邮箱负责范围内匹配</span>
+        <span className="outreach-field-label">产品分组 · 切换分组保留勾选</span>
         <div className="outreach-choices">
-          {productCategories.map((category) => (
-            <label
-              key={category.id}
-              className={`outreach-choice ${selectedCategories.includes(category.id) ? 'selected' : ''}`}
-            >
-              <input
-                type="checkbox"
-                checked={selectedCategories.includes(category.id)}
-                onChange={(event) => {
-                  const next = event.target.checked
-                    ? [...selectedCategories, category.id]
-                    : selectedCategories.filter((id) => id !== category.id);
-                  setSelectedCategories(next);
-                  setSelectedProducts(
-                    selectedProducts.filter(
-                      (id) =>
-                        !next.length ||
-                        products.some(
-                          (product) => product.id === id && next.includes(product.category || ''),
-                        ),
-                    ),
-                  );
-                }}
-              />
-              {category.label}
-            </label>
-          ))}
+          <button
+            type="button"
+            className="outreach-choice"
+            onClick={() => setSelectedCategories([])}
+          >
+            全部（{availableProducts.length}）
+          </button>
+          <button
+            type="button"
+            className="text-link"
+            onClick={() =>
+              setSelectedProducts([
+                ...new Set([...selectedProducts, ...availableProducts.map((p) => p.id)]),
+              ])
+            }
+          >
+            选择全部可用产品
+          </button>
+          {groups
+            .filter((group) => availableProducts.some((product) => groupId(product) === group.id))
+            .map((category) => {
+              const groupProducts = availableProducts.filter(
+                (product) => groupId(product) === category.id,
+              );
+              return (
+                <div key={category.id}>
+                  <button
+                    type="button"
+                    className={`outreach-choice ${selectedCategories.includes(category.id) ? 'selected' : ''}`}
+                    onClick={() => setSelectedCategories([category.id])}
+                  >
+                    {category.label}（{groupProducts.length}）
+                  </button>
+                  <button
+                    type="button"
+                    className="text-link"
+                    onClick={() =>
+                      setSelectedProducts([
+                        ...new Set([...selectedProducts, ...groupProducts.map((p) => p.id)]),
+                      ])
+                    }
+                  >
+                    选择本组
+                  </button>
+                </div>
+              );
+            })}
         </div>
         <span className="outreach-field-label">
-          供货产品 · 仅显示所选邮箱负责的产品，不选则匹配其中已审核的产品
+          供货产品 · 已选择 {selectedProducts.length} 项，至少选择一项
         </span>
         <ProductOptions
-          products={categoryProducts}
+          products={categoryProducts.map((product) => ({
+            ...product,
+            label: `${productName(product)} · ${{ finished: '成品', materials: '材料配件', samples: '样本展示' }[product.direction || ''] || product.direction || '形态未填写'} · ${mailboxes
+              .filter(
+                (box) =>
+                  selectedMailboxes.includes(box.id) &&
+                  box.productIds?.includes(product.id) &&
+                  siteAllowsProduct(product, box),
+              )
+              .map((box) => box.email)
+              .join('、')}`,
+          }))}
           selected={selectedProducts}
           onChange={setSelectedProducts}
           approvedOnly
@@ -856,7 +1047,13 @@ function CampaignEditor({
         />
         {unavailableSelections.length > 0 && (
           <div className="outreach-alert">
-            <span>原计划有 {unavailableSelections.length} 项产品已不在当前可用范围内。</span>
+            <span>有 {unavailableSelections.length} 项产品已不在当前可用范围内。</span>
+            {unavailableSelections.map((id) => (
+              <p key={id}>
+                {products.find((p) => p.id === id)?.name || id}：
+                {productReason(products.find((p) => p.id === id))}
+              </p>
+            ))}
             <button
               className="text-link"
               type="button"
@@ -1146,6 +1343,19 @@ export function OutreachCommunication({
   const [campaignEditor, setCampaignEditor] = useState<{ value: OutreachCampaign | null } | null>(
     null,
   );
+  const [deleteTarget, setDeleteTarget] = useState<{
+    campaign: OutreachCampaign;
+    source?: {
+      jobId: string;
+      roundId?: string;
+      scheduleId?: string;
+      scheduleName?: string;
+      currentJobId?: string;
+    };
+    pendingFirst: number;
+    pendingFollowUps: number;
+    unknown: number;
+  } | null>(null);
   const [cancelTarget, setCancelTarget] = useState<OutreachCampaign | null>(null);
   const [showLabels, setShowLabels] = useState(false);
   const [tagState, setTagState] = useState<MailboxTagState | null>(null);
@@ -1406,7 +1616,11 @@ export function OutreachCommunication({
         Object.keys(input).every((key) => ['draftPersona', 'knowledgeProductIds'].includes(key));
       await outreachApi(writingOnly ? path + '/writing' : path, {
         method: writingOnly ? 'PATCH' : mailbox ? 'PUT' : 'POST',
-        body: JSON.stringify({ ...input, businessNote }),
+        body: JSON.stringify({
+          ...input,
+          ...(mailbox && !writingOnly ? { revision: mailbox.revision } : {}),
+          businessNote,
+        }),
       });
       setSignatureRefresh((current) => current + 1);
     } else if (mailbox && businessNote !== undefined) {
@@ -1443,6 +1657,29 @@ export function OutreachCommunication({
     );
     await refresh();
     setNotice('计划已保存为草稿，可生成并检查样稿。');
+  }
+  async function confirmDeletion(campaign: OutreachCampaign) {
+    setBusy('deletion-preview');
+    setError(null);
+    try {
+      const counts = await outreachApi<{
+        source?: {
+          jobId: string;
+          roundId?: string;
+          scheduleId?: string;
+          scheduleName?: string;
+          currentJobId?: string;
+        };
+        pendingFirst: number;
+        pendingFollowUps: number;
+        unknown: number;
+      }>(pathFor('campaigns', campaign.id, 'deletion-preview'));
+      setDeleteTarget({ campaign, ...counts });
+    } catch (reason) {
+      setError(message(reason));
+    } finally {
+      setBusy(null);
+    }
   }
   function confirmCancellation(campaign: OutreachCampaign) {
     setError(null);
@@ -1799,6 +2036,7 @@ export function OutreachCommunication({
                           {[
                             ['current', '当前计划'],
                             ['history', '历史计划'],
+                            ['deleted', '已删除'],
                             ['tests', '公司试发'],
                           ].map(([value, label]) => (
                             <button
@@ -1920,6 +2158,13 @@ export function OutreachCommunication({
                                     <td className="outreach-campaign-name">
                                       <strong>{campaign.name}</strong>
                                       {campaign.acquisitionSource && <small>获客后自动首发</small>}
+                                      {campaign.deleteRequestedAt && (
+                                        <small>
+                                          {campaign.deletedAt
+                                            ? `删除完成：${formatTime(campaign.deletedAt)}`
+                                            : `删除处理中：${formatTime(campaign.deleteRequestedAt)}`}
+                                        </small>
+                                      )}
                                       {campaign.lastError && (
                                         <small className="outreach-row-error">
                                           {campaign.lastError}
@@ -2004,6 +2249,15 @@ export function OutreachCommunication({
                                               暂停计划
                                             </button>
                                           )}
+                                        {canDeleteCampaign(campaign) && (
+                                          <button
+                                            className="btn danger"
+                                            disabled={!!busy}
+                                            onClick={() => void confirmDeletion(campaign)}
+                                          >
+                                            删除计划
+                                          </button>
+                                        )}
                                         {canCancelCampaign(campaign) && (
                                           <details className="outreach-campaign-more">
                                             <summary>更多</summary>
@@ -2372,6 +2626,7 @@ export function OutreachCommunication({
                       </div>
                       <InlineError value={shownDetail.campaign.lastError || null} />
                       {shownDetail.campaign.mode === 'production' &&
+                        !shownDetail.campaign.deleteRequestedAt &&
                         shownDetail.campaign.status !== 'cancelled' && (
                           <div className="outreach-plan-rules">
                             <p>
@@ -2472,6 +2727,16 @@ export function OutreachCommunication({
                         />
                       ) : (
                         <>
+                          {shownDetail.campaign.deleteRequestedAt && (
+                            <p className="outreach-hint" role="status">
+                              删除请求：{formatTime(shownDetail.campaign.deleteRequestedAt)}；
+                              {shownDetail.campaign.deletedAt
+                                ? `删除完成：${formatTime(shownDetail.campaign.deletedAt)}`
+                                : '删除处理中'}
+                              。已提交邮件、结果核实及追信历史保留。
+                              {shownDetail.campaign.deletionError}
+                            </p>
+                          )}
                           {shownDetail.campaign.status === 'cancelled' && (
                             <p className="outreach-hint" role="status">
                               此计划已取消
@@ -2494,8 +2759,9 @@ export function OutreachCommunication({
                                   <div>
                                     <dt>市场</dt>
                                     <dd>
-                                      {shownDetail.campaign.filters?.markets.join('、') ||
-                                        '全部市场'}
+                                      {shownDetail.campaign.filters?.markets
+                                        .map((market) => countryFor(market)?.zh || market)
+                                        .join('、') || '全部市场'}
                                     </dd>
                                   </div>
                                   <div>
@@ -2695,6 +2961,15 @@ export function OutreachCommunication({
                               )}
                             </>
                           )}
+                        {canDeleteCampaign(shownDetail.campaign) && (
+                          <button
+                            className="btn danger"
+                            disabled={!!busy}
+                            onClick={() => void confirmDeletion(shownDetail.campaign)}
+                          >
+                            删除计划
+                          </button>
+                        )}
                         {canCancelCampaign(shownDetail.campaign) && (
                           <button
                             className="btn danger"
@@ -2708,6 +2983,64 @@ export function OutreachCommunication({
                       </div>
                     </>
                   )}
+                </div>
+              </Modal>
+            )}
+            {deleteTarget && (
+              <Modal
+                title="删除触达计划"
+                onClose={() => {
+                  if (!busy) setDeleteTarget(null);
+                }}
+              >
+                <div className="modal-body outreach-form">
+                  <p>
+                    确认删除 <strong>{deleteTarget.campaign.name}</strong>？
+                  </p>
+                  <p>
+                    待首发 {deleteTarget.pendingFirst} · 待追信 {deleteTarget.pendingFollowUps} ·
+                    待核实 {deleteTarget.unknown}
+                  </p>
+                  {deleteTarget.source && (
+                    <p>
+                      将暂停来源任务 {deleteTarget.source.jobId}；当前轮次{' '}
+                      {deleteTarget.source.currentJobId ||
+                        deleteTarget.source.roundId ||
+                        deleteTarget.source.jobId}
+                      ；定时安排{' '}
+                      {deleteTarget.source.scheduleName || deleteTarget.source.scheduleId || '无'}
+                      。来源及定时安排的获客后自动首发将关闭。直接恢复只继续获客，重新勾选并保存后才建立新触达安排。
+                    </p>
+                  )}
+                  <p>
+                    删除会结束剩余首发和追信。已提交邮件无法撤回，实际结果、未知核实及客户历史保留，可从已删除视图查阅。
+                  </p>
+                  <InlineError value={error} />
+                  <div className="modal-actions">
+                    <button
+                      className="btn secondary"
+                      disabled={!!busy}
+                      onClick={() => setDeleteTarget(null)}
+                    >
+                      保留计划
+                    </button>
+                    <button
+                      className="btn danger"
+                      disabled={!!busy}
+                      onClick={() =>
+                        void act(
+                          `delete-${deleteTarget.campaign.id}`,
+                          pathFor('campaigns', deleteTarget.campaign.id, 'delete'),
+                          { revision: deleteTarget.campaign.revision, confirmed: true },
+                          '删除已请求；来源暂停与自动首发关闭确认后完成，历史结果保留。',
+                        ).then((ok) => {
+                          if (ok) setDeleteTarget(null);
+                        })
+                      }
+                    >
+                      确认删除计划
+                    </button>
+                  </div>
                 </div>
               </Modal>
             )}

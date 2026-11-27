@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -46,7 +47,7 @@ const buyer = (id, product = 'PVC shutters') => ({
     },
   ],
 });
-function harness(path = ':memory:') {
+function harness(path = ':memory:', sourceDir) {
   const state = {
     now: Date.parse('2026-11-05T00:00:00Z'),
     leads: [],
@@ -83,12 +84,14 @@ function harness(path = ':memory:') {
     },
   ];
   const jobs = new BatchJobs({
+    path: sourceDir ? join(sourceDir, 'jobs.sqlite') : ':memory:',
     schedule: false,
     scope: 'local',
     now: () => state.now,
     readLeads: async () => state.leads,
   });
   const plans = new AcquisitionSchedules({
+    path: sourceDir ? join(sourceDir, 'schedules.sqlite') : ':memory:',
     jobs: () => jobs,
     now: () => state.now,
     scope: 'local',
@@ -100,6 +103,7 @@ function harness(path = ':memory:') {
     now: () => state.now,
     tickMs: 3600000,
     acquisitionSources: () => acquisitionOutreachSources(jobs, plans),
+    pauseAcquisitionSource: (id, context) => plans.pauseSourceForOutreach(id, context),
     loadLeads: async () => structuredClone(state.leads),
     products: () => structuredClone(products),
     mailboxes: {
@@ -1101,3 +1105,326 @@ test('旧版本已排队的同域首封在重启后按原地址发送一次', as
   );
   assert.equal(h.service.delivery(queued.id).status, 'accepted');
 });
+
+test('删除后直接恢复零新安排；重新保存授权只建立一个新安排，旧计划不复活', async () => {
+  const h = harness();
+  try {
+    const job = h.create();
+    await h.capture(job.id, buyer('fresh-authorization'));
+    h.service.syncAcquisition();
+    const oldId = `acquisition-${job.id}`;
+    h.service.deleteCampaign(oldId, h.service.campaign(oldId).revision, true);
+    await h.jobs.resume(job.id, {
+      sourceControlRevision: h.jobs.get(job.id).sourceControlRevision || 0,
+    });
+    h.service.syncAcquisition();
+    assert.equal(h.jobs.get(job.id).input.auto_first_touch, false);
+    assert.equal(h.service.campaigns().length, 1);
+    assert.equal(h.state.sent.length, 0);
+    h.jobs.pause(job.id);
+    const revision = h.jobs.get(job.id).sourceControlRevision;
+    const enabled = h.jobs.controlOutreach(job.id, true, { sourceControlRevision: revision });
+    h.jobs.controlOutreach(job.id, true, { sourceControlRevision: revision });
+    h.service.syncAcquisition();
+    const newId = `acquisition-${job.id}-g1`;
+    assert.equal(enabled.manualPaused, true);
+    assert.equal(h.service.campaign(newId).status, 'paused');
+    assert.equal(h.service.campaign(oldId).deletedAt != null, true);
+    assert.equal(h.service.campaigns().length, 2);
+    await h.jobs.resume(job.id, {
+      sourceControlRevision: h.jobs.get(job.id).sourceControlRevision || 0,
+    });
+    await h.pump();
+    assert.equal(h.state.sent.length, 1);
+    h.jobs.pause(job.id, { outreachPlanId: newId, disableFirstTouch: true });
+    assert.throws(() => h.jobs.controlOutreach(job.id, true, { sourceControlRevision: revision }), {
+      status: 409,
+    });
+  } finally {
+    await h.close();
+  }
+});
+
+test('定时来源重新授权保留暂停，重复保存唯一且过期编辑不能重新开启', async () => {
+  const h = harness();
+  try {
+    const plan = h.plan();
+    const job = h.create({}, plan.id);
+    h.service.syncAcquisition();
+    const oldId = `acquisition-${job.id}`;
+    h.service.deleteCampaign(oldId, 1, true);
+    const paused = h.plans.get(plan.id);
+    const enabled = h.plans.controlOutreach(plan.id, true, {
+      sourceControlRevision: paused.sourceControlRevision,
+    });
+    h.plans.controlOutreach(plan.id, true, { sourceControlRevision: paused.sourceControlRevision });
+    h.service.syncAcquisition();
+    assert.equal(enabled.status, 'paused');
+    assert.equal(h.service.campaigns().length, 2);
+    assert.equal(h.service.campaign(`acquisition-${job.id}-g1`).status, 'paused');
+    h.plans.pauseSourceForOutreach(job.id, { outreachPlanId: `acquisition-${job.id}-g1` });
+    assert.throws(
+      () =>
+        h.plans.update(plan.id, {
+          ...enabled,
+          sourceControlRevision: paused.sourceControlRevision,
+        }),
+      { status: 409 },
+    );
+    assert.equal(h.plans.get(plan.id).input.auto_first_touch, false);
+  } finally {
+    await h.close();
+  }
+});
+
+test('同轮重新授权不重试已跳过客户；重启只处理此前未尝试客户', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'reauthorization-'));
+  const h = harness(join(dir, 'outreach.sqlite'));
+  try {
+    const job = h.create();
+    await h.capture(job.id, { ...buyer('skipped-before'), email: '' });
+    await h.pump();
+    assert.equal(h.service.deliveries(`acquisition-${job.id}`)[0].status, 'skipped');
+    const oldId = `acquisition-${job.id}`;
+    h.service.deleteCampaign(oldId, h.service.campaign(oldId).revision, true);
+    h.state.leads[0] = buyer('skipped-before');
+    await h.capture(job.id, buyer('untouched-after'));
+    await h.capture(job.id, { ...buyer('no-mail-control'), email: '' });
+    const revision = h.jobs.get(job.id).sourceControlRevision;
+    h.jobs.controlOutreach(job.id, true, { sourceControlRevision: revision });
+    await h.jobs.resume(job.id, {
+      sourceControlRevision: h.jobs.get(job.id).sourceControlRevision || 0,
+    });
+    await h.service.close();
+    h.service = new OutreachService(h.options);
+    await h.pump();
+    assert.deepEqual(
+      h.state.sent.map((mail) => mail.to),
+      ['info@untouched-after.example.org'],
+    );
+    assert.equal(h.service.campaigns().length, 2);
+    assert.equal(h.service.campaign(oldId).deletedAt != null, true);
+  } finally {
+    await h.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+for (const name of ['legacy-alpha', 'legacy-beta', 'current-control', 'changed-identity']) {
+  test('升级前排队摘要受控迁移 ' + name, async () => {
+    const h = harness();
+    try {
+      const job = h.create();
+      await h.capture(job.id, buyer(name));
+      await h.service.tick();
+      await Promise.all([...h.service.preparing.values()]);
+      const [queued] = h.service.deliveries(undefined, ['queued']);
+      if (name !== 'current-control') {
+        const m = h.boxes[0];
+        queued.senderVersion = createHash('sha256')
+          .update(
+            JSON.stringify([
+              m.id,
+              m.email,
+              m.displayName,
+              m.signature,
+              ...(m.signatureDesign ? [m.signatureDesign] : []),
+              [...m.productIds].sort(),
+            ]),
+          )
+          .digest('hex');
+        h.service.putDelivery(queued);
+      }
+      if (name === 'changed-identity') h.boxes[0].displayName = 'Changed';
+      await h.pump();
+      assert.equal(
+        h.service.delivery(queued.id).status,
+        name === 'changed-identity' ? 'blocked' : 'accepted',
+      );
+      assert.equal(h.state.sent.length, name === 'changed-identity' ? 0 : 1);
+    } finally {
+      await h.close();
+    }
+  });
+}
+
+for (const failure of ['schedule', 'job']) {
+  test('定时重新授权写入失败无新安排 ' + failure, async () => {
+    const h = harness();
+    try {
+      const plan = h.plan(),
+        job = h.create({}, plan.id);
+      h.service.syncAcquisition();
+      h.service.deleteCampaign('acquisition-' + job.id, 1, true);
+      const paused = h.plans.get(plan.id);
+      h.jobs.onOutreachChange = () => h.service.syncAcquisition();
+      const db = failure === 'schedule' ? h.plans.db : h.jobs.db;
+      const table = failure === 'schedule' ? 'schedules' : 'jobs';
+      db.exec(
+        `CREATE TRIGGER fail_authorization BEFORE UPDATE ON ${table} WHEN json_extract(NEW.data,'$.input.auto_first_touch')=1 BEGIN SELECT RAISE(ABORT,'write failed'); END`,
+      );
+      assert.throws(
+        () =>
+          h.plans.update(plan.id, {
+            ...paused,
+            input: { ...paused.input, auto_first_touch: true },
+          }),
+        /write failed/,
+      );
+      assert.equal(h.jobs.get(job.id).input.auto_first_touch, false);
+      assert.equal(h.jobs.get(job.id).outreachGeneration || 0, 0);
+      assert.equal(h.plans.get(plan.id).input.auto_first_touch, false);
+      h.service.syncAcquisition();
+      assert.equal(h.service.campaigns().length, 1);
+      assert.equal(h.state.sent.length, 0);
+      db.exec('DROP TRIGGER fail_authorization');
+      h.plans.update(plan.id, { ...paused, input: { ...paused.input, auto_first_touch: true } });
+      h.plans.controlOutreach(plan.id, true, {
+        sourceControlRevision: paused.sourceControlRevision,
+      });
+      h.service.syncAcquisition();
+      assert.equal(h.jobs.get(job.id).outreachGeneration, 1);
+      assert.equal(h.service.campaigns().length, 2);
+    } finally {
+      await h.close();
+    }
+  });
+}
+
+test('旧页面恢复不能撤销较新删除暂停', async () => {
+  const h = harness();
+  try {
+    const plan = h.plan(),
+      job = h.create({}, plan.id);
+    h.service.syncAcquisition();
+    h.service.deleteCampaign('acquisition-' + job.id, 1, true);
+    const oldJob = h.jobs.get(job.id),
+      oldPlan = h.plans.get(plan.id);
+    h.plans.controlOutreach(plan.id, true, {
+      sourceControlRevision: oldPlan.sourceControlRevision,
+    });
+    h.service.syncAcquisition();
+    h.service.deleteCampaign('acquisition-' + job.id + '-g1', 1, true);
+    await assert.rejects(
+      h.jobs.resume(job.id, { sourceControlRevision: oldJob.sourceControlRevision }),
+      { status: 409 },
+    );
+    assert.throws(
+      () =>
+        h.plans.control(plan.id, 'resume', {
+          sourceControlRevision: oldPlan.sourceControlRevision,
+        }),
+      { status: 409 },
+    );
+    assert.equal(h.jobs.get(job.id).manualPaused, true);
+    assert.equal(h.plans.get(plan.id).status, 'paused');
+  } finally {
+    await h.close();
+  }
+});
+
+test('失败授权恢复只回滚控制字段，保留收尾进度及较新决定，重启不发布授权', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'authorization-journal-'));
+  const h = harness(join(dir, 'outreach.sqlite'), dir);
+  let restartedJobs, restartedPlans;
+  try {
+    const plan = h.plan(),
+      job = h.create({}, plan.id);
+    h.service.syncAcquisition();
+    h.service.deleteCampaign('acquisition-' + job.id, 1, true);
+    const paused = h.plans.get(plan.id);
+    h.plans.db.exec(
+      "CREATE TRIGGER fail_all BEFORE UPDATE ON schedules BEGIN SELECT RAISE(ABORT,'write failed'); END",
+    );
+    assert.throws(
+      () =>
+        h.plans.controlOutreach(plan.id, true, {
+          sourceControlRevision: paused.sourceControlRevision,
+        }),
+      /write failed/,
+    );
+    const checkpoint = h.jobs.get(job.id);
+    checkpoint.rows.push({ record_id: 'saved-during-failure', stored: true });
+    checkpoint.inserted = 1;
+    checkpoint.cursor = 7;
+    h.jobs.save(checkpoint);
+    h.plans.db.exec('DROP TRIGGER fail_all');
+    const recovered = h.plans.get(plan.id);
+    assert.equal(recovered.input.auto_first_touch, false);
+    assert.equal(h.jobs.get(job.id).input.auto_first_touch, false);
+    assert.equal(h.jobs.get(job.id).cursor, 7);
+    assert.equal(h.jobs.get(job.id).inserted, 1);
+    assert.equal(h.jobs.get(job.id).rows.at(-1).record_id, 'saved-during-failure');
+    const resumed = h.plans.control(plan.id, 'resume', {
+      sourceControlRevision: recovered.sourceControlRevision,
+    });
+    h.plans.control(plan.id, 'resume', { sourceControlRevision: recovered.sourceControlRevision });
+    h.plans.control(plan.id, 'delete');
+    await h.close();
+    restartedJobs = new BatchJobs({
+      path: join(dir, 'jobs.sqlite'),
+      scope: 'local',
+      schedule: false,
+    });
+    restartedPlans = new AcquisitionSchedules({
+      path: join(dir, 'schedules.sqlite'),
+      jobs: () => restartedJobs,
+    });
+    assert.equal(restartedPlans.get(plan.id).sourceDeletedAt != null, true);
+    assert.ok(restartedPlans.get(plan.id).sourceControlRevision > resumed.sourceControlRevision);
+    assert.equal(restartedJobs.get(job.id).input.auto_first_touch, false);
+    assert.equal(restartedJobs.get(job.id).cursor, 7);
+    assert.equal(restartedJobs.get(job.id).rows.at(-1).record_id, 'saved-during-failure');
+  } finally {
+    if (restartedPlans) {
+      restartedPlans.close();
+      restartedJobs.close();
+    } else await h.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+for (const newer of [false, true]) {
+  test('未完成授权跨重启恢复并保留较新控制 ' + newer, async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'authorization-crash-'));
+    const h = harness(join(dir, 'outreach.sqlite'), dir);
+    let jobs, plans;
+    try {
+      const plan = h.plan(),
+        job = h.create({}, plan.id);
+      h.service.syncAcquisition();
+      h.service.deleteCampaign('acquisition-' + job.id, 1, true);
+      const paused = h.plans.get(plan.id);
+      h.plans.db.exec(
+        "CREATE TRIGGER fail_all BEFORE UPDATE ON schedules BEGIN SELECT RAISE(ABORT,'write failed'); END",
+      );
+      assert.throws(
+        () =>
+          h.plans.controlOutreach(plan.id, true, {
+            sourceControlRevision: paused.sourceControlRevision,
+          }),
+        /write failed/,
+      );
+      if (newer) {
+        h.jobs.pause(job.id, { outreachPlanId: 'newer-deletion', disableFirstTouch: true });
+        h.jobs.pause(job.id);
+      }
+      const revision = h.jobs.get(job.id).sourceControlRevision;
+      h.plans.db.exec('DROP TRIGGER fail_all');
+      await h.close();
+      jobs = new BatchJobs({ path: join(dir, 'jobs.sqlite'), schedule: false, scope: 'local' });
+      plans = new AcquisitionSchedules({ path: join(dir, 'schedules.sqlite'), jobs: () => jobs });
+      assert.equal(plans.get(plan.id).input.auto_first_touch, false);
+      assert.equal(jobs.get(job.id).input.auto_first_touch, false);
+      assert.equal(jobs.get(job.id).outreachGeneration || 0, 0);
+      if (newer) assert.equal(jobs.get(job.id).sourceControlRevision, revision);
+      assert.equal(acquisitionOutreachSources(jobs, plans).length, 0);
+    } finally {
+      if (plans) {
+        plans.close();
+        jobs.close();
+      } else await h.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}

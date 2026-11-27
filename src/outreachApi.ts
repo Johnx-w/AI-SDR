@@ -10,6 +10,8 @@ export interface OutreachFact {
 }
 
 export interface OutreachProduct {
+  direction?: string;
+  deliveryForms?: string[];
   materialOnly?: boolean;
   materialCategory?: string;
   effectiveDate?: string;
@@ -28,6 +30,7 @@ export interface OutreachProduct {
 
 export interface OutreachMailbox {
   id: string;
+  revision: number;
   email: string;
   website: string;
   brandName: string;
@@ -71,6 +74,9 @@ export interface OutreachCampaign {
   intervalSeconds: number;
   createdAt: string;
   cancelledAt?: string;
+  deleteRequestedAt?: string;
+  deletedAt?: string;
+  deletionError?: string;
   lastError?: string;
   approvedRevision: number | null;
   productScopes?: { productId: string; name: string; englishName: string }[];

@@ -59,8 +59,19 @@ const senderVersion = (m) =>
     m.displayName,
     m.signature,
     ...(m.signatureDesign ? [m.signatureDesign] : []),
+  ]);
+// Only the exact former digest proves that identity and coverage are unchanged.
+const legacySenderVersion = (m) =>
+  hash([
+    m.id,
+    m.email,
+    m.displayName,
+    m.signature,
+    ...(m.signatureDesign ? [m.signatureDesign] : []),
     [...(m.productIds || [])].sort(),
   ]);
+const matchesSender = (m, version) =>
+  version === senderVersion(m) || version === legacySenderVersion(m);
 const dayFormat = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' });
 const day = (date) => dayFormat.format(new Date(date));
 function sendWindowError(w) {
@@ -111,6 +122,8 @@ export class OutreachService {
     now = Date.now,
     tickMs = 2000,
     acquisitionSources = () => [],
+    pauseAcquisitionSource,
+    acquisitionDeletionImpact,
     isMaintaining = () => false,
   } = {}) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
@@ -130,6 +143,8 @@ export class OutreachService {
     );
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
       CREATE TABLE IF NOT EXISTS outreach_campaigns(id TEXT PRIMARY KEY,data TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS outreach_pending_deletions ON outreach_campaigns(id) WHERE json_extract(data,'$.deleteRequestedAt') IS NOT NULL AND json_extract(data,'$.deletedAt') IS NULL;
+      CREATE INDEX IF NOT EXISTS outreach_acquisition_round ON outreach_campaigns(json_extract(data,'$.acquisitionSource.roundId'));
       CREATE TABLE IF NOT EXISTS outreach_deliveries(id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,state TEXT NOT NULL,data TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS outreach_delivery_campaign ON outreach_deliveries(campaign_id,state);
       CREATE INDEX IF NOT EXISTS outreach_counts ON outreach_deliveries(campaign_id,state,${outcomeSql},${draftSql});
@@ -159,6 +174,8 @@ export class OutreachService {
       now,
       tickMs,
       acquisitionSources,
+      pauseAcquisitionSource,
+      acquisitionDeletionImpact,
       isMaintaining,
     });
     this.customerMailState =
@@ -171,6 +188,7 @@ export class OutreachService {
           demands: (graph.demands || []).filter((d) => d.customerId === id),
         };
       });
+    this.migrateProductSelections();
     this.followUps = new OutreachFollowUps(this, recordFollowUp);
     this.tags = new MailboxTags(this.db, mailboxes);
     this.db
@@ -271,6 +289,18 @@ export class OutreachService {
     return JSON.parse(r.data);
   }
   putCampaign(c) {
+    const row = this.db.prepare('SELECT data FROM outreach_campaigns WHERE id=?').get(c.id);
+    const prior = row && JSON.parse(row.data);
+    if (prior?.deleteRequestedAt)
+      c = {
+        ...c,
+        deleteRequestedAt: prior.deleteRequestedAt,
+        deletedAt: prior.deletedAt || c.deletedAt,
+        status: prior.status,
+        revision: prior.revision,
+        approvedRevision: null,
+        followUpEnabled: false,
+      };
     const { stats, deliveryGroups, ...data } = c;
     this.db
       .prepare(
@@ -394,11 +424,16 @@ export class OutreachService {
       q = params.get('q')?.trim().toLowerCase();
     const where = [],
       args = [];
+    where.push(
+      view === 'deleted'
+        ? "json_extract(data,'$.deleteRequestedAt') IS NOT NULL"
+        : "json_extract(data,'$.deleteRequestedAt') IS NULL",
+    );
     const history = "json_extract(data,'$.status') IN ('completed','cancelled')";
     where.push(
       view === 'tests'
         ? "json_extract(data,'$.mode')='internal_test'"
-        : `json_extract(data,'$.mode')='production' AND ${view === 'history' ? '' : 'NOT'} (${history})`,
+        : `json_extract(data,'$.mode')='production' AND ${view === 'deleted' ? '1=1' : `${view === 'history' ? '' : 'NOT'} (${history})`}`,
     );
     if (q) {
       where.push("instr(outreach_lower(json_extract(data,'$.name')),?)>0");
@@ -450,10 +485,10 @@ export class OutreachService {
     if (params?.has('view')) {
       const counts = this.db
         .prepare(
-          "SELECT count(*) AS total,count(*) FILTER (WHERE json_extract(data,'$.status')='active') AS active FROM outreach_campaigns",
+          "SELECT count(*) AS total,count(*) FILTER (WHERE json_extract(data,'$.status')='active') AS active FROM outreach_campaigns WHERE json_extract(data,'$.deleteRequestedAt') IS NULL",
         )
         .get();
-      const page = ['current', 'history', 'tests'].includes(params.get('view'))
+      const page = ['current', 'history', 'deleted', 'tests'].includes(params.get('view'))
         ? this.campaignPage(params)
         : { campaigns: [], filtered: 0, page: 1 };
       const products = (params.get('view') === 'mailboxes' ? [] : this.products()).map(
@@ -468,6 +503,8 @@ export class OutreachService {
           sourceUrl,
           materialOnly,
           materialCategory,
+          direction,
+          deliveryForms,
           version,
           effectiveDate,
         }) => ({
@@ -480,6 +517,8 @@ export class OutreachService {
           sourceUrl,
           materialOnly,
           materialCategory,
+          direction,
+          deliveryForms,
           version,
           effectiveDate,
           status,
@@ -528,7 +567,7 @@ export class OutreachService {
   saveCampaign(input, id) {
     const prior = id ? this.campaign(id) : null;
     if (prior?.acquisitionSource) throw fail(409, '请在获客任务中管理自动首发');
-    if (['cancelled', 'completed'].includes(prior?.status))
+    if (prior?.deleteRequestedAt || ['cancelled', 'completed'].includes(prior?.status))
       throw fail(409, '计划已结束，请新建触达计划');
     if (prior?.mode === 'internal_test') throw fail(400, '内部测试计划不能改为正式计划');
     if (prior?.status === 'active' || prior?.status === 'preparing' || this.preparing.has(id))
@@ -557,7 +596,7 @@ export class OutreachService {
         markets: list(input.filters?.markets),
         grades: list(input.filters?.grades),
         products: list(input.filters?.products),
-        categories: list(input.filters?.categories),
+        categories: [],
       },
       mailboxIds,
       includeExisting: input.includeExisting !== false,
@@ -576,14 +615,10 @@ export class OutreachService {
       lastError: '',
       sendWindow: input.sendWindow === undefined ? (prior?.sendWindow ?? null) : input.sendWindow,
     };
+    this.validateProductSelection(c);
+    c.productSelectionVersion = 1;
     c.productScopes = this.salesProducts()
-      .filter(
-        (product) =>
-          (c.filters.products.length
-            ? c.filters.products.includes(product.id)
-            : mailboxIds.some((id) => this.mailboxes.get(id).productIds?.includes(product.id))) &&
-          (!c.filters.categories.length || c.filters.categories.includes(product.category)),
-      )
+      .filter((product) => c.filters.products.includes(product.id))
       .map(outreachProductScope);
     if (c.sendWindow !== null) {
       const error = sendWindowError(c.sendWindow);
@@ -607,8 +642,9 @@ export class OutreachService {
     const campaigns = new Map(this.campaigns().map((campaign) => [campaign.id, campaign]));
     for (const source of sources) {
       if (source.scope !== this.getScope()) continue;
-      const id = `acquisition-${source.jobId}`;
+      const id = `acquisition-${source.jobId}${source.generation ? `-g${source.generation}` : ''}`;
       const prior = campaigns.get(id);
+      if (prior?.deleteRequestedAt) continue;
       const campaign = prior || {
         id,
         name: source.name,
@@ -652,6 +688,7 @@ export class OutreachService {
       };
       const acquisitionSource = {
         jobId: source.jobId,
+        generation: source.generation || 0,
         scheduleId: source.scheduleId,
         roundId: source.roundId,
       };
@@ -689,11 +726,13 @@ export class OutreachService {
     }
   }
   acquisitionAllowed(campaign, followUp = false) {
+    if (campaign.deleteRequestedAt) return false;
     return (
       !campaign.acquisitionSource ||
       this.acquisitionSources().some(
         (source) =>
           source.jobId === campaign.acquisitionSource.jobId &&
+          (source.generation || 0) === (campaign.acquisitionSource.generation || 0) &&
           source.scope === this.getScope() &&
           (source.status === 'active' ||
             (followUp && source.status === 'completed' && source.followUpsAllowed)),
@@ -768,14 +807,109 @@ export class OutreachService {
     const { identities, blocked } = this.contactState(ignoreDelivery);
     return this.identities(candidate).some((k) => identities.has(k) || blocked.has(k));
   }
+  migrateProductSelections() {
+    // Only saved product snapshots prove old authorization; today's catalog cannot add it.
+    for (const row of this.db.prepare('SELECT data FROM outreach_campaigns').all()) {
+      const c = JSON.parse(row.data);
+      if (
+        c.mode !== 'production' ||
+        c.acquisitionSource ||
+        c.deleteRequestedAt ||
+        c.productSelectionVersion === 1
+      )
+        continue;
+      const snapshots = Array.isArray(c.productScopes) ? c.productScopes : [];
+      const products = snapshots
+        .filter(
+          (snapshot) =>
+            (!c.filters?.products?.length || c.filters.products.includes(snapshot.productId)) &&
+            (!c.filters?.categories?.length || c.filters.categories.includes(snapshot.category)) &&
+            c.mailboxIds?.some((id) => {
+              const box = this.mailboxes.get(id);
+              return (
+                box?.productIds?.includes(snapshot.productId) && siteAllowsProduct(snapshot, box)
+              );
+            }),
+        )
+        .map((snapshot) => snapshot.productId);
+      const waiting = !products.length;
+      const migrated = {
+        ...c,
+        filters: { ...c.filters, products, categories: [] },
+        productSelectionVersion: 1,
+        productSelectionState: waiting ? 'confirmation_required' : 'confirmed',
+        lastError: waiting ? '旧计划无可证明的可用产品，请编辑并确认供货产品' : c.lastError,
+        status:
+          waiting && ['active', 'preparing', 'ready'].includes(c.status) ? 'paused' : c.status,
+      };
+      this.db
+        .prepare('UPDATE outreach_campaigns SET data=? WHERE id=?')
+        .run(JSON.stringify(migrated), c.id);
+    }
+  }
+  validateProductSelection(c) {
+    if (c.acquisitionSource || c.mode !== 'production') return;
+    if (c.productSelectionState === 'confirmation_required')
+      throw fail(409, '旧计划无可证明的可用产品，请编辑并确认供货产品');
+    const ids = c.filters?.products || [];
+    if (!ids.length) throw fail(400, '请至少选择一个供货产品');
+    const today = day(this.now());
+    for (const id of ids) {
+      const product = this.salesProducts().find((p) => p.id === id);
+      if (!product) throw fail(400, `产品 ${id} 不存在或不是供货产品`);
+      if (product.status !== 'approved') throw fail(400, `${product.name || id} 尚未审核`);
+      if (product.effectiveDate && product.effectiveDate > today)
+        throw fail(400, `${product.name || id} 尚未生效`);
+      if (
+        !c.mailboxIds.some((id) => {
+          const box = this.mailboxes.get(id);
+          return box?.productIds?.includes(product.id) && siteAllowsProduct(product, box);
+        })
+      )
+        throw fail(400, `${product.name || id} 超出所选邮箱负责范围或品牌许可`);
+    }
+  }
+  async mailboxCoveragePreview(id, input) {
+    const current = this.mailboxes.get(id);
+    const next = await this.mailboxes.prepare({ ...input, id }, this.mailboxes.records, () =>
+      this.salesProducts(),
+    );
+    const added = next.productIds.filter((id) => !current.productIds.includes(id));
+    const removed = current.productIds.filter((id) => !next.productIds.includes(id));
+    const campaigns = this.db
+      .prepare(
+        `SELECT data FROM outreach_campaigns WHERE json_extract(data,'$.mode')='production' AND json_extract(data,'$.deleteRequestedAt') IS NULL AND EXISTS (SELECT 1 FROM json_each(data,'$.mailboxIds') WHERE value=?) ORDER BY rowid DESC`,
+      )
+      .all(id)
+      .map((r) => JSON.parse(r.data))
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        automatic: Boolean(c.acquisitionSource),
+        removed: removed.filter(
+          (id) =>
+            c.acquisitionSource || !c.filters?.products?.length || c.filters.products.includes(id),
+        ),
+        added: c.acquisitionSource ? added : [],
+      }))
+      .filter((c) => c.removed.length || c.added.length);
+    return { revision: current.revision, added, removed, campaigns };
+  }
   salesProducts() {
     return this.products().filter((p) => !p.materialOnly);
   }
   materialReason(delivery, campaign = this.campaign(delivery.campaignId)) {
     if (delivery.mode !== 'production' || !delivery.candidate) return '';
+    try {
+      this.validateProductSelection(campaign);
+    } catch (error) {
+      return error.message;
+    }
     const product = this.products().find((row) => row.id === delivery.candidate.productId);
     const version = outreachMaterialVersion(product, campaign, new Date(this.now()));
     const mailbox = this.mailboxes.get(delivery.mailboxId);
+    if (!mailbox?.productIds?.includes(delivery.candidate.productId))
+      return '邮箱已撤销该产品范围，邮件尚未提交发送';
     if (
       product &&
       mailbox &&
@@ -850,6 +984,19 @@ export class OutreachService {
     );
     eligibleLeads = eligibleLeads.filter((lead) => !skipped.has(lead.id));
     if (c.acquisitionSource) {
+      // A new authorization is still the same acquisition round.
+      const attempted = new Set(
+        this.db
+          .prepare(
+            `SELECT json_extract(d.data,'$.customerId') AS customerId
+        FROM outreach_deliveries d JOIN outreach_campaigns p ON p.id=d.campaign_id
+        WHERE d.campaign_id<>? AND json_extract(p.data,'$.acquisitionSource.roundId')=?
+        AND d.state IN ('skipped','accepted','unknown','failed')`,
+          )
+          .all(c.id, c.acquisitionSource.roundId)
+          .map((row) => row.customerId),
+      );
+      eligibleLeads = eligibleLeads.filter((lead) => !attempted.has(lead.id));
       const members = new Set(c.customerIds);
       const prepared = this.deliveries(c.id, ['blocked']).filter(
         (delivery) =>
@@ -860,7 +1007,7 @@ export class OutreachService {
         const draft = prepared.find((delivery) => delivery.customerId === lead.id);
         const mailbox = draft && this.mailboxes.get(draft.mailboxId);
         // Same-round configuration repairs cannot change a prepared email's sender identity.
-        return !draft || (mailbox && draft.senderVersion === senderVersion(mailbox));
+        return !draft || (mailbox && matchesSender(mailbox, draft.senderVersion));
       });
     }
     const existing = ignoreDelivery ? this.delivery(ignoreDelivery) : null;
@@ -939,12 +1086,13 @@ export class OutreachService {
   }
   prepare(id, includeDetail = true) {
     const c = this.campaign(id);
-    if (['cancelled', 'completed'].includes(c.status))
+    if (c.deleteRequestedAt || ['cancelled', 'completed'].includes(c.status))
       throw fail(409, '计划已结束，不能重新准备样稿');
     if (this.preparing.has(id)) return includeDetail ? this.detail(id) : undefined;
     if (c.mode !== 'production') throw fail(400, '测试计划使用固定测试内容');
     if (!c.mailboxIds.length && !c.acquisitionSource) throw fail(400, '请先选择发件邮箱');
     if (!this.acquisitionAllowed(c)) throw fail(409, '获客自动首发已暂停或关闭');
+    this.validateProductSelection(c);
     if (!this.generatorClient().configured) throw fail(503, '请先在API连接中配置模型');
     const wasActive = c.status === 'active';
     this.putCampaign({ ...c, status: wasActive ? 'active' : 'preparing', lastError: '' });
@@ -1292,11 +1440,13 @@ export class OutreachService {
   activate(id, revision) {
     const c = this.campaign(id);
     if (
+      c.deleteRequestedAt ||
       c.mode !== 'production' ||
       c.revision !== revision ||
       !['draft', 'ready', 'paused', 'active'].includes(c.status)
     )
       throw fail(409, '计划已更新或正在处理，请刷新后启动');
+    this.validateProductSelection(c);
     if (!this.generatorClient().configured) throw fail(503, '请先配置邮件生成模型');
     if (
       !c.mailboxIds.length ||
@@ -1329,7 +1479,7 @@ export class OutreachService {
   }
   pause(id) {
     const c = this.campaign(id);
-    if (['cancelled', 'completed'].includes(c.status))
+    if (c.deleteRequestedAt || ['cancelled', 'completed'].includes(c.status))
       throw fail(409, '计划已结束，不能恢复或暂停');
     this.putCampaign({ ...c, status: 'paused' });
     return this.detail(id);
@@ -1359,6 +1509,86 @@ export class OutreachService {
       });
     });
     return this.detail(id);
+  }
+  deletionPreview(id) {
+    const campaign = this.campaign(id);
+    const counts = this.deliveryCounts(id).stats;
+    const pendingFollowUps = this.db
+      .prepare(
+        "SELECT count(*) AS count FROM outreach_followups WHERE state='pending' AND json_extract(data,'$.campaignId')=?",
+      )
+      .get(id).count;
+    return {
+      ...(campaign.acquisitionSource
+        ? {
+            source:
+              this.acquisitionDeletionImpact?.(campaign.acquisitionSource.jobId) ||
+              campaign.acquisitionSource,
+          }
+        : {}),
+      pendingFirst: counts.draft + counts.queued + counts.blocked,
+      pendingFollowUps,
+      unknown: counts.unknown,
+    };
+  }
+  requestCampaignDeletion(id, revision, confirmed) {
+    const c = this.campaign(id);
+    if (confirmed !== true) throw fail(400, '请确认删除该触达计划');
+    if (c.deleteRequestedAt) return this.detail(id);
+    if (c.mode !== 'production') throw fail(409, '仅正式计划可删除');
+    if (c.revision !== revision) throw fail(409, '计划已更新，请刷新后重新确认删除');
+    this.transaction(() => {
+      const at = iso(this.now);
+      this.putCampaign({
+        ...c,
+        deleteRequestedAt: at,
+        revision: c.revision + 1,
+        approvedRevision: null,
+        followUpEnabled: false,
+        updatedAt: at,
+      });
+      for (const d of this.deliveries(id, ['draft', 'queued', 'blocked'])) {
+        this.putDelivery({ ...d, status: 'cancelled', reason: '触达计划已删除', cancelledAt: at });
+        this.release(d.id);
+      }
+      for (const { data } of this.db
+        .prepare(
+          "SELECT data FROM outreach_followups WHERE state='pending' AND json_extract(data,'$.campaignId')=?",
+        )
+        .all(id))
+        this.followUps.put({ ...JSON.parse(data), status: 'cancelled', reason: '触达计划已删除' });
+    });
+    return this.detail(id);
+  }
+  completeCampaignDeletion(id) {
+    const c = this.campaign(id);
+    if (!c.deleteRequestedAt) throw fail(409, '尚未请求删除');
+    if (!c.deletedAt) this.putCampaign({ ...c, deletedAt: iso(this.now), deletionError: '' });
+    return this.detail(id);
+  }
+  deleteCampaign(id, revision, confirmed) {
+    this.requestCampaignDeletion(id, revision, confirmed);
+    return this.finishCampaignDeletion(id);
+  }
+  finishCampaignDeletion(id) {
+    const c = this.campaign(id);
+    if (c.deletedAt) return this.detail(id);
+    try {
+      if (c.acquisitionSource) {
+        if (!this.pauseAcquisitionSource) throw new Error('来源暂停服务暂不可用');
+        this.pauseAcquisitionSource(c.acquisitionSource.jobId, {
+          outreachPlanId: id,
+          reason: '关联触达计划已删除，获客后自动首发已关闭',
+        });
+      }
+      return this.completeCampaignDeletion(id);
+    } catch (error) {
+      this.putCampaign({
+        ...this.campaign(id),
+        deletionError: error.message || '来源暂停尚未完成',
+      });
+      return this.detail(id);
+    }
   }
   suppress(input) {
     const reason = text(input.reason) || '人工标记不再联系';
@@ -1462,6 +1692,7 @@ export class OutreachService {
       : current >= w.start || current < w.end;
   }
   canDispatch(c, d, m) {
+    if (c.deleteRequestedAt) return false;
     if (this.isMaintaining()) return false;
     if (!this.acquisitionAllowed(c, Boolean(d.firstId))) return false;
     if (!m || m.paused || m.smtpStatus !== 'connected' || !m.configured) return false;
@@ -1509,6 +1740,12 @@ export class OutreachService {
     return this.running;
   }
   async runTick() {
+    for (const { id } of this.db
+      .prepare(
+        "SELECT id FROM outreach_campaigns WHERE json_extract(data,'$.deleteRequestedAt') IS NOT NULL AND json_extract(data,'$.deletedAt') IS NULL",
+      )
+      .all())
+      this.finishCampaignDeletion(id);
     if (
       typeof this.mailboxes.readMailbox === 'function' &&
       (!this.lastMailboxSync || this.now() - this.lastMailboxSync >= 60000)
@@ -1614,6 +1851,10 @@ export class OutreachService {
       this.delivery(d.id).status !== 'queued'
     )
       return;
+    if (d.senderVersion === legacySenderVersion(m)) {
+      d = { ...d, senderVersion: senderVersion(m) };
+      this.putDelivery(d);
+    }
     if (senderVersion(m) !== d.senderVersion) {
       this.putDelivery({
         ...d,
@@ -1740,7 +1981,8 @@ export class OutreachService {
                 ? '客户数据来源已改变，邮件尚未提交发送'
                 : '') ||
               (c.mode === 'production' && this.materialReason(d, campaign)) ||
-              (campaign.status !== 'active' ||
+              (campaign.deleteRequestedAt ||
+              campaign.status !== 'active' ||
               campaign.revision !== c.revision ||
               !this.acquisitionAllowed(campaign)
                 ? '计划已暂停或更新，邮件尚未提交发送'
@@ -1813,7 +2055,7 @@ export class OutreachService {
       if (error.code === 'OUTREACH_PRE_SEND_BLOCKED') {
         this.putDelivery({
           ...d,
-          status: 'blocked',
+          status: this.campaign(c.id).deleteRequestedAt ? 'cancelled' : 'blocked',
           reason: safeError(error),
           ...(this.materialReason(d, this.campaign(c.id)) ? { materialRefresh: true } : {}),
         });

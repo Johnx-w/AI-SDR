@@ -270,6 +270,18 @@ export function createApp({
           getEnv: () => connections.environment(),
           getScope: acquisitionScope,
           acquisitionSources: () => acquisitionOutreachSources(jobs(), plans()),
+          pauseAcquisitionSource: (id, context) => plans().pauseSourceForOutreach(id, context),
+          acquisitionDeletionImpact: (id) => {
+            const job = jobs().get(id);
+            const schedule = job.scheduleId ? plans().get(job.scheduleId) : null;
+            return {
+              jobId: id,
+              roundId: id,
+              scheduleId: job.scheduleId,
+              scheduleName: schedule?.name,
+              currentJobId: schedule?.lastJobId || id,
+            };
+          },
           businessState: () => business.state().store.view(),
           customerMailState: (id) => {
             const store = business.state().store;
@@ -822,6 +834,7 @@ export function createApp({
                 manager.update(suffix[0], {
                   name: body.name,
                   timing: body.timing,
+                  sourceControlRevision: body.sourceControlRevision,
                   input: {
                     ...validateInput(body.input),
                     target_count: validateCount(body.input?.target_count),
@@ -830,14 +843,32 @@ export function createApp({
               ),
             );
           }
-          if (suffix.length === 2 && suffix[1] === 'auto-first-touch' && request.method === 'POST')
+          if (
+            suffix.length === 2 &&
+            suffix[1] === 'auto-first-touch' &&
+            request.method === 'POST'
+          ) {
+            const body = await readJson(request);
             return json(
               response,
               200,
-              reviewPlan(manager.controlOutreach(suffix[0], (await readJson(request)).enabled)),
+              reviewPlan(manager.controlOutreach(suffix[0], body.enabled, body)),
             );
+          }
           if (suffix.length === 2 && request.method === 'POST')
-            return json(response, 200, reviewPlan(manager.control(suffix[0], suffix[1])));
+            return json(
+              response,
+              200,
+              reviewPlan(
+                manager.control(
+                  suffix[0],
+                  suffix[1],
+                  request.headers['content-type']?.includes('application/json')
+                    ? await readJson(request)
+                    : {},
+                ),
+              ),
+            );
           throw new ApiError(404, '定时计划接口不存在');
         }
         if (url.pathname === '/api/v1/leads/real/metrics' && request.method === 'GET')
@@ -1002,6 +1033,7 @@ export function createApp({
           return json(response, 200, provider.info);
         if (url.pathname === `${prefix}/jobs` || url.pathname.startsWith(`${prefix}/jobs/`)) {
           const suffix = url.pathname.slice(`${prefix}/jobs`.length).split('/').filter(Boolean);
+          plans().recoverAuthorizations();
           const manager = jobs();
           if (!suffix.length && request.method === 'GET')
             return json(response, 200, {
@@ -1023,12 +1055,22 @@ export function createApp({
           }
           if (suffix.length === 1 && request.method === 'GET')
             return json(response, 200, reviewJob(manager.get(suffix[0])));
-          if (suffix.length === 2 && suffix[1] === 'auto-first-touch' && request.method === 'POST')
+          if (
+            suffix.length === 2 &&
+            suffix[1] === 'auto-first-touch' &&
+            request.method === 'POST'
+          ) {
+            const body = await readJson(request);
             return json(
               response,
               200,
-              reviewJob(manager.controlOutreach(suffix[0], (await readJson(request)).enabled)),
+              reviewJob(
+                manager.controlOutreach(suffix[0], body.enabled, {
+                  sourceControlRevision: body.sourceControlRevision,
+                }),
+              ),
             );
+          }
           if (
             suffix.length === 3 &&
             suffix[1] === 'auto-first-touch' &&
@@ -1108,11 +1150,29 @@ export function createApp({
             }
           }
           if (suffix.length === 2 && request.method === 'POST') {
+            if (suffix[1] === 'pause')
+              return json(response, 200, reviewJob(manager.pause(suffix[0])));
+            if (suffix[1] === 'delete') {
+              const source = manager.get(suffix[0]);
+              if (source.scheduleId) plans().control(source.scheduleId, 'delete');
+              return json(response, 200, reviewJob(manager.delete(suffix[0])));
+            }
             if (suffix[1] === 'stop')
               return json(response, 200, reviewJob(manager.stop(suffix[0])));
             if (suffix[1] === 'resume') {
               if (!provider.info.configured) throw new ApiError(503, '获客执行引擎尚未配置');
-              return json(response, 200, reviewJob(await manager.resume(suffix[0])));
+              const body = request.headers['content-type']?.includes('application/json')
+                ? await readJson(request)
+                : {};
+              return json(
+                response,
+                200,
+                reviewJob(
+                  await manager.resume(suffix[0], {
+                    sourceControlRevision: body.sourceControlRevision,
+                  }),
+                ),
+              );
             }
           }
           throw new ApiError(404, '任务接口不存在');

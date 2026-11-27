@@ -225,3 +225,64 @@ test('旧轮询不能覆盖已暂停的定时计划，慢读取期间轮询不�
     globalThis.clearInterval = originalClearInterval;
   }
 });
+
+test('删除后定时页面勾选不立即授权，保存才发送当前修订且保持暂停', async () => {
+  const source = {
+    ...plan('paused'),
+    input: { ...plan('paused').input, auto_first_touch: false },
+    sourceControlRevision: 4,
+    sourcePause: { outreachPlanId: 'old', reason: '已删除' },
+  };
+  const states = [[source], false];
+  let index = 0;
+  const calls = [];
+  const load = createModuleLoader((specifier, path) => {
+    if (path.href !== entry.href) return;
+    if (specifier === 'react')
+      return {
+        ...React,
+        useState(initial) {
+          const current = index++;
+          if (!(current in states)) states[current] = initial;
+          return [
+            states[current],
+            (next) => {
+              states[current] = typeof next === 'function' ? next(states[current]) : next;
+            },
+          ];
+        },
+        useRef: (current) => ({ current }),
+        useEffect() {},
+      };
+    if (specifier === '../services/acquisition')
+      return {
+        acquisitionApi: {
+          async setAutomaticFirstTouch(...args) {
+            calls.push(args);
+            return {
+              ...source,
+              input: { ...source.input, auto_first_touch: true },
+              sourceControlRevision: 5,
+            };
+          },
+        },
+      };
+  });
+  const { ScheduledAcquisition } = load(entry);
+  const render = () => {
+    index = 0;
+    return ScheduledAcquisition();
+  };
+  const checkbox = elements(render()).find(
+    (e) => e.type === 'input' && e.props.type === 'checkbox',
+  );
+  assert.equal(checkbox.props.checked, false);
+  checkbox.props.onChange({ target: { checked: true } });
+  assert.equal(calls.length, 0);
+  elements(render())
+    .find((e) => e.type === 'button' && words(e) === '保存自动首发设置')
+    .props.onClick();
+  await flush();
+  assert.deepEqual(calls, [['schedules', source.id, true, 4]]);
+  assert.equal(states[0][0].status, 'paused');
+});

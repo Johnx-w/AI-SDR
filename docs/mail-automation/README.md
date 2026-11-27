@@ -40,6 +40,8 @@
 
 最新生产版本和在办工作见[当前进展与验收](status.md)。最初的功能分支 `codex/production-mail-automation` 从 2026-11-22 的生产提交 `736e160` 建立，对应本地回退标签 `mail-automation-production-baseline-20261122`。
 
+触达计划产品选择、邮箱负责范围、删除与来源恢复的隔离验收见[触达计划验收](outreach-plan-acceptance.md)，覆盖规格 #85 的 AC01—AC22。main 合并和生产发布另行确认。
+
 ## 本机实数工作区
 
 端口 14324 运行本分支构建的 React 页面，读取本机快照 `.data/mail-review-local`。查看实际来信请从跟进任务进入，点主题可打开同一账号和同一邮件线程。[邮箱来信跟进](http://127.0.0.1:14324/business?view=replies) · [收件箱](http://127.0.0.1:14324/inbox?tab=inbox) · [素材库](http://127.0.0.1:14324/materials)
