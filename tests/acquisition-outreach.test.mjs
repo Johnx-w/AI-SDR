@@ -1017,6 +1017,133 @@ test('新轮次启动时停止旧轮次待发首封，保留已发送历史', as
   }
 });
 
+test('自动获客首发与跟进只在当前步骤需要 AI 时调用，真人回复停止追信', async (t) => {
+  const h = await smtpHarness(t);
+  delete h.service.generator;
+  const calls = [];
+  let configured = false;
+  h.service.getEnv = () =>
+    configured
+      ? {
+          RESEARCH_MODEL_PROVIDER: 'openai_compatible',
+          RESEARCH_MODEL_BASE_URL: 'https://fixture.invalid/v1',
+          RESEARCH_MODEL_API_KEY: 'fixture',
+          RESEARCH_MODEL_MODEL: 'fixture',
+        }
+      : {};
+  h.service.fetchImpl = async (url, init) => {
+    assert.equal(String(url), 'https://fixture.invalid/v1/chat/completions');
+    const request = JSON.parse(init.body);
+    const context = JSON.parse(request.messages[1].content);
+    calls.push(context);
+    assert.equal(context.day, 7);
+    assert.deepEqual(request.response_format.json_schema.schema.required, ['subject']);
+    return Response.json({
+      choices: [
+        {
+          finish_reason: 'stop',
+          message: {
+            content: JSON.stringify({
+              subject: 'Update for ' + context.company,
+            }),
+          },
+        },
+      ],
+    });
+  };
+  saveSequencePolicy(h.service, {
+    ...h.service.followUps.policy(),
+    firstTemplate: {
+      subject: 'Introduction | {{company}}',
+      body: 'At {{brand}}, we supply {{product}}.',
+    },
+    steps: [
+      { day: 3, instruction: '', template: { subject: '', body: 'Following up on {{product}}.' } },
+      {
+        day: 7,
+        instruction: 'Write a short subject.',
+        template: {
+          subject: '{{ai_subject}}',
+          body: 'Would more information about {{product}} help?',
+        },
+      },
+    ],
+  });
+  const job = h.create({ auto_follow_up: true });
+  for (const id of ['alpine', 'bay', 'cedar']) {
+    await h.capture(job.id, buyer(id));
+    await h.pump();
+  }
+  assert.equal(h.state.sent.length, 3);
+  assert.equal(calls.length, 0);
+  const first = new Map(
+    h.service.deliveries(undefined, ['accepted']).map((m) => [m.customerId, m]),
+  );
+  for (const [id, m] of first) {
+    assert.equal(m.subject, 'Introduction | Company ' + id);
+    assert(m.bodyText.includes('At Brand, we supply PVC shutters.'));
+  }
+  for (const [id, classification, bodyText] of [
+    [
+      'alpine',
+      'auto_reply',
+      'I am out of the office until Monday.\nFor urgent matters, contact Jordan Lee at jordan@alpine.example.',
+    ],
+    ['cedar', 'normal', 'Please send a quote for 120 units.'],
+  ]) {
+    const m = first.get(id),
+      mailbox = h.mailboxes.get('box');
+    const at = new Date(h.state.now).toISOString();
+    h.service.conversations.putMessage(mailbox, {
+      identity: 'reply-' + id,
+      messageId: '<reply-' + id + '@example.org>',
+      inReplyTo: m.messageId,
+      references: [m.messageId],
+      direction: 'inbound',
+      from: m.to,
+      to: m.from,
+      subject: 'Re: ' + m.subject,
+      bodyText,
+      classification,
+      source: 'imap',
+      deliveryStatus: 'received',
+      occurredAt: at,
+      receivedAt: at,
+    });
+  }
+  for (const day of [3, 7]) {
+    if (day === 7) configured = true;
+    h.state.now =
+      Math.max(...[...first.values()].map((m) => Date.parse(m.sentAt))) + day * 86400000;
+    await h.pump(0);
+    await h.pump(10);
+    const sent = h.state.sent.slice(day === 3 ? 3 : 5);
+    assert.deepEqual(
+      sent.map((m) => m.to).sort(),
+      [first.get('alpine').to, first.get('bay').to].sort(),
+    );
+    for (const m of sent) {
+      const original = [...first.values()].find((item) => item.to === m.to);
+      assert.equal(m.inReplyTo, original.messageId);
+      assert.equal(
+        m.subject,
+        day === 3 ? 'Re: ' + original.subject : 'Update for ' + original.companyName,
+      );
+      assert(
+        m.text.includes(
+          day === 3
+            ? 'Following up on PVC shutters.'
+            : 'Would more information about PVC shutters help?',
+        ),
+      );
+    }
+    assert.equal(calls.length, day === 3 ? 0 : 2);
+  }
+  await h.pump(60);
+  assert.equal(h.state.sent.length, 7);
+  assert.equal(calls.length, 2);
+});
+
 test('定时获客自然换轮仍按原首封的自定义日期同线程跟进，定时计划暂停时暂缓', async () => {
   const h = harness();
   try {

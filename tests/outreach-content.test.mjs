@@ -125,11 +125,23 @@ test('序列模板按本客户资料展开自定义变量，资料不足或有�
     fetchImpl: async (_url, options) => {
       const request = JSON.parse(options.body);
       assert.deepEqual(JSON.parse(request.messages[1].content).personalization_rules, [variable]);
+      assert.deepEqual(request.response_format.json_schema.schema.required, [
+        'body_text',
+        'source_ids',
+        variable.key,
+      ]);
+      assert.match(
+        request.response_format.json_schema.schema.properties.body_text.description,
+        /one reply question/,
+      );
+      const { body_text, source_ids } = generated(input);
       return Response.json({
         choices: [
           {
             finish_reason: 'stop',
-            message: { content: JSON.stringify({ ...generated(input), [variable.key]: fragment }) },
+            message: {
+              content: JSON.stringify({ body_text, source_ids, [variable.key]: fragment }),
+            },
           },
         ],
       });

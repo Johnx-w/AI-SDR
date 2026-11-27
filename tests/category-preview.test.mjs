@@ -14,6 +14,101 @@ function api(h, path, method = 'GET', body) {
     readJson: async () => body,
   });
 }
+test('固定首封与跟进预览不调用模型，AI 步骤只生成当前邮件', async (t) => {
+  const h = categoryPreviewFixture(0);
+  t.after(h.close);
+  const fixedFirst = { subject: 'Introduction | {{company}}', body: 'We supply {{product}}.' };
+  const fixedFollow = { subject: '', body: 'Following up on {{product}} from {{brand}}.' };
+  const aiFirst = { subject: '{{ai_subject}}', body: '{{ai_body}}' };
+  const aiFollow = { subject: '', body: '{{ai_body}}' };
+  for (const [box, category] of [
+    [h.boxes[0], 'manufacturer'],
+    [h.boxes[1], 'distributor'],
+  ]) {
+    const scope = { mailboxId: box.id, category };
+    const sample = await api(h, '/sequence-policy/sample?' + new URLSearchParams(scope));
+    const original = h.leads.find((lead) => lead.id === sample.id);
+    const product = h.products.find((item) => item.id === sample.productId);
+    const preview = (params) =>
+      api(h, '/sequence-policy/preview', 'POST', {
+        ...scope,
+        sampleId: sample.id,
+        instruction: '',
+        ...params,
+      });
+    const before = h.requests.length;
+    const first = await preview({ step: 0, day: 0, template: fixedFirst });
+    assert.equal(first.subject, 'Introduction | ' + original.name);
+    assert.equal(
+      first.body,
+      [
+        'Hi ' + original.name + ' team,',
+        'We supply ' + product.englishName + '.',
+        box.signature,
+      ].join('\n\n'),
+    );
+    const second = await preview({
+      step: 1,
+      day: 3,
+      template: fixedFollow,
+      firstTemplate: fixedFirst,
+      priorSteps: [],
+    });
+    assert.equal(second.subject, 'Re: Introduction | ' + original.name);
+    assert.equal(
+      second.body,
+      [
+        'Hi ' + original.name + ' team,',
+        'Following up on ' + product.englishName + ' from ' + box.brandName + '.',
+        box.signature,
+      ].join('\n\n'),
+    );
+    const third = await preview({
+      step: 2,
+      day: 7,
+      template: fixedFollow,
+      firstTemplate: aiFirst,
+      priorSteps: [{ day: 3, template: aiFollow, instruction: 'Follow up.' }],
+    });
+    assert.equal(third.subject, '沿用首封主题');
+    assert.equal(third.body, second.body);
+    assert.equal(h.requests.length, before);
+    const aiStep = await preview({
+      step: 2,
+      day: 7,
+      template: aiFollow,
+      instruction: 'Follow up.',
+      firstTemplate: aiFirst,
+      priorSteps: [{ day: 3, template: aiFollow, instruction: 'Follow up.' }],
+    });
+    assert.match(aiStep.body, /Would a brief product overview help/);
+    assert.equal(h.requests.length, before + 1);
+    assert.equal(h.requests.at(-1).day, 7);
+    const firstAi = await preview({ step: 0, day: 0, template: aiFirst });
+    const inherited = await preview({
+      step: 1,
+      day: 3,
+      template: fixedFollow,
+      firstTemplate: aiFirst,
+      priorSteps: [],
+      firstPreview: {
+        sampleId: sample.id,
+        mailboxId: box.id,
+        productId: product.id,
+        subject: firstAi.subject,
+      },
+    });
+    assert.equal(inherited.subject, 'Re: ' + firstAi.subject);
+    assert.equal(h.requests.length, before + 2);
+  }
+  const before = h.requests.length;
+  await assert.rejects(
+    api(h, '/sequence-policy/sample?mailboxId=box-0&category=contractor'),
+    /没有合格样本/,
+  );
+  assert.equal(h.requests.length, before);
+  assert.equal(h.sends, 0);
+});
 test('完整类别取样覆盖三个邮箱、两类客户及无数据对照，预览完整三步且无业务写入', async (t) => {
   const h = categoryPreviewFixture();
   t.after(h.close);
@@ -54,6 +149,14 @@ test('完整类别取样覆盖三个邮箱、两类客户及无数据对照，�
           day,
           instruction: step ? 'Ask one easy question.' : '',
           template: { subject: step ? '' : '{{product}} for {{company}}', body: '{{ai_body}}' },
+          firstTemplate: { subject: '{{product}} for {{company}}', body: '{{ai_body}}' },
+          priorSteps: [
+            {
+              day: 3,
+              instruction: '',
+              template: { subject: '', body: 'Earlier note about {{product}}.' },
+            },
+          ],
         });
         assert.ok(preview.body.startsWith('Hi ' + original.name + ' team,'));
         assert.ok(preview.body.endsWith(box.signature));
@@ -64,7 +167,11 @@ test('完整类别取样覆盖三个邮箱、两类客户及无数据对照，�
         assert.equal(preview.rules.step, step);
         for (const other of h.boxes.filter((b) => b.id !== box.id))
           assert.ok(!preview.body.includes(other.brandName));
-        if (step === 2) assert.equal(h.requests.at(-1).history.length, 1);
+        if (step === 2)
+          assert.equal(
+            h.requests.at(-1).history[0].body,
+            'Earlier note about ' + sample.product + '.',
+          );
       }
       await assert.rejects(
         api(
@@ -279,7 +386,7 @@ test('三个邮箱按各步骤要求预览短正文与签名', async (t) => {
           ['Hi ' + original.name + ' team,', expected, box.signature].join('\n\n'),
         );
         assert.equal(preview.warning, undefined);
-        assert.equal(h.requests.length - before, step ? 2 : 1);
+        assert.equal(h.requests.length - before, 1);
         const input = {
           candidate,
           mailbox: box,

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { customerMirrorFields, customerEmailValidity } from '../server/customer-mirror.mjs';
 import { isDevelopmentCustomer } from '../server/customer-eligibility.mjs';
 import { CustomerBusinessApi } from '../server/customer-business-api.mjs';
+import { communicationRoundFields, communicationRounds } from '../server/communication-rounds.mjs';
+import { recordMailConversation } from '../server/mail-conversation-business.mjs';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -107,6 +109,152 @@ test('原T3后台同步调用并缓存来信分析，切换目标表后不复用
     assert.equal(syncs, 2);
     env.FEISHU_MESSAGES_TABLE_ID = 'other-t3';
     assert.notEqual(api.state(), state);
+  } finally {
+    await api.close();
+  }
+});
+
+test('后台同步直接登记已识别的普通外出回执，仍从真人询价创建采购需求', async () => {
+  const samples = [
+    [
+      'alpine',
+      'Automatic reply: out of office',
+      'I am out of the office until Monday.',
+      'auto_reply',
+    ],
+    [
+      'bay',
+      'Out of office',
+      'Thank you for your email.\nI am away from the office this week.',
+      'normal',
+    ],
+    ['cedar', 'Quote request', 'Please send a quote for 120 units of PVC shutters.', 'normal'],
+    [
+      'delegate',
+      'Out of office',
+      'I am out of the office until Monday.\nFor urgent matters, contact Jordan Lee at jordan@alpine.example.',
+      'auto_reply',
+    ],
+    [
+      'mixed',
+      'Out of office',
+      'I am out of the office until Monday.\nPlease send a quote for 100 units.',
+      'auto_reply',
+    ],
+  ];
+  const expectedCustomer = new Set(samples.map(([id]) => id));
+  const trace = [];
+  let mirrored;
+  const api = new CustomerBusinessApi({
+    getEnv: () => ({ FEISHU_MESSAGES_TABLE_ID: 'original-t3' }),
+    knowledge: () => ({ list: () => [] }),
+    loadCustomers: async () => [...expectedCustomer].map((id) => ({ id, fields: {} })),
+    customerRecord: async (id) => (expectedCustomer.has(id) ? { record_id: id } : null),
+    communicationModel: {
+      research: async ({ schema, messages }) => {
+        const { body } = JSON.parse(messages[1].content);
+        const [id] = samples.find(([, , original]) => original === body);
+        const demand = schema.required.includes('demands');
+        trace.push([id, demand ? 'T1' : 'T3']);
+        const data = demand
+          ? {
+              reviewReason: '',
+              demands: [
+                {
+                  existingId: '',
+                  title: 'PVC 百叶窗询价',
+                  productText: 'PVC shutters',
+                  specifications: '',
+                  quantity: '120',
+                  unit: 'units',
+                  quote: body,
+                },
+              ],
+            }
+          : {
+              replyType: id === 'cedar' ? '真人客户回复' : '系统自动回复',
+              classificationQuote: body,
+              facts: [],
+              demandSummary: id === 'cedar' ? 'PVC 百叶窗 120 件' : '',
+              demandQuote: id === 'cedar' ? body : '',
+            };
+        return { output_text: JSON.stringify(data) };
+      },
+    },
+  });
+  const { store, mirror } = api.state();
+  mirror.sync = async ({ messages }) => {
+    mirrored = communicationRounds(messages).rounds.map((round) => ({
+      customer: round.members[0].customerId,
+      ...communicationRoundFields(round),
+    }));
+    return { status: 'synced' };
+  };
+  const account = 'sales@example.test';
+  async function receive([id, subject, bodyText, classification], customerId = id) {
+    return recordMailConversation({
+      store,
+      conversation: { customerId, account, id: 'thread-' + id, subject },
+      messages: [
+        {
+          id: 'mail-' + id,
+          messageId: '<mail-' + id + '@example.test>',
+          direction: 'inbound',
+          from: id + '@buyer.example',
+          to: account,
+          subject,
+          bodyText,
+          classification,
+          deliveryStatus: 'received',
+          occurredAt: '2026-11-10T01:00:00.000Z',
+        },
+      ],
+    });
+  }
+  try {
+    for (const sample of samples.slice(0, 3)) assert.equal((await receive(sample)).recorded, 1);
+    const initial = await api.synchronize({ force: false });
+    assert.equal(initial.status, 'synced', initial.error);
+    assert.deepEqual(trace, [
+      ['cedar', 'T1'],
+      ['cedar', 'T3'],
+    ]);
+    assert.equal(mirrored.length, 3);
+    for (const [id, , body] of samples.slice(0, 3)) {
+      const row = mirrored.find((row) => row.customer === id);
+      assert.equal(row.回复类型, id === 'cedar' ? '真人客户回复' : '系统自动回复');
+      assert.equal(row.提取客户信息, '来信邮箱：' + id + '@buyer.example');
+      assert(row.收到回复内容.endsWith(body));
+      assert(row.收到回复内容.includes(id + '@buyer.example'));
+    }
+    const read = async (kind) =>
+      (await api.handle({ method: 'GET' }, new URL('http://localhost/api/v1/business/' + kind)))
+        .body.records;
+    let demands = await read('demands');
+    assert.equal(demands.length, 1);
+    const [d] = demands;
+    const quote = (await read('messages')).find((m) => m.customerId === 'cedar');
+    assert.deepEqual(
+      [d.customerId, d.productText, d.quantity, d.unit, d.sourceMessageId, d.evidenceQuote],
+      ['cedar', 'PVC shutters', '120', 'units', quote.id, samples[2][2]],
+    );
+
+    for (const sample of samples.slice(3)) assert.equal((await receive(sample)).recorded, 1);
+    assert.equal((await receive(['unassigned', ...samples[0].slice(1)], null)).recorded, 0);
+    assert.equal((await api.synchronize({ force: false })).status, 'synced');
+    assert.deepEqual(trace, [
+      ['cedar', 'T1'],
+      ['cedar', 'T3'],
+      ['mixed', 'T3'],
+    ]);
+    assert.equal(mirrored.length, 5);
+    const delegate = mirrored.find((row) => row.customer === 'delegate');
+    assert.equal(delegate.提取客户信息, '来信邮箱：delegate@buyer.example');
+    assert(delegate.收到回复内容.endsWith(samples[3][2]));
+    demands = await read('demands');
+    assert.equal(demands.length, 1);
+    assert.equal((await api.synchronize({ force: false })).status, 'synced');
+    assert.equal(trace.length, 3);
   } finally {
     await api.close();
   }

@@ -138,6 +138,17 @@ export function SequenceEmailComposer({
   const [sampling, setSampling] = useState(false);
   const sampleRequest = useRef(0);
   const scopeKey = JSON.stringify([customer, mailboxId, productId]);
+  const firstPreview = useRef<{ key: string; subject: string } | null>(null);
+  const firstPreviewKey = (sample: Sample) =>
+    JSON.stringify([
+      scopeKey,
+      sample.id,
+      sample.productId,
+      previewInput.firstTemplate,
+      previewInput.firstInstruction,
+      previewInput.firstBodyInstruction,
+      previewInput.firstWriting,
+    ]);
   const previewKey = JSON.stringify([scopeKey, representative?.id, previewInput, template]);
   const previewRequest = useRef(0);
   useEffect(() => {
@@ -194,6 +205,15 @@ export function SequenceEmailComposer({
   }, [scopeKey]);
   async function generatePreview() {
     const id = ++previewRequest.current;
+    const inherited =
+      !first && representative && firstPreview.current?.key === firstPreviewKey(representative)
+        ? {
+            sampleId: representative.id,
+            productId: representative.productId,
+            mailboxId,
+            subject: firstPreview.current.subject,
+          }
+        : undefined;
     setLoading(true);
     setPreviewError('');
     try {
@@ -205,10 +225,13 @@ export function SequenceEmailComposer({
           mailboxId,
           productId: productId || representative?.productId,
           sampleId: representative?.id,
+          firstPreview: inherited,
           template,
         }),
       });
       if (id === previewRequest.current) {
+        if (first)
+          firstPreview.current = { key: firstPreviewKey(value.sample), subject: value.subject };
         setRepresentative({ ...value.sample, demo: representative?.demo });
         setPreview({ key: previewKey, value });
       }

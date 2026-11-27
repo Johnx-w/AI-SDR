@@ -124,7 +124,8 @@ export function categoryPreviewFixture(count = 1200, respond) {
   const requests = [];
   let sends = 0;
   const fetchImpl = async (url, request) => {
-    const payload = JSON.parse(JSON.parse(request.body).messages[1].content);
+    const requestBody = JSON.parse(request.body);
+    const payload = JSON.parse(requestBody.messages[1].content);
     requests.push(payload);
     const product = payload.sender?.product || payload.product;
     const response = payload.customer
@@ -138,8 +139,11 @@ export function categoryPreviewFixture(count = 1200, respond) {
           source_ids: [payload.customer.evidence[0].id],
         }
       : { body_text: `Following up on ${product}. Would a brief product overview help your team?` };
+    const returned = respond ? respond(payload, response) : response;
+    const properties = requestBody.response_format.json_schema.schema.properties;
+    const fields = Object.fromEntries(Object.entries(returned).filter(([key]) => key in properties));
     return Response.json({
-      choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(respond ? respond(payload, response) : response) } }],
+      choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(fields) } }],
     });
   };
   const service = new OutreachService({

@@ -7,6 +7,7 @@ import {
   addPersonalizedFields,
   personalizedValues,
   personalizationPolicy,
+  templateModelFields,
 } from './sequence-personalization.mjs';
 import assert from 'node:assert/strict';
 import { followWritingRequirement } from './mail-writing-options.mjs';
@@ -102,73 +103,84 @@ export async function generateFollowUp({
   now,
 }) {
   // shortcut: 联系人尚无已核实采购负责人标记；接入该事实后再启用负责人措辞。
-  const facts = eligibleOutreachFacts(product, campaign, new Date(now));
-  const schema = {
-    type: 'object',
-    additionalProperties: false,
-    required: ['body_text'],
-    properties: { body_text: { type: 'string' } },
-  };
-  const needsSubject = [template?.subject, template?.body].some((text) =>
-    text?.includes('{{ai_subject}}'),
-  );
-  if (needsSubject) {
-    schema.required.push('subject');
-    schema.properties.subject = {
-      type: 'string',
-      description: 'Write the subject according to writingInstruction.',
+  const fields = templateModelFields(template);
+  const custom = fields.variables;
+  let response = {};
+  if (fields.needed) {
+    const facts = eligibleOutreachFacts(product, campaign, new Date(now));
+    const schema = {
+      type: 'object',
+      additionalProperties: false,
+      required: fields.body ? ['body_text'] : [],
+      properties: fields.body
+        ? {
+            body_text: { type: 'string', ...(fields.fragment && { description: fields.fragment }) },
+          }
+        : {},
     };
-  }
-  const custom = template?.variables || [];
-  addPersonalizedFields(schema, custom);
-  const result = await createResearchProviders({ env, fetchImpl }).model.research({
-    schema,
-    messages: [
-      {
-        role: 'system',
-        content: followUpWritingPolicy + (custom.length ? personalizationPolicy : ''),
-      },
-      {
-        role: 'user',
-        content: JSON.stringify({
-          step,
-          day,
-          writingInstruction: instruction,
-          ...(custom.length && {
-            personalization_rules: custom,
-            customer_evidence: (first.candidate?.evidence || [])
-              .filter((e) => e.id && e.quote && e.sourceUrl)
-              .map(({ id, value, quote, sourceUrl }) => ({ id, value, quote, sourceUrl })),
+    if (fields.subject) {
+      schema.required.push('subject');
+      schema.properties.subject = {
+        type: 'string',
+        description: 'Write the subject according to writingInstruction.',
+      };
+    }
+    addPersonalizedFields(schema, custom);
+    const result = await createResearchProviders({ env, fetchImpl }).model.research({
+      schema,
+      messages: [
+        {
+          role: 'system',
+          content:
+            followUpWritingPolicy +
+            (template ? '\nGenerate only the fields in the response schema.' : '') +
+            (previewOnly && !first.bodyText && !first.subject
+              ? '\nThe first email text is not available in this preview. Write in English.'
+              : '') +
+            (custom.length ? personalizationPolicy : ''),
+        },
+        {
+          role: 'user',
+          content: JSON.stringify({
+            step,
+            day,
+            writingInstruction: instruction,
+            ...(custom.length && {
+              personalization_rules: custom,
+              customer_evidence: (first.candidate?.evidence || [])
+                .filter((e) => e.id && e.quote && e.sourceUrl)
+                .map(({ id, value, quote, sourceUrl }) => ({ id, value, quote, sourceUrl })),
+            }),
+            sender: {
+              brand: mailbox?.brandName ?? first.senderBrand,
+              website: mailbox?.website ?? first.senderWebsite,
+            },
+            firstEmail: { subject: first.subject, body: first.bodyText },
+            product: product.englishName || product.name,
+            facts,
+            company: first.companyName,
+            history: history.map((m) => ({ direction: m.direction, body: m.bodyText })),
           }),
-          sender: {
-            brand: mailbox?.brandName ?? first.senderBrand,
-            website: mailbox?.website ?? first.senderWebsite,
-          },
-          firstEmail: { subject: first.subject, body: first.bodyText },
-          product: product.englishName || product.name,
-          facts,
-          company: first.companyName,
-          history: history.map((m) => ({ direction: m.direction, body: m.bodyText })),
-        }),
-      },
-    ],
-  });
-  assert(!result?.error && result?.status !== 'incomplete', '追信生成不完整');
-  const content =
-    result?.output_text ||
-    result?.choices?.[0]?.message?.content ||
-    result?.output
-      ?.flatMap((r) => r.content || [])
-      .filter((r) => r.type === 'output_text')
-      .map((r) => r.text)
-      .join('\n');
-  const response = JSON.parse(content);
+        },
+      ],
+    });
+    assert(!result?.error && result?.status !== 'incomplete', '追信生成不完整');
+    const content =
+      result?.output_text ||
+      result?.choices?.[0]?.message?.content ||
+      result?.output
+        ?.flatMap((r) => r.content || [])
+        .filter((r) => r.type === 'output_text')
+        .map((r) => r.text)
+        .join('\n');
+    response = JSON.parse(content);
+  }
   const draft = typeof response.body_text === 'string' ? response.body_text.trim() : '';
   const variables = mailVariables({
     company: first.companyName,
     product: product.englishName || product.name,
     brand: mailbox?.brandName ?? first.senderBrand,
-    subject: needsSubject && typeof response.subject === 'string' ? response.subject.trim() : '',
+    subject: fields.subject && typeof response.subject === 'string' ? response.subject.trim() : '',
     body: draft,
   });
   Object.assign(variables, personalizedValues(response, custom));
