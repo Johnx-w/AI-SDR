@@ -61,6 +61,10 @@ export function addModelTokens(usage, response) {
   const input = tokens.input_tokens ?? tokens.prompt_tokens;
   const output = tokens.output_tokens ?? tokens.completion_tokens;
   const valid = (value) => Number.isSafeInteger(value) && value >= 0;
+  if (valid(input))
+    usage.model_calls_with_input_tokens = (usage.model_calls_with_input_tokens || 0) + 1;
+  if (valid(output))
+    usage.model_calls_with_output_tokens = (usage.model_calls_with_output_tokens || 0) + 1;
   for (const [field, value] of [
     ['input_tokens', input],
     [

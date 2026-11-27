@@ -411,6 +411,179 @@ function fixture({
 
 const policyFact = (value, quote) => ({ value, quote, source_url: site });
 
+for (const reportAllModelUsage of [true, false])
+  test(`定时检索优先低消耗地区，保留探索及排除项用量（${reportAllModelUsage ? '完整' : '部分'}用量）`, async (t) => {
+    t.mock.timers.enable({
+      apis: ['Date', 'setInterval'],
+      now: Date.parse('2030-01-01T00:59:50Z'),
+    });
+    const localEnv = { TAVILY_API_KEY: 'fixture-search', DEEPSEEK_API_KEY: 'fixture-model' };
+    const scopes = [
+      ['American Screens', 'United States', 900, 100],
+      ['Mexican Screens', 'Mexico', 180, 30],
+      ['French Screens', 'France', 40, 10],
+      ['French Personal Blog', 'France', 15, 5],
+      ['French Personal Diary', 'France', 15, 5],
+      ['Exploration Screens', 'Germany', 200, 30],
+    ].map(([name, country, input, output], index) => {
+      const individual = index === 3 || index === 4;
+      const url = 'https://scope-business-' + index + '.example.org/';
+      const quote = individual
+        ? name + ' is my personal blog about my own roller blinds at home.'
+        : name + ' supplies made-to-measure roller blinds for building windows in ' + country + '.';
+      return { url, name, country, quote, input, output, individual };
+    });
+    const byUrl = new Map(scopes.map((scope) => [scope.url, scope]));
+    const searches = [];
+    const html = (scope) => '<p>' + scope.quote + '</p>';
+    const fetchImpl = async (url, options) => {
+      const request = JSON.parse(options.body);
+      if (url === 'https://api.tavily.com/search') {
+        searches.push(request.query);
+        const matched =
+          searches.length === 2
+            ? [scopes[0]]
+            : searches.length === 4
+              ? [scopes[1]]
+              : searches.length === 6
+                ? scopes.slice(2, 5)
+                : searches.length === 11
+                  ? [scopes[5]]
+                  : [];
+        return json({
+          results: matched.map(({ url, name }) => ({ url, title: name })),
+          usage: { credits: 1 },
+        });
+      }
+      if (url === 'https://api.tavily.com/extract') {
+        const extractUrl = new URL(request.urls[0]);
+        const source = byUrl.get(extractUrl.origin + '/');
+        const expensive = source === scopes[0];
+        const home = extractUrl.pathname === '/';
+        return json({
+          results: [
+            {
+              url: extractUrl.href,
+              raw_content:
+                html(source) + (expensive && home ? '<a href="/contact">Contact us</a>' : ''),
+            },
+          ],
+          usage: { credits: expensive ? (home ? 6 : 7) : 1 },
+        });
+      }
+      assert.equal(url, 'https://api.deepseek.com/responses');
+      const { pages, sources } = JSON.parse(request.input[1].content);
+      const source = byUrl.get((pages || sources)[0].source_url);
+      const fact = (value) => ({ value, quote: source.quote, source_url: source.url });
+      const content = sources
+        ? { result: 'relevant', sources: sources.map(({ i }) => i), reason: 'primary website' }
+        : {
+            company_name: fact(source.name),
+            entity_type: fact(source.individual ? 'individual' : 'business'),
+            actual_country: fact(source.country),
+            admission_facts: source.individual ? [] : [fact('complete_supply')],
+            products: [{ ...fact('roller blinds'), window_use: 'window_covering' }],
+          };
+      return json({
+        status: 'completed',
+        output: [{ content: [{ type: 'output_text', text: JSON.stringify(content) }] }],
+        usage: {
+          ...(!reportAllModelUsage && sources && source === scopes[1]
+            ? {}
+            : { input_tokens: source.input }),
+          output_tokens: source.output,
+        },
+      });
+    };
+    const native = new NativeAcquisition({
+      env: localEnv,
+      fetchImpl,
+      readPage: async ({ href }) => ({
+        html:
+          href.startsWith(scopes[0].url) || href === scopes[1].url
+            ? '<noscript>Enable JavaScript</noscript>'
+            : html(byUrl.get(href)),
+      }),
+      readScraplingPage: async () => ({ status: 'unavailable' }),
+    });
+    await withApp({ env: localEnv, nativeImpl: native, fetchImpl }, async (origin) => {
+      const api = origin + '/api/v1/acquisition';
+      const response = await fetch(api + '/schedules', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'idempotency-key': 'usage-dispatch-2030' },
+        body: JSON.stringify({
+          name: '按实际使用量调配检索',
+          input: { country: 'worldwide', product_scope: 'all', target_count: 4 },
+          timing: {
+            repeat: 'once',
+            startDate: '2030-01-01',
+            times: ['09:00'],
+            timezone: 'Asia/Shanghai',
+          },
+        }),
+      });
+      assert.equal(response.status, 201);
+      t.mock.timers.tick(15000);
+      let job;
+      for (let n = 0; n < 500; n++) {
+        ({
+          jobs: [job],
+        } = await (await fetch(api + '/jobs?summary=1')).json());
+        if (job && job.status !== 'running') break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(job?.status, 'completed', JSON.stringify(job));
+      job = await (await fetch(api + '/jobs/' + job.id)).json();
+      assert.deepEqual(
+        [1, 3, 5].map((i) => {
+          const metric = job.searchStats[i];
+          return [metric.country, metric.inserted, metric.researched, metric.rejected];
+        }),
+        [
+          ['United States', 1, 1, 0],
+          ['Mexico', 1, 1, 0],
+          ['France', 1, 3, 2],
+        ],
+      );
+      assert.equal(job.searchStats[8].country, 'Mexico');
+      assert.match(searches[8], /México/);
+      assert.deepEqual(
+        job.searchStats.slice(9).map(({ country }) => country),
+        ['', 'Japan'],
+      );
+      assert.deepEqual(job.searchStats[8].dispatchEvidence, {
+        metered: [
+          'search_credits',
+          ...(reportAllModelUsage ? ['input_tokens'] : []),
+          'output_tokens',
+          'web_extract_credits',
+        ],
+        attempts: reportAllModelUsage ? [] : ['model_calls'],
+      });
+      assert.deepEqual(
+        job.rows
+          .slice(0, 2)
+          .map(({ research_usage, web_usage }) => [
+            research_usage.input_tokens,
+            research_usage.output_tokens,
+            web_usage.web_extract_calls,
+            web_usage.web_extract_credits,
+          ]),
+        [
+          [1800, 200, 2, 13],
+          [reportAllModelUsage ? 360 : 180, 60, 1, 1],
+        ],
+      );
+      assert.equal(
+        job.rows
+          .filter(({ result }) => result === 'rejected')
+          .reduce((tokens, row) => tokens + row.research_usage.input_tokens, 0),
+        30,
+      );
+      assert.equal(job.inserted, 4);
+    });
+  });
+
 function mapDiscoveryFixture({
   lookup,
   googleResponse,
