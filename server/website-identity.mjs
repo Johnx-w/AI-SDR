@@ -53,8 +53,12 @@ export function thirdPartySupplierProfile({ url = '', title = '', text = '' } = 
 
 export function businessDirectoryEvidence(text) {
   const content = text.normalize('NFKC').replace(/\s+/g, ' ');
+  const directoryListingFeed =
+    /\bbusiness directory\b/i.test(content) &&
+    /\b(?:new|latest|search) business(?:es)? listings\b/i.test(content);
   return {
     browseProfiles:
+      directoryListingFeed ||
       /\b(?:browse|review|compare|explore) (?:[\w&-]+ ){0,5}(?:(?:business|company|contractor|provider|supplier|vendor|merchant) (?:profiles|listings)|(?:businesses|companies|contractors|providers|suppliers|vendors|merchants) in your area)\b/i.test(
         content,
       ),
