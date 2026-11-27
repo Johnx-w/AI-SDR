@@ -4,7 +4,7 @@
 
 ## 开发环境与复跑
 
-- Python 3.12，依赖锁在 [requirements.txt](../../server/scrapling/requirements.txt)。Scrapling 0.5.1 负责 DOM 解析。Playwright 1.65.2 选用它的 Chrome Headless Shell 159.0.8154.6（修订 1255）。
+- Windows 实测和 Linux CI 使用 Python 3.12.16，依赖锁在 [requirements.txt](../../server/scrapling/requirements.txt)。Scrapling 0.5.1 负责 DOM 解析。Playwright 1.65.2 选用它的 Chrome Headless Shell 159.0.8154.6（修订 1255）。Playwright 标注的 Linux 支持范围包括 Ubuntu 22.04。[系统要求](https://playwright.dev/python/docs/intro#system-requirements)
 - 先建独立虚拟环境，再按锁定文件安装。Windows 用虚拟环境的 `Scripts/python.exe`，Linux 用 `bin/python`。Linux 在隔离验证机执行下面的 `--with-deps` 安装步骤并检查实际系统包，浏览器以非 root 用户和 Chromium 沙箱启动。
 
 ```sh
@@ -16,7 +16,7 @@ export PLAYWRIGHT_BROWSERS_PATH="$PWD/.codex-tmp/browsers"
 node --test tests/scrapling-collector.test.mjs tests/acquisition-evidence-selection.test.mjs
 ```
 
-Windows 用同一个 Playwright 命令并省去 `--with-deps`。Linux 依赖安装和浏览器验证须在目标发行版和运行用户下复验。未配置 `SCRAPLING_PYTHON` 时返回采集不可用。
+Windows 用同一个 Playwright 命令并省去 `--with-deps`。本地安装的 Windows 浏览器来自 [Chrome for Testing 官方存储](https://storage.googleapis.com/chrome-for-testing-public/159.0.8154.6/win64/chrome-headless-shell-win64.zip)，SHA-256 为 `5db6a6948e6d1299ea3bc87c420d467bf343feae186a316921c930ce02056af5`。Linux CI release 作业创建单独虚拟环境，运行安装、依赖检查、沙箱启动和固定页面检查。目标机的实际运行用户、系统依赖及正常业务负载仍需实测。未配置 `SCRAPLING_PYTHON` 时返回采集不可用。
 
 每次只打开一个新页面和独立上下文。浏览器的网络请求由本机网关按允许的资源类型返回，网关只向校验后的同站公网 HTTPS 地址发 GET 请求，连接固定到已核验的 DNS 地址。拒绝跨域跳转、跨域资源、私网、图片、媒体、字体、额外页面和 WebSocket。跨站 CDN 托管的脚本可能影响渲染结果，记录为此路径仍缺证。直接请求和浏览器请求共用同一套 HTTPS 地址和代理校验。
 
@@ -26,7 +26,7 @@ Windows 用同一个 Playwright 命令并省去 `--with-deps`。Linux 依赖安�
 
 `tests/acquisition-evidence-selection.test.mjs` 从三个预标 HTML 比较相同的现有正文清理、预算及新证据选择。样本包含完整成品自产加工、自产与他牌经销并存、酒店定制、否定采购、用途否定及第三方展商归属。现有位置截取保留中部预标事实 0/10，新选择保留 10/10；三页均在每页 16,000 字符上限内并保留同一来源 URL。该组数据用于定位中部证据丢失。固定模型对同一输入的判断、入库与人工回读由正常任务入口验收。
 
-`tests/scrapling-collector.test.mjs` 使用两家可区分的动态官网、一家空壳和控制请求演练采集，页面及子资源用固定替身供给，可在 CI 运行，无需目标站点。
+`tests/scrapling-collector.test.mjs` 使用两家可区分的动态官网、一家空壳和控制请求演练采集，页面及子资源用固定替身供给，可在 CI 运行，无需目标站点。Windows 的锁定版本完成了两家渲染和空壳对照，进程退出后没有新增 `chrome-headless-shell.exe` PID。现场遇到有正文页面被慢脚本拖到超时，固定五个慢脚本的原场景从 `timeout` 修复为 `ok`，已显示的原文仍可读回。
 
 ## 现场配对入口
 

@@ -58,3 +58,16 @@ jobs:
           path: docling-runtime.tar
           compression-level: 0
           retention-days: 7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12.16'
+      - name: Verify sandboxed Linux website collection
+        env:
+          SCRAPLING_PYTHON: ${{ runner.temp }}/scrapling-venv/bin/python
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/scrapling-browsers
+        run: |
+          python -m venv "$RUNNER_TEMP/scrapling-venv"
+          "$SCRAPLING_PYTHON" -m pip install -r server/scrapling/requirements.txt
+          "$SCRAPLING_PYTHON" -m pip check
+          "$SCRAPLING_PYTHON" -m playwright install --with-deps --only-shell chromium
+          node --test tests/scrapling-collector.test.mjs tests/acquisition-evidence-selection.test.mjs
