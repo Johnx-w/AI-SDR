@@ -46,6 +46,20 @@ export class AcquisitionSchedules {
     return JSON.parse(row.data);
   }
   save(plan) {
+    const row = this.db.prepare('SELECT data FROM schedules WHERE id=?').get(plan.id);
+    const latest = row && JSON.parse(row.data);
+    if ((latest?.sourceControlRevision || 0) > (plan.sourceControlRevision || 0)) {
+      for (const key of [
+        'sourceControlRevision',
+        'sourcePause',
+        'sourceDeletedAt',
+        'status',
+        'nextRunAt',
+        'lastError',
+      ])
+        plan[key] = latest[key];
+      plan.input.auto_first_touch = latest.input.auto_first_touch;
+    }
     plan.updatedAt = new Date(this.now()).toISOString();
     this.db.prepare('UPDATE schedules SET data=? WHERE id=?').run(JSON.stringify(plan), plan.id);
     return plan;
@@ -121,10 +135,15 @@ export class AcquisitionSchedules {
   }
   control(id, action) {
     const plan = this.get(id);
-    if (!['pause', 'resume', 'close'].includes(action)) throw fail(400, '不支持的计划操作');
+    if (!['pause', 'resume', 'close', 'delete'].includes(action))
+      throw fail(400, '不支持的计划操作');
+    if (plan.sourceDeletedAt) {
+      if (action === 'delete') return plan;
+      throw fail(409, '来源计划已删除');
+    }
     if (
-      (plan.status === 'closed' && action !== 'resume') ||
-      (plan.status === 'completed' && action !== 'close')
+      (plan.status === 'closed' && !['resume', 'delete'].includes(action)) ||
+      (plan.status === 'completed' && !['close', 'delete'].includes(action))
     )
       throw fail(409, '该计划已结束');
     if (action === 'resume') {
@@ -141,14 +160,22 @@ export class AcquisitionSchedules {
       plan.status = 'enabled';
       plan.lastError = '';
     } else {
-      plan.status = action === 'close' ? 'closed' : 'paused';
+      plan.status = ['close', 'delete'].includes(action) ? 'closed' : 'paused';
+      if (action === 'delete') {
+        plan.sourceDeletedAt = new Date(this.now()).toISOString();
+        plan.input.auto_first_touch = false;
+      }
       plan.nextRunAt = null;
     }
+    plan.sourceControlRevision = (plan.sourceControlRevision || 0) + 1;
     this.save(plan);
     if (action !== 'resume' && plan.lastJobId) {
       try {
         const job = this.jobs().get(plan.lastJobId);
-        if (['running', 'stopping'].includes(job.status)) this.jobs().stop(job.id);
+        if (action === 'delete') this.jobs().delete(job.id);
+        else if (action === 'pause' && ['running', 'stopping', 'paused'].includes(job.status))
+          this.jobs().pause(job.id);
+        else if (['running', 'stopping'].includes(job.status)) this.jobs().stop(job.id);
       } catch (error) {
         if (error.status !== 404) throw error;
       }
@@ -164,6 +191,35 @@ export class AcquisitionSchedules {
     this.save(plan);
     this.onOutreachChange();
     return plan;
+  }
+  pauseSourceForOutreach(jobId, { outreachPlanId, reason = '关联触达计划已删除' } = {}) {
+    if (typeof outreachPlanId !== 'string' || !outreachPlanId.trim())
+      throw fail(400, '请提供关联触达计划编号');
+    const manager = this.jobs();
+    const source = manager.get(jobId);
+    let schedule = null;
+    if (source.scheduleId) {
+      schedule = this.get(source.scheduleId);
+      if (
+        schedule.sourcePause?.outreachPlanId !== outreachPlanId ||
+        schedule.input.auto_first_touch ||
+        schedule.status === 'enabled'
+      ) {
+        schedule.input.auto_first_touch = false;
+        schedule.status = schedule.status === 'closed' ? 'closed' : 'paused';
+        schedule.nextRunAt = null;
+        schedule.sourcePause = { outreachPlanId, reason };
+        schedule.sourceControlRevision = (schedule.sourceControlRevision || 0) + 1;
+        schedule.lastError = reason;
+        this.save(schedule);
+      }
+    }
+    const job = manager.pause(jobId, { outreachPlanId, reason, disableFirstTouch: true });
+    if (schedule?.lastJobId && schedule.lastJobId !== jobId) {
+      manager.pause(schedule.lastJobId, { outreachPlanId, reason, disableFirstTouch: true });
+    }
+    this.onOutreachChange();
+    return { job, schedule };
   }
   tick() {
     if (this.isMaintaining()) return;

@@ -1108,6 +1108,13 @@ export function createApp({
             }
           }
           if (suffix.length === 2 && request.method === 'POST') {
+            if (suffix[1] === 'pause')
+              return json(response, 200, reviewJob(manager.pause(suffix[0])));
+            if (suffix[1] === 'delete') {
+              const source = manager.get(suffix[0]);
+              if (source.scheduleId) plans().control(source.scheduleId, 'delete');
+              return json(response, 200, reviewJob(manager.delete(suffix[0])));
+            }
             if (suffix[1] === 'stop')
               return json(response, 200, reviewJob(manager.stop(suffix[0])));
             if (suffix[1] === 'resume') {

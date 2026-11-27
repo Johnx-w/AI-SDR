@@ -365,7 +365,7 @@ function AutomaticFirstTouchProgress({ job }: { job: AcquisitionJob }) {
 
 type BatchProgressProps = {
   job: AcquisitionJob;
-  control: (action: 'stop' | 'resume') => void;
+  control: (action: 'stop' | 'resume' | 'pause' | 'delete') => void;
   busy: boolean;
 };
 
@@ -425,7 +425,13 @@ function BatchProgressDetail({ job, control, busy }: BatchProgressProps) {
   return (
     <section className="batch-progress" aria-label="批量任务进度">
       <div className="result-title">
-        <strong>{states[job.status]}</strong>
+        <strong>
+          {job.sourceDeletedAt
+            ? '来源已删除'
+            : job.manualPaused && job.status === 'paused'
+              ? '已人工暂停'
+              : states[job.status]}
+        </strong>
         <span>{beijingTime(job.createdAt)}</span>
       </div>
       <div role="status" aria-live="polite">
@@ -435,6 +441,24 @@ function BatchProgressDetail({ job, control, busy }: BatchProgressProps) {
         <progress max={job.target} value={job.inserted} aria-label="去重后新增收录进度" />
       </div>
       <p>{job.message}</p>
+      {job.sourcePause && (
+        <p role="status">
+          {job.sourcePause.reason}。当前企业完成保存或核对后暂停，剩余队列与进度保留。
+          {job.sourcePause.outreachPlanId && (
+            <Link
+              to={`/inbox?tab=campaigns&campaignId=${encodeURIComponent(job.sourcePause.outreachPlanId)}`}
+            >
+              查看原触达计划
+            </Link>
+          )}
+        </p>
+      )}
+      {job.sourcePause?.outreachPlanId && (
+        <label>
+          <input type="checkbox" checked={job.input.auto_first_touch === true} disabled />
+          获客后自动首发（继续获客保持关闭）
+        </label>
+      )}
       {job.input.auto_first_touch && <AutomaticFirstTouchProgress job={job} />}
       {job.countPolicy === 'sales-handoff-v1' && (
         <p className="muted">
@@ -485,12 +509,22 @@ function BatchProgressDetail({ job, control, busy }: BatchProgressProps) {
             type="button"
             className="btn secondary"
             disabled={busy}
+            onClick={() => control('pause')}
+          >
+            暂停并保留进度
+          </button>
+        )}
+        {job.status === 'running' && (
+          <button
+            type="button"
+            className="btn secondary"
+            disabled={busy}
             onClick={() => control('stop')}
           >
             停止任务
           </button>
         )}
-        {job.status === 'paused' && (
+        {job.status === 'paused' && !job.sourceDeletedAt && (
           <>
             <button
               type="button"
@@ -498,7 +532,7 @@ function BatchProgressDetail({ job, control, busy }: BatchProgressProps) {
               disabled={busy}
               onClick={() => control('resume')}
             >
-              确认执行结果并继续
+              {job.manualPaused ? '继续获客' : '确认执行结果并继续'}
             </button>
             <button
               type="button"
@@ -509,6 +543,21 @@ function BatchProgressDetail({ job, control, busy }: BatchProgressProps) {
               结束任务
             </button>
           </>
+        )}
+        {!job.sourceDeletedAt && (
+          <button
+            type="button"
+            className="btn subtle"
+            disabled={busy}
+            onClick={() => {
+              if (
+                window.confirm('删除来源任务将结束后续执行并关闭自动首发，执行历史保留。确认删除？')
+              )
+                control('delete');
+            }}
+          >
+            删除来源任务
+          </button>
         )}
         <Link className="btn secondary" to="/leads?dataset=real">
           查看客户库

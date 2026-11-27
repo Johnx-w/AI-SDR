@@ -67,7 +67,10 @@ export function ScheduledAcquisition() {
       reading.current = false;
     };
   }, []);
-  async function control(plan: AcquisitionSchedule, action: 'pause' | 'resume' | 'close') {
+  async function control(
+    plan: AcquisitionSchedule,
+    action: 'pause' | 'resume' | 'close' | 'delete',
+  ) {
     setBusy(plan.id);
     setError('');
     try {
@@ -81,7 +84,7 @@ export function ScheduledAcquisition() {
       setBusy('');
     }
   }
-  async function controlJob(id: string, action: 'stop' | 'resume') {
+  async function controlJob(id: string, action: 'stop' | 'resume' | 'pause' | 'delete') {
     setBusy(id);
     setError('');
     try {
@@ -261,7 +264,7 @@ export function ScheduledAcquisition() {
                   暂停计划
                 </button>
               )}
-              {['paused', 'closed'].includes(plan.status) && (
+              {['paused', 'closed'].includes(plan.status) && !plan.sourceDeletedAt && (
                 <button
                   className="btn secondary"
                   disabled={Boolean(busy)}
@@ -279,6 +282,18 @@ export function ScheduledAcquisition() {
                 >
                   <X size={15} />
                   关闭计划
+                </button>
+              )}
+              {!plan.sourceDeletedAt && (
+                <button
+                  className="btn subtle"
+                  disabled={Boolean(busy)}
+                  onClick={() => {
+                    if (window.confirm('删除来源计划将结束当前及后续执行，保留历史。确认删除？'))
+                      void control(plan, 'delete');
+                  }}
+                >
+                  删除来源计划
                 </button>
               )}
               {plan.lastJob && (
