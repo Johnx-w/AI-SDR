@@ -6,6 +6,7 @@ import { domainKey } from './website-identity.mjs';
 import { regionalSearchAfter, searchPlan } from './search-plan.mjs';
 import { exclusionConditionsKey } from './exclusion-conditions.mjs';
 import { validateCountryScope } from './search-target.mjs';
+import { websiteAdmissionVersion } from './customer-eligibility.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 function discoveryPlanKey(input, plan) {
@@ -337,6 +338,7 @@ export class BatchJobs {
       target: input.target_count,
       inserted: 0,
       countPolicy: 'broad-business-v1',
+      admissionVersion: websiteAdmissionVersion,
       updated: 0,
       skipped: 0,
       rejected: 0,
@@ -745,6 +747,13 @@ export class BatchJobs {
       ) {
         job.rejected++;
         job.rows.push({
+          ...(output.collection_attempts?.length
+            ? {
+                source_url: item.source_url,
+                domain: item.domain,
+                name: output.research?.company_name || item.source_title,
+              }
+            : {}),
           search_id: item.search_id,
           operation_id: item.operation_id,
           result: 'rejected',
@@ -757,6 +766,8 @@ export class BatchJobs {
         throw new Error('写入结果无法确认');
       }
       const acceptedRow = job.rows.at(-1);
+      if (output.collection_attempts) acceptedRow.collection_attempts = output.collection_attempts;
+      if (output.collection_gaps) acceptedRow.collection_gaps = output.collection_gaps;
       if (written) acceptedRow.stored = true;
       const metric = job.searchStats?.find((entry) => entry.id === item.search_id);
       if (metric) {
@@ -883,7 +894,9 @@ export class BatchJobs {
           checkpoint(j);
           let found;
           try {
-            found = await this.discover(j.input, search, j.seen);
+            found = await this.discover(j.input, search, j.seen, {
+              admissionVersion: j.admissionVersion || 'legacy',
+            });
           } catch (error) {
             metric.status = 'failed';
             metric.error = error.status ? error.message : '本次搜索未取得结果';
@@ -959,7 +972,9 @@ export class BatchJobs {
         j.researched++;
         checkpoint(j);
         try {
-          const output = await this.research(j.input, j.current);
+          const output = await this.research(j.input, j.current, {
+            admissionVersion: j.admissionVersion || 'legacy',
+          });
           const latest = this.get(id);
           j.status = latest.status;
           await this.accept(j, output);

@@ -7,7 +7,11 @@ import {
   supportsWindowUse,
   windowProductDirections,
 } from './relevance.mjs';
-import { customerEligibility } from './customer-eligibility.mjs';
+import {
+  admissionFactDescriptions,
+  customerEligibility,
+  websiteAdmissionVersion,
+} from './customer-eligibility.mjs';
 import acquisition from '../src/data/acquisition.json' with { type: 'json' };
 import { isAllProductScope } from '../src/domain/acquisition-products.mjs';
 import { RESEARCH_GAP, researchEvidencePages } from './research-text.mjs';
@@ -21,6 +25,11 @@ import {
 
 // Shared, evidence-checked business research used by the production and replay workflows.
 export function companyResearchRequest(page, target = {}) {
+  const admissionInstructions =
+    page.admission_version === websiteAdmissionVersion
+      ? '\n逐条输出 evidence-backed admission_facts。候选页和本站运营者要分别核对：如果本次候选只出现在参展商、成员或第三方资料中，输出 third_party_profile，不归给官网运营者。只有在判定当前官网主体本身时才使用主办方、交易平台等运营角色。主营从网站整体定位、成品系列、询价、交付等实际事实判断；完整成品允许本地制造、专营家用销售、他牌经销及供应安装，含遮阳伞、窗用硬质外卷帘和随自家顶棚配售的完整遮阳系列。综合家居商和综合百货要核自身商业窗饰定制。只安装且供货未知、只有老目录、经营证据冲突或缺失，留空待核。明确仅有某类业务才使用 only 类代码，不能用旧目录或页面没提到另一类业务来证明。采购须为当前企业自身、明确肯定、用途与需求产品一致的采购或寻找供应商；历史、否定、假设、仅办公用品或访客提问均不输出。各代码含义：' +
+        JSON.stringify(admissionFactDescriptions)
+      : '';
   const scopeInstructions = isAllProductScope(target)
     ? '本次为all全窗饰范围：调查企业全部适用的窗饰成品、半成品、专用材料和配件业务，允许window coverings、window furnishings、blinds、shades、curtains等真实泛称，不要求命中某个细品类。environment_preference仅是发现阶段的优先顺序，不是产品准入限制；不能因另一环境而排除。generic screen、motor、fabric等词本身不能证明窗饰行业。半成品归materials；独立样本册/展示资料业务不在默认范围。只按官网事实输出实际经营产品、供货角色和可能适配方向，不从自产成品推测其已经采购配件，不把目录填进demand_products。'
     : '本次为specific指定产品范围：按target实际选定的产品和供货方向调查、匹配，其他产品可以如实记录但不能冒充目标产品证据。';
@@ -47,12 +56,16 @@ address 只能是企业实际办公/门店/工厂地址；服务城市不可冒�
           '\n' +
           scopeInstructions +
           `
-另输出 customer_types 数组，每项是带独立原文证据的经营角色（value,quote,source_url），允许兼营多个角色。可选值：${acquisition.customerTypes.map((t) => t.value + '=' + t.label).join('，')}。customer_type仍保留主要角色，但不能用主要角色覆盖其他已证实角色。target.customer_types多选时任意一种匹配即可，搜索选择不是企业事实。`,
+另输出 customer_types 数组，每项是带独立原文证据的经营角色（value,quote,source_url），允许兼营多个角色。可选值：${acquisition.customerTypes.map((t) => t.value + '=' + t.label).join('，')}。customer_type仍保留主要角色，但不能用主要角色覆盖其他已证实角色。target.customer_types多选时任意一种匹配即可，搜索选择不是企业事实。` +
+          admissionInstructions,
       },
       {
         role: 'user',
         content: JSON.stringify({
           target,
+          ...(admissionInstructions
+            ? { candidate_url: page.source_url, candidate_title: page.source_title || '' }
+            : {}),
           pages: page.research_pages || [{ source_url: page.source_url, text: page.page_text }],
         }),
       },
@@ -78,6 +91,7 @@ export function readResearchJson(response) {
 
 export function parseCompanyResearch(response, page, target = {}, approvedSources) {
   const raw = readResearchJson(response);
+  const unified = page.admission_version === websiteAdmissionVersion;
   // Each nested value carries its own evidence, avoiding parallel fields drifting apart.
   if (
     !Array.isArray(raw.facts) &&
@@ -99,6 +113,7 @@ export function parseCompanyResearch(response, page, target = {}, approvedSource
       'demand_products',
       'profile_tags',
       'service_areas',
+      'admission_facts',
     ].some(
       (key) =>
         raw[key] &&
@@ -127,6 +142,7 @@ export function parseCompanyResearch(response, page, target = {}, approvedSource
       'address',
       'products',
       'service_areas',
+      'admission_facts',
     ]) {
       const nested = raw[key];
       if (Array.isArray(nested)) {
@@ -185,6 +201,7 @@ export function parseCompanyResearch(response, page, target = {}, approvedSource
           'company_name',
           'legal_company_name',
           'trading_names',
+          'admission_facts',
         ].includes(f.field)
       )
         for (const line of f.quote
@@ -196,12 +213,25 @@ export function parseCompanyResearch(response, page, target = {}, approvedSource
           if (quote) break;
         }
       if (quote) {
+        const origin = page.evidence_by_url
+          ?.get(f.source_url)
+          ?.origins.find((evidence) => evidence.text.includes(quote));
+        const provenance = origin
+          ? { snapshot_id: origin.snapshotId, quote_offset: origin.text.indexOf(quote) }
+          : {};
         if (
           ['products', 'manufactured_products', 'demand_products'].includes(f.field) &&
           hasConflictingProductUse(f.value, quote, p.text)
         )
-          return [{ ...f, quote, window_use: f.window_use === 'other' ? 'other' : 'unknown' }];
-        return [{ ...f, quote }];
+          return [
+            {
+              ...f,
+              quote,
+              ...provenance,
+              window_use: f.window_use === 'other' ? 'other' : 'unknown',
+            },
+          ];
+        return [{ ...f, quote, ...provenance }];
       }
     }
     return [];
@@ -429,15 +459,28 @@ export function parseCompanyResearch(response, page, target = {}, approvedSource
         : profile_tags.length
           ? 'not_matched'
           : 'unknown';
+  const confirmedDemand = (fact) =>
+    /\b(?:we|our company|our team)\b[^.!?]{0,120}\b(?:seek(?:ing)?|look(?:ing)? for (?:suppliers?|manufacturers?)|sourc(?:e|ing)|purchas(?:e|ing)|procur(?:e|ing)|buy(?:ing)?)\b|suppliers? wanted|采购|求购|寻找供应商|寻求供应商|供应商招募/i.test(
+      fact.quote,
+    ) &&
+    (!unified ||
+      (supportsWindowUse(fact) &&
+        typeof fact.value === 'string' &&
+        windowProductDirections(fact.value).length > 0 &&
+        compact(fact.quote).toLowerCase().includes(compact(fact.value).toLowerCase()) &&
+        !/\b(?:not|never|no longer|stopped|ceased|used to|previously|formerly|if we|might|may)\b|n['’]t\b|不再|没有|并未|不会|未采购|此前|曾经|假如/i.test(
+          fact.quote,
+        )));
+  if (unified)
+    facts = facts.flatMap((fact) =>
+      fact.field !== 'demand_products'
+        ? [fact]
+        : confirmedDemand(fact)
+          ? [{ ...fact, method: 'verified_current_demand' }]
+          : [],
+    );
   const demand_products = list('demand_products').filter((value) =>
-    facts.some(
-      (f) =>
-        f.field === 'demand_products' &&
-        equal(f.value, value) &&
-        /\b(?:we|our company|our team)\b[^.!?]{0,120}\b(?:seek(?:ing)?|look(?:ing)? for (?:suppliers?|manufacturers?)|sourc(?:e|ing)|purchas(?:e|ing)|procur(?:e|ing)|buy(?:ing)?)\b|suppliers? wanted|采购|求购|寻找供应商|寻求供应商|供应商招募/i.test(
-          f.quote,
-        ),
-    ),
+    facts.some((f) => f.field === 'demand_products' && equal(f.value, value) && confirmedDemand(f)),
   );
   const audience = ['B', 'C', 'BC'].includes(raw.audience)
     ? scalar('audience', 'unknown')
@@ -450,7 +493,7 @@ export function parseCompanyResearch(response, page, target = {}, approvedSource
   const catalogFacts = facts.filter(
     (f) =>
       (f.field === 'products' ||
-        (f.field === 'demand_products' && demand_products.includes(f.value))) &&
+        (!unified && f.field === 'demand_products' && demand_products.includes(f.value))) &&
       typeof f.value === 'string',
   );
   const productEvidence = catalogFacts.filter(supportsWindowUse);
@@ -465,10 +508,10 @@ export function parseCompanyResearch(response, page, target = {}, approvedSource
   const production_model = scalar('production_model', 'unknown');
   const operating_model = scalar('operating_model', 'unknown');
   const manufactured_products = list('manufactured_products');
-  const eligibility = customerEligibility(
-    { entity_type, production_model, operating_model, manufactured_products },
-    target,
-  );
+  const admission_facts = unified
+    ? list('admission_facts').filter((code) => Object.hasOwn(admissionFactDescriptions, code))
+    : undefined;
+  const eligibility = customerEligibility({ entity_type, admission_facts });
   let preference = scalar('main_product_preference');
   if (products.length && (!preference || !/[\u4e00-\u9fff]/.test(preference))) {
     preference = '依据官网产品介绍，产品线主要包括：' + products.slice(0, 8).join('、') + '。';
@@ -535,6 +578,7 @@ export function parseCompanyResearch(response, page, target = {}, approvedSource
     operating_model,
     manufactured_products,
     eligibility,
+    ...(unified ? { admission_facts } : {}),
     industry_profile: scalar('industry_profile'),
     demand_products,
     profile_tags,
@@ -655,6 +699,18 @@ export const companyResearchSchema = {
     'address',
   ],
   additionalProperties: false,
+};
+
+export const websiteAdmissionResearchSchema = {
+  ...companyResearchSchema,
+  properties: {
+    ...companyResearchSchema.properties,
+    admission_facts: {
+      type: 'array',
+      items: evidenceSchema({ type: 'string', enum: Object.keys(admissionFactDescriptions) }),
+    },
+  },
+  required: [...companyResearchSchema.required, 'admission_facts'],
 };
 
 export function researchFields(research, evidence, existing = {}, researchPages = []) {

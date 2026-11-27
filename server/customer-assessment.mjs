@@ -262,14 +262,22 @@ export function assessCompany({ research, target, at = Date.now(), id }) {
         : opportunities.map((opportunity) => opportunity.product),
       target,
     );
+  const websiteDemand = (research.facts || []).find(
+    (fact) =>
+      fact.field === 'demand_products' &&
+      fact.method === 'verified_current_demand' &&
+      businessProductRelation([fact.value], target).kind === 'catalog_related',
+  );
   const supplyOpportunity =
     relation.kind === 'potential_input'
       ? {
           kind: 'potential_input',
           basisProduct: relation.basis_product || best?.product,
           targetProduct: target.product,
-          procurementStatus: 'unconfirmed',
-          note: '相关成品经营已有证据；材料或配件采购方式、规格、数量与负责人待沟通',
+          procurementStatus: websiteDemand ? 'confirmed_website' : 'unconfirmed',
+          note: websiteDemand
+            ? '官网公开采购需求已有原文依据，采购规格、数量与负责人待沟通'
+            : '相关成品经营已有证据；材料或配件采购方式、规格、数量与负责人待沟通',
         }
       : null;
   const snapshot = {
@@ -323,6 +331,16 @@ export function assessCompany({ research, target, at = Date.now(), id }) {
   return snapshot;
 }
 
+function publicProcurementEvidence(snapshot) {
+  return (snapshot.facts || [])
+    .filter((fact) => fact.field === 'demand_products' && fact.method === 'verified_current_demand')
+    .slice(0, 6)
+    .map(
+      (fact) =>
+        '公开采购需求：' + fact.value + '\n原文：' + fact.quote + '\n来源：' + fact.source_url,
+    );
+}
+
 export function formatAssessmentReason(snapshot) {
   const lines = [
     '[自动评估 ' + snapshot.id + ']',
@@ -341,6 +359,7 @@ export function formatAssessmentReason(snapshot) {
             snapshot.supplyOpportunity.note,
         ]
       : []),
+    ...publicProcurementEvidence(snapshot),
   ];
   if (snapshot.incompleteReason) lines.push('本轮研究限制：' + snapshot.incompleteReason);
   if (snapshot.missing?.length) lines.push('需要核实的冲突：' + snapshot.missing.join('；'));
@@ -429,6 +448,7 @@ export function formatAssessmentEvidence(snapshot) {
     }
   }
   if (!seen.size) lines.push('本轮未取得足以确定产品契合和供货角色的可验证依据。');
+  lines.push(...publicProcurementEvidence(snapshot));
   if (snapshot.missing?.length)
     lines.push('待补充依据：' + [...new Set(snapshot.missing)].join('；'));
   return lines.join('\n');

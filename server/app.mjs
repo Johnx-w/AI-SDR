@@ -9,7 +9,7 @@ import { gzip, brotliCompress, constants as zlib } from 'node:zlib';
 import { promisify } from 'node:util';
 import { pageRenderer } from './initial-page.mjs';
 import { decorateLeadDevelopment } from './lead-development.mjs';
-import { isDevelopmentCustomer } from './customer-eligibility.mjs';
+import { isDevelopmentCustomer, websiteAdmissionVersion } from './customer-eligibility.mjs';
 import { BrandingCache } from './branding-cache.mjs';
 import { validateTarget } from './search-target.mjs';
 import {
@@ -1138,7 +1138,7 @@ export function createApp({
                   source_title: '',
                   operation_id: attempt.operation_id,
                 },
-                { bypassExclusion: true },
+                { bypassExclusion: true, admissionVersion: websiteAdmissionVersion },
               );
               const resolution = reviews().settle(job.id, index, output);
               return json(response, 200, { resolution });

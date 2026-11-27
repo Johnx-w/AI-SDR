@@ -1,11 +1,11 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { acquisitionConfig } from './acquisition-config.mjs';
 import { createResearchProviders } from './research-providers.mjs';
 import { researchCacheKey } from './research-reuse.mjs';
 import { activitySources, verifyCompanyActivity } from './activity-verification.mjs';
 import { exclusionConditionsKey } from './exclusion-conditions.mjs';
 import { boundedResearchPages } from './research-input.mjs';
-import { compactResearchText } from './research-text.mjs';
+import { compactResearchText, RESEARCH_GAP } from './research-text.mjs';
 import { AcquisitionStore } from './acquisition-store.mjs';
 import { FeishuClient, encodeResearchFields, recordsForDomain } from './feishu-direct.mjs';
 import { fieldText } from './feishu.mjs';
@@ -19,16 +19,23 @@ import {
 import { applySupplementsToResearch } from './lead-supplements.mjs';
 import { domainKey, thirdPartyCompanySource } from './website-identity.mjs';
 import { calculateHandoffReadiness } from './handoff-readiness.mjs';
-import { readPublicHtml, websiteUrl } from './branding.mjs';
+import { readPublicHtml, websiteRedirectUrl, websiteUrl } from './branding.mjs';
 import { planWebsitePages, combineWebsiteEvidence, websiteScope } from './website-metadata.mjs';
 import { researchPageText, hasUsableResearchText } from './research-pages.mjs';
+import { collectScraplingPage } from './scrapling-collector.mjs';
+import {
+  acquisitionEvidenceVersion,
+  selectAcquisitionEvidence,
+} from './acquisition-evidence-selection.mjs';
 import {
   companyResearchRequest,
   companyResearchSchema,
   parseCompanyResearch,
   researchFields,
   mergeResearchFields,
+  websiteAdmissionResearchSchema,
 } from './company-research.mjs';
+import { websiteAdmissionVersion } from './customer-eligibility.mjs';
 import { pageRelevance } from './relevance.mjs';
 import { validateTarget } from './search-target.mjs';
 import { acquisitionMarkets, countryFor } from '../src/domain/country-catalog.ts';
@@ -143,6 +150,22 @@ export function selectWebsiteCandidates(results, knownDomains = [], limit = 20) 
   };
 }
 
+function admissionGap(research) {
+  if (
+    research.eligibility?.status === 'rejected' ||
+    research.eligibility?.code === 'official_site_missing' ||
+    [research.country_match, research.customer_type_match, research.profile_match].includes(
+      'not_matched',
+    )
+  )
+    return null;
+  if (!research.company_identity?.name || research.company_identity.status === 'identity_conflict')
+    return 'missing_company_identity';
+  if (research.eligibility?.status !== 'eligible' || research.product_match === 'unknown')
+    return 'missing_operating_evidence';
+  return null;
+}
+
 // Provider-reported billing only: an attempted call without valid usage makes
 // the total unknown, rather than silently treating its missing credits as zero.
 function webUsageCounter(operation) {
@@ -176,14 +199,18 @@ export class NativeAcquisition {
     env,
     fetchImpl = fetch,
     readPage = readPublicHtml,
+    readScraplingPage = collectScraplingPage,
     feishu,
     store,
     assessments,
     providers,
+    admissionVersion = websiteAdmissionVersion,
   } = {}) {
     this.env = env;
     this.fetch = fetchImpl;
     this.readPage = readPage;
+    this.readScraplingPage = readScraplingPage;
+    this.admissionVersion = admissionVersion;
     this.providers = providers || createResearchProviders({ env, fetchImpl });
     this.feishu = feishu || new FeishuClient({ env, fetchImpl });
     this.store =
@@ -419,7 +446,7 @@ export class NativeAcquisition {
         status: 503,
       });
   }
-  async discover(input, search, seen = []) {
+  async discover(input, search, seen = [], { admissionVersion = this.admissionVersion } = {}) {
     input = { ...input, ...validateTarget(input) };
     const conditionsKey = exclusionConditionsKey(input);
     this.store.backfillExclusions();
@@ -441,7 +468,8 @@ export class NativeAcquisition {
     });
     const selected = selectWebsiteCandidates(data.results, excluded);
     selected.candidates = selected.candidates.filter((candidate) => {
-      const prior = this.store.exclusion(conditionsKey, candidate.source_url);
+      const prior =
+        admissionVersion === 'legacy' && this.store.exclusion(conditionsKey, candidate.source_url);
       if (!prior) return true;
       selected.filtered_sources.push({
         url: candidate.source_url,
@@ -457,7 +485,7 @@ export class NativeAcquisition {
       usage: data.usage,
     };
   }
-  async collect(sourceUrl) {
+  async collect(sourceUrl, { unified = false, now, refresh = false, onAttempt } = {}) {
     const initial = websiteUrl(sourceUrl);
     if (!initial) throw new Error('官网地址无效，仅接受公网 HTTPS 企业网站');
     const domain = domainKey(initial.href),
@@ -468,8 +496,11 @@ export class NativeAcquisition {
       planned = new Set(queue),
       visited = new Set();
     const webUsage = webUsageCounter('extract');
+    const collection_attempts = [];
+    const blocked = new Set();
+    const browserVisited = new Set();
     const enqueue = (url, content) => {
-      for (const next of planWebsitePages(url, content)) {
+      for (const next of planWebsitePages(url, content, { includeProducts: unified })) {
         if (planned.size >= 5) break;
         if (!planned.has(next)) {
           planned.add(next);
@@ -477,14 +508,72 @@ export class NativeAcquisition {
         }
       }
     };
-    const addPage = (url, content) => {
+    const addPage = (url, content, snapshotId) => {
       // Keep complete HTML for independent contact/metadata extraction, even on shells.
       pages.push({ url, content });
       enqueue(url, content);
       const text = researchPageText(content, content.length);
       if (!hasUsableResearchText(text, content)) return false;
-      researchPages.set(url, { source_url: url, text });
+      if (unified) {
+        const page = researchPages.get(url) || {
+          source_url: url,
+          text: '',
+          selected: [],
+          origins: [],
+        };
+        const selected = selectAcquisitionEvidence(url, content).text;
+        if (!page.selected.includes(selected)) {
+          page.text += text;
+          page.selected.push(selected);
+          page.origins.push({ text, snapshotId });
+        }
+        researchPages.set(url, page);
+      } else researchPages.set(url, { source_url: url, text });
       return true;
+    };
+    const retain = ({ content, raw_content, links, ...attempt }, reused = false) => {
+      if (attempt.status === 'ok') {
+        addPage(attempt.final_url, content, attempt.snapshot_id);
+        if (raw_content && raw_content !== content)
+          pages.push({ url: attempt.final_url, content: raw_content });
+        if (links?.length) enqueue(attempt.final_url, links.map((url) => `[](${url})`).join('\n'));
+      }
+      const trace = {
+        ...attempt,
+        evidence_version: acquisitionEvidenceVersion,
+        reused,
+      };
+      collection_attempts.push(trace);
+      onAttempt?.(trace);
+    };
+    const record = ({
+      requested_url,
+      final_url,
+      method,
+      status,
+      reason,
+      content = '',
+      raw_content = content,
+      acquired_at = new Date(now ?? Date.now()).toISOString(),
+      links,
+      versions,
+    }) => {
+      const snapshot = this.store.savePageSnapshot({
+        requested_url,
+        final_url,
+        acquired_at,
+        method,
+        status,
+        reason,
+        content,
+        raw_content,
+        content_hash: content ? createHash('sha256').update(content).digest('hex') : null,
+        evidence_version: acquisitionEvidenceVersion,
+        gaps: status === 'ok' ? [] : ['page_body'],
+        ...(links ? { links } : {}),
+        ...(versions ? { versions } : {}),
+      });
+      retain(snapshot);
     };
     // Discover contact/about/service links from complete HTML before limiting AI input.
     const readPlanned = async () => {
@@ -493,34 +582,113 @@ export class NativeAcquisition {
         if (visited.has(original)) continue;
         visited.add(original);
         let url = websiteUrl(original),
-          content = '';
+          content = '',
+          status = 'failed';
+        if (unified && !refresh) {
+          const cached = this.store
+            .pageSnapshots(original, { now })
+            .filter((page) => domainKey(page.final_url) === domain);
+          if (cached.length) {
+            cached.forEach((page) => retain(page, true));
+            continue;
+          }
+        }
         try {
           for (let hop = 0; hop < 4; hop++) {
             const response = await this.readPage(url, AbortSignal.timeout(12000));
             if (response.redirect) {
-              const next = websiteUrl(response.redirect, url);
-              if (!next || domainKey(next.href) !== domain) throw new Error('官网跳转到其他域名');
+              const next = unified
+                ? websiteRedirectUrl(response.redirect, url)
+                : websiteUrl(response.redirect, url);
+              if (!next || domainKey(next.href) !== domain) {
+                if (unified) {
+                  status = 'blocked';
+                  blocked.add(original);
+                  record({
+                    requested_url: original,
+                    final_url: next?.href ?? null,
+                    method: 'node',
+                    status,
+                    reason: 'off_site_redirect',
+                  });
+                }
+                throw new Error('官网跳转到其他域名');
+              }
               url = next;
             } else {
               content = response.html || '';
+              status = hasUsableResearchText(researchPageText(content, content.length), content)
+                ? 'ok'
+                : 'empty';
               break;
             }
           }
-          if (!addPage(url.href, content)) failures.add(original);
-        } catch {
+          if (!unified && !addPage(url.href, content)) failures.add(original);
+        } catch (error) {
           failures.add(original);
+          if (unified && error.code === 'WEBSITE_NOT_PUBLIC') {
+            status = 'blocked';
+            blocked.add(original);
+            record({
+              requested_url: original,
+              final_url: url?.href ?? null,
+              method: 'node',
+              status,
+              reason: 'non_public_source',
+            });
+          }
+        }
+        if (unified && status !== 'blocked') {
+          record({
+            requested_url: original,
+            final_url: url?.href ?? null,
+            method: 'node',
+            status,
+            reason: 'initial_read',
+            content,
+          });
+          if (status !== 'ok') {
+            failures.add(original);
+            enqueue(url.href, content);
+          }
         }
       }
     };
-    await readPlanned();
-    // Supplement failed or dynamically rendered pages, bounded to the same five URLs.
+    const recoverBrowser = async (original, reason) => {
+      if (browserVisited.size >= 2 || blocked.has(original) || browserVisited.has(original))
+        return false;
+      browserVisited.add(original);
+      const result = await this.readScraplingPage(original, {
+        reason,
+        python: this.env.SCRAPLING_PYTHON,
+      }).catch(() => ({ status: 'failed' }));
+      const final = websiteUrl(result.final_url);
+      const content = typeof result.content === 'string' ? result.content : '';
+      const sameSite = final && domainKey(final.href) === domain;
+      const status =
+        result.status === 'ok'
+          ? !sameSite
+            ? 'blocked'
+            : hasUsableResearchText(researchPageText(content, content.length), content)
+              ? 'ok'
+              : 'empty'
+          : result.status;
+      record({
+        ...result,
+        requested_url: original,
+        final_url: final?.href ?? null,
+        method: 'scrapling',
+        status,
+        reason,
+        content: sameSite ? content : '',
+        raw_content: sameSite ? result.raw_content : '',
+      });
+      if (status === 'ok') failures.delete(original);
+      if (status === 'blocked') blocked.add(original);
+      return status === 'ok';
+    };
     const attempted = { basic: new Set(), advanced: new Set() };
-    for (;;) {
-      const depth = (
-        this.providers.web.provider === 'deepseek' ? ['basic'] : ['basic', 'advanced']
-      ).find((level) => [...failures].some((url) => !attempted[level].has(url)));
-      if (!depth) break;
-      const selected = [...failures].filter((url) => !attempted[depth].has(url));
+    const extractSelected = async (selected, depth, reason) => {
       for (const url of selected) attempted[depth].add(url);
       let extracted;
       try {
@@ -534,49 +702,125 @@ export class NativeAcquisition {
       } catch {
         extracted = { results: [] };
       }
-      for (const p of extracted?.results || []) {
-        const url = websiteUrl(p?.url);
-        if (
-          !url ||
-          domainKey(url.href) !== domain ||
-          !selected.includes(url.href) ||
-          !planned.has(url.href)
-        )
-          continue;
-        for (const content of [p.raw_content, p.content]) {
-          if (typeof content !== 'string') continue;
-          if (addPage(url.href, content)) {
-            failures.delete(url.href);
-            break;
+      if (unified) {
+        for (const url of selected) {
+          const found = (extracted?.results || []).find(
+            (page) => websiteUrl(page.url)?.href === url,
+          );
+          const content = [found?.raw_content, found?.content].find(
+            (value) =>
+              typeof value === 'string' &&
+              hasUsableResearchText(researchPageText(value, value.length), value),
+          );
+          record({
+            requested_url: url,
+            final_url: found ? url : null,
+            method: 'external',
+            status: content ? 'ok' : found ? 'empty' : 'failed',
+            reason,
+            content: content ?? found?.raw_content ?? found?.content ?? '',
+          });
+          if (content) failures.delete(url);
+        }
+      } else
+        for (const p of extracted?.results || []) {
+          const url = websiteUrl(p?.url);
+          if (
+            !url ||
+            domainKey(url.href) !== domain ||
+            !selected.includes(url.href) ||
+            !planned.has(url.href)
+          )
+            continue;
+          for (const content of [p.raw_content, p.content]) {
+            if (typeof content !== 'string') continue;
+            if (addPage(url.href, content)) {
+              failures.delete(url.href);
+              break;
+            }
           }
         }
+    };
+    await readPlanned();
+    // Supplement failed or dynamically rendered pages, bounded to the same five URLs.
+    for (;;) {
+      if (unified) {
+        for (const original of failures) await recoverBrowser(original, 'missing_page_body');
+        if (queue.length) {
+          await readPlanned();
+          continue;
+        }
       }
+      const recoverable = [...failures].filter((url) => !blocked.has(url));
+      const depth = (
+        !unified && this.providers.web.provider !== 'deepseek' ? ['basic', 'advanced'] : ['basic']
+      ).find((level) => recoverable.some((url) => !attempted[level].has(url)));
+      if (!depth) break;
+      const selected = recoverable.filter((url) => !attempted[depth].has(url));
+      await extractSelected(selected, depth, 'missing_page_body');
       await readPlanned();
     }
     if (!researchPages.size)
       throw Object.assign(new Error('官网页面均未取得有效正文，采集未完成，未调用模型或写入'), {
         web_usage: webUsage.snapshot(),
+        collection_attempts,
+        incomplete_urls: [...failures],
       });
-    const originalChars = [...researchPages.values()].reduce((sum, p) => sum + p.text.length, 0);
-    const compacted = [...researchPages.values()].map((p) => ({
-      ...p,
-      text: compactResearchText(p.text, p.source_url),
-    }));
-    const bounded = boundedResearchPages(compacted);
-    bounded.stats.originalChars = originalChars;
-    bounded.stats.compactedChars =
-      originalChars - compacted.reduce((sum, p) => sum + p.text.length, 0);
-    return {
-      source_url: initial.href,
-      research_pages: bounded.pages,
-      page_text: bounded.pages.map((p) => p.text).join('\n'),
-      input_stats: bounded.stats,
-      web_usage: webUsage.snapshot(),
-      incomplete_urls: [...failures],
-      website_metadata: combineWebsiteEvidence(pages),
-      checked_urls: [...researchPages.keys()],
+    const result = () => {
+      const captured = [...researchPages.values()];
+      const originalChars = captured.reduce((sum, page) => sum + page.text.length, 0);
+      const compacted = captured.map((page) => ({
+        source_url: page.source_url,
+        text: unified
+          ? page.selected.join(RESEARCH_GAP)
+          : compactResearchText(page.text, page.source_url),
+      }));
+      const bounded = boundedResearchPages(compacted);
+      bounded.stats.originalChars = originalChars;
+      bounded.stats.compactedChars =
+        originalChars - compacted.reduce((sum, page) => sum + page.text.length, 0);
+      return {
+        source_url: initial.href,
+        research_pages: bounded.pages,
+        page_text: bounded.pages.map((page) => page.text).join('\n'),
+        input_stats: bounded.stats,
+        web_usage: webUsage.snapshot(),
+        incomplete_urls: [...failures],
+        website_metadata: combineWebsiteEvidence(pages),
+        checked_urls: [...researchPages.keys()],
+        ...(unified ? { collection_attempts, evidence_by_url: researchPages } : {}),
+      };
     };
+    const first = result();
+    if (unified)
+      first.supplement = async (reason) => {
+        const preferredPath =
+          reason === 'missing_company_identity'
+            ? /about|contact|legal|terms|privacy|impressum/i
+            : /products?|collections?|services?|blinds|shutters|curtains|awnings/i;
+        const candidates = [...visited]
+          .filter((url) => !blocked.has(url) && !browserVisited.has(url))
+          .sort(
+            (a, b) =>
+              Number(preferredPath.test(new URL(b).pathname)) -
+              Number(preferredPath.test(new URL(a).pathname)),
+          );
+        for (const url of candidates.slice(0, Math.max(0, 2 - browserVisited.size))) {
+          const previousSize = researchPages.get(url)?.selected.length;
+          if (
+            !(await recoverBrowser(url, reason)) &&
+            !blocked.has(url) &&
+            !attempted.basic.has(url)
+          )
+            await extractSelected([url], 'basic', reason);
+          await readPlanned();
+          if (researchPages.get(url)?.selected.length !== previousSize) break;
+        }
+        return result();
+      };
+    return first;
   }
+
   output(operation, { research = {}, row, reason, outcome, skipped = [] } = {}) {
     const inserted = row?.result === 'inserted' ? 1 : 0;
     const updated = row?.result === 'updated' ? 1 : 0;
@@ -613,6 +857,10 @@ export class NativeAcquisition {
         : null,
       checked_urls: research.checked_urls || [],
       ...(operation.research_usage ? { research_usage: operation.research_usage } : {}),
+      ...(operation.collection_attempts
+        ? { collection_attempts: operation.collection_attempts }
+        : {}),
+      ...(operation.collection_gaps?.length ? { collection_gaps: operation.collection_gaps } : {}),
       明细: row ? [row] : [],
     };
   }
@@ -630,6 +878,8 @@ export class NativeAcquisition {
       checked_urls: operation.checked_urls,
       incomplete_urls: operation.incomplete_urls,
       collection_complete: operation.collection_complete,
+      collection_attempts: operation.collection_attempts,
+      admission_version: operation.admission_version,
       research_complete: operation.research_complete,
       research: Object.fromEntries(
         [
@@ -651,7 +901,16 @@ export class NativeAcquisition {
     };
     if (research.relevance) minimal.research.relevance = { relevant: research.relevance.relevant };
     if (research.eligibility)
-      minimal.research.eligibility = { status: research.eligibility.status };
+      minimal.research.eligibility =
+        operation.admission_version === websiteAdmissionVersion
+          ? research.eligibility
+          : { status: research.eligibility.status };
+    if (operation.admission_version === websiteAdmissionVersion) {
+      minimal.research.company_name = research.company_name;
+      minimal.research.facts = research.facts?.filter((fact) =>
+        ['company_name', 'legal_company_name', 'admission_facts', 'products'].includes(fact.field),
+      );
+    }
     const output = this.output(minimal, {
       research: { ...minimal.research, ok: false, reason },
       outcome: 'rejected',
@@ -679,7 +938,14 @@ export class NativeAcquisition {
       if (this.researchByDomain.get(domain) === current) this.researchByDomain.delete(domain);
     }
   }
-  async researchDomain(input, item, { bypassExclusion = false } = {}) {
+  async researchDomain(
+    input,
+    item,
+    {
+      bypassExclusion = false,
+      admissionVersion = item.target_record_id ? 'legacy' : this.admissionVersion,
+    } = {},
+  ) {
     // Also validate restored tasks and callers that bypass HTTP validation.
     const researchTarget = validateTarget(input);
     input = { ...input, ...researchTarget };
@@ -693,6 +959,8 @@ export class NativeAcquisition {
       if (settled.settled) return settled.output;
       throw conflict('该企业操作尚待确认，未重复研究或写入');
     }
+    const unified = admissionVersion === websiteAdmissionVersion;
+    op.admission_version = admissionVersion;
     op.research_usage = { model_calls: 0, cache_hits: 0, input_chars: 0 };
     this.active.add(id);
     try {
@@ -734,7 +1002,7 @@ export class NativeAcquisition {
         this.store.complete(op, output);
         return output;
       }
-      if (!item.target_record_id && !bypassExclusion) {
+      if (!unified && !item.target_record_id && !bypassExclusion) {
         const prior = this.store.exclusion(conditionsKey, item.source_url);
         if (prior) {
           const reason = `命中历史排除记录（原操作 ${prior.operation_id}）：${prior.reason}`;
@@ -759,7 +1027,16 @@ export class NativeAcquisition {
       }
       op.stage = 'extract';
       this.store.save(op);
-      const page = await this.collect(item.source_url);
+      const page = await this.collect(item.source_url, {
+        unified,
+        refresh: bypassExclusion,
+        onAttempt: (attempt) => {
+          (op.collection_attempts ||= []).push(attempt);
+          this.store.save(op);
+        },
+      });
+      page.admission_version = admissionVersion;
+      page.source_title = item.source_title;
       op.web_usage = page.web_usage;
       op.incomplete_urls = page.incomplete_urls;
       op.research_usage.omitted_pages = page.input_stats?.omittedPages || 0;
@@ -798,7 +1075,7 @@ export class NativeAcquisition {
       // Cheap keyword screen before the paid model call: keep only pages that
       // actually mention the target products or the window-shading industry.
       const relevance = pageRelevance(page.page_text, input);
-      if (!relevance.relevant) {
+      if (!unified && !relevance.relevant) {
         const incomplete = page.incomplete_urls.length > 0;
         if (item.target_record_id)
           return await this.persistIncompleteAssessment(
@@ -834,110 +1111,41 @@ export class NativeAcquisition {
           item.source_url,
         );
       }
-      op.research_usage.input_chars =
-        page.input_stats?.inputChars ??
-        page.research_pages.reduce((sum, p) => sum + p.text.length, 0);
-      const prompt = companyResearchRequest(page, researchTarget);
-      const request = {
-        messages: prompt.messages,
-        schema: companyResearchSchema,
+      const context = {
+        input,
+        researchTarget,
+        item,
+        domain,
+        conditionsKey,
+        admissionVersion,
+        unified,
+        bypassExclusion,
       };
-      const cacheKey = researchCacheKey({
-        ...request,
-        identity: this.providers.model.cacheIdentity,
-      });
-      let response, parsed;
-      if (cacheKey && typeof this.store.modelResponse === 'function') {
-        try {
-          response = this.store.modelResponse(cacheKey);
-          if (!response && !item.target_record_id && !bypassExclusion) {
-            response = this.store.reviewResponse(conditionsKey, domain, cacheKey);
+      let { response, parsed, cacheKey, extractionFromCache } = await this.researchPageEvidence(
+        page,
+        op,
+        context,
+      );
+      if (unified) {
+        const gap = admissionGap(parsed);
+        if (gap) {
+          op.collection_gaps = [gap];
+          const supplemented = await page.supplement(gap);
+          op.web_usage = supplemented.web_usage;
+          op.incomplete_urls = supplemented.incomplete_urls;
+          if (supplemented.page_text !== page.page_text) {
+            Object.assign(page, supplemented);
+            op.research_pages = page.research_pages;
+            op.checked_urls = page.checked_urls;
+            op.evidence = page.website_metadata;
+            this.store.save(op);
+            ({ response, parsed, cacheKey, extractionFromCache } = await this.researchPageEvidence(
+              page,
+              op,
+              context,
+            ));
+            op.collection_gaps = [admissionGap(parsed)].filter(Boolean);
           }
-          // Replay through today's evidence and policy checks, never cached
-          // eligibility, scores, customer writes or a prior operation result.
-          if (response) parsed = parseCompanyResearch(response, page, input);
-        } catch {
-          // Corrupt/obsolete cache data is not research evidence. A fresh
-          // request may replace it; cache failure must not block valid research.
-          response = undefined;
-        }
-      }
-      const extractionFromCache = Boolean(parsed);
-      if (parsed) {
-        op.research_usage.cache_hits = 1;
-        op.research_usage.input_tokens = 0;
-        op.research_usage.output_tokens = 0;
-      } else {
-        // Count attempts before the network call, including an unknown remote
-        // outcome; this is not a claim that the provider charged a given amount.
-        op.research_usage.model_calls = 1;
-        if (item.target_record_id || bypassExclusion) this.store.save(op);
-        else this.store.startModelAttempt(op, conditionsKey, domain);
-        response = await this.providers.model.research(request);
-        op.research_response = response;
-        const usage = response.usage || response.body?.usage || {};
-        for (const [key, value] of [
-          ['input_tokens', usage.input_tokens ?? usage.prompt_tokens],
-          ['output_tokens', usage.output_tokens ?? usage.completion_tokens],
-        ])
-          if (Number.isSafeInteger(value) && value >= 0) op.research_usage[key] = value;
-        this.store.save(op);
-        parsed = parseCompanyResearch(response, page, input);
-      }
-      if (
-        parsed.product_match === 'matched' &&
-        parsed.company_identity?.name &&
-        ![parsed.customer_type_match, parsed.country_match, parsed.profile_match].includes(
-          'not_matched',
-        ) &&
-        parsed.eligibility?.status !== 'rejected'
-      ) {
-        const sources = activitySources(parsed.facts, item.source_url, page.research_pages);
-        let verdict = { result: 'uncertain', reason: '官网经营用途缺少可复核的原文', sources: [] };
-        if (sources.length) {
-          try {
-            verdict = await verifyCompanyActivity(
-              this.providers.model,
-              this.store,
-              op.research_usage,
-              sources,
-              input,
-              {
-                name: parsed.company_identity.name,
-                website: item.source_url,
-                identity_evidence: parsed.company_identity.evidence
-                  .slice(0, 6)
-                  .map(({ value, quote, source_url }) => ({ value, quote, source_url })),
-                homepage: page.research_pages
-                  .find(
-                    (p) =>
-                      domainKey(p.source_url) === domain && new URL(p.source_url).pathname === '/',
-                  )
-                  ?.text?.slice(0, 1200),
-              },
-            );
-          } catch {
-            verdict.reason = '官网业务独立模型复核未完成，待重新核实';
-          }
-        }
-        parsed = parseCompanyResearch(
-          response,
-          page,
-          input,
-          verdict.result === 'relevant' ? verdict.sources : [],
-        );
-        parsed.activity_verification = {
-          result: verdict.result,
-          reason: verdict.reason,
-          sources: verdict.sources.map(({ source_url, quote }) => ({ source_url, quote })),
-        };
-        if (verdict.result !== 'relevant' || parsed.product_match !== 'matched') {
-          parsed.ok = false;
-          parsed.product_match = verdict.result === 'unrelated' ? 'not_matched' : 'unknown';
-          parsed.product_relation = { status: parsed.product_match, kind: null };
-          parsed.review_required = parsed.product_match === 'unknown';
-          parsed.reason = verdict.reason;
-          parsed.assessment_opportunities = [];
         }
       }
       op.research_response = response;
@@ -972,18 +1180,24 @@ export class NativeAcquisition {
         ) &&
         research.company_identity.status !== 'identity_conflict';
       const hardMismatch =
-        research.entity_type === 'individual' ||
-        research.product_match === 'not_matched' ||
-        research.country_match === 'not_matched' ||
-        research.customer_type_match === 'not_matched' ||
-        research.profile_match === 'not_matched' ||
-        research.eligibility?.status === 'rejected';
+        !(
+          unified &&
+          ((!identityVerified && research.entity_type !== 'individual') ||
+            research.eligibility?.code === 'official_site_missing')
+        ) &&
+        (research.entity_type === 'individual' ||
+          research.product_match === 'not_matched' ||
+          research.country_match === 'not_matched' ||
+          research.customer_type_match === 'not_matched' ||
+          research.profile_match === 'not_matched' ||
+          research.eligibility?.status === 'rejected');
       const broadAdmissionReady =
         research.entity_type === 'business' &&
         Boolean(research.company_name) &&
         Boolean(identityVerified) &&
         research.product_match === 'matched' &&
-        !hardMismatch;
+        !hardMismatch &&
+        (!unified || research.eligibility?.status === 'eligible');
       if (hardMismatch && cacheKey && typeof this.store.discardModelResponse === 'function') {
         try {
           this.store.discardModelResponse(cacheKey);
@@ -993,17 +1207,19 @@ export class NativeAcquisition {
       }
       if (hardMismatch && !item.target_record_id) {
         const reason =
-          research.entity_type === 'individual'
-            ? '官网主体不是经营企业'
-            : research.product_match === 'not_matched'
-              ? '官网产品与本次目标不相关'
-              : research.country_match === 'not_matched'
-                ? '官网所在国家与目标市场不符'
-                : research.customer_type_match === 'not_matched'
-                  ? '官网客户类型与本次筛选不符'
-                  : research.profile_match === 'not_matched'
-                    ? '官网业务画像与本次筛选不符'
-                    : '官网经营资格与本次目标不符';
+          unified && research.eligibility?.status === 'rejected'
+            ? research.eligibility.reason
+            : research.entity_type === 'individual'
+              ? '官网主体不是经营企业'
+              : research.product_match === 'not_matched'
+                ? '官网产品与本次目标不相关'
+                : research.country_match === 'not_matched'
+                  ? '官网所在国家与目标市场不符'
+                  : research.customer_type_match === 'not_matched'
+                    ? '官网客户类型与本次筛选不符'
+                    : research.profile_match === 'not_matched'
+                      ? '官网业务画像与本次筛选不符'
+                      : '官网经营资格与本次目标不符';
         return this.rejectNewCandidate(op, reason);
       }
       if (
@@ -1021,6 +1237,7 @@ export class NativeAcquisition {
         }
       }
       if (!broadAdmissionReady && !item.target_record_id) {
+        if (unified) research.review_required = true;
         op.reviewRequestKey = cacheKey;
         const output = this.output(op, {
           research,
@@ -1166,6 +1383,23 @@ export class NativeAcquisition {
       return await this.writePreparedAssessment(op);
     } catch (error) {
       if (op.stage === 'extract' && error.web_usage) op.web_usage = error.web_usage;
+      if (unified && op.stage === 'extract' && error.collection_attempts) {
+        op.collection_attempts = error.collection_attempts;
+        op.incomplete_urls = error.incomplete_urls;
+        op.research = {
+          source_url: item.source_url,
+          review_required: true,
+          incomplete_reason: error.message,
+        };
+        return this.store.complete(
+          op,
+          this.output(op, {
+            research: op.research,
+            reason: error.message,
+            outcome: 'review',
+          }),
+        ).output;
+      }
       if (['persist', 'assessment'].includes(op.stage)) {
         op.state = 'uncertain';
         this.store.save(op);
@@ -1210,6 +1444,146 @@ export class NativeAcquisition {
     } finally {
       this.active.delete(id);
     }
+  }
+  async researchPageEvidence(
+    page,
+    op,
+    {
+      input,
+      researchTarget,
+      item,
+      domain,
+      conditionsKey,
+      admissionVersion,
+      unified,
+      bypassExclusion,
+    },
+  ) {
+    op.research_usage.input_chars += page.input_stats.inputChars;
+    const prompt = companyResearchRequest(page, researchTarget);
+    const request = {
+      messages: prompt.messages,
+      schema: unified ? websiteAdmissionResearchSchema : companyResearchSchema,
+    };
+    const cacheKey = researchCacheKey({
+      ...request,
+      identity:
+        unified && this.providers.model.cacheIdentity
+          ? {
+              ...this.providers.model.cacheIdentity,
+              admission_version: admissionVersion,
+              evidence_version: acquisitionEvidenceVersion,
+              content_hashes: page.collection_attempts
+                .filter((attempt) => attempt.status === 'ok')
+                .map(({ final_url, content_hash }) => [final_url, content_hash]),
+            }
+          : this.providers.model.cacheIdentity,
+    });
+    let response, parsed;
+    if (cacheKey && typeof this.store.modelResponse === 'function') {
+      try {
+        response = this.store.modelResponse(cacheKey);
+        if (!response && !item.target_record_id && !bypassExclusion) {
+          response = this.store.reviewResponse(conditionsKey, domain, cacheKey);
+        }
+        // Replay through today's evidence and policy checks, never cached
+        // eligibility, scores, customer writes or a prior operation result.
+        if (response) parsed = parseCompanyResearch(response, page, input);
+      } catch {
+        // Corrupt/obsolete cache data is not research evidence. A fresh
+        // request may replace it; cache failure must not block valid research.
+        response = undefined;
+      }
+    }
+    const extractionFromCache = Boolean(parsed);
+    if (parsed) {
+      op.research_usage.cache_hits++;
+      op.research_usage.input_tokens ??= 0;
+      op.research_usage.output_tokens ??= 0;
+    } else {
+      // Count attempts before the network call, including an unknown remote
+      // outcome; this is not a claim that the provider charged a given amount.
+      op.research_usage.model_calls++;
+      if (item.target_record_id || bypassExclusion) this.store.save(op);
+      else this.store.startModelAttempt(op, conditionsKey, domain);
+      response = await this.providers.model.research(request);
+      op.research_response = response;
+      const usage = response.usage || response.body?.usage || {};
+      for (const [key, value] of [
+        ['input_tokens', usage.input_tokens ?? usage.prompt_tokens],
+        ['output_tokens', usage.output_tokens ?? usage.completion_tokens],
+      ])
+        if (Number.isSafeInteger(value) && value >= 0)
+          op.research_usage[key] = (op.research_usage[key] || 0) + value;
+      this.store.save(op);
+      parsed = parseCompanyResearch(response, page, input);
+    }
+    if (
+      parsed.product_match === 'matched' &&
+      parsed.company_identity?.name &&
+      ![parsed.customer_type_match, parsed.country_match, parsed.profile_match].includes(
+        'not_matched',
+      ) &&
+      (unified
+        ? parsed.eligibility?.status === 'eligible'
+        : parsed.eligibility?.status !== 'rejected')
+    ) {
+      const sources = activitySources(parsed.facts, item.source_url, page.research_pages);
+      let verdict = { result: 'uncertain', reason: '官网经营用途缺少可复核的原文', sources: [] };
+      if (sources.length) {
+        try {
+          verdict = await verifyCompanyActivity(
+            this.providers.model,
+            this.store,
+            op.research_usage,
+            sources,
+            input,
+            {
+              name: parsed.company_identity.name,
+              website: item.source_url,
+              identity_evidence: parsed.company_identity.evidence
+                .slice(0, 6)
+                .map(({ value, quote, source_url }) => ({ value, quote, source_url })),
+              ...(unified
+                ? {
+                    admission_evidence: parsed.facts
+                      .filter((f) => f.field === 'admission_facts')
+                      .map(({ value, quote, source_url }) => ({ value, quote, source_url })),
+                  }
+                : {}),
+              homepage: page.research_pages
+                .find(
+                  (p) =>
+                    domainKey(p.source_url) === domain && new URL(p.source_url).pathname === '/',
+                )
+                ?.text?.slice(0, 1200),
+            },
+          );
+        } catch {
+          verdict.reason = '官网业务独立模型复核未完成，待重新核实';
+        }
+      }
+      parsed = parseCompanyResearch(
+        response,
+        page,
+        input,
+        verdict.result === 'relevant' ? verdict.sources : [],
+      );
+      parsed.activity_verification = {
+        result: verdict.result,
+        reason: verdict.reason,
+        sources: verdict.sources.map(({ source_url, quote }) => ({ source_url, quote })),
+      };
+      if (verdict.result !== 'relevant' || parsed.product_match !== 'matched') {
+        parsed.ok = false;
+        parsed.product_match = verdict.result === 'unrelated' ? 'not_matched' : 'unknown';
+        parsed.product_relation = { status: parsed.product_match, kind: null };
+        parsed.review_required = parsed.product_match === 'unknown';
+        parsed.reason = verdict.reason;
+        parsed.assessment_opportunities = [];
+      }
+    }
+    return { response, parsed, cacheKey, extractionFromCache };
   }
   async persistIncompleteAssessment(op, input, item, reason, checkedUrls, partialResearch = {}) {
     const customer = await this.feishu.record(item.target_record_id);
@@ -1281,6 +1655,17 @@ export class NativeAcquisition {
     return this.writePreparedAssessment(op);
   }
   async writePreparedAssessment(op) {
+    if (
+      op.action === 'insert' &&
+      op.admission_version === websiteAdmissionVersion &&
+      (op.research?.eligibility?.status !== 'eligible' ||
+        op.research?.product_match !== 'matched' ||
+        op.research?.activity_verification?.result !== 'relevant' ||
+        !['legal_name_self_reported', 'website_name_only'].includes(
+          op.research?.company_identity?.status,
+        ))
+    )
+      throw new Error('当前官网未通过主体与经营准入核对，停止入库');
     op.stage = 'persist';
     this.store.save(op);
     try {

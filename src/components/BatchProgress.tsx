@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import type { AcquisitionJob } from '../domain/types';
+import type { AcquisitionJob, WebsiteCollectionAttempt } from '../domain/types';
 import { WORLDWIDE_COUNTRY, WORLDWIDE_LABEL } from '../domain/country-catalog';
 import { acquisitionApi } from '../services/acquisition';
 import { Modal } from './ui';
@@ -86,6 +86,54 @@ function HandoffContacts({ contacts = [] }: { contacts?: HandoffContact[] }) {
     </>
   );
 }
+const collectionMethods: Record<string, string> = {
+  node: '官网直读',
+  scrapling: '浏览器补抓',
+  external: '外部提取',
+};
+const collectionStatuses: Record<string, string> = {
+  ok: '已取得正文',
+  empty: '无有效正文',
+  blocked: '已拦截',
+  unavailable: '暂不可用',
+  timeout: '超时',
+  failed: '读取失败',
+};
+const collectionReasons: Record<string, string> = {
+  off_site_redirect: '跨站跳转',
+  non_public_source: '非公网来源',
+  missing_page_body: '补正文',
+  missing_company_identity: '补主体证据',
+  missing_operating_evidence: '补经营证据',
+};
+function CollectionAttempts({ attempts }: { attempts?: WebsiteCollectionAttempt[] }) {
+  if (!attempts?.length) return null;
+  return (
+    <details>
+      <summary>官网采集记录（{attempts.length}）</summary>
+      {attempts.map((attempt, index) => (
+        <small key={attempt.snapshot_id + index}>
+          {collectionMethods[attempt.method] || attempt.method} ·{' '}
+          {collectionStatuses[attempt.status] || attempt.status}
+          {attempt.reused ? ' · 已复用' : ''}
+          {collectionReasons[attempt.reason] ? ' · ' + collectionReasons[attempt.reason] : ''}
+          {' · ' + beijingTime(attempt.acquired_at) + ' · '}
+          {safeUrl(attempt.final_url || attempt.requested_url) ? (
+            <a
+              href={safeUrl(attempt.final_url || attempt.requested_url)}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              来源
+            </a>
+          ) : (
+            '来源不可打开'
+          )}
+        </small>
+      ))}
+    </details>
+  );
+}
 function ReviewAction({ jobId, index, row }: { jobId: string; index: number; row: ReviewRow }) {
   const [sourceUrl, setSourceUrl] = useState(
     row.review_resolution?.source_url || row.source_url || '',
@@ -159,7 +207,7 @@ function ReviewAction({ jobId, index, row }: { jobId: string; index: number; row
             <small key={`${fact.field}-${i}`}>
               {fact.field === 'products'
                 ? `产品依据${fact.value ? `（${fact.value}）` : ''}：`
-                : `${fact.field === 'company_name' ? '名称' : '主体'}依据：`}
+                : `${fact.field === 'admission_facts' ? '经营准入' : ['company_name', 'legal_company_name'].includes(fact.field) ? '名称' : '主体'}依据：`}
               {fact.quote}（
               {safeUrl(fact.source_url) ? (
                 <a href={safeUrl(fact.source_url)} target="_blank" rel="noopener noreferrer">
@@ -171,6 +219,7 @@ function ReviewAction({ jobId, index, row }: { jobId: string; index: number; row
               ）
             </small>
           ))}
+          {resolution && <CollectionAttempts attempts={evidence.collection_attempts} />}
         </div>
       ) : (
         <small>
@@ -250,6 +299,7 @@ function DetailRows({
               )}
               {row.search_query && <small>发现词：{row.search_query}</small>}
               <HandoffContacts contacts={row.handoff?.contacts} />
+              <CollectionAttempts attempts={row.collection_attempts} />
               {row.result === 'review' && (
                 <ReviewAction jobId={jobId} index={allRows.indexOf(row)} row={row} />
               )}

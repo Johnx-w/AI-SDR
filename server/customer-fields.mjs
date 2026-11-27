@@ -280,7 +280,9 @@ export function assessmentSummaryFields(snapshot) {
           product +
           (potential.procurementStatus === 'confirmed'
             ? '（采购需求已人工确认）'
-            : '（相关成品经营支持的潜在关联，采购需求未确认）'),
+            : potential.procurementStatus === 'confirmed_website'
+              ? '（采购需求经官网核实）'
+              : '（相关成品经营支持的潜在关联，采购需求未确认）'),
       );
   }
   return {
