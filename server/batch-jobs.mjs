@@ -38,8 +38,10 @@ const researchUsageKeys = [
   'cache_hits',
   'input_chars',
   'input_tokens',
+  'model_calls_with_input_tokens',
   'input_cached_tokens',
   'output_tokens',
+  'model_calls_with_output_tokens',
   'total_tokens',
   'omitted_pages',
   'truncated_pages',
@@ -990,7 +992,8 @@ export class BatchJobs {
         ['pending', 'unknown'].includes(status),
       );
       if (unresolved?.length) acceptedRow.paid_requests = unresolved;
-      if (output?.web_usage?.web_extract_calls) acceptedRow.web_usage = output.web_usage;
+      if (output.web_usage && (job.batch || output.web_usage.web_extract_calls))
+        acceptedRow.web_usage = output.web_usage;
       const metric = job.searchStats?.find((entry) => entry.id === item.search_id);
       if (metric) {
         metric.researched++;
@@ -1146,6 +1149,7 @@ export class BatchJobs {
                 ...(search.searchRegion ? { searchRegion: search.searchRegion } : {}),
                 source_kind: search.source_kind || 'web',
                 family: search.family,
+                ...(search.dispatchEvidence ? { dispatchEvidence: search.dispatchEvidence } : {}),
                 startedAt: new Date(this.now()).toISOString(),
                 status: 'running',
                 discovered: 0,
