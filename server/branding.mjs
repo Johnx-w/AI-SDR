@@ -1,6 +1,8 @@
 import { lookup } from 'node:dns/promises';
 import { Agent, request } from 'node:https';
 import { isIP } from 'node:net';
+import { promisify } from 'node:util';
+import { gunzip } from 'node:zlib';
 import { websiteProxyUrl } from './website-proxy.mjs';
 
 export const WEBSITE_USER_AGENT = 'Mozilla/5.0';
@@ -282,8 +284,18 @@ export function readHtmlResponse(response, maxBytes = 4 * 1024 * 1024) {
   return readWebsiteBytes(response, maxBytes).then((body) => ({ html: body.toString('utf8') }));
 }
 
-export function readWebsiteBytes(response, maxBytes) {
-  return new Promise((resolve, reject) => {
+const decompressWebsite = promisify(gunzip);
+const oversizedWebsite = () => new Error('官网 HTML 超过读取上限，未使用截断页面');
+
+export async function readWebsiteBytes(response, maxBytes) {
+  const encoding = String(response.headers?.['content-encoding'] || 'identity')
+    .trim()
+    .toLowerCase();
+  if (encoding !== 'identity' && encoding !== 'gzip') {
+    response.destroy();
+    throw new Error('官网返回不支持的正文编码');
+  }
+  const body = await new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
     let done = false;
@@ -296,7 +308,7 @@ export function readWebsiteBytes(response, maxBytes) {
       if (done) return;
       size += chunk.length;
       if (size > maxBytes) {
-        fail(new Error('官网 HTML 超过读取上限，未使用截断页面'));
+        fail(oversizedWebsite());
         response.destroy();
         return;
       }
@@ -313,6 +325,13 @@ export function readWebsiteBytes(response, maxBytes) {
     });
     response.on('error', fail);
   });
+  if (encoding === 'identity') return body;
+  try {
+    return await decompressWebsite(body, { maxOutputLength: maxBytes });
+  } catch (error) {
+    if (error.code === 'ERR_BUFFER_TOO_LARGE') throw oversizedWebsite();
+    throw new Error('官网压缩正文不完整或格式无效', { cause: error });
+  }
 }
 function withSignal(promise, signal) {
   signal.throwIfAborted();

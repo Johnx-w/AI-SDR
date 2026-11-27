@@ -62,6 +62,19 @@ def read_gateway(request, url, resource_type):
         return b"", None
 
 
+def has_body_text(document):
+    # An interrupted page can serialize its title or a Trustindex badge before
+    # the site's body arrives. Retain that HTML, but keep the capture incomplete.
+    nodes = document.xpath(
+        "//body//text()[not("
+        "ancestor::title or ancestor::script or ancestor::style or "
+        "ancestor::template or ancestor::svg or ancestor::noscript or "
+        "ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' ti-widget-container ')]"
+        ")]"
+    ).getall()
+    return any(character.isalnum() for text in nodes for character in text)
+
+
 async def read_page(request):
     async with async_playwright() as playwright:
         try:
@@ -126,6 +139,7 @@ async def read_page(request):
                 "status": "ok",
                 "url": page.url,
                 "content": html,
+                "has_body_text": has_body_text(document),
                 "links": document.css("a::attr(href)").getall()[:150],
                 "versions": {
                     "python": sys.version.split()[0],
