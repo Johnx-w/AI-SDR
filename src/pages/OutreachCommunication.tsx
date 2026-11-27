@@ -2021,7 +2021,7 @@ export function OutreachCommunication({
                       </section>
                       {!state.readiness.generatorConfigured && (
                         <div className="outreach-alert">
-                          邮件生成服务尚未配置。可以先完成邮箱配置和计划草稿。
+                          含 AI 内容的邮件步骤需要配置模型。固定模板可直接使用。
                         </div>
                       )}
                       <div className="outreach-section-heading">

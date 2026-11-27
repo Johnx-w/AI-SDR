@@ -1,7 +1,7 @@
-import { personalizationPolicy } from './sequence-personalization.mjs';
+import { personalizationPolicy, templateModelFields } from './sequence-personalization.mjs';
 import { setImmediate } from 'node:timers/promises';
 import { readFileSync } from 'node:fs';
-import { normalizeTemplate } from '../src/domain/sequence-email.mjs';
+import { expandTemplate, normalizeTemplate } from '../src/domain/sequence-email.mjs';
 import {
   writerPolicy,
   normalizeOutreachLead,
@@ -208,39 +208,7 @@ export async function previewOutreachTemplate(service, input) {
     new Set(priorSteps.map((s) => s.day)).size !== priorSteps.length
   )
     throw fail('跟进上下文无效', 400);
-  const prior = priorSteps
-    .filter((s) => s.day < input.day)
-    .sort((a, b) => a.day - b.day)
-    .map((s) => ({
-      ...s,
-      template: normalizeTemplate(s.template, false),
-      instruction: followWritingRequirement(
-        writingInstruction(s.instruction, !!s.template || !!(s.writing?.angle || s.writing?.reply)),
-        normalizeWritingOptions(s.writing),
-      ),
-    }));
-  const draft = await service.generatorClient().generate({
-    candidate,
-    mailbox,
-    product,
-    campaign,
-    template: firstTemplate,
-    includeVariables: true,
-    now: new Date(service.now()),
-    ...requirements,
-  });
-  const first = {
-    candidate,
-    companyName: candidate.companyName,
-    subject: draft.subject,
-    bodyText: draft.bodyText + '\n\n' + signature,
-  };
-  checkOutreachScope(
-    draft.subject + '\n' + draft.bodyText,
-    mailbox,
-    service,
-    candidate.companyName,
-  );
+  const prior = priorSteps.filter((s) => s.day < input.day).sort((a, b) => a.day - b.day);
   const metadata = {
     sample: sampleDetails(context, input.category),
     rules: {
@@ -263,14 +231,67 @@ export async function previewOutreachTemplate(service, input) {
     signature,
     to: candidate.to,
   };
-  if (firstTouch)
+  if (firstTouch) {
+    const draft = await service.generatorClient().generate({
+      candidate,
+      mailbox,
+      product,
+      campaign,
+      template,
+      includeVariables: true,
+      now: new Date(service.now()),
+      ...requirements,
+    });
+    checkOutreachScope(
+      draft.subject + '\n' + draft.bodyText,
+      mailbox,
+      service,
+      candidate.companyName,
+    );
     return {
       ...metadata,
       variables: draft.variables,
-      subject: first.subject,
-      body: first.bodyText,
+      subject: draft.subject,
+      body: draft.bodyText + '\n\n' + signature,
     };
-  const history = [];
+  }
+  const local = {
+    company: candidate.companyName,
+    product: product.englishName || product.name,
+    brand: mailbox.brandName,
+  };
+  const aiVariable = /\{\{(?:ai_|custom_)[^{}]+\}\}/u;
+  const localBody = (previous) =>
+    expandTemplate(
+      (previous?.body || '').replaceAll(new RegExp(aiVariable.source, 'gu'), ''),
+      local,
+    ).trim();
+  const first = {
+    candidate,
+    companyName: candidate.companyName,
+    subject:
+      firstTemplate && !aiVariable.test(firstTemplate.subject)
+        ? expandTemplate(firstTemplate.subject, local)
+        : '',
+    bodyText: localBody(firstTemplate),
+  };
+  const previous = input.firstPreview;
+  if (
+    !first.subject &&
+    previous?.sampleId === candidate.customerId &&
+    previous.mailboxId === mailbox.id &&
+    previous.productId === product.id &&
+    typeof previous.subject === 'string' &&
+    previous.subject.length <= 150 &&
+    !/[\x00-\x1f\x7f]/u.test(previous.subject)
+  )
+    first.subject = previous.subject.trim();
+  const history = templateModelFields(template).needed
+    ? prior.flatMap((s) => {
+        const bodyText = localBody(normalizeTemplate(s.template, false));
+        return bodyText ? [{ direction: 'outbound', bodyText }] : [];
+      })
+    : [];
   const generate = service.generator?.generateFollowUp || generateFollowUp;
   const follow = async (step, day, instruction, template) => {
     const result = await generate({
@@ -298,13 +319,6 @@ export async function previewOutreachTemplate(service, input) {
     );
     return result;
   };
-  for (const [index, s] of prior.entries()) {
-    const body = await follow(index + 1, s.day, s.instruction, s.template);
-    history.push({
-      direction: 'outbound',
-      bodyText: [greeting, typeof body === 'string' ? body : body.body, signature].join('\n\n'),
-    });
-  }
   const body = await follow(
     input.step,
     input.day,
@@ -315,7 +329,7 @@ export async function previewOutreachTemplate(service, input) {
     ...metadata,
     variables: body.variables,
     warning: body.warning,
-    subject: body.subject || 'Re: ' + first.subject,
+    subject: body.subject || (first.subject ? 'Re: ' + first.subject : '沿用首封主题'),
     body: [greeting, typeof body === 'string' ? body : body.body, signature].join('\n\n'),
   };
 }

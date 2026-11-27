@@ -386,15 +386,22 @@ test('固定模板与自定义变量只校验实际展开的邮件及证据', as
       { key: 'custom_reason', label: '联系理由', instruction: 'Describe the matching product.' },
     ],
   };
-  draft.body_text = '';
-  draft.custom_reason = 'Your range includes ' + input.product.englishName + '.';
-  const result = await generate(input, draft);
+  const fragment = {
+    source_ids: draft.source_ids,
+    custom_reason: 'Your range includes ' + input.product.englishName + '.',
+  };
+  const result = await generate(input, fragment, (request) => {
+    assert.deepEqual(request.response_format.json_schema.schema.required, [
+      'source_ids',
+      'custom_reason',
+    ]);
+  });
   assert.equal(result.subject, input.product.englishName + ' range');
   assert.equal(
     result.bodyText,
-    'Hi Example Dealer team,\n\nFrom ' + input.mailbox.brandName + '. ' + draft.custom_reason,
+    'Hi Example Dealer team,\n\nFrom ' + input.mailbox.brandName + '. ' + fragment.custom_reason,
   );
-  await assert.rejects(generate(input, { ...draft, custom_reason: 'We guarantee delivery.' }), {
+  await assert.rejects(generate(input, { ...fragment, custom_reason: 'We guarantee delivery.' }), {
     code: 'outreach_unsupported_claim',
   });
 });

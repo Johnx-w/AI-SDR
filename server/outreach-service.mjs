@@ -1,5 +1,6 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { firstWritingRequirements } from './mail-writing-options.mjs';
+import { templateModelFields } from './sequence-personalization.mjs';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -1093,7 +1094,11 @@ export class OutreachService {
     if (!c.mailboxIds.length && !c.acquisitionSource) throw fail(400, '请先选择发件邮箱');
     if (!this.acquisitionAllowed(c)) throw fail(409, '获客自动首发已暂停或关闭');
     this.validateProductSelection(c);
-    if (!this.generatorClient().configured) throw fail(503, '请先在API连接中配置模型');
+    if (
+      templateModelFields(this.followUps.policy().firstTemplate, true).needed &&
+      !this.generatorClient().configured
+    )
+      throw fail(503, '请先在API连接中配置模型');
     const wasActive = c.status === 'active';
     this.putCampaign({ ...c, status: wasActive ? 'active' : 'preparing', lastError: '' });
     // Allocation and reservations span campaigns. A single preparation queue
@@ -1447,7 +1452,11 @@ export class OutreachService {
     )
       throw fail(409, '计划已更新或正在处理，请刷新后启动');
     this.validateProductSelection(c);
-    if (!this.generatorClient().configured) throw fail(503, '请先配置邮件生成模型');
+    if (
+      templateModelFields(this.followUps.policy().firstTemplate, true).needed &&
+      !this.generatorClient().configured
+    )
+      throw fail(503, '请先配置邮件生成模型');
     if (
       !c.mailboxIds.length ||
       c.mailboxIds.some((id) => {
