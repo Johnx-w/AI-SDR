@@ -18,7 +18,7 @@ node --test tests/scrapling-collector.test.mjs tests/acquisition-evidence-select
 
 Windows 用同一个 Playwright 命令并省去 `--with-deps`。本地安装的 Windows 浏览器来自 [Chrome for Testing 官方存储](https://storage.googleapis.com/chrome-for-testing-public/159.0.8154.6/win64/chrome-headless-shell-win64.zip)，SHA-256 为 `5db6a6948e6d1299ea3bc87c420d467bf343feae186a316921c930ce02056af5`。Linux CI release 作业创建单独虚拟环境，运行安装、依赖检查、沙箱启动和固定页面检查。目标机的实际运行用户、系统依赖及正常业务负载仍需实测。没有随版本安装的运行时且未设置 `SCRAPLING_PYTHON` 时返回采集不可用。
 
-正式打包从通过 CI 的同一次运行取得 Docling 和 Scrapling 运行时。采集包随发布携带内置 Python 的 PEX 工作进程和压缩的固定 Chromium。手工发布和 CD 均先检查合包小于 512 MiB。新版本在独立目录安装时，由运行用户解包并通过同一采集接口渲染固定页面，校验两种工具及浏览器和 Python 版本。系统共享依赖由目标机提供，缺依赖或沙箱启动失败会在切换前暴露。旧版本回退使用自己的发布目录和运行时。开发环境可指定 `SCRAPLING_PYTHON`，带离线包的 Linux 发布目录默认使用随版本交付的运行时。
+正式打包从通过 CI 的同一次运行取得 Docling 和 Scrapling 运行时。采集包随发布携带内置 Python 的 PEX 工作进程和压缩的固定 Chromium。手工发布和 CD 均先检查合包小于 512 MiB。新版本在独立目录安装时，由运行用户解包并通过同一采集接口渲染固定页面，校验两种工具及浏览器和 Python 版本。系统共享依赖由目标机提供，缺依赖或沙箱启动失败会在切换前暴露。旧版本回退使用自己的发布目录和运行时。开发环境可指定 `SCRAPLING_PYTHON`，带离线包的 Linux 发布目录默认使用随版本交付的运行时。暂存安装的离线包探测输出 `archive_only`，用于核对包、依赖及沙箱；生产资源隔离另在受委托单元中核对。
 
 ### Ubuntu 26.04 浏览器沙箱
 
@@ -44,7 +44,28 @@ profile shadeflow-chromium-1255 /opt/shadeflow/chromium/chromium_headless_shell-
 
 浏览器成功状态要求渲染后的页面有正文文本。对 `7baefea` 现场快照的字节回放显示，Cameron 和 Clearview 只渲染出页头，Empire 只出现标题和 Trustindex 评分组件。修复后这三份渲染快照均保持采集失败，原始 HTML 里的正文仍可识别，快照均保留。固定浏览器回归同时确认实际短正文仍可成功返回。
 
-开发限制为 20 秒内页面导航和等待、30 秒采集硬超时、系统剩余内存 1 GiB 时停止派单。每 100 毫秒采样 Python 与子进程的 RSS 之和和整机内存使用量；RSS 之和会重复计入共享页。进程树 RSS 超过 1 GiB 时中断，Linux 的进程清理和目标机资源上限仍需实测。
+### 进程隔离和故障探测
+
+采集在全局队列中一次派一个页面。系统可用内存低于 1 GiB 时等待。单页导航和等待约 20 秒，派入后的整次请求含启动最多 30 秒，随后等待进程树清理。本机 Windows 用 Job Object 回收后代，非委托的 Linux 开发按独立进程组回收后代。开发进程每 100 毫秒采样 Python 与子进程 RSS 之和及整机使用量，RSS 之和会重复计入共享页。
+
+生产 Linux 要求 cgroup v2。管理员将 [单元片段](../../scripts/systemd/shadeflow-scrapling.conf) 安装为 `/etc/systemd/system/shadeflow.service.d/scrapling.conf` 并运行 `systemctl daemon-reload`，在标准发布的受控重启时生效。Node 应位于 `/system.slice/shadeflow.service/app`。采集请求在同级 `scrapling-worker` 下设置并读回 `memory.max=1073741824`、`memory.swap.max=0` 和 `memory.oom.group=1`。启动器在执行 Python 前加入该组，Chromium 后代继承同一限制。完成、崩溃、超时和取消都回收该组，并在释放队列前确认无活动进程。服务停止由 systemd 回收整个单元。无法建立该限制时记录 `worker_isolation_unavailable`，获客继续走原回退路径。内存超限依据内核计数归为 `memory_limit`，报告进程组峰值。采集状态和阶段原因用于补证和回退。
+
+在 Ubuntu 26.04 目标机的独立暂存目录运行下面的固定页面探测。使用包中的工作进程和已核对的 Chromium，期待 `delegated`、1 GiB 上限和非零内存峰值。命令不接触业务库。
+
+```sh
+sudo systemd-run --unit=shadeflow-scrapling-probe --wait --collect --pipe \
+  --uid=shadeflow --property=Delegate=memory --property=DelegateSubgroup=app \
+  --property=OOMPolicy=continue --property=KillMode=control-group \
+  --working-directory="$PWD" /usr/local/bin/node scripts/check-scrapling.mjs --require-isolation
+```
+
+同一个固定名的暂存单元可执行内核回归测试。按 [开发环境](#开发环境与复跑) 安装测试用 Python，先将上述命令的最后一行替换为下列参数。夹具读回 1 GiB 再将自己的测试叶组降至 32 MiB，由测试子进程触发真正的内核 OOM，检查父子进程、叶组清理与 Node 所在组。
+
+```sh
+  --working-directory="$PWD" --setenv=SCRAPLING_CGROUP_TEST=1 \
+  --setenv=SCRAPLING_PYTHON="$SCRAPLING_PYTHON" /usr/local/bin/node --test \
+  --test-name-pattern="Linux cgroup OOM" tests/scrapling-collector.test.mjs
+```
 
 ## 固定快照
 
