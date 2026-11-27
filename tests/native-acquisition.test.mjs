@@ -3606,6 +3606,234 @@ test('获客任务按官网证据收录两家，空壳与参展商待核实，�
     await new Promise((resolve) => app.close(resolve));
   }
 });
+test('正常官网任务跟进经营页链接并将证据归给实际经营者', async () => {
+  const origin = 'https://restrepoinnovations.com';
+  const spotlight = origin + '/blog/workroom-services-group-spotlight.html';
+  const source = spotlight.replace('https://', 'https://www.');
+  const servicePage = origin + '/residential/motorized-shades.html';
+  const studio = 'https://brook-studio.example.org';
+  const studioSource = studio + '/news/project-launch.html';
+  const studioLegal = studio + '/company/legal-notice';
+  const studioService = studio + '/services/motorized-shading.html';
+  const theater = 'https://theater-store.example.org';
+  const theaterProfile = theater + '/partners/4517';
+  const theaterListing = theater + '/products/8862';
+  // Restrepo excerpts from US-1-B row 8 and its linked public product page.
+  const beneficiary =
+    'Workroom Services handles the complete trade sequence for custom window and wall treatments.';
+  const scenarios = new Map([
+    [
+      source,
+      {
+        name: 'Restrepo Innovations LLC',
+        identity: '© 2026 Restrepo Innovations LLC. All rights reserved.',
+        identityUrl: spotlight,
+        supply: 'The same team that designs the system installs it, programs it, and services it.',
+        offering: 'Every motorized shades project we run follows the same six steps',
+        product: 'motorized shades',
+        service: servicePage,
+      },
+    ],
+    [
+      studioSource,
+      {
+        name: 'Brook Studio LLC',
+        identity: 'This website is operated by Brook Studio LLC.',
+        identityUrl: studioLegal,
+        supply:
+          'We custom-build and supply complete motorized roller shades for residential windows.',
+        offering: 'Our motorized roller shades are custom fitted to residential windows.',
+        product: 'motorized roller shades',
+        service: studioService,
+      },
+    ],
+    [
+      theaterProfile,
+      {
+        name: 'Theater Store LLC',
+        identity: 'This website is operated by Theater Store LLC.',
+        identityUrl: theaterProfile,
+      },
+    ],
+  ]);
+  const restrepo = scenarios.get(source);
+  const brook = scenarios.get(studioSource);
+  const site = new Map([
+    [
+      spotlight,
+      `<p>${restrepo.identity}</p><p>${beneficiary}</p><a href="https://www.workroomservices.com/about">Workroom Services</a>`,
+    ],
+    [
+      origin + '/',
+      '<a href="about.html">About</a><a href="contact.html">Contact</a><a href="residential/motorized-shades.html">Motorized Shades</a>',
+    ],
+    [origin + '/about.html', '<p>About Restrepo Innovations</p>'],
+    [origin + '/contact.html', '<p>Contact us to schedule a consultation.</p>'],
+    [
+      servicePage,
+      `<p>Lutron Sivoia and Palladiom integrated with lighting, climate, and time of day.</p><p>${restrepo.offering}</p><p>${restrepo.supply}</p>`,
+    ],
+    [
+      studioSource,
+      '<p>Read about our showroom opening.</p><a href="/contact">Contact</a><a href="/contact/team">Our team</a><a href="/about">About us</a>',
+    ],
+    [
+      studio + '/',
+      '<p>Home automation design in Oregon.</p><a href="/company/legal-notice">Legal notice</a><a href="/services/motorized-shading.html">Motorized shading</a>',
+    ],
+    [studioLegal, `<p>${brook.identity}</p>`],
+    [studioService, `<p>${brook.offering}</p><p>${brook.supply}</p>`],
+    [studio + '/contact', '<p>Request an appointment with our design team.</p>'],
+    [studio + '/contact/team', '<p>Meet our showroom team.</p>'],
+    [studio + '/about', '<p>We design home automation projects in Oregon.</p>'],
+    [
+      theaterProfile,
+      `<p>${scenarios.get(theaterProfile).identity}</p><p>Our business sells audio and video equipment.</p><a href="${theaterListing}">Partner spotlight</a>`,
+    ],
+    [
+      theater + '/',
+      `<p>We sell home cinema equipment.</p><a href="${theaterListing}">Partner spotlight</a><a href="${studioService}">Independent shades supplier</a>`,
+    ],
+    [theaterListing, '<p>Brook Studio supplies complete motorized roller shades.</p>'],
+  ]);
+  const f = fixture();
+  const evidence = (value, quote, source_url) => ({ value, quote, source_url });
+  const fetchImpl = async (url, options) => {
+    if (url === 'https://api.tavily.com/search') {
+      const { exclude_domains } = JSON.parse(options.body);
+      return json({
+        results: [...scenarios].flatMap(([url, scenario]) =>
+          exclude_domains.includes(new URL(url).hostname.replace(/^www\./, ''))
+            ? []
+            : [{ url, title: scenario.name }],
+        ),
+      });
+    }
+    if (url !== 'https://api.deepseek.com/responses') return f.fetchImpl(url, options);
+    const { pages, sources } = JSON.parse(JSON.parse(options.body).input[1].content);
+    const scenario =
+      pages && scenarios.get(pages[0].source_url === spotlight ? source : pages[0].source_url);
+    const id = pages?.find(
+      (page) => page.source_url === scenario.identityUrl && page.text.includes(scenario.identity),
+    );
+    const operating = pages?.find((page) => page.source_url === scenario.service);
+    const identity = (value) =>
+      id ? evidence(value, scenario.identity, scenario.identityUrl) : null;
+    const data = sources
+      ? { result: 'relevant', sources: sources.map(({ i }) => i), reason: '官网确认经营' }
+      : {
+          company_name: identity(scenario.name),
+          legal_company_name: identity(scenario.name),
+          entity_type: identity('business'),
+          admission_facts: operating?.text.includes(scenario.supply)
+            ? [evidence('complete_supply', scenario.supply, scenario.service)]
+            : [],
+          products: operating?.text.includes(scenario.offering)
+            ? [
+                {
+                  ...evidence(scenario.product, scenario.offering, scenario.service),
+                  window_use: 'window_covering',
+                },
+              ]
+            : [],
+        };
+    return json({
+      status: 'completed',
+      output: [{ content: [{ type: 'output_text', text: JSON.stringify(data) }] }],
+    });
+  };
+  const readUrls = [];
+  const nativeImpl = f.make({
+    fetchImpl,
+    readPage: async ({ href }) => {
+      readUrls.push(href);
+      if (href === source) return { redirect: spotlight };
+      assert.ok(site.has(href), href);
+      return { html: site.get(href) };
+    },
+    readScraplingPage: async () => ({ status: 'unavailable' }),
+  });
+  await withApp({ env, fetchImpl, nativeImpl }, async (url) => {
+    const api = url + '/api/v1';
+    const response = await fetch(api + '/acquisition/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'linked-operating-pages' },
+      body: JSON.stringify({
+        ...input,
+        product: 'window coverings',
+        product_scope: 'all',
+        target_count: 3,
+        research_budget: 3,
+      }),
+    });
+    assert.equal(response.status, 202);
+    const { id } = await response.json();
+    let job;
+    for (let n = 0; n < 200; n++) {
+      job = await (await fetch(api + '/acquisition/jobs/' + id)).json();
+      if (job.status !== 'running') break;
+      await delay(10);
+    }
+    assert.equal(job.admissionVersion, 'website-admission-v1');
+    assert.deepEqual(
+      job.rows.map(({ source_url, result }) => [source_url, result]),
+      [
+        [source, 'inserted'],
+        [studioSource, 'inserted'],
+        [theaterProfile, 'review'],
+      ],
+      job.rows.map(({ reason }) => reason).join('\n'),
+    );
+    const [restrepoRow, studioRow, control] = job.rows;
+    assert.deepEqual(
+      restrepoRow.collection_attempts
+        .filter(({ final_url, method }) => final_url === spotlight && method === 'node')
+        .map(({ requested_url }) => requested_url),
+      [source],
+    );
+    assert.equal(job.inserted, 2);
+    assert.equal(control.record_id, undefined);
+    assert.ok(!readUrls.includes(theaterListing));
+    assert.ok(
+      !control.collection_attempts.some(({ requested_url }) => requested_url === studioService),
+    );
+    for (const [row, scenario] of [
+      [restrepoRow, restrepo],
+      [studioRow, brook],
+    ]) {
+      const nodePages = row.collection_attempts.filter(({ method }) => method === 'node');
+      assert.equal(new Set(nodePages.map(({ final_url }) => final_url)).size, 5);
+      const { lead } = await (await fetch(api + '/leads/real/' + row.record_id)).json();
+      assert.equal(lead.name, scenario.name);
+      assert.equal(lead.companyIdentity.legal_name, scenario.name);
+      assert.equal(
+        lead.companyIdentity.evidence.find(({ field }) => field === 'legal_company_name')
+          ?.source_url,
+        scenario.identityUrl,
+      );
+      assert.deepEqual(
+        lead.facts
+          .filter(({ field }) => field === 'products')
+          .map(({ value, quote, source_url, snapshot_id }) => [
+            value,
+            quote,
+            source_url,
+            snapshot_id,
+          ]),
+        [
+          [
+            scenario.product,
+            scenario.offering,
+            scenario.service,
+            nodePages.find(({ final_url }) => final_url === scenario.service)?.snapshot_id,
+          ],
+        ],
+      );
+    }
+    const { leads } = await (await fetch(api + '/leads/real/list')).json();
+    assert.deepEqual(leads.map(({ name }) => name).sort(), [brook.name, restrepo.name]);
+  });
+});
 test('正常任务按营业登记主体区分同域企业，补证、并发核对和版本复用均只认原主库归属', async (t) => {
   t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2030-02-01T12:00:00Z') });
   const north = 'https://shade-hub.example.org/north/';

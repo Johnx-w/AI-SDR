@@ -33,7 +33,12 @@ import {
 } from './website-identity.mjs';
 import { calculateHandoffReadiness } from './handoff-readiness.mjs';
 import { readPublicHtml, websiteRedirectUrl, websiteUrl } from './branding.mjs';
-import { planWebsitePages, combineWebsiteEvidence, websiteScope } from './website-metadata.mjs';
+import {
+  planWebsitePages,
+  combineWebsiteEvidence,
+  websitePagePriority,
+  websiteScope,
+} from './website-metadata.mjs';
 import { researchPageText, hasUsableResearchText } from './research-pages.mjs';
 import { collectScraplingPage } from './scrapling-collector.mjs';
 import {
@@ -698,12 +703,22 @@ export class NativeAcquisition {
       visited = new Set();
     const webUsage = webUsageCounter('extract');
     const collection_attempts = [];
-    const resumedUrls = new Set();
     const blocked = new Set();
     const diskDeferred = new Set();
     const browserVisited = new Set();
+    const resolved = new Set();
     const enqueue = (url, content) => {
-      for (const next of planWebsitePages(url, content, { includeProducts: unified })) {
+      const candidates = planWebsitePages(url, content, { includeProducts: unified });
+      if (unified) {
+        const priority = (next) =>
+          next === initial.href || next === evidenceUrl ? 9 : websitePagePriority(next, true);
+        const pending = [...new Set([...queue, ...candidates])]
+          .filter((next) => !visited.has(next) && !resolved.has(next))
+          .sort((a, b) => priority(b) - priority(a));
+        queue.splice(0, queue.length, ...pending.slice(0, Math.max(0, 5 - visited.size)));
+        return;
+      }
+      for (const next of candidates) {
         if (planned.size >= 5) break;
         if (!planned.has(next)) {
           planned.add(next);
@@ -719,6 +734,7 @@ export class NativeAcquisition {
     const addPage = (url, content, snapshotId, requestedUrl = url) => {
       // Keep complete HTML for independent contact/metadata extraction, even on shells.
       pages.push({ url, content });
+      if (unified) resolved.add(url);
       enqueue(url, content);
       const text = researchPageText(content, content.length);
       if (!hasUsableResearchText(text, content)) return false;
@@ -775,16 +791,19 @@ export class NativeAcquisition {
         this.store.snapshotById(attempt.snapshot_id, { verify: true });
       pinned.delete(attempt.snapshot_id);
       if (stored?.status === 'ok' && domainKey(stored.final_url) === domain) {
-        resumedUrls.add(stored.requested_url);
+        visited.add(stored.requested_url);
         retain(stored, true);
       } else collection_attempts.push(attempt);
       if (attempt.method === 'scrapling' && attempt.status !== 'deferred')
         browserVisited.add(attempt.requested_url);
-      if (attempt.status === 'blocked') blocked.add(attempt.requested_url);
+      if (attempt.status === 'blocked') {
+        blocked.add(attempt.requested_url);
+        visited.add(attempt.requested_url);
+      }
       if (attempt.extract_depth) attempted[attempt.extract_depth]?.add(attempt.requested_url);
     }
     for (const page of pinned.values()) {
-      if (page.status === 'ok') resumedUrls.add(page.requested_url);
+      if (page.status === 'ok') visited.add(page.requested_url);
       retain(page, true);
     }
     const record = ({
@@ -835,9 +854,9 @@ export class NativeAcquisition {
       while (queue.length && visited.size < 5) {
         check();
         const original = queue.shift();
-        if (visited.has(original)) continue;
+        if (visited.has(original) || resolved.has(original)) continue;
         visited.add(original);
-        if (resumedUrls.has(original) || blocked.has(original)) continue;
+        if (blocked.has(original)) continue;
         let url = websiteUrl(original),
           content = '',
           status = 'failed';
@@ -997,7 +1016,7 @@ export class NativeAcquisition {
         });
         if (status === 'ok') {
           failures.delete(url);
-          if (restoring) resumedUrls.add(url);
+          if (restoring) visited.add(url);
         }
       }
     };
