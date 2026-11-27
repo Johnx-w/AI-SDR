@@ -324,7 +324,7 @@ export class NativeAcquisition {
     this.readScraplingPage = readScraplingPage;
     this.admissionVersion = admissionVersion;
     this.providers = providers || createResearchProviders({ env, fetchImpl });
-    this.discoverMaps = createMapsDiscovery({ env, fetchImpl, provider: mapsProvider });
+    this.discoverMaps = mapsProvider ? createMapsDiscovery(mapsProvider) : null;
     this.feishu = feishu || new FeishuClient({ env, fetchImpl });
     this.store =
       store ||
@@ -579,7 +579,8 @@ export class NativeAcquisition {
     const known = byUrl
       ? []
       : (await this.feishu.records()).map((r) => domainKey(customerWebsite(r))).filter(Boolean);
-    const paired = byUrl && admissionVersion === websiteAdmissionVersion && mapsContext;
+    const paired =
+      this.discoverMaps && byUrl && admissionVersion === websiteAdmissionVersion && mapsContext;
     const recent = new Set(paired ? seen.filter((url) => !mapsContext.mapOnlyUrls.has(url)) : seen);
     const excluded = [...new Set(known.filter((domain) => !recent.has(domain))), ...recent];
     const query = search.query.slice(0, 395);
