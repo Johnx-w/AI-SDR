@@ -85,7 +85,7 @@ export function readActivityVerdict(body, sources) {
   };
 }
 
-export async function verifyCompanyActivity(model, store, usage, sources, target, company) {
+export async function verifyCompanyActivity(model, store, usage, sources, target, company, trace) {
   const request = activityRequest(
     sources,
     {
@@ -95,13 +95,24 @@ export async function verifyCompanyActivity(model, store, usage, sources, target
     },
     company,
   );
-  const key = researchCacheKey({ ...request, identity: model.cacheIdentity });
+  const key = researchCacheKey({
+    ...request,
+    identity:
+      model.cacheIdentity && trace
+        ? { ...model.cacheIdentity, ...trace.versions }
+        : model.cacheIdentity,
+  });
+  if (trace) {
+    trace.request_key = key;
+    trace.reused = false;
+  }
   if (key) {
     try {
       const cached = store.modelResponse(key);
       if (cached) {
         const verdict = readActivityVerdict(cached, sources);
         usage.cache_hits++;
+        if (trace) trace.reused = true;
         return verdict;
       }
     } catch {

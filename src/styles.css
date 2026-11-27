@@ -3133,6 +3133,12 @@ main {
 .website-correction-form .btn {
   white-space: normal;
 }
+.acquisition-review-evidence {
+  display: grid;
+  gap: 10px;
+  flex: 1 0 100%;
+  min-width: 0;
+}
 .batch-details td small {
   display: block;
   max-width: 480px;

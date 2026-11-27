@@ -11,6 +11,7 @@ export interface OverviewCapture {
   domain: string;
   capturedAt: string;
   jobId: string;
+  mode?: 'automatic' | 'manual';
   available: boolean | null;
 }
 export interface OverviewData {

@@ -2,6 +2,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import { acquisitionConfig } from './acquisition-config.mjs';
 import { createResearchProviders } from './research-providers.mjs';
 import { researchCacheKey } from './research-reuse.mjs';
+import {
+  acquisitionIdentityVersion,
+  acquisitionUrl,
+  subjectName,
+  verifiedRegistration,
+} from './acquisition-subject.mjs';
 import { activitySources, verifyCompanyActivity } from './activity-verification.mjs';
 import { exclusionConditionsKey } from './exclusion-conditions.mjs';
 import { boundedResearchPages } from './research-input.mjs';
@@ -111,7 +117,7 @@ function companyWebsiteSourceUrl(value, evidence = {}) {
   return companyWebsiteSource(value, evidence).url;
 }
 
-export function selectWebsiteCandidates(results, knownDomains = [], limit = 20) {
+export function selectWebsiteCandidates(results, knownDomains = [], limit = 20, byUrl = false) {
   const known = new Set(knownDomains),
     seen = new Set(),
     candidates = [],
@@ -128,12 +134,13 @@ export function selectWebsiteCandidates(results, knownDomains = [], limit = 20) 
     }
     const url = source.url;
     const domain = domainKey(url.href);
-    if (known.has(domain)) {
+    const candidateKey = byUrl ? acquisitionUrl(url.href) : domain;
+    if (known.has(candidateKey)) {
       skipped.push({ domain, url: url.href });
       continue;
     }
-    if (seen.has(domain)) continue;
-    seen.add(domain);
+    if (seen.has(candidateKey)) continue;
+    seen.add(candidateKey);
     candidates.push({
       source_url: url.href,
       source_title: result.title || '',
@@ -446,15 +453,22 @@ export class NativeAcquisition {
         status: 503,
       });
   }
-  async discover(input, search, seen = [], { admissionVersion = this.admissionVersion } = {}) {
+  async discover(
+    input,
+    search,
+    seen = [],
+    { admissionVersion = this.admissionVersion, identityVersion } = {},
+  ) {
     input = { ...input, ...validateTarget(input) };
     const conditionsKey = exclusionConditionsKey(input);
     this.store.backfillExclusions();
     if (search?.country && !input.market_countries.includes(search.country))
       throw Object.assign(new Error('搜索国家不在当前支持的市场范围内'), { status: 400 });
     this.ensureConfigured();
-    const records = await this.feishu.records();
-    const known = records.map((r) => domainKey(customerWebsite(r))).filter(Boolean);
+    const byUrl = identityVersion === acquisitionIdentityVersion;
+    const known = byUrl
+      ? []
+      : (await this.feishu.records()).map((r) => domainKey(customerWebsite(r))).filter(Boolean);
     const recent = new Set(seen);
     const excluded = [...new Set(known.filter((domain) => !recent.has(domain))), ...recent];
     const data = await this.providers.web.search({
@@ -464,9 +478,9 @@ export class NativeAcquisition {
       include_answer: false,
       include_raw_content: false,
       auto_parameters: false,
-      exclude_domains: excluded.slice(-150),
+      exclude_domains: byUrl ? [] : excluded.slice(-150),
     });
-    const selected = selectWebsiteCandidates(data.results, excluded);
+    const selected = selectWebsiteCandidates(data.results, excluded, 20, byUrl);
     selected.candidates = selected.candidates.filter((candidate) => {
       const prior =
         admissionVersion === 'legacy' && this.store.exclusion(conditionsKey, candidate.source_url);
@@ -485,14 +499,16 @@ export class NativeAcquisition {
       usage: data.usage,
     };
   }
-  async collect(sourceUrl, { unified = false, now, refresh = false, onAttempt } = {}) {
+  async collect(sourceUrl, { unified = false, now, refresh = false, onAttempt, evidenceUrl } = {}) {
     const initial = websiteUrl(sourceUrl);
     if (!initial) throw new Error('官网地址无效，仅接受公网 HTTPS 企业网站');
     const domain = domainKey(initial.href),
       pages = [],
       failures = new Set(),
       researchPages = new Map();
-    const queue = [initial.href],
+    const queue = [
+        ...new Set([initial.href, ...(domainKey(evidenceUrl) === domain ? [evidenceUrl] : [])]),
+      ],
       planned = new Set(queue),
       visited = new Set();
     const webUsage = webUsageCounter('extract');
@@ -861,6 +877,7 @@ export class NativeAcquisition {
         ? { collection_attempts: operation.collection_attempts }
         : {}),
       ...(operation.collection_gaps?.length ? { collection_gaps: operation.collection_gaps } : {}),
+      ...(operation.research_trace ? { research_trace: operation.research_trace } : {}),
       明细: row ? [row] : [],
     };
   }
@@ -879,6 +896,7 @@ export class NativeAcquisition {
       incomplete_urls: operation.incomplete_urls,
       collection_complete: operation.collection_complete,
       collection_attempts: operation.collection_attempts,
+      research_trace: operation.research_trace,
       admission_version: operation.admission_version,
       research_complete: operation.research_complete,
       research: Object.fromEntries(
@@ -944,6 +962,8 @@ export class NativeAcquisition {
     {
       bypassExclusion = false,
       admissionVersion = item.target_record_id ? 'legacy' : this.admissionVersion,
+      identityVersion,
+      review,
     } = {},
   ) {
     // Also validate restored tasks and callers that bypass HTTP validation.
@@ -953,7 +973,13 @@ export class NativeAcquisition {
     this.ensureConfigured();
     const id = item.operation_id;
     if (typeof id !== 'string' || !/^[\w-]{8,150}$/.test(id)) throw conflict('研究操作编号无效');
-    const { operation: op, existing } = this.store.begin(id, { input, item });
+    const scopedIdentity = identityVersion === acquisitionIdentityVersion && this.feishu.localFirst;
+    const { operation: op, existing } = this.store.begin(id, {
+      input,
+      item,
+      ...(identityVersion ? { identityVersion } : {}),
+      ...(review ? { review } : {}),
+    });
     if (existing) {
       const settled = await this.status(id);
       if (settled.settled) return settled.output;
@@ -961,12 +987,13 @@ export class NativeAcquisition {
     }
     const unified = admissionVersion === websiteAdmissionVersion;
     op.admission_version = admissionVersion;
+    op.identity_version = identityVersion;
     op.research_usage = { model_calls: 0, cache_hits: 0, input_chars: 0 };
     this.active.add(id);
     try {
       const domain = domainKey(item.source_url);
       if (!websiteScope(item.source_url) || !domain) throw new Error('企业网址无效');
-      let matching = recordsForDomain(await this.feishu.records(), domain);
+      let matching = scopedIdentity ? [] : recordsForDomain(await this.feishu.records(), domain);
       if (
         matching.length > 1 ||
         (item.target_record_id &&
@@ -1030,6 +1057,7 @@ export class NativeAcquisition {
       const page = await this.collect(item.source_url, {
         unified,
         refresh: bypassExclusion,
+        evidenceUrl: review?.decision?.source_url,
         onAttempt: (attempt) => {
           (op.collection_attempts ||= []).push(attempt);
           this.store.save(op);
@@ -1071,6 +1099,10 @@ export class NativeAcquisition {
         });
         this.store.complete(op, output);
         return output;
+      }
+      if (scopedIdentity && !review) {
+        const known = this.previouslyVerifiedSubject(page, item, op, researchTarget);
+        if (known) return await this.finishAcquisitionMatch(op, { record_id: known });
       }
       // Cheap keyword screen before the paid model call: keep only pages that
       // actually mention the target products or the window-shading industry.
@@ -1120,6 +1152,8 @@ export class NativeAcquisition {
         admissionVersion,
         unified,
         bypassExclusion,
+        identityVersion,
+        review,
       };
       let { response, parsed, cacheKey, extractionFromCache } = await this.researchPageEvidence(
         page,
@@ -1198,14 +1232,19 @@ export class NativeAcquisition {
         research.product_match === 'matched' &&
         !hardMismatch &&
         (!unified || research.eligibility?.status === 'eligible');
-      if (hardMismatch && cacheKey && typeof this.store.discardModelResponse === 'function') {
+      if (
+        !scopedIdentity &&
+        hardMismatch &&
+        cacheKey &&
+        typeof this.store.discardModelResponse === 'function'
+      ) {
         try {
           this.store.discardModelResponse(cacheKey);
         } catch {
           op.research_usage.cache_unavailable = true;
         }
       }
-      if (hardMismatch && !item.target_record_id) {
+      if (hardMismatch && !item.target_record_id && !scopedIdentity) {
         const reason =
           unified && research.eligibility?.status === 'rejected'
             ? research.eligibility.reason
@@ -1223,7 +1262,7 @@ export class NativeAcquisition {
         return this.rejectNewCandidate(op, reason);
       }
       if (
-        !hardMismatch &&
+        (!hardMismatch || scopedIdentity) &&
         !extractionFromCache &&
         cacheKey &&
         typeof this.store.saveModelResponse === 'function'
@@ -1235,6 +1274,9 @@ export class NativeAcquisition {
           // current validated result or a reason to repeat its model call.
           op.research_usage.cache_unavailable = true;
         }
+      }
+      if (scopedIdentity && hardMismatch && !item.target_record_id) {
+        return this.rejectNewCandidate(op, research.reason || '官网经营资格与本次目标不符');
       }
       if (!broadAdmissionReady && !item.target_record_id) {
         if (unified) research.review_required = true;
@@ -1265,8 +1307,25 @@ export class NativeAcquisition {
         );
       op.stage = 'prepare';
       this.store.save(op);
+      if (scopedIdentity && !item.target_record_id) {
+        const registration = verifiedRegistration(research.company_identity, research.facts);
+        op.acquisition = {
+          operation_id: id,
+          source_url: item.source_url,
+          source_kind: item.source_kind || 'website',
+          name: research.company_identity.name,
+          registration,
+          ...(op.content_key && registration ? { content_key: op.content_key } : {}),
+          mode: review ? 'manual' : 'automatic',
+          job_id: review?.job_id || item.job_id,
+          ...(review ? { review } : {}),
+        };
+        const matched = this.feishu.acquisitionMatch(op.acquisition);
+        if (matched.record_id || matched.conflict)
+          return await this.finishAcquisitionMatch(op, matched);
+      }
       // Recheck identity immediately before writing, including all record pages.
-      matching = recordsForDomain(await this.feishu.records(), domain);
+      matching = scopedIdentity ? [] : recordsForDomain(await this.feishu.records(), domain);
       if (
         matching.length > 1 ||
         (item.target_record_id &&
@@ -1322,7 +1381,7 @@ export class NativeAcquisition {
           if (typeof corrections[key]?.value === 'string') raw[name] = corrections[key].value;
       } else
         Object.assign(raw, {
-          customer_id: 'web_' + domain,
+          customer_id: 'web_' + (op.acquisition?.registration?.key || domain),
           首次发现时间: Date.now(),
           开发状态: '待开发',
         });
@@ -1457,6 +1516,8 @@ export class NativeAcquisition {
       admissionVersion,
       unified,
       bypassExclusion,
+      identityVersion,
+      review,
     },
   ) {
     op.research_usage.input_chars += page.input_stats.inputChars;
@@ -1473,12 +1534,28 @@ export class NativeAcquisition {
               ...this.providers.model.cacheIdentity,
               admission_version: admissionVersion,
               evidence_version: acquisitionEvidenceVersion,
+              ...(identityVersion
+                ? { identity_version: identityVersion, subject: acquisitionUrl(item.source_url) }
+                : {}),
               content_hashes: page.collection_attempts
                 .filter((attempt) => attempt.status === 'ok')
                 .map(({ final_url, content_hash }) => [final_url, content_hash]),
             }
           : this.providers.model.cacheIdentity,
     });
+    if (identityVersion) {
+      (op.research_trace ||= []).push({
+        stage: 'extraction',
+        request_key: cacheKey,
+        admission_version: admissionVersion,
+        identity_version: identityVersion,
+        evidence_version: acquisitionEvidenceVersion,
+        subject: acquisitionUrl(item.source_url),
+        snapshot_ids: page.collection_attempts
+          .filter((attempt) => attempt.status === 'ok')
+          .map((attempt) => attempt.snapshot_id),
+      });
+    }
     let response, parsed;
     if (cacheKey && typeof this.store.modelResponse === 'function') {
       try {
@@ -1496,6 +1573,7 @@ export class NativeAcquisition {
       }
     }
     const extractionFromCache = Boolean(parsed);
+    if (identityVersion) op.research_trace.at(-1).reused = extractionFromCache;
     if (parsed) {
       op.research_usage.cache_hits++;
       op.research_usage.input_tokens ??= 0;
@@ -1518,6 +1596,64 @@ export class NativeAcquisition {
       this.store.save(op);
       parsed = parseCompanyResearch(response, page, input);
     }
+    let operatorFacts = [];
+    if (review?.decision) {
+      const { decision } = review;
+      const { source_url, identity_quote, operating_quote, company_name, product, admission_fact } =
+        decision;
+      const normalize = (value) =>
+        value.normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
+      const origins = page.evidence_by_url?.get(source_url)?.origins || [];
+      const contains = (quote) =>
+        origins.some(({ text }) => normalize(text).includes(normalize(quote)));
+      const identityMatches =
+        !parsed.company_identity.name ||
+        [
+          parsed.company_identity.name,
+          parsed.company_identity.website_name,
+          ...parsed.company_identity.aliases,
+        ].some((name) => subjectName(name) === subjectName(company_name));
+      if (
+        !contains(identity_quote) ||
+        !contains(operating_quote) ||
+        !identityMatches ||
+        !normalize(identity_quote).includes(normalize(company_name)) ||
+        !normalize(operating_quote).includes(normalize(product))
+      ) {
+        return {
+          response,
+          cacheKey,
+          extractionFromCache,
+          parsed: {
+            ...parsed,
+            product_match: 'unknown',
+            review_required: true,
+            reason: '人工裁定引文未能从本次官网快照核对，或与已取得的经营主体冲突',
+          },
+        };
+      }
+      const evidence = (field, value, quote) => ({
+        field,
+        value,
+        quote,
+        source_url,
+        method: 'manual_review',
+      });
+      operatorFacts = [
+        ...(!parsed.company_identity.name
+          ? [evidence('company_name', company_name, identity_quote)]
+          : []),
+        ...(!parsed.company_identity.legal_name
+          ? [evidence('legal_company_name', company_name, identity_quote)]
+          : []),
+        ...(parsed.entity_type === 'unknown'
+          ? [evidence('entity_type', 'business', identity_quote)]
+          : []),
+        evidence('admission_facts', admission_fact, operating_quote),
+        { ...evidence('products', product, operating_quote), window_use: 'window_covering' },
+      ];
+      parsed = parseCompanyResearch(response, page, input, undefined, operatorFacts);
+    }
     if (
       parsed.product_match === 'matched' &&
       parsed.company_identity?.name &&
@@ -1531,6 +1667,29 @@ export class NativeAcquisition {
       const sources = activitySources(parsed.facts, item.source_url, page.research_pages);
       let verdict = { result: 'uncertain', reason: '官网经营用途缺少可复核的原文', sources: [] };
       if (sources.length) {
+        const trace = identityVersion && {
+          stage: 'activity',
+          versions: {
+            admission_version: admissionVersion,
+            identity_version: identityVersion,
+            evidence_version: acquisitionEvidenceVersion,
+            subject:
+              verifiedRegistration(parsed.company_identity, parsed.facts)?.key ||
+              acquisitionUrl(item.source_url),
+          },
+          snapshot_ids: [
+            ...new Set(
+              [
+                ...sources,
+                ...parsed.company_identity.evidence,
+                ...parsed.facts.filter(({ field }) => field === 'admission_facts'),
+              ]
+                .map(({ snapshot_id }) => snapshot_id)
+                .filter(Boolean),
+            ),
+          ],
+        };
+        if (trace) (op.research_trace ||= []).push(trace);
         try {
           verdict = await verifyCompanyActivity(
             this.providers.model,
@@ -1558,6 +1717,7 @@ export class NativeAcquisition {
                 )
                 ?.text?.slice(0, 1200),
             },
+            trace,
           );
         } catch {
           verdict.reason = '官网业务独立模型复核未完成，待重新核实';
@@ -1568,11 +1728,16 @@ export class NativeAcquisition {
         page,
         input,
         verdict.result === 'relevant' ? verdict.sources : [],
+        operatorFacts,
       );
       parsed.activity_verification = {
         result: verdict.result,
         reason: verdict.reason,
-        sources: verdict.sources.map(({ source_url, quote }) => ({ source_url, quote })),
+        sources: verdict.sources.map(({ source_url, quote, snapshot_id, quote_offset }) => ({
+          source_url,
+          quote,
+          ...(snapshot_id ? { snapshot_id, quote_offset } : {}),
+        })),
       };
       if (verdict.result !== 'relevant' || parsed.product_match !== 'matched') {
         parsed.ok = false;
@@ -1669,7 +1834,18 @@ export class NativeAcquisition {
     op.stage = 'persist';
     this.store.save(op);
     try {
-      const written = await this.feishu.write(op.action, op.fields, op.recordId, op.clientToken);
+      const written = await this.feishu.write(
+        op.action,
+        op.fields,
+        op.recordId,
+        op.clientToken,
+        op.acquisition,
+      );
+      if (written.acquisition_conflict || written.acquisition_duplicate)
+        return await this.finishAcquisitionMatch(op, {
+          conflict: written.acquisition_conflict,
+          record_id: written.record_id,
+        });
       op.recordId = written.record_id;
       this.store.save(op);
       if (!(await this.verify(op))) throw new Error('客户档案保存后读回不一致');
@@ -1689,6 +1865,8 @@ export class NativeAcquisition {
   async verify(op) {
     if (!op.recordId) return false;
     const record = await this.feishu.record(op.recordId);
+    if (op.acquisition && acquisitionUrl(customerWebsite(record)) !== acquisitionUrl(op.source_url))
+      return false;
     if (domainKey(customerWebsite(record)) !== domainKey(op.source_url)) return false;
     const fields = this.feishu.localFirst
       ? op.fields
@@ -1726,12 +1904,15 @@ export class NativeAcquisition {
       this.assessments.save(op.assessment, await this.feishu.record(op.recordId));
     }
     this.feishu.persist?.(op.recordId);
+    const capture = op.acquisition && this.feishu.confirmAcquisition(op.recordId, op.id);
+    if (capture) this.recordAcquisitionSource(op, op.recordId);
     const output = this.output(op, {
       research: op.research,
       row: {
         result: op.action === 'insert' ? 'inserted' : 'updated',
         source_url: op.source_url,
         record_id: op.recordId,
+        ...(capture ? { capture } : {}),
       },
       reason: op.assessment
         ? op.assessment.incompleteReason
@@ -1750,16 +1931,137 @@ export class NativeAcquisition {
       op.input.item.source_url,
     );
   }
+  recordAcquisitionSource(op, recordId) {
+    this.feishu.observeAcquisition(recordId, op.id, {
+      ...op.acquisition,
+      research_trace: op.research_trace,
+      eligibility: op.research?.eligibility,
+      activity: op.research?.activity_verification,
+      opportunities: op.research?.assessment_opportunities,
+      checked_at: new Date().toISOString(),
+    });
+  }
+  previouslyVerifiedSubject(page, item, op, target) {
+    const successful = page.collection_attempts.filter(({ status }) => status === 'ok');
+    const hashes = [...new Set(successful.map(({ content_hash }) => content_hash))].sort();
+    if (!hashes.length || !this.providers.model.cacheIdentity) return null;
+    const key = researchCacheKey({
+      messages: [hashes, target],
+      schema: websiteAdmissionResearchSchema,
+      identity: {
+        ...this.providers.model.cacheIdentity,
+        admission: op.admission_version,
+        identity: op.identity_version,
+        evidence: acquisitionEvidenceVersion,
+        prompt: companyResearchRequest(page, target).messages[0].content,
+      },
+    });
+    if (!key) return null;
+    op.content_key = key;
+    const domain = domainKey(item.source_url);
+    for (const previous of this.feishu.acquisitionSourcesByContent(key)) {
+      if (!previous.registration || domainKey(previous.source_url) === domain) continue;
+      if (item.source_title && subjectName(item.source_title) !== subjectName(previous.name))
+        continue;
+      const locate = ({ quote, value, field }) =>
+        [...page.evidence_by_url].flatMap(([source_url, page]) =>
+          page.origins
+            .filter(({ text }) => text.includes(quote))
+            .map(({ text, snapshotId }) => ({
+              field,
+              value,
+              quote,
+              source_url,
+              snapshot_id: snapshotId,
+              quote_offset: text.indexOf(quote),
+            })),
+        )[0];
+      const evidence = locate(previous.registration.evidence);
+      const address = previous.registration.address_evidence;
+      const address_evidence = address && locate(address);
+      if (!evidence || (address && !address_evidence)) continue;
+      op.acquisition = {
+        operation_id: op.id,
+        source_url: item.source_url,
+        source_kind: item.source_kind || 'website',
+        job_id: item.job_id,
+        name: previous.name,
+        registration: {
+          ...previous.registration,
+          evidence,
+          ...(address_evidence ? { address_evidence } : {}),
+        },
+        content_key: key,
+        mode: 'automatic',
+      };
+      op.research = {
+        company_name: previous.name,
+        facts: [evidence, address_evidence].filter(Boolean),
+        checked_urls: page.checked_urls,
+      };
+      op.research_trace = [
+        {
+          stage: 'known_subject',
+          request_key: key,
+          subject: previous.registration.key,
+          reused: true,
+          snapshot_ids: successful.map(({ snapshot_id }) => snapshot_id),
+        },
+      ];
+      op.research_usage.cache_hits++;
+      return previous.record_id;
+    }
+    return null;
+  }
+  async finishAcquisitionMatch(op, match) {
+    const source_url = op.acquisition.source_url;
+    op.acquisition_match = match;
+    this.store.save(op);
+    if (match.record_id) {
+      await this.feishu.record(match.record_id);
+      this.recordAcquisitionSource(op, match.record_id);
+    } else {
+      op.research.identity_conflict = match.conflict;
+      op.research.review_required = true;
+    }
+    return this.store.complete(
+      op,
+      this.output(op, {
+        research: op.research,
+        outcome: match.record_id ? 'no_new_candidates' : 'review',
+        reason: match.conflict || '经营主体已收录，已保留本次发现来源',
+        row: {
+          source_url,
+          result: match.record_id ? 'duplicate' : 'manual_review',
+          record_id: match.record_id,
+        },
+        skipped: match.record_id ? [{ url: source_url, domain: domainKey(source_url) }] : [],
+      }),
+    ).output;
+  }
   async status(id) {
     const op = this.store.get(id);
     if (!op) return { settled: false, missing: true, reason: '操作记录不存在，未自动重放' };
     if (op.state === 'completed') return { settled: true, output: op.output };
     if (this.active.has(id)) return { settled: false, reason: '仍在执行' };
+    if (op.acquisition_match) {
+      try {
+        return {
+          settled: true,
+          output: await this.finishAcquisitionMatch(op, op.acquisition_match),
+        };
+      } catch {
+        return { settled: false, reason: '既有本地档案尚未读回，未重复写入' };
+      }
+    }
     if (['persist', 'assessment'].includes(op.stage)) {
       try {
         if (op.stage === 'assessment' && op.recordVerifiedAt)
           return { settled: true, output: await this.finishWritten(op) };
-        if (!op.recordId && op.action === 'insert') {
+        if (!op.recordId && op.acquisition) {
+          op.recordId = this.feishu.acquisitionWrite(id);
+          if (op.recordId) this.store.save(op);
+        } else if (!op.recordId && op.action === 'insert') {
           const candidates = recordsForDomain(
             await this.feishu.records(),
             domainKey(op.source_url),
