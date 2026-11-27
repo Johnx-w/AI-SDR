@@ -344,6 +344,28 @@ test('来源人工暂停显示原因、未勾选首发、旧计划入口与继�
   assert.match(html, /campaignId=old-plan/);
   assert.match(html, /继续获客/);
   assert.match(html, /删除来源任务/);
-  assert.match(html, /<input[^>]*type="checkbox"[^>]*disabled/);
+  assert.match(html, /<input[^>]*type="checkbox"/);
+  assert.match(html, /保存自动首发设置/);
   assert.doesNotMatch(html, /<input[^>]*checked/);
+});
+
+test('已结束来源提供重新执行入口并沿用持久化关闭状态', () => {
+  const html = renderToStaticMarkup(
+    createElement(
+      MemoryRouter,
+      null,
+      createElement(BatchProgress, {
+        job: {
+          ...job,
+          status: 'completed',
+          input: { auto_first_touch: false },
+          sourcePause: { outreachPlanId: 'old-plan', reason: '关联触达已删除' },
+        },
+        control: () => {},
+        busy: false,
+      }),
+    ),
+  );
+  assert.match(html, /重新执行/);
+  assert.match(html, /rerun=usage-ui-fixture/);
 });

@@ -51,6 +51,7 @@ export class AcquisitionSchedules {
     if ((latest?.sourceControlRevision || 0) > (plan.sourceControlRevision || 0)) {
       for (const key of [
         'sourceControlRevision',
+        'outreachAuthorizationRevision',
         'sourcePause',
         'sourceDeletedAt',
         'status',
@@ -113,8 +114,13 @@ export class AcquisitionSchedules {
       .run(plan.id, key, hash, JSON.stringify(plan));
     return plan;
   }
-  update(id, { name, input, timing }) {
-    const plan = this.get(id);
+  update(id, { name, input, timing, sourceControlRevision }) {
+    let plan = this.get(id);
+    if (
+      plan.sourcePause?.outreachPlanId &&
+      sourceControlRevision !== (plan.sourceControlRevision || 0)
+    )
+      throw fail(409, '来源已更新，请刷新后重新编辑');
     if (!['enabled', 'paused'].includes(plan.status)) throw fail(409, '该计划已结束');
     if (typeof name !== 'string' || !name.trim() || name.length > 80)
       throw fail(400, '计划名称须为 1–80 字符');
@@ -124,6 +130,12 @@ export class AcquisitionSchedules {
     const normalized = validateTiming(timing, this.now());
     const nextRunAt = plan.status === 'enabled' ? nextOccurrence(normalized, this.now()) : null;
     if (plan.status === 'enabled' && !nextRunAt) throw fail(400, '所选日期已没有未到的执行时间');
+    if (
+      plan.sourcePause?.outreachPlanId &&
+      input.auto_first_touch !== plan.input.auto_first_touch
+    ) {
+      plan = this.controlOutreach(id, input.auto_first_touch === true, { sourceControlRevision });
+    }
     plan.name = name.trim();
     plan.input = input;
     plan.timing = normalized;
@@ -147,6 +159,7 @@ export class AcquisitionSchedules {
     )
       throw fail(409, '该计划已结束');
     if (action === 'resume') {
+      if (plan.sourcePause?.outreachPlanId && plan.status === 'enabled') return plan;
       if (!['paused', 'closed'].includes(plan.status))
         throw fail(409, '只有暂停或关闭的计划可以恢复');
       this.checkInput(plan.input);
@@ -183,10 +196,32 @@ export class AcquisitionSchedules {
     this.onOutreachChange();
     return plan;
   }
-  controlOutreach(id, enabled) {
+  controlOutreach(id, enabled, { sourceControlRevision } = {}) {
     if (typeof enabled !== 'boolean') throw fail(400, '请明确选择开启或关闭自动首发');
     const plan = this.get(id);
-    if (plan.status === 'closed') throw fail(409, '该计划已关闭');
+    if (plan.status === 'closed' || plan.sourceDeletedAt) throw fail(409, '该计划已关闭');
+    if (plan.sourcePause?.outreachPlanId) {
+      const revision = plan.sourceControlRevision || 0;
+      if (sourceControlRevision !== revision) {
+        if (
+          enabled &&
+          plan.input.auto_first_touch &&
+          plan.outreachAuthorizationRevision === sourceControlRevision
+        )
+          return plan;
+        throw fail(409, '来源已更新，请刷新后重新保存自动首发授权');
+      }
+      if (plan.input.auto_first_touch === enabled) return plan;
+      if (plan.lastJobId) {
+        const job = this.jobs().get(plan.lastJobId);
+        this.jobs().controlOutreach(job.id, enabled, {
+          sourceControlRevision: job.sourceControlRevision || 0,
+          fromSchedule: true,
+        });
+      }
+      if (enabled) plan.outreachAuthorizationRevision = revision;
+      plan.sourceControlRevision = revision + 1;
+    }
     plan.input.auto_first_touch = validateAutoFirstTouch(enabled);
     this.save(plan);
     this.onOutreachChange();

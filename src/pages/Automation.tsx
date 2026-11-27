@@ -107,6 +107,7 @@ export function Automation() {
   const { notify } = useWorkspace();
   const [params, setParams] = useSearchParams();
   const editId = params.get('edit');
+  const rerunId = params.get('rerun');
   const tab =
     params.get('tab') === 'schedules' ? 'schedules' : params.get('tab') === 'runs' ? 'runs' : 'new';
   const [restored] = useState(readSubmission);
@@ -166,6 +167,28 @@ export function Automation() {
     indoor: '优先室内窗饰',
     outdoor: '优先室外遮阳',
   };
+  useEffect(() => {
+    if (!rerunId || editId) return;
+    let alive = true;
+    setEditError('正在读取原任务…');
+    acquisitionApi
+      .job(rerunId)
+      .then((job) => {
+        if (!alive) return;
+        if (job.sourceDeletedAt || job.scheduleId || !['completed', 'partial'].includes(job.status))
+          throw new Error('只有已结束的单次来源可以重新执行');
+        setInput(editableInput(job.input));
+        setTargetCount(job.target);
+        setRunMode('now');
+        setEditError('');
+      })
+      .catch((cause) => {
+        if (alive) setEditError(cause instanceof Error ? cause.message : '读取原任务失败');
+      });
+    return () => {
+      alive = false;
+    };
+  }, [rerunId, editId]);
   useEffect(() => {
     if (!pending && params.get('mode') === 'scheduled') setRunMode('scheduled');
   }, [params.get('mode'), pending]);
@@ -335,7 +358,8 @@ export function Automation() {
     !timingError &&
     (runMode !== 'scheduled' || !!scheduleName) &&
     !(runMode === 'now' && active) &&
-    (!editId || (!!editPlan && !editError));
+    (!editId || (!!editPlan && !editError)) &&
+    (!rerunId || !editError);
   async function submit(retry = false) {
     if (submissionRef.current || (!retry && (!canSubmit || locked))) return;
     const request = retry
@@ -373,6 +397,7 @@ export function Automation() {
           request.input,
           request.target,
           request.timing,
+          editPlan.sourceControlRevision || 0,
         );
         notify('定时计划已更新');
         setParams({ tab: 'schedules' });
@@ -598,7 +623,7 @@ export function Automation() {
                 </button>
               </div>
             )}
-            {editId && (editing?.id !== editId || editError) ? (
+            {(editId && (editing?.id !== editId || editError)) || (rerunId && editError) ? (
               <div className="acq-notice" role="status">
                 {editError || '正在读取计划…'}
                 {editError && <Link to="/automation?tab=schedules">返回定时计划</Link>}

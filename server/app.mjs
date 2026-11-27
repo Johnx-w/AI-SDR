@@ -822,6 +822,7 @@ export function createApp({
                 manager.update(suffix[0], {
                   name: body.name,
                   timing: body.timing,
+                  sourceControlRevision: body.sourceControlRevision,
                   input: {
                     ...validateInput(body.input),
                     target_count: validateCount(body.input?.target_count),
@@ -830,12 +831,18 @@ export function createApp({
               ),
             );
           }
-          if (suffix.length === 2 && suffix[1] === 'auto-first-touch' && request.method === 'POST')
+          if (
+            suffix.length === 2 &&
+            suffix[1] === 'auto-first-touch' &&
+            request.method === 'POST'
+          ) {
+            const body = await readJson(request);
             return json(
               response,
               200,
-              reviewPlan(manager.controlOutreach(suffix[0], (await readJson(request)).enabled)),
+              reviewPlan(manager.controlOutreach(suffix[0], body.enabled, body)),
             );
+          }
           if (suffix.length === 2 && request.method === 'POST')
             return json(response, 200, reviewPlan(manager.control(suffix[0], suffix[1])));
           throw new ApiError(404, '定时计划接口不存在');
@@ -1023,12 +1030,22 @@ export function createApp({
           }
           if (suffix.length === 1 && request.method === 'GET')
             return json(response, 200, reviewJob(manager.get(suffix[0])));
-          if (suffix.length === 2 && suffix[1] === 'auto-first-touch' && request.method === 'POST')
+          if (
+            suffix.length === 2 &&
+            suffix[1] === 'auto-first-touch' &&
+            request.method === 'POST'
+          ) {
+            const body = await readJson(request);
             return json(
               response,
               200,
-              reviewJob(manager.controlOutreach(suffix[0], (await readJson(request)).enabled)),
+              reviewJob(
+                manager.controlOutreach(suffix[0], body.enabled, {
+                  sourceControlRevision: body.sourceControlRevision,
+                }),
+              ),
             );
+          }
           if (
             suffix.length === 3 &&
             suffix[1] === 'auto-first-touch' &&

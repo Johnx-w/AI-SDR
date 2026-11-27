@@ -1101,3 +1101,107 @@ test('旧版本已排队的同域首封在重启后按原地址发送一次', as
   );
   assert.equal(h.service.delivery(queued.id).status, 'accepted');
 });
+
+test('删除后直接恢复零新安排；重新保存授权只建立一个新安排，旧计划不复活', async () => {
+  const h = harness();
+  try {
+    const job = h.create();
+    await h.capture(job.id, buyer('fresh-authorization'));
+    h.service.syncAcquisition();
+    const oldId = `acquisition-${job.id}`;
+    h.service.requestCampaignDeletion(oldId, h.service.campaign(oldId).revision, true);
+    h.plans.pauseSourceForOutreach(job.id, { outreachPlanId: oldId });
+    h.service.completeCampaignDeletion(oldId);
+    await h.jobs.resume(job.id);
+    h.service.syncAcquisition();
+    assert.equal(h.jobs.get(job.id).input.auto_first_touch, false);
+    assert.equal(h.service.campaigns().length, 1);
+    assert.equal(h.state.sent.length, 0);
+    h.jobs.pause(job.id);
+    const revision = h.jobs.get(job.id).sourceControlRevision;
+    const enabled = h.jobs.controlOutreach(job.id, true, { sourceControlRevision: revision });
+    h.jobs.controlOutreach(job.id, true, { sourceControlRevision: revision });
+    h.service.syncAcquisition();
+    const newId = `acquisition-${job.id}-g1`;
+    assert.equal(enabled.manualPaused, true);
+    assert.equal(h.service.campaign(newId).status, 'paused');
+    assert.equal(h.service.campaign(oldId).deletedAt != null, true);
+    assert.equal(h.service.campaigns().length, 2);
+    await h.jobs.resume(job.id);
+    await h.pump();
+    assert.equal(h.state.sent.length, 1);
+    h.jobs.pause(job.id, { outreachPlanId: newId, disableFirstTouch: true });
+    assert.throws(() => h.jobs.controlOutreach(job.id, true, { sourceControlRevision: revision }), {
+      status: 409,
+    });
+  } finally {
+    await h.close();
+  }
+});
+
+test('定时来源重新授权保留暂停，重复保存唯一且过期编辑不能重新开启', async () => {
+  const h = harness();
+  try {
+    const plan = h.plan();
+    const job = h.create({}, plan.id);
+    h.service.syncAcquisition();
+    const oldId = `acquisition-${job.id}`;
+    h.service.requestCampaignDeletion(oldId, 1, true);
+    h.plans.pauseSourceForOutreach(job.id, { outreachPlanId: oldId });
+    h.service.completeCampaignDeletion(oldId);
+    const paused = h.plans.get(plan.id);
+    const enabled = h.plans.controlOutreach(plan.id, true, {
+      sourceControlRevision: paused.sourceControlRevision,
+    });
+    h.plans.controlOutreach(plan.id, true, { sourceControlRevision: paused.sourceControlRevision });
+    h.service.syncAcquisition();
+    assert.equal(enabled.status, 'paused');
+    assert.equal(h.service.campaigns().length, 2);
+    assert.equal(h.service.campaign(`acquisition-${job.id}-g1`).status, 'paused');
+    h.plans.pauseSourceForOutreach(job.id, { outreachPlanId: `acquisition-${job.id}-g1` });
+    assert.throws(
+      () =>
+        h.plans.update(plan.id, {
+          ...enabled,
+          sourceControlRevision: paused.sourceControlRevision,
+        }),
+      { status: 409 },
+    );
+    assert.equal(h.plans.get(plan.id).input.auto_first_touch, false);
+  } finally {
+    await h.close();
+  }
+});
+
+test('同轮重新授权不重试已跳过客户；重启只处理此前未尝试客户', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'reauthorization-'));
+  const h = harness(join(dir, 'outreach.sqlite'));
+  try {
+    const job = h.create();
+    await h.capture(job.id, { ...buyer('skipped-before'), email: '' });
+    await h.pump();
+    assert.equal(h.service.deliveries(`acquisition-${job.id}`)[0].status, 'skipped');
+    const oldId = `acquisition-${job.id}`;
+    h.service.requestCampaignDeletion(oldId, h.service.campaign(oldId).revision, true);
+    h.plans.pauseSourceForOutreach(job.id, { outreachPlanId: oldId });
+    h.service.completeCampaignDeletion(oldId);
+    h.state.leads[0] = buyer('skipped-before');
+    await h.capture(job.id, buyer('untouched-after'));
+    await h.capture(job.id, { ...buyer('no-mail-control'), email: '' });
+    const revision = h.jobs.get(job.id).sourceControlRevision;
+    h.jobs.controlOutreach(job.id, true, { sourceControlRevision: revision });
+    await h.jobs.resume(job.id);
+    await h.service.close();
+    h.service = new OutreachService(h.options);
+    await h.pump();
+    assert.deepEqual(
+      h.state.sent.map((mail) => mail.to),
+      ['info@untouched-after.example.org'],
+    );
+    assert.equal(h.service.campaigns().length, 2);
+    assert.equal(h.service.campaign(oldId).deletedAt != null, true);
+  } finally {
+    await h.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
