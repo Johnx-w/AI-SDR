@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { availableMemory } from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +14,10 @@ import { domainKey } from './website-identity.mjs';
 import { researchPageText, hasUsableResearchText } from './research-pages.mjs';
 
 const worker = fileURLToPath(new URL('./scrapling/worker.py', import.meta.url));
+const bundledWorker = fileURLToPath(new URL('./scrapling/runtime-linux/worker', import.meta.url));
+const bundledBrowsers = fileURLToPath(
+  new URL('./scrapling/runtime-linux/browsers', import.meta.url),
+);
 const maxDocument = 4 * 1024 * 1024;
 const maxResources = 30;
 const allowed = new Set(['document', 'script', 'stylesheet', 'xhr', 'fetch']);
@@ -97,11 +102,13 @@ function runWorker(python, input, signal) {
       ),
     ),
   );
+  safeEnv.PYTHONUTF8 = '1';
+  if (!python) safeEnv.PLAYWRIGHT_BROWSERS_PATH = bundledBrowsers;
   return new Promise((resolve, reject) => {
     const grouped = process.platform !== 'win32';
     const child = execFile(
-      python,
-      ['-I', '-X', 'utf8', worker],
+      python || bundledWorker,
+      python ? ['-I', '-X', 'utf8', worker] : [],
       {
         windowsHide: true,
         detached: grouped,
@@ -171,11 +178,14 @@ export async function collectScraplingPage(
   };
   const initial = websiteUrl(url);
   if (!initial || !domainKey(initial.href)) return snapshot;
-  if (!python || active || availableMemory() < 1024 ** 3) {
+  const installed =
+    python || (process.platform === 'linux' && existsSync(bundledWorker) && bundledWorker);
+  if (!installed || active || availableMemory() < 1024 ** 3) {
     return { ...snapshot, status: 'unavailable' };
   }
   const timeout = AbortSignal.timeout(30000);
-  const stop = signal ? AbortSignal.any([signal, timeout]) : timeout;
+  const finished = new AbortController();
+  const stop = AbortSignal.any([timeout, finished.signal, ...(signal ? [signal] : [])]);
   const { server, token, readChecked } = browserGateway(initial, stop, readResourceImpl);
   active = true;
   try {
@@ -228,6 +238,7 @@ export async function collectScraplingPage(
       status: timeout.aborted ? 'timeout' : error.code === 'ENOENT' ? 'unavailable' : 'failed',
     };
   } finally {
+    finished.abort();
     server.closeAllConnections();
     server.close();
     active = false;

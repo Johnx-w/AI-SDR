@@ -18,3 +18,5 @@ docs/research/customer-calibration-*.md
 .venv/
 __pycache__/
 server/docling/reader-linux
+server/scrapling/runtime-linux
+server/scrapling/runtime-linux.tar.gz

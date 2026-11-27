@@ -1,4 +1,4 @@
-import { isCountryScope } from '../src/domain/country-catalog.ts';
+import { isCountryScope, WORLDWIDE_COUNTRY } from '../src/domain/country-catalog.ts';
 import acquisition from '../src/data/acquisition.json' with { type: 'json' };
 import {
   MAX_SELECTED_PRODUCTS,
@@ -12,15 +12,17 @@ import {
 const invalid = (message) => Object.assign(new Error(message), { status: 400 });
 export function validateCountryScope(input) {
   if (!isCountryScope(input))
-    throw Object.assign(
-      invalid('请选择一个支持的国家，获客范围仅限该国全境。旧范围需要重新选择国家。'),
-      { code: 'INVALID_COUNTRY_SCOPE' },
-    );
+    throw Object.assign(invalid('请选择“所有国家”或一个支持的国家全境。旧范围需要重新选择。'), {
+      code: 'INVALID_COUNTRY_SCOPE',
+    });
 }
 
 export function validateTarget(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input))
     throw invalid('请提交有效的搜索参数');
+  const country = typeof input.country === 'string' ? input.country.trim() : input.country;
+  const region = typeof input.region === 'string' ? input.region.trim() : input.region;
+  validateCountryScope({ ...input, country, region });
   if (
     ['audience', 'preferred_requirements', 'required_requirements'].some((key) =>
       Object.hasOwn(input, key),
@@ -66,9 +68,8 @@ export function validateTarget(input) {
     if (typeof value !== 'string' || value.length > maximum)
       throw invalid(`参数 ${key} 必须是字符串且不能超过 ${maximum} 字符`);
     result[key] = value.trim();
-    if (['country', 'product'].includes(key) && !result[key]) throw invalid(`参数 ${key} 不能为空`);
+    if (key === 'product' && !result[key]) throw invalid(`参数 ${key} 不能为空`);
   }
-  validateCountryScope({ ...input, country: result.country, region: result.region });
   if (input.products !== undefined && !allProducts) {
     if (
       !Array.isArray(input.products) ||
@@ -107,10 +108,10 @@ export function validateTarget(input) {
   if (input.query_mode !== undefined) {
     if (input.query_mode !== 'auto') throw invalid('新任务仅支持自动生成搜索词');
     result.query_mode = 'auto';
-  } else if (allProducts) result.query_mode = 'auto';
+  } else if (allProducts || country === WORLDWIDE_COUNTRY) result.query_mode = 'auto';
   const channel = input.acquisition_channel ?? 'tavily_web';
   if (!['tavily_web', 'web'].includes(channel)) throw invalid('该获客渠道尚未接入');
   result.acquisition_channel = channel;
-  result.market_countries = [result.country];
+  result.market_countries = result.country === WORLDWIDE_COUNTRY ? [] : [result.country];
   return result;
 }

@@ -1,5 +1,6 @@
 """Read one brokered document in a fresh Chromium context."""
 
+import asyncio
 from base64 import b64decode
 from importlib.metadata import version
 import json
@@ -12,7 +13,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, build_opener, ProxyHandler
 
 import psutil
-from playwright.sync_api import Error, TimeoutError, sync_playwright
+from playwright.async_api import Error, TimeoutError, async_playwright
 from scrapling import Selector
 
 MAX_DOCUMENT = 4 * 1024 * 1024
@@ -46,10 +47,25 @@ def observe(stop, peaks):
             stop_processes()
 
 
-def read_page(request):
-    with sync_playwright() as playwright:
+def read_gateway(request, url, resource_type):
+    query = urlencode({"url": url, "kind": resource_type})
+    try:
+        with build_opener(ProxyHandler({})).open(
+            Request(
+                request["gateway"] + "/?" + query,
+                headers={"Authorization": "Bearer " + request["token"]},
+            ),
+            timeout=4,
+        ) as reply:
+            return reply.read(MAX_DOCUMENT + 1), reply.headers.get("Content-Type")
+    except (URLError, OSError):
+        return b"", None
+
+
+async def read_page(request):
+    async with async_playwright() as playwright:
         try:
-            browser = playwright.chromium.launch(
+            browser = await playwright.chromium.launch(
                 chromium_sandbox=True,
                 proxy={"server": "http://127.0.0.1:1"},
                 args=[
@@ -63,51 +79,46 @@ def read_page(request):
         except Error:
             return {"status": "unavailable"}
         try:
-            context = browser.new_context(accept_downloads=False, service_workers="block")
-            page = context.new_page()
+            context = await browser.new_context(accept_downloads=False, service_workers="block")
+            page = await context.new_page()
             context.on("page", lambda popup: popup.close())
-            context.route_web_socket("**/*", lambda socket: socket.close())
-            opener = build_opener(ProxyHandler({}))
+            await context.route_web_socket("**/*", lambda socket: socket.close())
             body = b64decode(request["body"], validate=True)
             document_served = False
+            available = asyncio.Semaphore(3)
 
-            def route_request(route):
+            async def route_request(route):
                 nonlocal document_served
                 resource = route.request
                 if resource.method != "GET" or not resource.url.startswith("https://"):
-                    route.abort()
+                    await route.abort()
                 elif resource.resource_type == "document":
                     if document_served or resource.url != request["url"]:
-                        route.abort()
+                        await route.abort()
                     else:
                         document_served = True
-                        route.fulfill(status=200, body=body, content_type=request["type"])
+                        await route.fulfill(status=200, body=body, content_type=request["type"])
                 elif resource.resource_type in {"script", "stylesheet", "xhr", "fetch"}:
-                    query = urlencode({"url": resource.url, "kind": resource.resource_type})
-                    try:
-                        with opener.open(
-                            Request(
-                                request["gateway"] + "/?" + query,
-                                headers={"Authorization": "Bearer " + request["token"]},
-                            ),
-                            timeout=4,
-                        ) as reply:
-                            data = reply.read(MAX_DOCUMENT + 1)
-                            kind = reply.headers.get("Content-Type")
-                    except (URLError, TimeoutError, OSError):
-                        route.abort()
-                        return
-                    if len(data) > MAX_DOCUMENT:
-                        route.abort()
+                    async with available:
+                        data, kind = await asyncio.to_thread(
+                            read_gateway, request, resource.url, resource.resource_type
+                        )
+                    if not kind or len(data) > MAX_DOCUMENT:
+                        await route.abort()
                     else:
-                        route.fulfill(status=200, body=data, content_type=kind)
+                        await route.fulfill(status=200, body=data, content_type=kind)
                 else:
-                    route.abort()
+                    await route.abort()
 
-            context.route("**/*", route_request)
-            page.goto(request["url"], wait_until="domcontentloaded", timeout=18000)
-            page.wait_for_timeout(950)
-            html = page.content()
+            await context.route("**/*", route_request)
+            await page.goto(request["url"], wait_until="commit", timeout=10000)
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=8000)
+            except TimeoutError:
+                # Slow optional scripts need not hide evidence already in the DOM.
+                pass
+            await page.wait_for_timeout(950)
+            html = await page.content()
             if len(html.encode()) > MAX_DOCUMENT:
                 return {"status": "failed"}
             document = Selector(content=html, url=page.url)
@@ -128,7 +139,7 @@ def read_page(request):
         except Error:
             return {"status": "failed"}
         finally:
-            browser.close()
+            await browser.close()
 
 
 if __name__ == "__main__":
@@ -138,7 +149,7 @@ if __name__ == "__main__":
     observer = Thread(target=observe, args=(stopped, measurements), daemon=True)
     observer.start()
     try:
-        result = read_page(json.load(sys.stdin))
+        result = asyncio.run(read_page(json.load(sys.stdin)))
     finally:
         stopped.set()
         observer.join()

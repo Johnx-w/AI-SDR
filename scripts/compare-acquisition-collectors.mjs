@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -40,6 +41,22 @@ if (
 await mkdir(output);
 await mkdir(join(output, 'pages'));
 await writeFile(join(output, 'sample.json'), JSON.stringify(targets, null, 2));
+const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
+await writeFile(
+  join(output, 'environment.json'),
+  JSON.stringify(
+    {
+      revision: git('rev-parse', 'HEAD'),
+      working_tree_dirty: Boolean(git('status', '--porcelain')),
+      node: process.version,
+      os: process.platform,
+      arch: process.arch,
+      started_at: new Date().toISOString(),
+    },
+    null,
+    2,
+  ),
+);
 
 async function archive(content) {
   if (!content) return null;

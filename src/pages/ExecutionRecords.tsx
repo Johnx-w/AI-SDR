@@ -8,6 +8,7 @@ import type { OverviewPeriod } from '../domain/overview-rules.mjs';
 import { BatchProgress } from '../components/BatchProgress';
 import { Badge, Empty } from '../components/ui';
 import type { AcquisitionJob } from '../domain/types';
+import { WORLDWIDE_COUNTRY, WORLDWIDE_LABEL } from '../domain/country-catalog';
 import {
   ALL_PRODUCTS_LABEL,
   environmentPreferenceLabels,
@@ -280,7 +281,7 @@ function AcquisitionExecutionList({ selectedId }: { selectedId?: string }) {
           >
             <span>
               <strong>
-                {job.input.country}
+                {job.input.country === WORLDWIDE_COUNTRY ? WORLDWIDE_LABEL : job.input.country}
                 {job.input.region ? ' · ' + job.input.region : ''}
               </strong>
               <small>

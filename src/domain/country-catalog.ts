@@ -91,6 +91,12 @@ export const acquisitionMarkets = targetCountries.map((c) => ({
   value: c.name,
   keywords: [c.code, c.iso3, ...(aliases[c.code] || [])].join(' '),
 }));
+export const WORLDWIDE_COUNTRY = 'worldwide';
+export const WORLDWIDE_LABEL = '所有国家';
+export const acquisitionScopes = [
+  { value: WORLDWIDE_COUNTRY, label: WORLDWIDE_LABEL, keywords: '全球 global worldwide' },
+  ...acquisitionMarkets,
+];
 export const outreachMarkets = acquisitionMarkets.map((option, i) => ({
   ...option,
   value: targetCountries[i].code,
@@ -107,9 +113,15 @@ export function isCountryScope(input: {
   market_countries?: unknown;
   target_markets?: unknown;
 }) {
+  if (input.region != null && input.region !== '') return false;
+  if (input.country === WORLDWIDE_COUNTRY)
+    return (
+      input.target_markets === undefined &&
+      (input.market_countries === undefined ||
+        (Array.isArray(input.market_countries) && input.market_countries.length === 0))
+    );
   return (
     acquisitionMarkets.some((option) => option.value === input.country) &&
-    !input.region &&
     [input.market_countries, input.target_markets].every(
       (group) =>
         group === undefined ||
