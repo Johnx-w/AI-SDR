@@ -171,6 +171,7 @@ export class OutreachService {
           demands: (graph.demands || []).filter((d) => d.customerId === id),
         };
       });
+    this.migrateProductSelections();
     this.followUps = new OutreachFollowUps(this, recordFollowUp);
     this.tags = new MailboxTags(this.db, mailboxes);
     this.db
@@ -485,6 +486,8 @@ export class OutreachService {
           sourceUrl,
           materialOnly,
           materialCategory,
+          direction,
+          deliveryForms,
           version,
           effectiveDate,
         }) => ({
@@ -497,6 +500,8 @@ export class OutreachService {
           sourceUrl,
           materialOnly,
           materialCategory,
+          direction,
+          deliveryForms,
           version,
           effectiveDate,
           status,
@@ -574,7 +579,7 @@ export class OutreachService {
         markets: list(input.filters?.markets),
         grades: list(input.filters?.grades),
         products: list(input.filters?.products),
-        categories: list(input.filters?.categories),
+        categories: [],
       },
       mailboxIds,
       includeExisting: input.includeExisting !== false,
@@ -593,14 +598,10 @@ export class OutreachService {
       lastError: '',
       sendWindow: input.sendWindow === undefined ? (prior?.sendWindow ?? null) : input.sendWindow,
     };
+    this.validateProductSelection(c);
+    c.productSelectionVersion = 1;
     c.productScopes = this.salesProducts()
-      .filter(
-        (product) =>
-          (c.filters.products.length
-            ? c.filters.products.includes(product.id)
-            : mailboxIds.some((id) => this.mailboxes.get(id).productIds?.includes(product.id))) &&
-          (!c.filters.categories.length || c.filters.categories.includes(product.category)),
-      )
+      .filter((product) => c.filters.products.includes(product.id))
       .map(outreachProductScope);
     if (c.sendWindow !== null) {
       const error = sendWindowError(c.sendWindow);
@@ -786,11 +787,73 @@ export class OutreachService {
     const { identities, blocked } = this.contactState(ignoreDelivery);
     return this.identities(candidate).some((k) => identities.has(k) || blocked.has(k));
   }
+  migrateProductSelections() {
+    // Only saved product snapshots prove old authorization; today's catalog cannot add it.
+    for (const row of this.db.prepare('SELECT data FROM outreach_campaigns').all()) {
+      const c = JSON.parse(row.data);
+      if (c.mode !== 'production' || c.acquisitionSource || c.productSelectionVersion === 1)
+        continue;
+      const snapshots = Array.isArray(c.productScopes) ? c.productScopes : [];
+      const products = snapshots
+        .filter(
+          (snapshot) =>
+            (!c.filters?.products?.length || c.filters.products.includes(snapshot.productId)) &&
+            (!c.filters?.categories?.length || c.filters.categories.includes(snapshot.category)) &&
+            c.mailboxIds?.some((id) => {
+              const box = this.mailboxes.get(id);
+              return (
+                box?.productIds?.includes(snapshot.productId) && siteAllowsProduct(snapshot, box)
+              );
+            }),
+        )
+        .map((snapshot) => snapshot.productId);
+      const waiting = !products.length;
+      const migrated = {
+        ...c,
+        filters: { ...c.filters, products, categories: [] },
+        productSelectionVersion: 1,
+        productSelectionState: waiting ? 'confirmation_required' : 'confirmed',
+        lastError: waiting ? '旧计划无可证明的可用产品，请编辑并确认供货产品' : c.lastError,
+        status:
+          waiting && ['active', 'preparing', 'ready'].includes(c.status) ? 'paused' : c.status,
+      };
+      this.db
+        .prepare('UPDATE outreach_campaigns SET data=? WHERE id=?')
+        .run(JSON.stringify(migrated), c.id);
+    }
+  }
+  validateProductSelection(c) {
+    if (c.acquisitionSource || c.mode !== 'production') return;
+    if (c.productSelectionState === 'confirmation_required')
+      throw fail(409, '旧计划无可证明的可用产品，请编辑并确认供货产品');
+    const ids = c.filters?.products || [];
+    if (!ids.length) throw fail(400, '请至少选择一个供货产品');
+    const today = day(this.now());
+    for (const id of ids) {
+      const product = this.salesProducts().find((p) => p.id === id);
+      if (!product) throw fail(400, `产品 ${id} 不存在或不是供货产品`);
+      if (product.status !== 'approved') throw fail(400, `${product.name || id} 尚未审核`);
+      if (product.effectiveDate && product.effectiveDate > today)
+        throw fail(400, `${product.name || id} 尚未生效`);
+      if (
+        !c.mailboxIds.some((id) => {
+          const box = this.mailboxes.get(id);
+          return box?.productIds?.includes(product.id) && siteAllowsProduct(product, box);
+        })
+      )
+        throw fail(400, `${product.name || id} 超出所选邮箱负责范围或品牌许可`);
+    }
+  }
   salesProducts() {
     return this.products().filter((p) => !p.materialOnly);
   }
   materialReason(delivery, campaign = this.campaign(delivery.campaignId)) {
     if (delivery.mode !== 'production' || !delivery.candidate) return '';
+    try {
+      this.validateProductSelection(campaign);
+    } catch (error) {
+      return error.message;
+    }
     const product = this.products().find((row) => row.id === delivery.candidate.productId);
     const version = outreachMaterialVersion(product, campaign, new Date(this.now()));
     const mailbox = this.mailboxes.get(delivery.mailboxId);
@@ -963,6 +1026,7 @@ export class OutreachService {
     if (c.mode !== 'production') throw fail(400, '测试计划使用固定测试内容');
     if (!c.mailboxIds.length && !c.acquisitionSource) throw fail(400, '请先选择发件邮箱');
     if (!this.acquisitionAllowed(c)) throw fail(409, '获客自动首发已暂停或关闭');
+    this.validateProductSelection(c);
     if (!this.generatorClient().configured) throw fail(503, '请先在API连接中配置模型');
     const wasActive = c.status === 'active';
     this.putCampaign({ ...c, status: wasActive ? 'active' : 'preparing', lastError: '' });
@@ -1316,6 +1380,7 @@ export class OutreachService {
       !['draft', 'ready', 'paused', 'active'].includes(c.status)
     )
       throw fail(409, '计划已更新或正在处理，请刷新后启动');
+    this.validateProductSelection(c);
     if (!this.generatorClient().configured) throw fail(503, '请先配置邮件生成模型');
     if (
       !c.mailboxIds.length ||

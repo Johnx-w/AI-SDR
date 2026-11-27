@@ -1,3 +1,4 @@
+import { siteAllowsProduct } from '../domain/mail-site.mjs';
 import { SectionWorkspace } from '../components/SectionWorkspace';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
@@ -127,7 +128,7 @@ const mailboxProductNames = (mailbox: OutreachMailbox, products: OutreachProduct
 const productCategories = [
   { id: 'ventilation', label: '透气窗' },
   { id: 'shutters', label: '百叶窗' },
-  { id: 'indoor', label: '室内成品帘' },
+  { id: 'indoor', label: '室内窗饰' },
   { id: 'outdoor', label: '户外遮阳' },
 ];
 const priorityGrades = ['A', 'B', 'C'];
@@ -654,18 +655,41 @@ function CampaignEditor({
   const [grades, setGrades] = useState(campaign?.filters?.grades || []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const coveredProductIds = new Set(
-    mailboxes
-      .filter((mailbox) => selectedMailboxes.includes(mailbox.id))
-      .flatMap((mailbox) => mailbox.productIds || []),
+  const productReason = (product: OutreachProduct | undefined) => {
+    if (!product || product.materialOnly) return '产品不存在或不是供货产品';
+    if (!productApproved(product)) return '尚未审核';
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(
+      new Date(),
+    );
+    if (product.effectiveDate && product.effectiveDate > today) return '尚未生效';
+    if (
+      !mailboxes.some(
+        (box) =>
+          selectedMailboxes.includes(box.id) &&
+          box.productIds?.includes(product.id) &&
+          siteAllowsProduct(product, box),
+      )
+    )
+      return '超出所选邮箱负责范围或品牌许可';
+    return '';
+  };
+  const availableProducts = products.filter((product) => !productReason(product));
+  const groups = [
+    ...productCategories,
+    { id: 'other', label: '其他' },
+    { id: '', label: '未分类' },
+  ];
+  const groupId = (product: OutreachProduct) =>
+    !product.category
+      ? ''
+      : groups.some((group) => group.id === product.category)
+        ? product.category
+        : 'other';
+  const categoryProducts = availableProducts.filter(
+    (product) => !selectedCategories.length || selectedCategories.includes(groupId(product)),
   );
-  const categoryProducts = products.filter(
-    (product) =>
-      coveredProductIds.has(product.id) &&
-      (!selectedCategories.length || selectedCategories.includes(product.category || '')),
-  );
-  const unavailableSelections = selectedProducts.filter(
-    (id) => !categoryProducts.some((product) => product.id === id && productApproved(product)),
+  const unavailableSelections = selectedProducts.filter((id) =>
+    productReason(products.find((product) => product.id === id)),
   );
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -673,8 +697,12 @@ function CampaignEditor({
       setError('请至少选择一个发件邮箱。');
       return;
     }
+    if (!selectedProducts.length) {
+      setError('请至少选择一个供货产品。');
+      return;
+    }
     if (unavailableSelections.length) {
-      setError('请先移除超出邮箱负责范围、品类范围或尚未审核的产品选择。');
+      setError('请先移除不可用产品，或补回负责邮箱并核对审核与生效条件。');
       return;
     }
     const form = new FormData(event.currentTarget);
@@ -688,10 +716,8 @@ function CampaignEditor({
         filters: {
           markets,
           grades,
-          products: selectedProducts.filter((id) =>
-            categoryProducts.some((product) => product.id === id && productApproved(product)),
-          ),
-          categories: selectedCategories,
+          products: selectedProducts,
+          categories: [],
         },
         mailboxIds: selectedMailboxes,
         includeExisting: form.get('includeExisting') === 'on',
@@ -806,13 +832,7 @@ function CampaignEditor({
                   const next = event.target.checked
                     ? [...selectedMailboxes, mailbox.id]
                     : selectedMailboxes.filter((id) => id !== mailbox.id);
-                  const nextCoverage = new Set(
-                    mailboxes
-                      .filter((item) => next.includes(item.id))
-                      .flatMap((item) => item.productIds || []),
-                  );
                   setSelectedMailboxes(next);
-                  setSelectedProducts(selectedProducts.filter((id) => nextCoverage.has(id)));
                 }}
               />
               <span>
@@ -827,41 +847,70 @@ function CampaignEditor({
           ))}
         </div>
         {!mailboxes.length && <p className="outreach-hint">请先在邮箱管理中添加邮箱。</p>}
-        <span className="outreach-field-label">产品品类 · 不选则在所选邮箱负责范围内匹配</span>
+        <span className="outreach-field-label">产品分组 · 切换分组保留勾选</span>
         <div className="outreach-choices">
-          {productCategories.map((category) => (
-            <label
-              key={category.id}
-              className={`outreach-choice ${selectedCategories.includes(category.id) ? 'selected' : ''}`}
-            >
-              <input
-                type="checkbox"
-                checked={selectedCategories.includes(category.id)}
-                onChange={(event) => {
-                  const next = event.target.checked
-                    ? [...selectedCategories, category.id]
-                    : selectedCategories.filter((id) => id !== category.id);
-                  setSelectedCategories(next);
-                  setSelectedProducts(
-                    selectedProducts.filter(
-                      (id) =>
-                        !next.length ||
-                        products.some(
-                          (product) => product.id === id && next.includes(product.category || ''),
-                        ),
-                    ),
-                  );
-                }}
-              />
-              {category.label}
-            </label>
-          ))}
+          <button
+            type="button"
+            className="outreach-choice"
+            onClick={() => setSelectedCategories([])}
+          >
+            全部（{availableProducts.length}）
+          </button>
+          <button
+            type="button"
+            className="text-link"
+            onClick={() =>
+              setSelectedProducts([
+                ...new Set([...selectedProducts, ...availableProducts.map((p) => p.id)]),
+              ])
+            }
+          >
+            选择全部可用产品
+          </button>
+          {groups.map((category) => {
+            const groupProducts = availableProducts.filter(
+              (product) => groupId(product) === category.id,
+            );
+            return (
+              <div key={category.id}>
+                <button
+                  type="button"
+                  className={`outreach-choice ${selectedCategories.includes(category.id) ? 'selected' : ''}`}
+                  onClick={() => setSelectedCategories([category.id])}
+                >
+                  {category.label}（{groupProducts.length}）
+                </button>
+                <button
+                  type="button"
+                  className="text-link"
+                  onClick={() =>
+                    setSelectedProducts([
+                      ...new Set([...selectedProducts, ...groupProducts.map((p) => p.id)]),
+                    ])
+                  }
+                >
+                  选择本组
+                </button>
+              </div>
+            );
+          })}
         </div>
         <span className="outreach-field-label">
-          供货产品 · 仅显示所选邮箱负责的产品，不选则匹配其中已审核的产品
+          供货产品 · 已选择 {selectedProducts.length} 项，至少选择一项
         </span>
         <ProductOptions
-          products={categoryProducts}
+          products={categoryProducts.map((product) => ({
+            ...product,
+            label: `${productName(product)} · ${{ finished: '成品', materials: '材料配件', samples: '样本展示' }[product.direction || ''] || product.direction || '形态未填写'} · ${mailboxes
+              .filter(
+                (box) =>
+                  selectedMailboxes.includes(box.id) &&
+                  box.productIds?.includes(product.id) &&
+                  siteAllowsProduct(product, box),
+              )
+              .map((box) => box.email)
+              .join('、')}`,
+          }))}
           selected={selectedProducts}
           onChange={setSelectedProducts}
           approvedOnly
@@ -869,7 +918,13 @@ function CampaignEditor({
         />
         {unavailableSelections.length > 0 && (
           <div className="outreach-alert">
-            <span>原计划有 {unavailableSelections.length} 项产品已不在当前可用范围内。</span>
+            <span>有 {unavailableSelections.length} 项产品已不在当前可用范围内。</span>
+            {unavailableSelections.map((id) => (
+              <p key={id}>
+                {products.find((p) => p.id === id)?.name || id}：
+                {productReason(products.find((p) => p.id === id))}
+              </p>
+            ))}
             <button
               className="text-link"
               type="button"

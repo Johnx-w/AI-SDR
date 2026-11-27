@@ -10,6 +10,8 @@ export interface OutreachFact {
 }
 
 export interface OutreachProduct {
+  direction?: string;
+  deliveryForms?: string[];
   materialOnly?: boolean;
   materialCategory?: string;
   effectiveDate?: string;
