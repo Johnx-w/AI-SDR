@@ -2599,13 +2599,18 @@ test('正常任务按营业登记主体区分同域企业，补证、并发核�
     return (await response.json()).id;
   };
   const readJob = async (id) => {
+    const deadline = performance.now() + 30_000;
     let job;
-    for (let n = 0; n < 120; n++) {
-      job = await (await fetch(base + '/acquisition/jobs/' + id)).json();
-      if (job.status !== 'running') break;
+    do {
+      const response = await fetch(base + '/acquisition/jobs/' + id);
+      assert.equal(response.status, 200);
+      job = await response.json();
+      if (['completed', 'partial', 'paused'].includes(job.status)) return job;
       await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    return job;
+    } while (performance.now() < deadline);
+    assert.fail(
+      `隔离任务 ${id} 在 30 秒内未结束或暂停（${job.status}，已搜索 ${job.searches} 次）`,
+    );
   };
   try {
     const jobId = await startJob('subject-credit-fixture');
