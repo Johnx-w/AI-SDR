@@ -20,6 +20,24 @@ Windows 用同一个 Playwright 命令并省去 `--with-deps`。本地安装的 
 
 正式打包从通过 CI 的同一次运行取得 Docling 和 Scrapling 运行时。采集包随发布携带内置 Python 的 PEX 工作进程和压缩的固定 Chromium。手工发布和 CD 均先检查合包小于 512 MiB。新版本在独立目录安装时，由运行用户解包并通过同一采集接口渲染固定页面，校验两种工具及浏览器和 Python 版本。系统共享依赖由目标机提供，缺依赖或沙箱启动失败会在切换前暴露。旧版本回退使用自己的发布目录和运行时。开发环境可指定 `SCRAPLING_PYTHON`，带离线包的 Linux 发布目录默认使用随版本交付的运行时。
 
+### Ubuntu 26.04 浏览器沙箱
+
+目标机已读回 Ubuntu 26.04、AppArmor 启用及 `kernel.apparmor_restrict_unprivileged_userns=1`。以 `shadeflow` 运行的普通 `unshare -Ur true` 被拒绝。浏览器保持 Chromium 沙箱启用，由管理员通过 AppArmor 只授权锁定二进制使用用户命名空间。[Ubuntu AppArmor 策略说明](https://canonical.com/blog/ubuntu-23-10-restricted-unprivileged-user-namespaces) · [Chromium 沙箱说明](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md)
+
+从相同 CI 的 `scrapling-runtime` 提取完整的 `chromium_headless_shell-1255` 版本目录，安装至 `/opt/shadeflow/chromium`。路径、二进制及随附库和其他资源由 root 所有，且无组或其他用户写权限。可将版本目录限制为 `root:shadeflow` 的 `0750`。AppArmor 仅匹配以下实际可执行文件的绝对路径。发布目录由应用账号持有，AppArmor 权限不随发布目录或 `current` 的路径变化。
+
+```text
+abi <abi/4.0>,
+include <tunables/global>
+profile shadeflow-chromium-1255 /opt/shadeflow/chromium/chromium_headless_shell-1255/chrome-headless-shell-linux64/chrome-headless-shell flags=(default_allow) {
+  userns,
+}
+```
+
+管理员确认根目录和完整树权限、当前版本及共享库后单独加载该 profile，保持全局命名空间策略不变。Ubuntu 26.04 的依赖按 Playwright 1.65.2 的发行版清单核对，使用 `ldd` 对照缺失库。部署前在独立暂存目录以服务账号执行 `node scripts/check-scrapling.mjs`。探测会逐文件比对该版本目录与当次发布包的 SHA-256，再渲染固定页面并报告所选目录。另用普通 `unshare -Ur true` 复查服务账号仍受全局限制。从 `systemctl show` 核对服务的 `RestrictNamespaces` 等设置，必要时在等效隔离环境启动同一离线探测。目标环境验收以实际沙箱启动和页面结果为准。
+
+没有该系统目录的 CI 和开发环境可以使用包内浏览器。已配置该系统目录时，缺少当前修订或文件与发布包有差异会阻断安装。升级浏览器时另建受 root 管理的版本目录和精确路径 profile，回退期间保留仍可回退版本对应的目录和 profile。
+
 每次只打开一个新页面和独立上下文。浏览器的网络请求由本机网关按允许的资源类型返回，网关只向校验后的同站公网 HTTPS 地址发 GET 请求，连接固定到已核验的 DNS 地址。拒绝跨域跳转、跨域资源、私网、图片、媒体、字体、额外页面和 WebSocket。跨站 CDN 托管的脚本可能影响渲染结果，记录为此路径仍缺证。直接请求和浏览器请求共用同一套 HTTPS 地址和代理校验。
 
 开发限制为 20 秒内页面导航和等待、30 秒采集硬超时、系统剩余内存 1 GiB 时停止派单。每 100 毫秒采样 Python 与子进程的 RSS 之和和整机内存使用量；RSS 之和会重复计入共享页。进程树 RSS 超过 1 GiB 时中断，Linux 的进程清理和目标机资源上限仍需实测。
