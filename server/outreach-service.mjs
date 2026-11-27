@@ -271,6 +271,18 @@ export class OutreachService {
     return JSON.parse(r.data);
   }
   putCampaign(c) {
+    const row = this.db.prepare('SELECT data FROM outreach_campaigns WHERE id=?').get(c.id);
+    const prior = row && JSON.parse(row.data);
+    if (prior?.deleteRequestedAt)
+      c = {
+        ...c,
+        deleteRequestedAt: prior.deleteRequestedAt,
+        deletedAt: prior.deletedAt || c.deletedAt,
+        status: prior.status,
+        revision: prior.revision,
+        approvedRevision: null,
+        followUpEnabled: false,
+      };
     const { stats, deliveryGroups, ...data } = c;
     this.db
       .prepare(
@@ -394,11 +406,16 @@ export class OutreachService {
       q = params.get('q')?.trim().toLowerCase();
     const where = [],
       args = [];
+    where.push(
+      view === 'deleted'
+        ? "json_extract(data,'$.deleteRequestedAt') IS NOT NULL"
+        : "json_extract(data,'$.deleteRequestedAt') IS NULL",
+    );
     const history = "json_extract(data,'$.status') IN ('completed','cancelled')";
     where.push(
       view === 'tests'
         ? "json_extract(data,'$.mode')='internal_test'"
-        : `json_extract(data,'$.mode')='production' AND ${view === 'history' ? '' : 'NOT'} (${history})`,
+        : `json_extract(data,'$.mode')='production' AND ${view === 'deleted' ? '1=1' : `${view === 'history' ? '' : 'NOT'} (${history})`}`,
     );
     if (q) {
       where.push("instr(outreach_lower(json_extract(data,'$.name')),?)>0");
@@ -450,10 +467,10 @@ export class OutreachService {
     if (params?.has('view')) {
       const counts = this.db
         .prepare(
-          "SELECT count(*) AS total,count(*) FILTER (WHERE json_extract(data,'$.status')='active') AS active FROM outreach_campaigns",
+          "SELECT count(*) AS total,count(*) FILTER (WHERE json_extract(data,'$.status')='active') AS active FROM outreach_campaigns WHERE json_extract(data,'$.deleteRequestedAt') IS NULL",
         )
         .get();
-      const page = ['current', 'history', 'tests'].includes(params.get('view'))
+      const page = ['current', 'history', 'deleted', 'tests'].includes(params.get('view'))
         ? this.campaignPage(params)
         : { campaigns: [], filtered: 0, page: 1 };
       const products = (params.get('view') === 'mailboxes' ? [] : this.products()).map(
@@ -528,7 +545,7 @@ export class OutreachService {
   saveCampaign(input, id) {
     const prior = id ? this.campaign(id) : null;
     if (prior?.acquisitionSource) throw fail(409, '请在获客任务中管理自动首发');
-    if (['cancelled', 'completed'].includes(prior?.status))
+    if (prior?.deleteRequestedAt || ['cancelled', 'completed'].includes(prior?.status))
       throw fail(409, '计划已结束，请新建触达计划');
     if (prior?.mode === 'internal_test') throw fail(400, '内部测试计划不能改为正式计划');
     if (prior?.status === 'active' || prior?.status === 'preparing' || this.preparing.has(id))
@@ -689,6 +706,7 @@ export class OutreachService {
     }
   }
   acquisitionAllowed(campaign, followUp = false) {
+    if (campaign.deleteRequestedAt) return false;
     return (
       !campaign.acquisitionSource ||
       this.acquisitionSources().some(
@@ -939,7 +957,7 @@ export class OutreachService {
   }
   prepare(id, includeDetail = true) {
     const c = this.campaign(id);
-    if (['cancelled', 'completed'].includes(c.status))
+    if (c.deleteRequestedAt || ['cancelled', 'completed'].includes(c.status))
       throw fail(409, '计划已结束，不能重新准备样稿');
     if (this.preparing.has(id)) return includeDetail ? this.detail(id) : undefined;
     if (c.mode !== 'production') throw fail(400, '测试计划使用固定测试内容');
@@ -1292,6 +1310,7 @@ export class OutreachService {
   activate(id, revision) {
     const c = this.campaign(id);
     if (
+      c.deleteRequestedAt ||
       c.mode !== 'production' ||
       c.revision !== revision ||
       !['draft', 'ready', 'paused', 'active'].includes(c.status)
@@ -1329,7 +1348,7 @@ export class OutreachService {
   }
   pause(id) {
     const c = this.campaign(id);
-    if (['cancelled', 'completed'].includes(c.status))
+    if (c.deleteRequestedAt || ['cancelled', 'completed'].includes(c.status))
       throw fail(409, '计划已结束，不能恢复或暂停');
     this.putCampaign({ ...c, status: 'paused' });
     return this.detail(id);
@@ -1359,6 +1378,60 @@ export class OutreachService {
       });
     });
     return this.detail(id);
+  }
+  deletionPreview(id) {
+    this.campaign(id);
+    const counts = this.deliveryCounts(id).stats;
+    const pendingFollowUps = this.db
+      .prepare(
+        "SELECT count(*) AS count FROM outreach_followups WHERE state='pending' AND json_extract(data,'$.campaignId')=?",
+      )
+      .get(id).count;
+    return {
+      pendingFirst: counts.draft + counts.queued + counts.blocked,
+      pendingFollowUps,
+      unknown: counts.unknown,
+    };
+  }
+  requestCampaignDeletion(id, revision, confirmed) {
+    const c = this.campaign(id);
+    if (confirmed !== true) throw fail(400, '请确认删除该触达计划');
+    if (c.deleteRequestedAt) return this.detail(id);
+    if (c.mode !== 'production') throw fail(409, '仅正式计划可删除');
+    if (c.revision !== revision) throw fail(409, '计划已更新，请刷新后重新确认删除');
+    this.transaction(() => {
+      const at = iso(this.now);
+      this.putCampaign({
+        ...c,
+        deleteRequestedAt: at,
+        revision: c.revision + 1,
+        approvedRevision: null,
+        followUpEnabled: false,
+        updatedAt: at,
+      });
+      for (const d of this.deliveries(id, ['draft', 'queued', 'blocked'])) {
+        this.putDelivery({ ...d, status: 'cancelled', reason: '触达计划已删除', cancelledAt: at });
+        this.release(d.id);
+      }
+      for (const { data } of this.db
+        .prepare(
+          "SELECT data FROM outreach_followups WHERE state='pending' AND json_extract(data,'$.campaignId')=?",
+        )
+        .all(id))
+        this.followUps.put({ ...JSON.parse(data), status: 'cancelled', reason: '触达计划已删除' });
+    });
+    return this.detail(id);
+  }
+  completeCampaignDeletion(id) {
+    const c = this.campaign(id);
+    if (!c.deleteRequestedAt) throw fail(409, '尚未请求删除');
+    if (!c.deletedAt) this.putCampaign({ ...c, deletedAt: iso(this.now), deletionError: '' });
+    return this.detail(id);
+  }
+  deleteCampaign(id, revision, confirmed) {
+    if (this.campaign(id).acquisitionSource) throw fail(409, '来源暂停尚未接通，请稍后重试');
+    this.requestCampaignDeletion(id, revision, confirmed);
+    return this.completeCampaignDeletion(id);
   }
   suppress(input) {
     const reason = text(input.reason) || '人工标记不再联系';
@@ -1462,6 +1535,7 @@ export class OutreachService {
       : current >= w.start || current < w.end;
   }
   canDispatch(c, d, m) {
+    if (c.deleteRequestedAt) return false;
     if (this.isMaintaining()) return false;
     if (!this.acquisitionAllowed(c, Boolean(d.firstId))) return false;
     if (!m || m.paused || m.smtpStatus !== 'connected' || !m.configured) return false;
@@ -1740,7 +1814,8 @@ export class OutreachService {
                 ? '客户数据来源已改变，邮件尚未提交发送'
                 : '') ||
               (c.mode === 'production' && this.materialReason(d, campaign)) ||
-              (campaign.status !== 'active' ||
+              (campaign.deleteRequestedAt ||
+              campaign.status !== 'active' ||
               campaign.revision !== c.revision ||
               !this.acquisitionAllowed(campaign)
                 ? '计划已暂停或更新，邮件尚未提交发送'
@@ -1813,7 +1888,7 @@ export class OutreachService {
       if (error.code === 'OUTREACH_PRE_SEND_BLOCKED') {
         this.putDelivery({
           ...d,
-          status: 'blocked',
+          status: this.campaign(c.id).deleteRequestedAt ? 'cancelled' : 'blocked',
           reason: safeError(error),
           ...(this.materialReason(d, this.campaign(c.id)) ? { materialRefresh: true } : {}),
         });

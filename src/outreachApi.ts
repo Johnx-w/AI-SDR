@@ -71,6 +71,9 @@ export interface OutreachCampaign {
   intervalSeconds: number;
   createdAt: string;
   cancelledAt?: string;
+  deleteRequestedAt?: string;
+  deletedAt?: string;
+  deletionError?: string;
   lastError?: string;
   approvedRevision: number | null;
   productScopes?: { productId: string; name: string; englishName: string }[];

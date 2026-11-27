@@ -100,18 +100,22 @@ const deliveryDetailLabel = (delivery: OutreachDelivery) =>
       ? '正在生成'
       : statusLabel(delivery.status);
 const campaignStatusLabel = (campaign: OutreachCampaign) =>
-  campaign.status === 'ready' &&
-  !campaign.stats?.draft &&
-  !campaign.stats?.queued &&
-  !campaign.stats?.accepted
-    ? campaign.stats?.skipped && !campaign.stats?.blocked
-      ? '本次客户已跳过'
-      : '待补齐条件'
-    : campaign.status === 'draft'
-      ? '未启动'
-      : campaign.status === 'preparing'
-        ? '正在生成'
-        : statusLabel(campaign.status);
+  campaign.deleteRequestedAt
+    ? campaign.deletedAt
+      ? '已删除'
+      : '删除处理中'
+    : campaign.status === 'ready' &&
+        !campaign.stats?.draft &&
+        !campaign.stats?.queued &&
+        !campaign.stats?.accepted
+      ? campaign.stats?.skipped && !campaign.stats?.blocked
+        ? '本次客户已跳过'
+        : '待补齐条件'
+      : campaign.status === 'draft'
+        ? '未启动'
+        : campaign.status === 'preparing'
+          ? '正在生成'
+          : statusLabel(campaign.status);
 const productName = (product: OutreachProduct) => product.label || product.name || product.id;
 const productApproved = (product: OutreachProduct) =>
   product.status === 'approved' || product.approved === true;
@@ -153,7 +157,11 @@ const tone = (status: string) =>
 const pathFor = (kind: string, id: string, action?: string) =>
   `/${kind}/${encodeURIComponent(id)}${action ? `/${action}` : ''}`;
 const canCancelCampaign = (campaign: OutreachCampaign) =>
-  !campaign.acquisitionSource && !['completed', 'cancelled'].includes(campaign.status);
+  !campaign.deleteRequestedAt &&
+  !campaign.acquisitionSource &&
+  !['completed', 'cancelled'].includes(campaign.status);
+const canDeleteCampaign = (campaign: OutreachCampaign) =>
+  campaign.mode === 'production' && !campaign.acquisitionSource && !campaign.deleteRequestedAt;
 
 function InlineError({ value }: { value: string | null }) {
   return value ? (
@@ -1151,6 +1159,12 @@ export function OutreachCommunication({
   const [campaignEditor, setCampaignEditor] = useState<{ value: OutreachCampaign | null } | null>(
     null,
   );
+  const [deleteTarget, setDeleteTarget] = useState<{
+    campaign: OutreachCampaign;
+    pendingFirst: number;
+    pendingFollowUps: number;
+    unknown: number;
+  } | null>(null);
   const [cancelTarget, setCancelTarget] = useState<OutreachCampaign | null>(null);
   const [showLabels, setShowLabels] = useState(false);
   const [tagState, setTagState] = useState<MailboxTagState | null>(null);
@@ -1448,6 +1462,22 @@ export function OutreachCommunication({
     );
     await refresh();
     setNotice('计划已保存为草稿，可生成并检查样稿。');
+  }
+  async function confirmDeletion(campaign: OutreachCampaign) {
+    setBusy('deletion-preview');
+    setError(null);
+    try {
+      const counts = await outreachApi<{
+        pendingFirst: number;
+        pendingFollowUps: number;
+        unknown: number;
+      }>(pathFor('campaigns', campaign.id, 'deletion-preview'));
+      setDeleteTarget({ campaign, ...counts });
+    } catch (reason) {
+      setError(message(reason));
+    } finally {
+      setBusy(null);
+    }
   }
   function confirmCancellation(campaign: OutreachCampaign) {
     setError(null);
@@ -1804,6 +1834,7 @@ export function OutreachCommunication({
                           {[
                             ['current', '当前计划'],
                             ['history', '历史计划'],
+                            ['deleted', '已删除'],
                             ['tests', '公司试发'],
                           ].map(([value, label]) => (
                             <button
@@ -1925,6 +1956,13 @@ export function OutreachCommunication({
                                     <td className="outreach-campaign-name">
                                       <strong>{campaign.name}</strong>
                                       {campaign.acquisitionSource && <small>获客后自动首发</small>}
+                                      {campaign.deleteRequestedAt && (
+                                        <small>
+                                          {campaign.deletedAt
+                                            ? `删除完成：${formatTime(campaign.deletedAt)}`
+                                            : `删除处理中：${formatTime(campaign.deleteRequestedAt)}`}
+                                        </small>
+                                      )}
                                       {campaign.lastError && (
                                         <small className="outreach-row-error">
                                           {campaign.lastError}
@@ -2009,6 +2047,15 @@ export function OutreachCommunication({
                                               暂停计划
                                             </button>
                                           )}
+                                        {canDeleteCampaign(campaign) && (
+                                          <button
+                                            className="btn danger"
+                                            disabled={!!busy}
+                                            onClick={() => void confirmDeletion(campaign)}
+                                          >
+                                            删除计划
+                                          </button>
+                                        )}
                                         {canCancelCampaign(campaign) && (
                                           <details className="outreach-campaign-more">
                                             <summary>更多</summary>
@@ -2377,6 +2424,7 @@ export function OutreachCommunication({
                       </div>
                       <InlineError value={shownDetail.campaign.lastError || null} />
                       {shownDetail.campaign.mode === 'production' &&
+                        !shownDetail.campaign.deleteRequestedAt &&
                         shownDetail.campaign.status !== 'cancelled' && (
                           <div className="outreach-plan-rules">
                             <p>
@@ -2477,6 +2525,16 @@ export function OutreachCommunication({
                         />
                       ) : (
                         <>
+                          {shownDetail.campaign.deleteRequestedAt && (
+                            <p className="outreach-hint" role="status">
+                              删除请求：{formatTime(shownDetail.campaign.deleteRequestedAt)}；
+                              {shownDetail.campaign.deletedAt
+                                ? `删除完成：${formatTime(shownDetail.campaign.deletedAt)}`
+                                : '删除处理中'}
+                              。已提交邮件、结果核实及追信历史保留。
+                              {shownDetail.campaign.deletionError}
+                            </p>
+                          )}
                           {shownDetail.campaign.status === 'cancelled' && (
                             <p className="outreach-hint" role="status">
                               此计划已取消
@@ -2701,6 +2759,15 @@ export function OutreachCommunication({
                               )}
                             </>
                           )}
+                        {canDeleteCampaign(shownDetail.campaign) && (
+                          <button
+                            className="btn danger"
+                            disabled={!!busy}
+                            onClick={() => void confirmDeletion(shownDetail.campaign)}
+                          >
+                            删除计划
+                          </button>
+                        )}
                         {canCancelCampaign(shownDetail.campaign) && (
                           <button
                             className="btn danger"
@@ -2714,6 +2781,53 @@ export function OutreachCommunication({
                       </div>
                     </>
                   )}
+                </div>
+              </Modal>
+            )}
+            {deleteTarget && (
+              <Modal
+                title="删除触达计划"
+                onClose={() => {
+                  if (!busy) setDeleteTarget(null);
+                }}
+              >
+                <div className="modal-body outreach-form">
+                  <p>
+                    确认删除 <strong>{deleteTarget.campaign.name}</strong>？
+                  </p>
+                  <p>
+                    待首发 {deleteTarget.pendingFirst} · 待追信 {deleteTarget.pendingFollowUps} ·
+                    待核实 {deleteTarget.unknown}
+                  </p>
+                  <p>
+                    删除会结束剩余首发和追信。已提交邮件无法撤回，实际结果、未知核实及客户历史保留，可从已删除视图查阅。
+                  </p>
+                  <InlineError value={error} />
+                  <div className="modal-actions">
+                    <button
+                      className="btn secondary"
+                      disabled={!!busy}
+                      onClick={() => setDeleteTarget(null)}
+                    >
+                      保留计划
+                    </button>
+                    <button
+                      className="btn danger"
+                      disabled={!!busy}
+                      onClick={() =>
+                        void act(
+                          `delete-${deleteTarget.campaign.id}`,
+                          pathFor('campaigns', deleteTarget.campaign.id, 'delete'),
+                          { revision: deleteTarget.campaign.revision, confirmed: true },
+                          '计划已删除，历史结果已保留。',
+                        ).then((ok) => {
+                          if (ok) setDeleteTarget(null);
+                        })
+                      }
+                    >
+                      确认删除计划
+                    </button>
+                  </div>
                 </div>
               </Modal>
             )}

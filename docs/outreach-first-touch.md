@@ -211,3 +211,11 @@
 队列由后端执行，关闭网页不停止；重启恢复符合条件的已启动首封计划，未知发送先核对。旧固定双邮箱试点接口和后台已退役，不再启用原轮询。
 
 相关离线检查为 `tests/outreach-*.test.mjs`、`tests/mail-conversations*.test.mjs`、`tests/mail-replies*.test.mjs`、`tests/mailbox-reader.test.mjs` 及客户业务测试。模拟传输不能证明真实投递；实际小批核验记录内容、收件地址、Message-ID 和真实状态，不把归档中的历史通过次数当作当前全量回归。
+
+### 手动触达计划删除（本地实现，待发布）
+
+正式手动计划在草稿、准备中、就绪、运行、暂停、完成和取消状态均可从列表或详情删除。确认框从 SQLite 回读待首发、待追信、结果未知数量。删除保留计划原业务状态，以 `deleteRequestedAt` 优先阻止启动、编辑及提交；`deletedAt` 表示完成。当前与历史列表排除删除请求，已删除视图按原状态、名称筛选并在数据库分页，保留删除时间及实际发送结果。
+
+删除请求、取消未提交首发与待追信在同一事务保存。服务商已开始提交的邮件继续结算；未知结果及其原邮箱核实、企业占用和客户历史保留。删除后的核实成功不创建追信。重复删除和重启回读幂等，异步计划检查点不能覆盖已保存的删除标记。
+
+接口为 `GET /api/v1/outreach/campaigns/:id/deletion-preview` 和 `POST /api/v1/outreach/campaigns/:id/delete`，后者要求 `revision` 与 `confirmed: true`，过期版本返回 409。来源计划暂停联动由 T6 接入；暂停和关闭开关未全部确认时不得设置完成时间。共享服务入口为 `requestCampaignDeletion` 与 `completeCampaignDeletion`。
