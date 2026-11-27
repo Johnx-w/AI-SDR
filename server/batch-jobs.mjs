@@ -803,7 +803,7 @@ export class BatchJobs {
         metric.researched++;
         const key = {
           inserted: 'inserted',
-          duplicate: 'updated',
+          duplicate: job.identityVersion && output?.更新 !== 1 ? 'duplicates' : 'updated',
           rejected: 'rejected',
           review: 'review',
           failed: 'failed',
