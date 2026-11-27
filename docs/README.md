@@ -66,7 +66,7 @@ T12 自动同步随本次版本交付，使用运行环境有效飞书连接和�
 | [ADR-0017](adr/0017-automatic-sending-with-confirmed-information.md)        | 基础首封免逐封审核；标准商务自动回信待实现     |
 | [ADR-0018](adr/0018-simple-llm-outreach-with-fixed-signatures.md)           | 独立首封写作；旧专业模式及审批链已移除         |
 | [ADR-0019](adr/0019-ai-sales-agents-with-controlled-mail-reception.md)      | 接待独立授权，四品类角色配置待实现             |
-| [ADR-0020](adr/0020-website-only-acquisition.md)                            | 官网为唯一自动获客来源                         |
+| [ADR-0020](adr/0020-website-only-acquisition.md)                            | 官网是自动获客的准入证据                       |
 | [ADR-0022](adr/0022-unified-abc-customer-grades.md)                         | 当前统一 A/B/C，正式 T12 已按快照回填          |
 | [ADR-0023](adr/0023-acquisition-scoped-automatic-first-touch.md)            | 获客范围内逐家自动首发及计划控制               |
 | [ADR-0024](adr/0024-align-feishu-business-mirrors.md)                       | 当前评级与真实沟通镜像，正式原 T5 停止产品镜像 |

@@ -29,6 +29,30 @@ const metricState: Record<string, string> = {
   failed: '搜索失败',
   interrupted: '服务中断',
 };
+const mapsStates: Record<string, string> = {
+  running: '查询中',
+  completed: '已查询',
+  identifiers_only: '仅地点编号',
+  unavailable: '不可用',
+  paused: '已暂停',
+  failed: '失败',
+  rate_limited: '限流',
+  deferred: '已延后',
+  budget_limit: '已达对照上限',
+};
+const mapsReasons: Record<string, string> = {
+  credentials_missing: '缺少 Places 凭据',
+  website_mapping_unavailable: '官网定位未开放',
+  binding_mismatch: '地图地点与官网主体不符',
+  conflicting_reference: '同一地点编号对应冲突信息',
+  permission_denied: '权限不足',
+  provider_busy: '供应商请求处理中',
+  provider_cooldown: '等待供应商恢复',
+  retry_deferred: '已延后重试',
+  request_unknown: '请求结果待核对',
+  invalid_response: '供应商响应异常',
+  provider_failed: '供应商请求失败',
+};
 const beijingTime = (value: string) =>
   new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
 function safeUrl(value?: string | null) {
@@ -401,6 +425,19 @@ function DetailRows({
                 <span>{row.name || row.domain || '待核实企业'}</span>
               )}
               {row.reason && <small>{row.reason}</small>}
+              {row.discovery_sources?.some(({ kind }) => kind === 'maps') && (
+                <small>
+                  {row.discovery_sources.some(({ kind }) => kind === 'web') && '官网搜索 · '}
+                  地图地点{' '}
+                  {row.discovery_sources.flatMap(({ reference }) => reference || []).join('、')}
+                </small>
+              )}
+              {!!row.unverified_map_sources?.length && (
+                <small>
+                  待核实的地图地点{' '}
+                  {row.unverified_map_sources.map(({ reference }) => reference).join('、')}
+                </small>
+              )}
               {row.handoff && (
                 <small>
                   {row.handoff.contact_verified
@@ -738,7 +775,24 @@ function BatchProgressDetail({ job: snapshot, control, busy }: BatchProgressProp
           )}
         </p>
       )}
-      <p className="muted">发现来源：官网搜索</p>
+      {job.mapComparison ? (
+        <p className="muted">
+          {job.searchStats?.some(({ maps }) => maps?.status === 'completed') ? (
+            <>
+              确认新增 · 官网独有 {job.mapComparison.qualifiedNew.websiteOnly} · 地图独有{' '}
+              {job.mapComparison.qualifiedNew.mapsOnly} · 共同发现{' '}
+              {job.mapComparison.qualifiedNew.both}
+              {' · '}地图独有中引用 Scrapling 证据 {job.mapComparison.qualifiedNew.mapsAndScrapling}
+            </>
+          ) : (
+            '发现以官网搜索为主'
+          )}
+          {job.mapComparison.pausedReason &&
+            ` · 地图已暂停（${mapsReasons[job.mapComparison.pausedReason] || '待核对'}）`}
+        </p>
+      ) : (
+        <p className="muted">发现来源：官网搜索</p>
+      )}
       <div className="result-actions">
         {!job.scheduleId &&
           !job.sourceDeletedAt &&
@@ -835,6 +889,16 @@ function BatchProgressDetail({ job: snapshot, control, busy }: BatchProgressProp
                         · {metricState[metric.status] || metric.status}
                         {metric.error ? ` · ${metric.error}` : ''}
                       </small>
+                      {metric.maps && (
+                        <small>
+                          地图 {mapsStates[metric.maps.status] || metric.maps.status}
+                          {metric.maps.reason &&
+                            ` · ${mapsReasons[metric.maps.reason] || '待核对'}`}
+                          {!!metric.maps.attempts &&
+                            ` · ${metric.maps.attempts} 次调用 · ${metric.maps.returned} 个地点`}
+                          {metric.maps.usage && ` · ${metric.maps.usage.credits} 额度`}
+                        </small>
+                      )}
                     </td>
                     <td>
                       {metric.discovered}
