@@ -1401,6 +1401,11 @@ test('经营目录及采购档案待核实，独立官网和带数字与评价�
   const directoryRoot = 'https://www.contractorsup.com/';
   const directory = directoryRoot + '140956/';
   const procurement = 'https://buy.nsw.gov.au/supplier/profile/12468764';
+  const localDirectoryRoot = 'https://yourlocalbiz.com.au/';
+  const localDirectory =
+    localDirectoryRoot +
+    'business/perth-metropolitan-region/perth/sola-shade-indoor-outdoor-shutters-blinds/';
+  const solaOfficial = 'https://solashade.com.au/';
   const officialRoot = 'https://www.windowproductsct.com/';
   const official = officialRoot + 'window-products-contact/';
   const productRoot = 'https://shadeatelier.example.org/';
@@ -1411,9 +1416,16 @@ test('经营目录及采购档案待核实，独立官网和带数字与评价�
   const generalSupply =
     'We supply custom roller blinds for residential windows and commercial buildings.';
   const officialSupply = `${officialName} is your source for custom blinds, shades, sheer shades, shutters, draperies, awnings, and more.`;
+  // Directory excerpts from AU-1-B row 50.
+  const localDirectorySupply =
+    'Sola Shade Pty Ltd has supplied and installed superior quality indoor and outdoor blinds, shutters, awnings, and shade systems in Perth since 1987.';
   const candidates = new Map([
     [directory, { name: directoryName, identity: directoryName, supply: generalSupply }],
     [procurement, { name: 'PAMIDO PTY LTD' }],
+    [
+      localDirectory,
+      { name: 'Sola Shade Pty Ltd', identity: 'Sola Shade Pty Ltd', supply: localDirectorySupply },
+    ],
     [official, { name: officialName, identity: officialName, supply: officialSupply }],
     [product, { name: productName, identity: productName, supply: generalSupply }],
   ]);
@@ -1431,6 +1443,15 @@ test('经营目录及采购档案待核实，独立官网和带数字与评价�
       '<h1>PAMIDO PTY LTD</h1><p>This supplier has self-identified in the following products and services.</p>',
     ],
     [
+      localDirectory,
+      `<h1>Sola Shade | Indoor &amp; Outdoor Shutters &amp; Blinds</h1><p>${localDirectorySupply}</p>
+      <a href="${solaOfficial}">Website</a><a href="/add-listing/">Add Listing</a>`,
+    ],
+    [
+      localDirectoryRoot,
+      '<h1>Australian Business Directory</h1><h2>New businesses listings!</h2><a href="/add-listing/">Add Your Business</a>',
+    ],
+    [
       official,
       `<h1>Contact Window Products Awning Blind &amp; Shade Co Branford CT</h1>
       <p>Our new address: 3 Research Drive, Unit 9, Branford CT 06405</p><p>${officialSupply}</p>`,
@@ -1441,13 +1462,24 @@ test('经营目录及采购档案待核实，独立官网和带数字与评价�
       <button data-review="/products/review?business_id=71004">Write a Review</button>
       <p>Customer review: Explore independent contractor profiles at your local trade fair.</p>`,
     ],
-    [productRoot, `<h1>${productName}</h1><p>Explore our custom roller blind profiles.</p>`],
+    [
+      productRoot,
+      `<h1>${productName}</h1><p>Explore our custom roller blind profiles.</p>
+      <p>Find us in the Australian Business Directory.</p>
+      <a href="${localDirectoryRoot}add-listing/">Add Your Business</a>`,
+    ],
   ]);
   await withWebsiteCustodyJob(candidates, pages, 2, (job, leads, researched) => {
-    assert.deepEqual(leads.map(({ name, website }) => [name, website]).sort(), [
-      [productName, product],
-      [officialName, official],
-    ]);
+    assert.deepEqual(
+      leads.map(({ name, website }) => [name, website]).sort(),
+      [
+        [productName, product],
+        [officialName, official],
+      ],
+      JSON.stringify(
+        job.rows.map(({ source_url, result, reason }) => [source_url, result, reason]),
+      ),
+    );
     assert.equal(job.inserted, 2);
     assert.deepEqual(researched, [official, product]);
     assert.deepEqual(
@@ -1455,9 +1487,18 @@ test('经营目录及采购档案待核实，独立官网和带数字与评价�
       [
         [directory, 'review'],
         [procurement, 'review'],
+        [localDirectory, 'review'],
         [official, 'inserted'],
         [product, 'inserted'],
       ],
+    );
+    const directoryRow = job.rows.find(({ source_url }) => source_url === localDirectory);
+    assert.match(directoryRow.reason, /第三方.*独立官网/);
+    assert.equal(directoryRow.record_id, undefined);
+    assert.ok(
+      directoryRow.collection_attempts.some(
+        ({ final_url, status }) => final_url === localDirectoryRoot && status === 'ok',
+      ),
     );
   });
 });
