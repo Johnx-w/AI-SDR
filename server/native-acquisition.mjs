@@ -25,6 +25,7 @@ import {
 } from './lead-supplement-service.mjs';
 import { applySupplementsToResearch } from './lead-supplements.mjs';
 import {
+  businessDirectoryEvidence,
   domainKey,
   thirdPartyCompanySource,
   thirdPartySupplierProfile,
@@ -704,12 +705,24 @@ export class NativeAcquisition {
         }
       }
     };
-    const addPage = (url, content, snapshotId) => {
+    let browsesProfiles = false,
+      publishesListings = false,
+      managesCandidateProfile = false;
+    const isBusinessDirectory = () =>
+      browsesProfiles && (publishesListings || managesCandidateProfile);
+    const addPage = (url, content, snapshotId, requestedUrl = url) => {
       // Keep complete HTML for independent contact/metadata extraction, even on shells.
       pages.push({ url, content });
       enqueue(url, content);
       const text = researchPageText(content, content.length);
       if (!hasUsableResearchText(text, content)) return false;
+      const custody = businessDirectoryEvidence(text);
+      if (requestedUrl === initial.href) managesCandidateProfile ||= custody.manageProfile;
+      // The candidate's description can be supplied by a listed business.
+      if (requestedUrl !== initial.href || new URL(url).pathname === '/') {
+        browsesProfiles ||= custody.browseProfiles;
+        publishesListings ||= custody.publishListings;
+      }
       if (unified) {
         const page = researchPages.get(url) || {
           source_url: url,
@@ -730,7 +743,7 @@ export class NativeAcquisition {
     const retain = ({ content, raw_content, links, ...attempt }, reused = false) => {
       if (reused && operationId) this.store.referencePageSnapshot(operationId, attempt.snapshot_id);
       if (attempt.status === 'ok') {
-        addPage(attempt.final_url, content, attempt.snapshot_id);
+        addPage(attempt.final_url, content, attempt.snapshot_id, attempt.requested_url);
         if (raw_content && raw_content !== content)
           pages.push({ url: attempt.final_url, content: raw_content });
         if (links?.length) enqueue(attempt.final_url, links.map((url) => `[](${url})`).join('\n'));
@@ -877,7 +890,7 @@ export class NativeAcquisition {
               break;
             }
           }
-          if (!unified && !addPage(url.href, content)) failures.add(original);
+          if (!unified && !addPage(url.href, content, undefined, original)) failures.add(original);
         } catch (error) {
           failures.add(original);
           if (unified && error.code === 'WEBSITE_NOT_PUBLIC') {
@@ -1067,7 +1080,7 @@ export class NativeAcquisition {
     await readPlanned();
     check();
     // Supplement failed or dynamically rendered pages, bounded to the same five URLs.
-    for (;;) {
+    while (!isBusinessDirectory()) {
       if (unified) {
         for (const original of failures) await recoverBrowser(original, 'missing_page_body');
         if (queue.length) {
@@ -1116,6 +1129,7 @@ export class NativeAcquisition {
         web_usage: op?.web_usage || webUsage.snapshot(),
         incomplete_urls: [...failures],
         website_metadata: combineWebsiteEvidence(pages),
+        is_business_directory: isBusinessDirectory(),
         checked_urls: [...researchPages.keys()],
         ...(unified ? { collection_attempts, evidence_by_url: researchPages } : {}),
       };
@@ -1430,19 +1444,8 @@ export class NativeAcquisition {
       op.evidence = page.website_metadata;
       this.store.save(op);
       check();
-      if (
-        op.collection_attempts?.some(
-          ({ requested_url, final_url }) =>
-            requested_url === candidateUrl && thirdPartySupplierProfile({ url: final_url }),
-        ) ||
-        thirdPartyCompanySource({
-          url: item.source_url,
-          title: item.source_title,
-          text: page.page_text,
-        })
-      ) {
-        const reason =
-          '采集正文表明当前页面为第三方贸易、采购或平台供应商档案，尚未取得企业独立官网';
+      const reviewThirdParty = async () => {
+        const reason = '采集正文表明当前页面为第三方档案、平台或目录，尚未取得企业独立官网';
         if (item.target_record_id)
           return await this.persistIncompleteAssessment(op, input, item, reason, page.checked_urls);
         const output = this.output(op, {
@@ -1456,7 +1459,20 @@ export class NativeAcquisition {
         });
         this.store.complete(op, output);
         return output;
-      }
+      };
+      if (
+        page.is_business_directory ||
+        op.collection_attempts?.some(
+          ({ requested_url, final_url }) =>
+            requested_url === candidateUrl && thirdPartySupplierProfile({ url: final_url }),
+        ) ||
+        thirdPartyCompanySource({
+          url: item.source_url,
+          title: item.source_title,
+          text: page.page_text,
+        })
+      )
+        return await reviewThirdParty();
       if (scopedIdentity && !review) {
         const known = this.previouslyVerifiedSubject(page, item, op, researchTarget);
         if (known) {
@@ -1528,11 +1544,12 @@ export class NativeAcquisition {
           const supplemented = await page.supplement(gap);
           op.web_usage = supplemented.web_usage;
           op.incomplete_urls = supplemented.incomplete_urls;
-          if (supplemented.page_text !== page.page_text) {
+          if (supplemented.is_business_directory || supplemented.page_text !== page.page_text) {
             Object.assign(page, supplemented);
             op.research_pages = page.research_pages;
             op.checked_urls = page.checked_urls;
             op.evidence = page.website_metadata;
+            if (page.is_business_directory) return await reviewThirdParty();
             this.store.save(op);
             ({ response, parsed, cacheKey, extractionFromCache } = await this.researchPageEvidence(
               page,
