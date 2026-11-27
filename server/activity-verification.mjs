@@ -86,7 +86,16 @@ export function readActivityVerdict(body, sources) {
   };
 }
 
-export async function verifyCompanyActivity(model, store, usage, sources, target, company, trace) {
+export async function verifyCompanyActivity(
+  model,
+  store,
+  usage,
+  sources,
+  target,
+  company,
+  trace,
+  paidResearch,
+) {
   const request = activityRequest(
     sources,
     {
@@ -120,10 +129,14 @@ export async function verifyCompanyActivity(model, store, usage, sources, target
       usage.cache_unavailable = true;
     }
   }
-  usage.model_calls++;
-  usage.input_chars += request.messages[1].content.length;
-  const response = await model.research(request);
-  addModelTokens(usage, response);
+  let response;
+  if (paidResearch) response = await paidResearch(request, key);
+  else {
+    usage.model_calls++;
+    usage.input_chars += request.messages[1].content.length;
+    response = await model.research(request);
+    addModelTokens(usage, response);
+  }
   const verdict = readActivityVerdict(response, sources);
   if (key) {
     try {

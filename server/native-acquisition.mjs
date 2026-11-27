@@ -75,6 +75,14 @@ import {
 } from './customer-fields.mjs';
 
 const conflict = (message) => Object.assign(new Error(message), { status: 409 });
+const interrupted = () =>
+  Object.assign(new Error('执行已在安全边界暂停'), { code: 'ACQUISITION_INTERRUPTED' });
+const paidUnknown = () =>
+  Object.assign(new Error('付费请求结果待供应商核对'), { code: 'ACQUISITION_PAID_UNKNOWN' });
+const paidFailed = () =>
+  Object.assign(new Error('已确认供应商请求失败'), { code: 'ACQUISITION_PAID_FAILED' });
+const recoverySignal = (error) =>
+  ['ACQUISITION_INTERRUPTED', 'ACQUISITION_PAID_UNKNOWN'].includes(error.code);
 const blockedHosts =
   /(?:^|\.)(?:facebook|instagram|linkedin|youtube|youtu|tiktok|twitter|x|pinterest|reddit|quora|wikipedia|alibaba|made-in-china|seek|indeed|jora|glassdoor|careerone|adzuna|jobsora|jooble|talent|careerjet|simplyhired|ziprecruiter|workforceaustralia|hipages|oneflare|yellowpages|truelocal|localsearch|hotfrog|yelp|houzz|gumtree|airtasker|serviceseeking|startlocal|aussieweb|dlook|brownbook|boombusinessdirectory|cylex|yably|bark|google|bing|amazon|ebay|eventbrite|medium)\./i;
 const blockedMedia = [
@@ -304,6 +312,17 @@ function webUsageCounter(operation) {
     },
   };
 }
+const paidRequestSummaries = (op) =>
+  Object.values(op.paid_requests || {}).map(
+    ({ id, kind, provider, status, started_at, usage }) => ({
+      id,
+      kind,
+      provider,
+      status,
+      started_at,
+      ...(usage === undefined ? {} : { usage }),
+    }),
+  );
 
 export class NativeAcquisition {
   constructor({
@@ -563,7 +582,12 @@ export class NativeAcquisition {
     input,
     search,
     seen = [],
-    { admissionVersion = this.admissionVersion, identityVersion, mapsContext } = {},
+    {
+      admissionVersion = this.admissionVersion,
+      identityVersion,
+      mapsContext,
+      discoveryRequestId,
+    } = {},
   ) {
     input = { ...input, ...validateTarget(input) };
     const conditionsKey = exclusionConditionsKey(input);
@@ -583,7 +607,7 @@ export class NativeAcquisition {
     const recent = new Set(paired ? seen.filter((url) => !mapsContext.mapOnlyUrls.has(url)) : seen);
     const excluded = [...new Set(known.filter((domain) => !recent.has(domain))), ...recent];
     const query = search.query.slice(0, 395);
-    const data = await this.providers.web.search({
+    const request = {
       query,
       search_depth: 'basic',
       max_results: 20,
@@ -591,7 +615,19 @@ export class NativeAcquisition {
       include_raw_content: false,
       auto_parameters: false,
       exclude_domains: byUrl ? [] : excluded.slice(-150),
-    });
+    };
+    let data;
+    if (discoveryRequestId) {
+      const { operation } = this.store.begin(discoveryRequestId, { request });
+      data = await this.paidRequest(
+        operation,
+        'web_search',
+        this.providers.web,
+        request,
+        null,
+        (id) => this.providers.web.search(request, { requestId: id }),
+      );
+    } else data = await this.providers.web.search(request);
     const selected = selectWebsiteCandidates(
       data.results,
       excluded,
@@ -625,10 +661,24 @@ export class NativeAcquisition {
   }
   async collect(
     sourceUrl,
-    { unified = false, now, refresh = false, onAttempt, onCollectionQueue, evidenceUrl } = {},
+    {
+      unified = false,
+      now,
+      refresh = false,
+      previousAttempts = [],
+      restoring = false,
+      onAttempt,
+      onCollectionQueue,
+      evidenceUrl,
+      op,
+      operationId,
+      signal,
+      check = () => {},
+    } = {},
   ) {
     const initial = websiteUrl(sourceUrl);
     if (!initial) throw new Error('官网地址无效，仅接受公网 HTTPS 企业网站');
+    if (unified) this.store.maintainPageSnapshots();
     const domain = domainKey(initial.href),
       pages = [],
       failures = new Set(),
@@ -640,7 +690,9 @@ export class NativeAcquisition {
       visited = new Set();
     const webUsage = webUsageCounter('extract');
     const collection_attempts = [];
+    const resumedUrls = new Set();
     const blocked = new Set();
+    const diskDeferred = new Set();
     const browserVisited = new Set();
     const enqueue = (url, content) => {
       for (const next of planWebsitePages(url, content, { includeProducts: unified })) {
@@ -675,6 +727,7 @@ export class NativeAcquisition {
       return true;
     };
     const retain = ({ content, raw_content, links, ...attempt }, reused = false) => {
+      if (reused && operationId) this.store.referencePageSnapshot(operationId, attempt.snapshot_id);
       if (attempt.status === 'ok') {
         addPage(attempt.final_url, content, attempt.snapshot_id);
         if (raw_content && raw_content !== content)
@@ -689,6 +742,30 @@ export class NativeAcquisition {
       collection_attempts.push(trace);
       onAttempt?.(trace);
     };
+    const attempted = { basic: new Set(), advanced: new Set() };
+    const pinned =
+      restoring && operationId
+        ? new Map(
+            this.store.referencedPageSnapshots(operationId).map((page) => [page.snapshot_id, page]),
+          )
+        : new Map();
+    for (const attempt of previousAttempts) {
+      const stored =
+        pinned.get(attempt.snapshot_id) || this.store.snapshotById(attempt.snapshot_id);
+      pinned.delete(attempt.snapshot_id);
+      if (stored?.status === 'ok' && domainKey(stored.final_url) === domain) {
+        resumedUrls.add(stored.requested_url);
+        retain(stored, true);
+      } else collection_attempts.push(attempt);
+      if (attempt.method === 'scrapling' && attempt.status !== 'deferred')
+        browserVisited.add(attempt.requested_url);
+      if (attempt.status === 'blocked') blocked.add(attempt.requested_url);
+      if (attempt.extract_depth) attempted[attempt.extract_depth]?.add(attempt.requested_url);
+    }
+    for (const page of pinned.values()) {
+      if (page.status === 'ok') resumedUrls.add(page.requested_url);
+      retain(page, true);
+    }
     const record = ({
       requested_url,
       final_url,
@@ -701,31 +778,45 @@ export class NativeAcquisition {
       links,
       versions,
       resource_wait,
+      extract_depth,
+      failure_reason,
+      resources,
+      paid_request_id,
     }) => {
-      const snapshot = this.store.savePageSnapshot({
-        requested_url,
-        final_url,
-        acquired_at,
-        method,
-        status,
-        reason,
-        content,
-        raw_content,
-        content_hash: content ? createHash('sha256').update(content).digest('hex') : null,
-        evidence_version: acquisitionEvidenceVersion,
-        gaps: status === 'ok' ? [] : ['page_body'],
-        ...(links ? { links } : {}),
-        ...(versions ? { versions } : {}),
-        ...(resource_wait ? { resource_wait } : {}),
-      });
+      const snapshot = this.store.savePageSnapshot(
+        {
+          requested_url,
+          final_url,
+          acquired_at,
+          method,
+          status,
+          reason,
+          content,
+          raw_content,
+          content_hash: content ? createHash('sha256').update(content).digest('hex') : null,
+          evidence_version: acquisitionEvidenceVersion,
+          gaps: status === 'ok' ? [] : ['page_body'],
+          ...(links ? { links } : {}),
+          ...(versions ? { versions } : {}),
+          ...(resource_wait ? { resource_wait } : {}),
+          ...(extract_depth ? { extract_depth } : {}),
+          ...(failure_reason ? { failure_reason } : {}),
+          ...(resources ? { resources } : {}),
+          ...(paid_request_id ? { paid_request_id } : {}),
+        },
+        { operationId },
+      );
       retain(snapshot);
+      return snapshot.status;
     };
     // Discover contact/about/service links from complete HTML before limiting AI input.
     const readPlanned = async () => {
       while (queue.length && visited.size < 5) {
+        check();
         const original = queue.shift();
         if (visited.has(original)) continue;
         visited.add(original);
+        if (resumedUrls.has(original) || blocked.has(original)) continue;
         let url = websiteUrl(original),
           content = '',
           status = 'failed';
@@ -738,9 +829,26 @@ export class NativeAcquisition {
             continue;
           }
         }
+        if (unified && !this.store.canPersistPageBodies()) {
+          failures.add(original);
+          diskDeferred.add(original);
+          record({
+            requested_url: original,
+            final_url: null,
+            method: 'node',
+            status: 'deferred',
+            reason: 'initial_read',
+            failure_reason: 'snapshot_capacity',
+          });
+          continue;
+        }
         try {
           for (let hop = 0; hop < 4; hop++) {
-            const response = await this.readPage(url, AbortSignal.timeout(12000));
+            const timeout = AbortSignal.timeout(12000);
+            const response = await this.readPage(
+              url,
+              signal ? AbortSignal.any([timeout, signal]) : timeout,
+            );
             if (response.redirect) {
               const next = unified
                 ? websiteRedirectUrl(response.redirect, url)
@@ -784,7 +892,7 @@ export class NativeAcquisition {
           }
         }
         if (unified && status !== 'blocked') {
-          record({
+          status = record({
             requested_url: original,
             final_url: url?.href ?? null,
             method: 'node',
@@ -800,14 +908,22 @@ export class NativeAcquisition {
       }
     };
     const recoverBrowser = async (original, reason) => {
-      if (browserVisited.size >= 2 || blocked.has(original) || browserVisited.has(original))
+      check();
+      if (
+        browserVisited.size >= 2 ||
+        blocked.has(original) ||
+        browserVisited.has(original) ||
+        diskDeferred.has(original) ||
+        !this.store.canPersistPageBodies()
+      )
         return false;
       browserVisited.add(original);
       const result = await this.readScraplingPage(original, {
         reason,
         python: this.env.SCRAPLING_PYTHON,
+        signal,
         onQueue: onCollectionQueue && ((state) => onCollectionQueue(state, original)),
-      }).catch(() => ({ status: 'failed' }));
+      }).catch(() => ({ status: 'failed', failure_reason: 'worker_failed' }));
       const final = websiteUrl(result.final_url);
       const content = typeof result.content === 'string' ? result.content : '';
       const sameSite = final && domainKey(final.href) === domain;
@@ -819,7 +935,7 @@ export class NativeAcquisition {
               ? 'ok'
               : 'empty'
           : result.status;
-      record({
+      const storedStatus = record({
         ...result,
         requested_url: original,
         final_url: final?.href ?? null,
@@ -829,45 +945,105 @@ export class NativeAcquisition {
         content: sameSite ? content : '',
         raw_content: sameSite ? result.raw_content : '',
       });
-      if (status === 'ok') failures.delete(original);
-      if (status === 'blocked') blocked.add(original);
-      return status === 'ok';
+      if (storedStatus === 'ok') failures.delete(original);
+      if (storedStatus === 'blocked') blocked.add(original);
+      return storedStatus === 'ok';
     };
-    const attempted = { basic: new Set(), advanced: new Set() };
+    const recordExtract = (selected, depth, reason, extracted, failureReason, requestId) => {
+      for (const url of selected) {
+        const found = (extracted?.results || []).find((page) => websiteUrl(page.url)?.href === url);
+        const content = [found?.raw_content, found?.content].find(
+          (value) =>
+            typeof value === 'string' &&
+            hasUsableResearchText(researchPageText(value, value.length), value),
+        );
+        const status = record({
+          requested_url: url,
+          final_url: found ? url : null,
+          method: 'external',
+          status: content
+            ? 'ok'
+            : found
+              ? 'empty'
+              : failureReason === 'provider_request_unknown'
+                ? 'unknown'
+                : 'failed',
+          reason,
+          extract_depth: depth,
+          failure_reason: failureReason,
+          paid_request_id: requestId,
+          content: content ?? found?.raw_content ?? found?.content ?? '',
+        });
+        if (status === 'ok') {
+          failures.delete(url);
+          if (restoring) resumedUrls.add(url);
+        }
+      }
+    };
+    if (restoring) {
+      for (const entry of Object.values(op.paid_requests || {})) {
+        if (entry.kind !== 'web_extract' || !entry.source) continue;
+        const { urls, extract_depth, reason } = entry.source;
+        for (const url of urls) attempted[extract_depth].add(url);
+        const failure =
+          entry.status === 'completed'
+            ? undefined
+            : entry.status === 'failed'
+              ? 'provider_extract_failed'
+              : 'provider_request_unknown';
+        const missing = urls.filter(
+          (url) =>
+            !collection_attempts.some(
+              (attempt) =>
+                attempt.paid_request_id === entry.id &&
+                attempt.requested_url === url &&
+                (!entry.response || attempt.status !== 'unknown'),
+            ),
+        );
+        if (missing.length)
+          recordExtract(missing, extract_depth, reason, entry.response, failure, entry.id);
+      }
+    }
     const extractSelected = async (selected, depth, reason) => {
+      check();
       for (const url of selected) attempted[depth].add(url);
+      if (unified && !this.store.canPersistPageBodies()) return;
       let extracted;
+      let failureReason;
+      let requestId;
       try {
-        webUsage.start();
-        extracted = await this.providers.web.extract({
+        const request = {
           urls: selected,
           extract_depth: depth,
           format: 'markdown',
-        });
-        webUsage.observe(extracted);
-      } catch {
+        };
+        if (op) {
+          extracted = await this.paidRequest(
+            op,
+            'web_extract',
+            this.providers.web,
+            request,
+            null,
+            (id) => {
+              requestId = id;
+              return this.providers.web.extract(request, { requestId: id });
+            },
+            { urls: selected, extract_depth: depth, reason },
+          );
+        } else {
+          webUsage.start();
+          extracted = await this.providers.web.extract(request);
+          webUsage.observe(extracted);
+        }
+      } catch (error) {
+        failureReason =
+          error.code === 'ACQUISITION_PAID_UNKNOWN'
+            ? 'provider_request_unknown'
+            : 'provider_extract_failed';
         extracted = { results: [] };
       }
       if (unified) {
-        for (const url of selected) {
-          const found = (extracted?.results || []).find(
-            (page) => websiteUrl(page.url)?.href === url,
-          );
-          const content = [found?.raw_content, found?.content].find(
-            (value) =>
-              typeof value === 'string' &&
-              hasUsableResearchText(researchPageText(value, value.length), value),
-          );
-          record({
-            requested_url: url,
-            final_url: found ? url : null,
-            method: 'external',
-            status: content ? 'ok' : found ? 'empty' : 'failed',
-            reason,
-            content: content ?? found?.raw_content ?? found?.content ?? '',
-          });
-          if (content) failures.delete(url);
-        }
+        recordExtract(selected, depth, reason, extracted, failureReason, requestId);
       } else
         for (const p of extracted?.results || []) {
           const url = websiteUrl(p?.url);
@@ -888,6 +1064,7 @@ export class NativeAcquisition {
         }
     };
     await readPlanned();
+    check();
     // Supplement failed or dynamically rendered pages, bounded to the same five URLs.
     for (;;) {
       if (unified) {
@@ -897,18 +1074,23 @@ export class NativeAcquisition {
           continue;
         }
       }
-      const recoverable = [...failures].filter((url) => !blocked.has(url));
+      const recoverable = [...failures].filter(
+        (url) => !blocked.has(url) && !diskDeferred.has(url),
+      );
       const depth = (
         !unified && this.providers.web.provider !== 'deepseek' ? ['basic', 'advanced'] : ['basic']
       ).find((level) => recoverable.some((url) => !attempted[level].has(url)));
       if (!depth) break;
       const selected = recoverable.filter((url) => !attempted[depth].has(url));
-      await extractSelected(selected, depth, 'missing_page_body');
+      if (op && this.providers.web.provider === 'deepseek') {
+        for (const url of selected) await extractSelected([url], depth, 'missing_page_body');
+      } else await extractSelected(selected, depth, 'missing_page_body');
       await readPlanned();
     }
+    check();
     if (!researchPages.size)
       throw Object.assign(new Error('官网页面均未取得有效正文，采集未完成，未调用模型或写入'), {
-        web_usage: webUsage.snapshot(),
+        web_usage: op?.web_usage || webUsage.snapshot(),
         collection_attempts,
         incomplete_urls: [...failures],
       });
@@ -930,7 +1112,7 @@ export class NativeAcquisition {
         research_pages: bounded.pages,
         page_text: bounded.pages.map((page) => page.text).join('\n'),
         input_stats: bounded.stats,
-        web_usage: webUsage.snapshot(),
+        web_usage: op?.web_usage || webUsage.snapshot(),
         incomplete_urls: [...failures],
         website_metadata: combineWebsiteEvidence(pages),
         checked_urls: [...researchPages.keys()],
@@ -1003,6 +1185,8 @@ export class NativeAcquisition {
         : null,
       checked_urls: research.checked_urls || [],
       ...(operation.research_usage ? { research_usage: operation.research_usage } : {}),
+      ...(operation.web_usage ? { web_usage: operation.web_usage } : {}),
+      ...(operation.paid_requests ? { paid_requests: paidRequestSummaries(operation) } : {}),
       ...(operation.collection_attempts
         ? { collection_attempts: operation.collection_attempts }
         : {}),
@@ -1098,6 +1282,8 @@ export class NativeAcquisition {
       identityVersion,
       executionVersion,
       onCollectionQueue,
+      isMaintaining,
+      signal,
       review,
     } = {},
   ) {
@@ -1120,17 +1306,25 @@ export class NativeAcquisition {
       ...(executionVersion ? { executionVersion } : {}),
       ...(review ? { review } : {}),
     });
-    if (existing) {
+    const resumable = scopedIdentity && executionVersion === unifiedExecutionVersion;
+    if (existing && !(resumable && this.beforeAcquisitionWrite(op) && !this.active.has(id))) {
       const settled = await this.status(id);
       if (settled.settled) return settled.output;
       throw conflict('该企业操作尚待确认，未重复研究或写入');
     }
+    if (existing && !(await this.reconcilePaidRequests(op, { deferExternal: true })))
+      throw paidUnknown();
     const unified = admissionVersion === websiteAdmissionVersion;
+    if (resumable) op.recovery_version = 1;
     op.admission_version = admissionVersion;
     op.identity_version = identityVersion;
-    op.research_usage = { model_calls: 0, cache_hits: 0, input_chars: 0 };
+    op.research_usage ||= { model_calls: 0, cache_hits: 0, input_chars: 0 };
+    const check = () => {
+      if (resumable && (signal?.aborted || isMaintaining?.())) throw interrupted();
+    };
     this.active.add(id);
     try {
+      check();
       const domain = domainKey(item.source_url);
       const candidateUrl = websiteUrl(item.source_url)?.href;
       if (!websiteScope(item.source_url) || !domain) throw new Error('企业网址无效');
@@ -1200,11 +1394,23 @@ export class NativeAcquisition {
       this.store.save(op);
       const page = await this.collect(item.source_url, {
         unified,
+        check,
+        signal,
+        operationId: unified ? id : undefined,
+        ...(resumable ? { op } : {}),
         refresh: bypassExclusion,
         evidenceUrl: review?.decision?.source_url,
         onCollectionQueue,
+        ...(resumable && existing
+          ? { previousAttempts: op.collection_attempts || [], restoring: true }
+          : {}),
         onAttempt: (attempt) => {
-          (op.collection_attempts ||= []).push(attempt);
+          const attempts = (op.collection_attempts ||= []);
+          const index = attempts.findIndex(
+            ({ snapshot_id }) => snapshot_id === attempt.snapshot_id,
+          );
+          if (index === -1) attempts.push(attempt);
+          else attempts[index] = attempt;
           this.store.save(op);
         },
       });
@@ -1222,6 +1428,7 @@ export class NativeAcquisition {
       op.collection_complete = page.research_pages.length > 0;
       op.evidence = page.website_metadata;
       this.store.save(op);
+      check();
       if (
         op.collection_attempts?.some(
           ({ requested_url, final_url }) =>
@@ -1251,7 +1458,10 @@ export class NativeAcquisition {
       }
       if (scopedIdentity && !review) {
         const known = this.previouslyVerifiedSubject(page, item, op, researchTarget);
-        if (known) return await this.finishAcquisitionMatch(op, { record_id: known });
+        if (known) {
+          check();
+          return await this.finishAcquisitionMatch(op, { record_id: known });
+        }
       }
       // Cheap keyword screen before the paid model call: keep only pages that
       // actually mention the target products or the window-shading industry.
@@ -1303,6 +1513,7 @@ export class NativeAcquisition {
         bypassExclusion,
         identityVersion,
         review,
+        check,
       };
       let { response, parsed, cacheKey, extractionFromCache } = await this.researchPageEvidence(
         page,
@@ -1333,6 +1544,7 @@ export class NativeAcquisition {
       }
       op.research_response = response;
       this.store.save(op);
+      check();
       const research = {
         ...parsed,
         checked_urls: page.checked_urls,
@@ -1464,6 +1676,7 @@ export class NativeAcquisition {
         );
       op.stage = 'prepare';
       this.store.save(op);
+      check();
       if (scopedIdentity && !item.target_record_id) {
         const registration = verifiedRegistration(research.company_identity, research.facts);
         op.acquisition = {
@@ -1590,6 +1803,7 @@ export class NativeAcquisition {
             fields[key] = value || null;
       }
       if (!Object.keys(fields).length) throw new Error('没有可更新字段');
+      check();
       // Persist intent before the remote side effect. Never auto-repeat an uncertain write.
       op.stage = 'persist';
       op.action = old ? 'update' : 'insert';
@@ -1598,6 +1812,16 @@ export class NativeAcquisition {
       op.source_url = item.source_url;
       return await this.writePreparedAssessment(op);
     } catch (error) {
+      if (error.code === 'ACQUISITION_INTERRUPTED' && signal?.reason === 'stopped') {
+        return this.store.complete(
+          op,
+          this.output(op, {
+            outcome: 'review',
+            reason: '任务已停止，此候选保留已采集证据，等待核实',
+          }),
+        ).output;
+      }
+      if (recoverySignal(error)) throw error;
       if (op.stage === 'extract' && error.web_usage) op.web_usage = error.web_usage;
       if (unified && op.stage === 'extract' && error.collection_attempts) {
         op.collection_attempts = error.collection_attempts;
@@ -1661,6 +1885,109 @@ export class NativeAcquisition {
       this.active.delete(id);
     }
   }
+  async paidRequest(op, kind, provider, request, onDispatch, send, source) {
+    const key = createHash('sha256')
+      .update(JSON.stringify([op.id, op.scope, kind, provider.provider, request]))
+      .digest('hex');
+    const requests = (op.paid_requests ||= {});
+    const previous = requests[key];
+    if (previous?.status === 'completed') return previous.response;
+    if (previous?.status === 'failed') throw paidFailed();
+    if (previous) throw paidUnknown();
+    const entry = {
+      id: key,
+      kind,
+      provider: provider.provider,
+      status: 'pending',
+      started_at: new Date().toISOString(),
+      ...(source ? { source } : {}),
+    };
+    requests[key] = entry;
+    if (kind === 'web_extract') {
+      op.web_usage ||= { web_extract_calls: 0 };
+      op.web_usage.web_extract_calls++;
+      delete op.web_usage.web_extract_credits;
+    }
+    onDispatch?.();
+    this.store.save(op);
+    let response;
+    try {
+      response = await send(key);
+    } catch (error) {
+      const knownFailure =
+        error.upstreamStatus >= 400 && error.upstreamStatus < 500 && error.upstreamStatus !== 408;
+      entry.status = knownFailure ? 'failed' : 'unknown';
+      this.store.save(op);
+      if (!knownFailure) throw paidUnknown();
+      throw paidFailed();
+    }
+    this.confirmPaidRequest(op, entry, response);
+    return response;
+  }
+  confirmPaidRequest(op, entry, response) {
+    entry.status = 'completed';
+    entry.response = response;
+    if (entry.kind.startsWith('model_')) addModelTokens(op.research_usage, response);
+    if (Number.isFinite(response?.usage?.credits) && response.usage.credits >= 0)
+      entry.usage = { credits: response.usage.credits };
+    if (entry.kind === 'web_extract') {
+      const extracts = Object.values(op.paid_requests).filter(({ kind }) => kind === 'web_extract');
+      if (extracts.every(({ usage }) => usage))
+        op.web_usage.web_extract_credits = extracts.reduce(
+          (sum, { usage }) => sum + usage.credits,
+          0,
+        );
+    }
+    this.store.save(op);
+  }
+  async reconcilePaidRequests(op, { deferExternal = false } = {}) {
+    for (const entry of Object.values(op.paid_requests || {})) {
+      if (!['pending', 'unknown'].includes(entry.status)) continue;
+      const service = entry.kind.startsWith('model_') ? this.providers.model : this.providers.web;
+      if (entry.provider !== service.provider) {
+        if (deferExternal && entry.kind === 'web_extract') continue;
+        return false;
+      }
+      const lookup = await Promise.resolve()
+        .then(() =>
+          service.reconcile?.({
+            id: entry.id,
+            kind: entry.kind,
+            signal: AbortSignal.timeout(3000),
+          }),
+        )
+        .catch(() => null);
+      if (lookup?.status === 'completed' && lookup.response) {
+        this.confirmPaidRequest(op, entry, lookup.response);
+      } else if (lookup?.status === 'failed') {
+        entry.status = 'failed';
+        this.store.save(op);
+      } else {
+        if (entry.status !== 'unknown') {
+          entry.status = 'unknown';
+          this.store.save(op);
+        }
+        if (!(deferExternal && entry.kind === 'web_extract')) return false;
+      }
+    }
+    return true;
+  }
+  operationProgress(id) {
+    const op = this.store.get(id);
+    if (!op) return null;
+    return {
+      id: op.id,
+      stage: op.stage,
+      collection_attempts: op.collection_attempts || [],
+      research_usage: op.research_usage,
+      web_usage: op.web_usage,
+      requests: paidRequestSummaries(op),
+    };
+  }
+  async discoveryReady(id) {
+    const op = this.store.get(id);
+    return !op || this.reconcilePaidRequests(op);
+  }
   async researchPageEvidence(
     page,
     op,
@@ -1675,8 +2002,10 @@ export class NativeAcquisition {
       bypassExclusion,
       identityVersion,
       review,
+      check = () => {},
     },
   ) {
+    check();
     op.research_usage.input_chars += page.input_stats.inputChars;
     const prompt = companyResearchRequest(page, researchTarget);
     const request = {
@@ -1738,13 +2067,28 @@ export class NativeAcquisition {
     } else {
       // Count attempts before the network call, including an unknown remote
       // outcome; this is not a claim that the provider charged a given amount.
-      op.research_usage.model_calls++;
-      if (item.target_record_id || bypassExclusion) this.store.save(op);
-      else this.store.startModelAttempt(op, conditionsKey, domain);
-      response = await this.providers.model.research(request);
+      const start = () => {
+        op.research_usage.model_calls++;
+        if (item.target_record_id || bypassExclusion) this.store.save(op);
+        else this.store.startModelAttempt(op, conditionsKey, domain);
+      };
+      if (op.recovery_version) {
+        response = await this.paidRequest(
+          op,
+          'model_extraction',
+          this.providers.model,
+          [cacheKey, request],
+          start,
+          (id) => this.providers.model.research(request, { requestId: id }),
+        );
+      } else {
+        start();
+        response = await this.providers.model.research(request);
+        addModelTokens(op.research_usage, response);
+      }
       op.research_response = response;
-      addModelTokens(op.research_usage, response);
       this.store.save(op);
+      check();
       parsed = parseCompanyResearch(response, page, researchTarget);
     }
     let operatorFacts = [];
@@ -1869,8 +2213,24 @@ export class NativeAcquisition {
                 ?.text?.slice(0, 1200),
             },
             trace,
+            op.recovery_version &&
+              ((request, key) => {
+                check();
+                return this.paidRequest(
+                  op,
+                  'model_activity',
+                  this.providers.model,
+                  [key, request],
+                  () => {
+                    op.research_usage.model_calls++;
+                    op.research_usage.input_chars += request.messages[1].content.length;
+                  },
+                  (id) => this.providers.model.research(request, { requestId: id }),
+                );
+              }),
           );
-        } catch {
+        } catch (error) {
+          if (recoverySignal(error)) throw error;
           verdict.reason = '官网业务独立模型复核未完成，待重新核实';
         }
       }
@@ -2238,11 +2598,35 @@ export class NativeAcquisition {
       }
       return { settled: false, reason: '写入尚未确认，未自动重试' };
     }
+    if (this.beforeAcquisitionWrite(op)) {
+      if (
+        !op.recovery_version &&
+        (op.research_usage?.model_calls > 0 || op.web_usage?.web_extract_calls > 0)
+      )
+        return {
+          settled: false,
+          paidUnknown: true,
+          reason: '旧版付费请求缺少精确编号，结果待核对',
+        };
+      if (await this.reconcilePaidRequests(op, { deferExternal: true }))
+        return { settled: false, resumeSafe: true, reason: '从原企业操作继续' };
+      return { settled: false, paidUnknown: true, reason: '付费请求结果待供应商核对' };
+    }
     const output = this.output(op, { reason: '服务在写入前中断；本次企业未入库' });
     if (['extract', 'research'].includes(op.stage) && !op.action && !op.fields)
       output.retryable_before_write = true;
     this.store.complete(op, output);
     return { settled: true, output };
+  }
+  beforeAcquisitionWrite(op) {
+    return (
+      op.input.executionVersion === unifiedExecutionVersion &&
+      op.state !== 'completed' &&
+      ['select', 'extract', 'research', 'prepare'].includes(op.stage) &&
+      !op.acquisition_match &&
+      !op.action &&
+      !op.fields
+    );
   }
   close() {
     this.assessments.close();

@@ -120,6 +120,9 @@ export function createAcquisitionProvider({
       };
     },
     status: (id) => service().status(id),
+    operationProgress: (id) => service().operationProgress?.(id),
+    discoveryReady: (id) => service().discoveryReady?.(id),
+    maintainPageSnapshots: () => native?.store?.maintainPageSnapshots(),
     close: () => {
       const pending = customers.close?.();
       if (pending) return pending.finally(() => native?.close());

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { setTimeout as delay } from 'node:timers/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NativeAcquisition, selectWebsiteCandidates } from '../server/native-acquisition.mjs';
@@ -58,6 +59,145 @@ const definitions = [
   { field_name: '客户类型', type: 3 },
 ];
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status });
+
+for (const interruptAt of ['官网正文已保存', '已派模型应答返回'])
+  test('发布中断后同一轮复用已存官网和原操作：' + interruptAt, async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'acquisition-recovery-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const maintenance = join(dir, 'maintenance.json');
+    const runtimeEnv = {
+      TAVILY_API_KEY: 'fixture-search',
+      DEEPSEEK_API_KEY: 'fixture-model',
+      BATCH_DB_PATH: join(dir, 'acquisition.sqlite'),
+      LEAD_LIBRARY_DB_PATH: join(dir, 'customers.sqlite'),
+      RELEASE_MAINTENANCE_PATH: maintenance,
+    };
+    const north = 'https://north-recovery.example.org/';
+    const south = 'https://south-recovery.example.org/';
+    const alias = 'https://north-recovery-alias.example.org/';
+    const companies = {
+      [north]: ['North Recovery Limited', '07123456'],
+      [south]: ['South Recovery Limited', '07987654'],
+      [alias]: ['North Recovery Limited', '07123456'],
+    };
+    const identity = (url) => {
+      const [name, number] = companies[url];
+      return `This website is operated by ${name}, registered in England and Wales, company number ${number}.`;
+    };
+    const operating =
+      'We supply made-to-measure roller blinds for residential windows and commercial buildings.';
+    let found = 0;
+    let interrupt = true;
+    const calls = [];
+    const fetchImpl = async (url, options) => {
+      if (url === 'https://api.tavily.com/search') {
+        found++;
+        return json({
+          results: Object.keys(companies).map((url) => ({ url, title: companies[url][0] })),
+        });
+      }
+      if (url !== 'https://api.deepseek.com/responses') throw new Error('Fixture network disabled');
+      const { pages, sources } = JSON.parse(JSON.parse(options.body).input[1].content);
+      const response = sources
+        ? { result: 'relevant', sources: sources.map(({ i }) => i), reason: '官网确认经营' }
+        : (() => {
+            const url = pages[0].source_url;
+            calls.push(url);
+            const evidence = (value, quote) => ({ value, quote, source_url: url });
+            return {
+              company_name: evidence(companies[url][0], identity(url)),
+              legal_company_name: evidence(companies[url][0], identity(url)),
+              entity_type: evidence('business', identity(url)),
+              admission_facts: [evidence('complete_supply', operating)],
+              products: [
+                { ...evidence('roller blinds', operating), window_use: 'window_covering' },
+              ],
+            };
+          })();
+      if (interrupt && interruptAt === '已派模型应答返回' && pages?.[0].source_url === south)
+        writeFileSync(maintenance, '{}');
+      return json({
+        status: 'completed',
+        usage: { input_tokens: 511, output_tokens: 39, total_tokens: 550 },
+        output: [{ content: [{ type: 'output_text', text: JSON.stringify(response) }] }],
+      });
+    };
+    const pageReads = [];
+    const options = () => ({
+      env: runtimeEnv,
+      fetchImpl,
+      nativeImpl: new NativeAcquisition({
+        env: runtimeEnv,
+        fetchImpl,
+        readPage: async ({ href }) => {
+          pageReads.push(href);
+          if (interrupt && interruptAt === '官网正文已保存' && href === south)
+            writeFileSync(maintenance, '{}');
+          return { html: `<p>${identity(href)}</p><p>${operating}</p>` };
+        },
+      }),
+    });
+    const waitRead = async (url, predicate) => {
+      let result;
+      for (let attempt = 0; attempt < 200; attempt++) {
+        result = await (await fetch(url)).json();
+        if (predicate(result)) return result;
+        await delay(10);
+      }
+      assert.fail(JSON.stringify(result));
+    };
+    let id;
+    await withApp(options(), async (origin) => {
+      const response = await fetch(origin + '/api/v1/acquisition/jobs', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'idempotency-key': 'recovery-fixture' },
+        body: JSON.stringify({
+          ...input,
+          product: 'roller blinds',
+          search_query: 'roller blinds United States',
+          target_count: 3,
+          research_budget: 3,
+        }),
+      });
+      assert.equal(response.status, 202);
+      ({ id } = await response.json());
+      await waitRead(origin + '/api/v1/ops/maintenance', ({ enabled, quiet }) => enabled && quiet);
+      assert.deepEqual(
+        pageReads,
+        [north, south],
+        'maintenance yields after saving the second page',
+      );
+      assert.deepEqual(calls, interruptAt === '官网正文已保存' ? [north] : [north, south]);
+    });
+    interrupt = false;
+    rmSync(maintenance);
+    await withApp(options(), async (origin) => {
+      const api = origin + '/api/v1';
+      const job = await waitRead(api + '/acquisition/jobs/' + id, ({ status }) =>
+        ['completed', 'partial'].includes(status),
+      );
+      assert.equal(job.inserted, 2, JSON.stringify({ rows: job.rows, pageReads, calls }));
+      assert.equal(job.remainingTarget, 1);
+      assert.equal(job.researched, 3);
+      assert.equal(found, 1);
+      assert.deepEqual(pageReads, [north, south, alias]);
+      assert.deepEqual(calls, [north, south]);
+      assert.deepEqual(
+        job.rows.map(({ source_url, result }) => [source_url, result]),
+        [
+          [north, 'inserted'],
+          [south, 'inserted'],
+          [alias, 'duplicate'],
+        ],
+      );
+      assert.equal(job.rows[1].capture.operation_id, id + '-2');
+      assert.equal(job.rows[0].record_id, job.rows[2].record_id);
+      assert.deepEqual(
+        (await (await fetch(api + '/leads/real/list')).json()).leads.map(({ name }) => name).sort(),
+        ['North Recovery Limited', 'South Recovery Limited'],
+      );
+    });
+  });
 
 function fixture({
   initial = [],
@@ -296,6 +436,389 @@ function mapDiscoveryFixture({
     googleRequests,
   };
 }
+
+test('付费模型应答丢失后继续只核对原请求，取回结果后收录一次', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'acquisition-paid-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const runtimeEnv = {
+    ...env,
+    BATCH_DB_PATH: join(dir, 'acquisition.sqlite'),
+    LEAD_LIBRARY_DB_PATH: join(dir, 'customers.sqlite'),
+  };
+  const fixture = mapDiscoveryFixture();
+  let received;
+  let extractionCalls = 0;
+  let queryCalls = 0;
+  const lookups = [];
+  const fetchImpl = async (url, options) => {
+    if (url === 'https://api.tavily.com/search') queryCalls++;
+    if (url === 'https://api.deepseek.com/responses') {
+      const { sources } = JSON.parse(JSON.parse(options.body).input[1].content);
+      if (!sources) {
+        extractionCalls++;
+        received = await (await fixture.app.fetchImpl(url, options)).json();
+        throw new Error('供应商已执行，但 HTTP 响应中断');
+      }
+    }
+    return fixture.app.fetchImpl(url, options);
+  };
+  let remoteAvailable = false;
+  const options = () => {
+    const service = new NativeAcquisition({
+      env: runtimeEnv,
+      fetchImpl,
+      readPage: fixture.app.nativeImpl.readPage,
+    });
+    service.providers.model.reconcile = ({ id, kind }) => {
+      lookups.push([id, kind]);
+      return remoteAvailable ? { status: 'completed', response: received } : { status: 'unknown' };
+    };
+    return { env: runtimeEnv, fetchImpl, nativeImpl: service };
+  };
+  const jobAt = async (url, expected) => {
+    for (let attempt = 0; attempt < 175; attempt++) {
+      const job = await (await fetch(url)).json();
+      if (job.status !== 'running') {
+        assert.equal(job.status, expected, JSON.stringify(job.rows));
+        return job;
+      }
+      await delay(10);
+    }
+    assert.fail('获客任务未及时进入' + expected);
+  };
+  let id;
+  let request;
+  await withApp(options(), async (origin) => {
+    const jobs = origin + '/api/v1/acquisition/jobs';
+    const submit = await fetch(jobs, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'idempotency-key': 'paid-recovery-fixture' },
+      body: JSON.stringify({
+        ...input,
+        product: 'roller blinds',
+        search_query: 'roller blinds United States',
+        target_count: 1,
+        research_budget: 1,
+      }),
+    });
+    assert.equal(submit.status, 202);
+    ({ id } = await submit.json());
+    const pending = await jobAt(jobs + '/' + id, 'paused');
+    assert.equal(pending.currentProgress.stage, 'research');
+    assert.equal(pending.currentProgress.research_usage.model_calls, 1);
+    assert.equal(pending.remainingTarget, 1);
+    [request] = pending.currentProgress.requests.filter(({ status }) => status === 'unknown');
+    assert.equal(request.kind, 'model_extraction');
+    assert.equal(pending.rows.length, 0);
+    assert.equal((await fetch(jobs + '/' + id + '/resume', { method: 'POST' })).status, 409);
+  });
+  await withApp(options(), async (origin) => {
+    const api = origin + '/api/v1';
+    const url = api + '/acquisition/jobs/' + id;
+    const pending = await jobAt(url, 'paused');
+    assert.equal(pending.currentProgress.requests[0].id, request.id);
+    assert.equal(extractionCalls, 1);
+    remoteAvailable = true;
+    await Promise.all([
+      fetch(url + '/resume', { method: 'POST' }),
+      fetch(url + '/resume', { method: 'POST' }),
+    ]);
+    const done = await jobAt(url, 'completed');
+    assert.equal(done.inserted, 1);
+    assert.equal(done.remainingTarget, 0);
+    assert.equal(done.rows[0].source_url, fixture.beacon);
+    assert.equal(done.researchUsage.model_calls, 2);
+    assert.equal(extractionCalls, 1);
+    assert.equal(queryCalls, 1);
+    assert.ok(lookups.length >= 2);
+    assert.ok(lookups.every(([id, kind]) => id === request.id && kind === 'model_extraction'));
+    assert.deepEqual(
+      (await (await fetch(api + '/leads/real/list')).json()).leads.map(({ website }) => website),
+      [fixture.beacon],
+    );
+  });
+});
+
+test('付费搜索失去应答时恢复保持原游标，供应商核对后消费同批候选', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'acquisition-search-recovery-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const fixture = mapDiscoveryFixture();
+  const runtimeEnv = { ...env, BATCH_DB_PATH: join(dir, 'acquisition.sqlite') };
+  let queries = 0;
+  let providerResult;
+  let responseAvailable = false;
+  const checks = [];
+  const fetchImpl = async (url, options) => {
+    if (url === 'https://api.tavily.com/search') {
+      queries++;
+      providerResult = await (await fixture.app.fetchImpl(url, options)).json();
+      throw new Error('搜索应答丢失');
+    }
+    return fixture.app.fetchImpl(url, options);
+  };
+  const options = () => {
+    const nativeImpl = new NativeAcquisition({
+      env: runtimeEnv,
+      fetchImpl,
+      readPage: fixture.app.nativeImpl.readPage,
+    });
+    nativeImpl.providers.web.reconcile = ({ id, kind }) => {
+      checks.push([id, kind]);
+      return responseAvailable ? { status: 'completed', response: providerResult } : null;
+    };
+    return { env: runtimeEnv, fetchImpl, nativeImpl };
+  };
+  const waitFor = async (url, status) => {
+    for (let attempt = 0; attempt < 175; attempt++) {
+      const job = await (await fetch(url)).json();
+      if (job.status === status) return job;
+      await delay(10);
+    }
+    assert.fail('获客任务未及时进入' + status);
+  };
+  let id;
+  let requestId;
+  await withApp(options(), async (origin) => {
+    const jobs = origin + '/api/v1/acquisition/jobs';
+    const result = await fetch(jobs, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'idempotency-key': 'search-recovery-fixture' },
+      body: JSON.stringify({
+        ...input,
+        product: 'roller blinds',
+        target_count: 1,
+        research_budget: 1,
+      }),
+    });
+    assert.equal(result.status, 202);
+    ({ id } = await result.json());
+    const paused = await waitFor(jobs + '/' + id, 'paused');
+    assert.equal(paused.searches, 1);
+    assert.equal(paused.currentProgress.requests[0].kind, 'web_search');
+    requestId = paused.currentProgress.requests[0].id;
+    assert.equal(paused.currentProgress.requests[0].status, 'unknown');
+  });
+  await withApp(options(), async (origin) => {
+    const url = origin + '/api/v1/acquisition/jobs/' + id;
+    assert.equal((await fetch(url + '/resume', { method: 'POST' })).status, 409);
+    assert.equal(queries, 1);
+    responseAvailable = true;
+    const waited = await fetch(url + '/resume', { method: 'POST' });
+    assert.equal(waited.status, 200);
+    const done = await waitFor(url, 'completed');
+    assert.equal(done.inserted, 1);
+    assert.equal(done.rows[0].source_url, fixture.beacon);
+    assert.equal(done.searches, 1);
+    assert.equal(done.searchStats[0].usage.credits, 1);
+    assert.equal(queries, 1);
+    assert.ok(checks.every(([id, kind]) => id === requestId && kind === 'web_search'));
+  });
+});
+
+test('资源失败和外部提取未知只延后缺证企业，两个正常官网继续入库', async () => {
+  const shell = 'https://unreadable-recovery.example.org/';
+  const fixture = mapDiscoveryFixture({
+    webResults: ({ atlas, beacon }) => [shell, atlas, beacon],
+  });
+  const extractCalls = [];
+  const fetchImpl = async (url, options) => {
+    if (url === 'https://api.tavily.com/search') {
+      return json({
+        results: [shell, fixture.atlas, fixture.beacon].map((url) => ({ url, title: url })),
+        usage: { credits: 1 },
+      });
+    }
+    if (url === 'https://api.tavily.com/extract') {
+      extractCalls.push(JSON.parse(options.body).urls);
+      throw new Error('外部提取应答丢失');
+    }
+    return fixture.app.fetchImpl(url, options);
+  };
+  const nativeImpl = new NativeAcquisition({
+    env,
+    fetchImpl,
+    readPage: async (url, signal) =>
+      url.href === shell
+        ? { html: '<noscript>Enable JavaScript</noscript>' }
+        : fixture.app.nativeImpl.readPage(url, signal),
+    readScraplingPage: async (url) =>
+      url === shell
+        ? { status: 'memory_limit', failure_reason: 'worker_memory_limit' }
+        : fixture.app.nativeImpl.readScraplingPage(url),
+  });
+  await withApp({ env, fetchImpl, nativeImpl }, async (origin) => {
+    const api = origin + '/api/v1';
+    const response = await fetch(api + '/acquisition/jobs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'idempotency-key': 'fallback-fixture' },
+      body: JSON.stringify({
+        ...input,
+        product: 'roller blinds',
+        target_count: 2,
+        research_budget: 3,
+      }),
+    });
+    assert.equal(response.status, 202);
+    const { id } = await response.json();
+    let job;
+    for (let attempt = 0; attempt < 125; attempt++) {
+      job = await (await fetch(api + '/acquisition/jobs/' + id)).json();
+      if (job.status !== 'running') break;
+      await delay(10);
+    }
+    assert.equal(job.status, 'completed');
+    assert.deepEqual(
+      job.rows.map(({ source_url, result }) => [source_url, result]),
+      [
+        [shell, 'review'],
+        [fixture.atlas, 'inserted'],
+        [fixture.beacon, 'inserted'],
+      ],
+    );
+    assert.deepEqual(
+      job.rows[0].collection_attempts.map(({ method, status, failure_reason }) => [
+        method,
+        status,
+        failure_reason ?? null,
+      ]),
+      [
+        ['node', 'empty', null],
+        ['scrapling', 'memory_limit', 'worker_memory_limit'],
+        ['external', 'unknown', 'provider_request_unknown'],
+      ],
+    );
+    const [request] = job.rows[0].paid_requests;
+    assert.deepEqual([request.kind, request.status], ['web_extract', 'unknown']);
+    assert.deepEqual(extractCalls, [[shell]]);
+    assert.deepEqual(
+      (await (await fetch(api + '/leads/real/list')).json()).leads
+        .map(({ website }) => website)
+        .sort(),
+      [fixture.atlas, fixture.beacon],
+    );
+  });
+});
+
+test('服务正常停止时收回活跃浏览器，重启补抓未保存的网页并保持原候选', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'acquisition-browser-shutdown-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const fixture = mapDiscoveryFixture({ webResults: ({ atlas }) => [atlas] });
+  const runtimeEnv = { ...env, BATCH_DB_PATH: join(dir, 'acquisition.sqlite') };
+  const { fetchImpl } = fixture.app;
+  let begin;
+  const browserStarted = new Promise((resolve) => (begin = resolve));
+  let aborted = 0;
+  const browserReads = [];
+  const options = (hold) => ({
+    env: runtimeEnv,
+    fetchImpl,
+    nativeImpl: new NativeAcquisition({
+      env: runtimeEnv,
+      fetchImpl,
+      readPage: fixture.app.nativeImpl.readPage,
+      readScraplingPage: async (url, { signal }) => {
+        browserReads.push(url);
+        if (!hold) return fixture.app.nativeImpl.readScraplingPage(url);
+        begin();
+        return new Promise((resolve) =>
+          signal?.addEventListener(
+            'abort',
+            () => {
+              aborted++;
+              resolve({ status: 'deferred', failure_reason: 'aborted' });
+            },
+            { once: true },
+          ),
+        );
+      },
+    }),
+  });
+  const app = createApp(options(true));
+  await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
+  let id;
+  try {
+    const jobs = 'http://127.0.0.1:' + app.address().port + '/api/v1/acquisition/jobs';
+    const response = await fetch(jobs, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'idempotency-key': 'shutdown-fixture' },
+      body: JSON.stringify({
+        ...input,
+        product: 'roller blinds',
+        target_count: 1,
+        research_budget: 1,
+      }),
+    });
+    assert.equal(response.status, 202);
+    ({ id } = await response.json());
+    await browserStarted;
+    await app.shutdown();
+    assert.equal(aborted, 1);
+  } finally {
+    if (app.listening) await new Promise((resolve) => app.close(resolve));
+  }
+  await withApp(options(false), async (origin) => {
+    const api = origin + '/api/v1';
+    let job;
+    for (let attempt = 0; attempt < 125; attempt++) {
+      job = await (await fetch(api + '/acquisition/jobs/' + id)).json();
+      if (job.status === 'completed') break;
+      await delay(10);
+    }
+    assert.equal(job.status, 'completed');
+    assert.equal(job.researched, 1);
+    assert.equal(job.rows[0].capture.operation_id, id + '-1');
+    assert.deepEqual(browserReads, [fixture.atlas, fixture.atlas]);
+    assert.deepEqual(
+      job.rows[0].collection_attempts
+        .filter(({ method }) => method === 'scrapling')
+        .map(({ status }) => status),
+      ['deferred', 'ok'],
+    );
+    assert.deepEqual(
+      (await (await fetch(api + '/leads/real/list')).json()).leads.map(({ website }) => website),
+      [fixture.atlas],
+    );
+  });
+});
+
+test('快照保留期和缓存容量只清理未引用页面，保留在途和档案原文', () => {
+  const store = new AcquisitionStore(':memory:', 'retention-fixture', { snapshotCacheBytes: 550 });
+  const now = Date.parse('2030-02-01T00:00:00Z');
+  const snapshot = (name, date, operationId) => {
+    const url = 'https://' + name + '.example.org/';
+    return store.savePageSnapshot(
+      {
+        requested_url: url,
+        final_url: url,
+        acquired_at: date,
+        method: 'node',
+        status: 'ok',
+        content: name + ' independent frozen original website evidence. '.repeat(4),
+      },
+      { operationId },
+    );
+  };
+  try {
+    const old = '2030-01-12T00:00:00.000Z';
+    const active = store.begin('active-fixture-operation', {}).operation;
+    const archived = store.begin('archived-fixture-operation', {}).operation;
+    const inFlight = snapshot('active', old, active.id);
+    // Reopening a pre-upgrade operation may have its references only in operation evidence.
+    const history = snapshot('archive', old);
+    store.complete(archived, { research: { facts: [{ snapshot_id: history.snapshot_id }] } });
+    const expired = snapshot('old-unreferenced', old);
+    const overflow = snapshot('overflow', '2030-01-31T22:00:00.000Z');
+    const latest = snapshot('latest', '2030-01-31T23:00:00.000Z');
+    store.prunePageSnapshots({ now });
+    assert.equal(store.snapshotById(inFlight.snapshot_id).content, inFlight.content);
+    assert.equal(store.snapshotById(history.snapshot_id).content, history.content);
+    assert.equal(store.snapshotById(expired.snapshot_id), null);
+    assert.equal(store.snapshotById(overflow.snapshot_id), null);
+    assert.equal(store.snapshotById(latest.snapshot_id).content, latest.content);
+  } finally {
+    store.close();
+  }
+});
 
 async function runMapDiscoveryJob(base, target = 3) {
   const api = base + '/api/v1';
@@ -2600,7 +3123,7 @@ test('正常任务按营业登记主体区分同域企业，补证、并发核�
   };
   const readJob = async (id) => {
     let job;
-    for (let n = 0; n < 120; n++) {
+    for (let n = 0; n < 600; n++) {
       job = await (await fetch(base + '/acquisition/jobs/' + id)).json();
       if (job.status !== 'running') break;
       await new Promise((resolve) => setTimeout(resolve, 10));
