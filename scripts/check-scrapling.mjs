@@ -13,6 +13,9 @@ import {
 
 const archive = fileURLToPath(new URL('../server/scrapling/runtime-linux.tar.gz', import.meta.url));
 const directory = fileURLToPath(new URL('../server/scrapling/runtime-linux', import.meta.url));
+const requireIsolation = process.argv.includes('--require-isolation');
+
+if (requireIsolation) assert(existsSync(archive), '官网采集受限探测缺少发布运行时');
 
 if (existsSync(archive)) {
   assert.equal(process.platform, 'linux', '官网采集发布运行时须在 Linux 上安装');
@@ -45,6 +48,7 @@ if (existsSync(archive)) {
   const browserDirectory = await verifyReleaseChromium(join(directory, 'browsers'));
   const checked = await collectScraplingPage('https://collection-health.example.org/', {
     python: null,
+    offlineProbe: !requireIsolation,
     async readResourceImpl(_url, kind) {
       return kind === 'document'
         ? {
@@ -61,7 +65,11 @@ if (existsSync(archive)) {
           };
     },
   });
-  assert.equal(checked.status, 'ok', '官网采集发布运行时无法渲染固定页面');
+  assert.equal(
+    checked.status,
+    'ok',
+    '官网采集发布运行时无法渲染固定页面：' + (checked.failure_reason || checked.status),
+  );
   assert.match(checked.content, /Scrapling release probe/);
   assert.deepEqual(checked.versions, {
     python: '3.12.16',
@@ -69,7 +77,18 @@ if (existsSync(archive)) {
     playwright: '1.65.2',
     chromium: chromiumVersion,
   });
+  const cgroupLimit = checked.resources.cgroup_limit_bytes;
+  if (requireIsolation) {
+    assert.equal(cgroupLimit, 1073741824, '官网采集运行时未启用 1 GiB 硬限制');
+    assert(checked.resources.cgroup_peak_bytes > 0, '官网采集未取得受限进程内存峰值');
+  }
   console.log(
-    '官网采集发布运行时已验证：' + JSON.stringify({ ...checked.versions, browserDirectory }),
+    '官网采集发布运行时已验证：' +
+      JSON.stringify({
+        ...checked.versions,
+        browserDirectory,
+        isolation: cgroupLimit ? 'delegated' : 'archive_only',
+        ...(cgroupLimit ? { resources: checked.resources } : {}),
+      }),
   );
 }

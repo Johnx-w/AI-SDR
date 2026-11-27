@@ -5,7 +5,6 @@ from base64 import b64decode
 from importlib.metadata import version
 import json
 import os
-import signal
 import sys
 from threading import Event, Thread
 from urllib.error import URLError
@@ -20,17 +19,9 @@ MAX_DOCUMENT = 4 * 1024 * 1024
 MEMORY_LIMIT = 1024 ** 3
 
 
-def stop_processes(*_):
-    for child in reversed(psutil.Process().children(recursive=True)):
-        try:
-            child.kill()
-        except psutil.NoSuchProcess:
-            pass
-    os._exit(1)
-
-
 def observe(stop, peaks):
     root = psutil.Process()
+    kernel_limited = os.environ.get("SCRAPLING_CGROUP_LIMITED") == "1"
     while not stop.wait(0.1):
         children = root.children(recursive=True)
         rss = 0
@@ -43,8 +34,8 @@ def observe(stop, peaks):
         peaks["processes"] = max(peaks["processes"], len(children) + 1)
         memory = psutil.virtual_memory()
         peaks["system_used_bytes"] = max(peaks["system_used_bytes"], memory.total - memory.available)
-        if rss > MEMORY_LIMIT:
-            stop_processes()
+        if not kernel_limited and rss > MEMORY_LIMIT:
+            os._exit(74)
 
 
 def read_gateway(request, url, resource_type):
@@ -157,7 +148,6 @@ async def read_page(request):
 
 
 if __name__ == "__main__":
-    signal.signal(signal.SIGTERM, stop_processes)
     stopped = Event()
     measurements = {"tree_rss_bytes": 0, "processes": 0, "system_used_bytes": 0}
     observer = Thread(target=observe, args=(stopped, measurements), daemon=True)
