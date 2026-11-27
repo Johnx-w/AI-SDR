@@ -169,7 +169,7 @@ const canCancelCampaign = (campaign: OutreachCampaign) =>
   !campaign.acquisitionSource &&
   !['completed', 'cancelled'].includes(campaign.status);
 const canDeleteCampaign = (campaign: OutreachCampaign) =>
-  campaign.mode === 'production' && !campaign.acquisitionSource && !campaign.deleteRequestedAt;
+  campaign.mode === 'production' && !campaign.deleteRequestedAt;
 
 function InlineError({ value }: { value: string | null }) {
   return value ? (
@@ -1345,6 +1345,13 @@ export function OutreachCommunication({
   );
   const [deleteTarget, setDeleteTarget] = useState<{
     campaign: OutreachCampaign;
+    source?: {
+      jobId: string;
+      roundId?: string;
+      scheduleId?: string;
+      scheduleName?: string;
+      currentJobId?: string;
+    };
     pendingFirst: number;
     pendingFollowUps: number;
     unknown: number;
@@ -1656,6 +1663,13 @@ export function OutreachCommunication({
     setError(null);
     try {
       const counts = await outreachApi<{
+        source?: {
+          jobId: string;
+          roundId?: string;
+          scheduleId?: string;
+          scheduleName?: string;
+          currentJobId?: string;
+        };
         pendingFirst: number;
         pendingFollowUps: number;
         unknown: number;
@@ -2987,6 +3001,17 @@ export function OutreachCommunication({
                     待首发 {deleteTarget.pendingFirst} · 待追信 {deleteTarget.pendingFollowUps} ·
                     待核实 {deleteTarget.unknown}
                   </p>
+                  {deleteTarget.source && (
+                    <p>
+                      将暂停来源任务 {deleteTarget.source.jobId}；当前轮次{' '}
+                      {deleteTarget.source.currentJobId ||
+                        deleteTarget.source.roundId ||
+                        deleteTarget.source.jobId}
+                      ；定时安排{' '}
+                      {deleteTarget.source.scheduleName || deleteTarget.source.scheduleId || '无'}
+                      。来源及定时安排的获客后自动首发将关闭。直接恢复只继续获客，重新勾选并保存后才建立新触达安排。
+                    </p>
+                  )}
                   <p>
                     删除会结束剩余首发和追信。已提交邮件无法撤回，实际结果、未知核实及客户历史保留，可从已删除视图查阅。
                   </p>
@@ -3007,7 +3032,7 @@ export function OutreachCommunication({
                           `delete-${deleteTarget.campaign.id}`,
                           pathFor('campaigns', deleteTarget.campaign.id, 'delete'),
                           { revision: deleteTarget.campaign.revision, confirmed: true },
-                          '计划已删除，历史结果已保留。',
+                          '删除已请求；来源暂停与自动首发关闭确认后完成，历史结果保留。',
                         ).then((ok) => {
                           if (ok) setDeleteTarget(null);
                         })

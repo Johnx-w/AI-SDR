@@ -249,9 +249,12 @@ export class AcquisitionSchedules {
         this.save(schedule);
       }
     }
-    const job = manager.pause(jobId, { outreachPlanId, reason, disableFirstTouch: true });
+    const job = source.sourceDeletedAt
+      ? source
+      : manager.pause(jobId, { outreachPlanId, reason, disableFirstTouch: true });
     if (schedule?.lastJobId && schedule.lastJobId !== jobId) {
-      manager.pause(schedule.lastJobId, { outreachPlanId, reason, disableFirstTouch: true });
+      if (!manager.get(schedule.lastJobId).sourceDeletedAt)
+        manager.pause(schedule.lastJobId, { outreachPlanId, reason, disableFirstTouch: true });
     }
     this.onOutreachChange();
     return { job, schedule };

@@ -100,6 +100,7 @@ function harness(path = ':memory:') {
     now: () => state.now,
     tickMs: 3600000,
     acquisitionSources: () => acquisitionOutreachSources(jobs, plans),
+    pauseAcquisitionSource: (id, context) => plans.pauseSourceForOutreach(id, context),
     loadLeads: async () => structuredClone(state.leads),
     products: () => structuredClone(products),
     mailboxes: {
@@ -1109,9 +1110,7 @@ test('删除后直接恢复零新安排；重新保存授权只建立一个新�
     await h.capture(job.id, buyer('fresh-authorization'));
     h.service.syncAcquisition();
     const oldId = `acquisition-${job.id}`;
-    h.service.requestCampaignDeletion(oldId, h.service.campaign(oldId).revision, true);
-    h.plans.pauseSourceForOutreach(job.id, { outreachPlanId: oldId });
-    h.service.completeCampaignDeletion(oldId);
+    h.service.deleteCampaign(oldId, h.service.campaign(oldId).revision, true);
     await h.jobs.resume(job.id);
     h.service.syncAcquisition();
     assert.equal(h.jobs.get(job.id).input.auto_first_touch, false);
@@ -1146,9 +1145,7 @@ test('定时来源重新授权保留暂停，重复保存唯一且过期编辑�
     const job = h.create({}, plan.id);
     h.service.syncAcquisition();
     const oldId = `acquisition-${job.id}`;
-    h.service.requestCampaignDeletion(oldId, 1, true);
-    h.plans.pauseSourceForOutreach(job.id, { outreachPlanId: oldId });
-    h.service.completeCampaignDeletion(oldId);
+    h.service.deleteCampaign(oldId, 1, true);
     const paused = h.plans.get(plan.id);
     const enabled = h.plans.controlOutreach(plan.id, true, {
       sourceControlRevision: paused.sourceControlRevision,
@@ -1182,9 +1179,7 @@ test('同轮重新授权不重试已跳过客户；重启只处理此前未尝�
     await h.pump();
     assert.equal(h.service.deliveries(`acquisition-${job.id}`)[0].status, 'skipped');
     const oldId = `acquisition-${job.id}`;
-    h.service.requestCampaignDeletion(oldId, h.service.campaign(oldId).revision, true);
-    h.plans.pauseSourceForOutreach(job.id, { outreachPlanId: oldId });
-    h.service.completeCampaignDeletion(oldId);
+    h.service.deleteCampaign(oldId, h.service.campaign(oldId).revision, true);
     h.state.leads[0] = buyer('skipped-before');
     await h.capture(job.id, buyer('untouched-after'));
     await h.capture(job.id, { ...buyer('no-mail-control'), email: '' });
