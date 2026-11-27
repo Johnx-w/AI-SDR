@@ -520,6 +520,249 @@ function mapDiscoveryFixture({
   };
 }
 
+test('主库写入前中断后按原操作保存准备好的资料，不重复付费研究', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'acquisition-before-local-write-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const fixture = mapDiscoveryFixture({ webResults: ({ atlas, beacon }) => [atlas, beacon] });
+  const runtimeEnv = {
+    ...env,
+    BATCH_DB_PATH: join(dir, 'acquisition.sqlite'),
+    LEAD_LIBRARY_DB_PATH: join(dir, 'customers.sqlite'),
+  };
+  const paid = [];
+  const fetchImpl = (url, options) => {
+    if (url === 'https://api.deepseek.com/responses') paid.push(JSON.parse(options.body));
+    return fixture.app.fetchImpl(url, options);
+  };
+  const options = () => ({
+    env: runtimeEnv,
+    fetchImpl,
+    nativeImpl: new NativeAcquisition({
+      env: runtimeEnv,
+      fetchImpl,
+      readPage: fixture.app.nativeImpl.readPage,
+      readScraplingPage: fixture.app.nativeImpl.readScraplingPage,
+    }),
+  });
+  const waitFor = async (url, expected) => {
+    let job;
+    for (let n = 0; n < 125; n++) {
+      job = await (await fetch(url)).json();
+      if (job.status === expected) return job;
+      await delay(10);
+    }
+    assert.fail(JSON.stringify([job.status, job.reason, job.inserted]));
+  };
+  let id;
+  const first = options();
+  await withApp(first, async (origin) => {
+    first.nativeImpl.feishu.write = async () => {
+      throw new Error('本地事务尚未发起时模拟进程中断');
+    };
+    const api = origin + '/api/v1';
+    const response = await fetch(api + '/acquisition/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'local-intent-recovery' },
+      body: JSON.stringify({
+        ...input,
+        product: 'roller blinds',
+        target_count: 2,
+        research_budget: 2,
+      }),
+    });
+    assert.equal(response.status, 202);
+    ({ id } = await response.json());
+    const paused = await waitFor(api + '/acquisition/jobs/' + id, 'paused');
+    assert.deepEqual(
+      [paused.inserted, paused.currentProgress.stage, paid.length],
+      [0, 'persist', 2],
+    );
+    assert.equal((await (await fetch(api + '/leads/real/list')).json()).leads.length, 0);
+  });
+  const second = options();
+  let localWrites = 0;
+  const restarted = createApp(second);
+  const archive = second.nativeImpl.feishu;
+  const readOwner = archive.acquisitionWrite.bind(archive);
+  const write = archive.write.bind(archive);
+  archive.acquisitionWrite = () => {
+    throw new Error('暂时不能读取原写入归属');
+  };
+  archive.write = async (...args) => {
+    localWrites++;
+    return write(...args);
+  };
+  await new Promise((resolve) => {
+    restarted.listen(0, '127.0.0.1', resolve);
+  });
+  try {
+    const api = 'http://127.0.0.1:' + restarted.address().port + '/api/v1';
+    const url = api + '/acquisition/jobs/' + id;
+    assert.equal((await fetch(url + '/resume', { method: 'POST' })).status, 409);
+    assert.equal(localWrites, 0);
+    const paused = await waitFor(url, 'paused');
+    assert.equal(paused.currentProgress.id, id + '-1');
+    archive.acquisitionWrite = readOwner;
+    await Promise.all([
+      fetch(url + '/resume', { method: 'POST' }),
+      fetch(url + '/resume', { method: 'POST' }),
+    ]);
+    const done = await waitFor(url, 'completed');
+    assert.deepEqual(
+      done.rows.map(({ source_url, capture }) => [source_url, capture.operation_id]),
+      [
+        [fixture.atlas, id + '-1'],
+        [fixture.beacon, id + '-2'],
+      ],
+    );
+    assert.deepEqual([done.inserted, done.researched, localWrites, paid.length], [2, 2, 2, 4]);
+    assert.deepEqual(
+      (await (await fetch(api + '/leads/real/list')).json()).leads
+        .map(({ website }) => website)
+        .sort(),
+      [fixture.atlas, fixture.beacon],
+    );
+  } finally {
+    await restarted.shutdown();
+  }
+});
+
+test('人工补证重启后沿用原编号及已保存官网，应答未知保持原请求待核对', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'acquisition-manual-resume-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const maintenance = join(dir, 'maintenance.json');
+  const runtimeEnv = {
+    ...env,
+    BATCH_DB_PATH: join(dir, 'acquisition.sqlite'),
+    LEAD_LIBRARY_DB_PATH: join(dir, 'customers.sqlite'),
+    RELEASE_MAINTENANCE_PATH: maintenance,
+  };
+  const fixture = mapDiscoveryFixture();
+  const shells = [
+    'https://manual-recovery-north.example.org/',
+    'https://manual-recovery-south.example.org/',
+    'https://manual-recovery-control.example.org/',
+  ];
+  const fetches = [];
+  let loss = false;
+  let interrupt = true;
+  let controls = 0;
+  const fetchImpl = async (url, options) => {
+    if (url === 'https://api.tavily.com/search')
+      return json({ results: shells.map((url) => ({ url, title: url })) });
+    if (url === 'https://api.tavily.com/extract') return json({ results: [] });
+    if (url === 'https://api.deepseek.com/responses') {
+      const { pages } = JSON.parse(JSON.parse(options.body).input[1].content);
+      if (pages?.[0].source_url === fixture.showroom) {
+        controls++;
+        assert.equal(loss, true);
+        throw new Error('供应商已收到请求但应答丢失');
+      }
+    }
+    return fixture.app.fetchImpl(url, options);
+  };
+  const options = () => {
+    const nativeImpl = new NativeAcquisition({
+      env: runtimeEnv,
+      fetchImpl,
+      readPage: async (url) => {
+        fetches.push(url.href);
+        if (shells.includes(url.href)) return { html: '<noscript>Enable JavaScript</noscript>' };
+        if (interrupt && url.href === fixture.beacon) writeFileSync(maintenance, '{}');
+        return fixture.app.nativeImpl.readPage(url);
+      },
+      readScraplingPage: async (url) =>
+        shells.includes(url)
+          ? { status: 'unavailable' }
+          : fixture.app.nativeImpl.readScraplingPage(url),
+    });
+    return { env: runtimeEnv, fetchImpl, nativeImpl };
+  };
+  const post = (route, key, source_url, actor = 'Operator') =>
+    fetch(route, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+      body: JSON.stringify({ source_url, actor }),
+    });
+  let id;
+  let beaconOperation;
+  await withApp(options(), async (origin) => {
+    const jobs = origin + '/api/v1/acquisition/jobs';
+    const response = await fetch(jobs, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'manual-checkpoint-job' },
+      body: JSON.stringify({
+        ...input,
+        product: 'roller blinds',
+        target_count: 1,
+        research_budget: 3,
+      }),
+    });
+    assert.equal(response.status, 202);
+    ({ id } = await response.json());
+    const url = jobs + '/' + id;
+    let before;
+    for (let attempt = 0; attempt < 125; attempt++) {
+      before = await (await fetch(url)).json();
+      if (before.status === 'partial') break;
+      await delay(10);
+    }
+    assert.deepEqual(
+      before.rows.map(({ source_url, result }) => [source_url, result]),
+      shells.map((url) => [url, 'review']),
+    );
+    const review = url + '/reviews/0';
+    assert.equal((await post(review, 'manual-original-beacon', fixture.beacon)).status, 409);
+    rmSync(maintenance);
+    const { resolution, evidence } = await (await fetch(review)).json();
+    beaconOperation = resolution.operation_id;
+    assert.equal(resolution.status, 'uncertain');
+    assert.deepEqual(
+      evidence.collection_attempts.map(({ status }) => status),
+      ['ok'],
+    );
+  });
+  interrupt = false;
+  await withApp(options(), async (origin) => {
+    const api = origin + '/api/v1';
+    const url = api + '/acquisition/jobs/' + id;
+    const review = url + '/reviews/0';
+    assert.equal((await post(review, 'manual-fork-beacon', fixture.beacon)).status, 409);
+    assert.equal(
+      (await post(review, 'manual-original-beacon', fixture.beacon, 'Changed Actor')).status,
+      409,
+    );
+    const responses = await Promise.all([
+      post(review, 'manual-original-beacon', fixture.beacon),
+      post(review, 'manual-original-beacon', fixture.beacon),
+    ]);
+    assert.ok(responses.some(({ status }) => status === 200));
+    const { resolution, attempts } = await (await fetch(review)).json();
+    assert.deepEqual(
+      [resolution.operation_id, resolution.status, attempts.length],
+      [beaconOperation, 'inserted', 1],
+    );
+    assert.equal(fetches.filter((url) => url === fixture.beacon).length, 1);
+    const another = await post(url + '/reviews/1', 'manual-atlas', fixture.atlas);
+    assert.equal(another.status, 200);
+    assert.equal((await another.json()).resolution.status, 'inserted');
+    loss = true;
+    const control = url + '/reviews/2';
+    assert.equal((await post(control, 'manual-invalid', 'http://127.0.0.1/')).status, 400);
+    assert.equal((await post(control, 'manual-uncertain', fixture.showroom)).status, 409);
+    assert.equal((await post(control, 'manual-uncertain', fixture.showroom)).status, 409);
+    assert.equal(controls, 1);
+    const job = await (await fetch(url)).json();
+    assert.deepEqual([job.inserted, job.manualInserted, job.confirmedInserted], [0, 2, 2]);
+    assert.deepEqual(
+      (await (await fetch(api + '/leads/real/list')).json()).leads
+        .map(({ website }) => website)
+        .sort(),
+      [fixture.atlas, fixture.beacon],
+    );
+  });
+});
+
 test('付费模型应答丢失后继续只核对原请求，取回结果后收录一次', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'acquisition-paid-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
@@ -1401,6 +1644,11 @@ test('经营目录及采购档案待核实，独立官网和带数字与评价�
   const directoryRoot = 'https://www.contractorsup.com/';
   const directory = directoryRoot + '140956/';
   const procurement = 'https://buy.nsw.gov.au/supplier/profile/12468764';
+  const localDirectoryRoot = 'https://yourlocalbiz.com.au/';
+  const localDirectory =
+    localDirectoryRoot +
+    'business/perth-metropolitan-region/perth/sola-shade-indoor-outdoor-shutters-blinds/';
+  const solaOfficial = 'https://solashade.com.au/';
   const officialRoot = 'https://www.windowproductsct.com/';
   const official = officialRoot + 'window-products-contact/';
   const productRoot = 'https://shadeatelier.example.org/';
@@ -1411,9 +1659,16 @@ test('经营目录及采购档案待核实，独立官网和带数字与评价�
   const generalSupply =
     'We supply custom roller blinds for residential windows and commercial buildings.';
   const officialSupply = `${officialName} is your source for custom blinds, shades, sheer shades, shutters, draperies, awnings, and more.`;
+  // Directory excerpts from AU-1-B row 50.
+  const localDirectorySupply =
+    'Sola Shade Pty Ltd has supplied and installed superior quality indoor and outdoor blinds, shutters, awnings, and shade systems in Perth since 1987.';
   const candidates = new Map([
     [directory, { name: directoryName, identity: directoryName, supply: generalSupply }],
     [procurement, { name: 'PAMIDO PTY LTD' }],
+    [
+      localDirectory,
+      { name: 'Sola Shade Pty Ltd', identity: 'Sola Shade Pty Ltd', supply: localDirectorySupply },
+    ],
     [official, { name: officialName, identity: officialName, supply: officialSupply }],
     [product, { name: productName, identity: productName, supply: generalSupply }],
   ]);
@@ -1431,6 +1686,15 @@ test('经营目录及采购档案待核实，独立官网和带数字与评价�
       '<h1>PAMIDO PTY LTD</h1><p>This supplier has self-identified in the following products and services.</p>',
     ],
     [
+      localDirectory,
+      `<h1>Sola Shade | Indoor &amp; Outdoor Shutters &amp; Blinds</h1><p>${localDirectorySupply}</p>
+      <a href="${solaOfficial}">Website</a><a href="/add-listing/">Add Listing</a>`,
+    ],
+    [
+      localDirectoryRoot,
+      '<h1>Australian Business Directory</h1><h2>New businesses listings!</h2><a href="/add-listing/">Add Your Business</a>',
+    ],
+    [
       official,
       `<h1>Contact Window Products Awning Blind &amp; Shade Co Branford CT</h1>
       <p>Our new address: 3 Research Drive, Unit 9, Branford CT 06405</p><p>${officialSupply}</p>`,
@@ -1441,13 +1705,24 @@ test('经营目录及采购档案待核实，独立官网和带数字与评价�
       <button data-review="/products/review?business_id=71004">Write a Review</button>
       <p>Customer review: Explore independent contractor profiles at your local trade fair.</p>`,
     ],
-    [productRoot, `<h1>${productName}</h1><p>Explore our custom roller blind profiles.</p>`],
+    [
+      productRoot,
+      `<h1>${productName}</h1><p>Explore our custom roller blind profiles.</p>
+      <p>Find us in the Australian Business Directory.</p>
+      <a href="${localDirectoryRoot}add-listing/">Add Your Business</a>`,
+    ],
   ]);
   await withWebsiteCustodyJob(candidates, pages, 2, (job, leads, researched) => {
-    assert.deepEqual(leads.map(({ name, website }) => [name, website]).sort(), [
-      [productName, product],
-      [officialName, official],
-    ]);
+    assert.deepEqual(
+      leads.map(({ name, website }) => [name, website]).sort(),
+      [
+        [productName, product],
+        [officialName, official],
+      ],
+      JSON.stringify(
+        job.rows.map(({ source_url, result, reason }) => [source_url, result, reason]),
+      ),
+    );
     assert.equal(job.inserted, 2);
     assert.deepEqual(researched, [official, product]);
     assert.deepEqual(
@@ -1455,9 +1730,18 @@ test('经营目录及采购档案待核实，独立官网和带数字与评价�
       [
         [directory, 'review'],
         [procurement, 'review'],
+        [localDirectory, 'review'],
         [official, 'inserted'],
         [product, 'inserted'],
       ],
+    );
+    const directoryRow = job.rows.find(({ source_url }) => source_url === localDirectory);
+    assert.match(directoryRow.reason, /第三方.*独立官网/);
+    assert.equal(directoryRow.record_id, undefined);
+    assert.ok(
+      directoryRow.collection_attempts.some(
+        ({ final_url, status }) => final_url === localDirectoryRoot && status === 'ok',
+      ),
     );
   });
 });
@@ -3605,6 +3889,234 @@ test('获客任务按官网证据收录两家，空壳与参展商待核实，�
   } finally {
     await new Promise((resolve) => app.close(resolve));
   }
+});
+test('正常官网任务跟进经营页链接并将证据归给实际经营者', async () => {
+  const origin = 'https://restrepoinnovations.com';
+  const spotlight = origin + '/blog/workroom-services-group-spotlight.html';
+  const source = spotlight.replace('https://', 'https://www.');
+  const servicePage = origin + '/residential/motorized-shades.html';
+  const studio = 'https://brook-studio.example.org';
+  const studioSource = studio + '/news/project-launch.html';
+  const studioLegal = studio + '/company/legal-notice';
+  const studioService = studio + '/services/motorized-shading.html';
+  const theater = 'https://theater-store.example.org';
+  const theaterProfile = theater + '/partners/4517';
+  const theaterListing = theater + '/products/8862';
+  // Restrepo excerpts from US-1-B row 8 and its linked public product page.
+  const beneficiary =
+    'Workroom Services handles the complete trade sequence for custom window and wall treatments.';
+  const scenarios = new Map([
+    [
+      source,
+      {
+        name: 'Restrepo Innovations LLC',
+        identity: '© 2026 Restrepo Innovations LLC. All rights reserved.',
+        identityUrl: spotlight,
+        supply: 'The same team that designs the system installs it, programs it, and services it.',
+        offering: 'Every motorized shades project we run follows the same six steps',
+        product: 'motorized shades',
+        service: servicePage,
+      },
+    ],
+    [
+      studioSource,
+      {
+        name: 'Brook Studio LLC',
+        identity: 'This website is operated by Brook Studio LLC.',
+        identityUrl: studioLegal,
+        supply:
+          'We custom-build and supply complete motorized roller shades for residential windows.',
+        offering: 'Our motorized roller shades are custom fitted to residential windows.',
+        product: 'motorized roller shades',
+        service: studioService,
+      },
+    ],
+    [
+      theaterProfile,
+      {
+        name: 'Theater Store LLC',
+        identity: 'This website is operated by Theater Store LLC.',
+        identityUrl: theaterProfile,
+      },
+    ],
+  ]);
+  const restrepo = scenarios.get(source);
+  const brook = scenarios.get(studioSource);
+  const site = new Map([
+    [
+      spotlight,
+      `<p>${restrepo.identity}</p><p>${beneficiary}</p><a href="https://www.workroomservices.com/about">Workroom Services</a>`,
+    ],
+    [
+      origin + '/',
+      '<a href="about.html">About</a><a href="contact.html">Contact</a><a href="residential/motorized-shades.html">Motorized Shades</a>',
+    ],
+    [origin + '/about.html', '<p>About Restrepo Innovations</p>'],
+    [origin + '/contact.html', '<p>Contact us to schedule a consultation.</p>'],
+    [
+      servicePage,
+      `<p>Lutron Sivoia and Palladiom integrated with lighting, climate, and time of day.</p><p>${restrepo.offering}</p><p>${restrepo.supply}</p>`,
+    ],
+    [
+      studioSource,
+      '<p>Read about our showroom opening.</p><a href="/contact">Contact</a><a href="/contact/team">Our team</a><a href="/about">About us</a>',
+    ],
+    [
+      studio + '/',
+      '<p>Home automation design in Oregon.</p><a href="/company/legal-notice">Legal notice</a><a href="/services/motorized-shading.html">Motorized shading</a>',
+    ],
+    [studioLegal, `<p>${brook.identity}</p>`],
+    [studioService, `<p>${brook.offering}</p><p>${brook.supply}</p>`],
+    [studio + '/contact', '<p>Request an appointment with our design team.</p>'],
+    [studio + '/contact/team', '<p>Meet our showroom team.</p>'],
+    [studio + '/about', '<p>We design home automation projects in Oregon.</p>'],
+    [
+      theaterProfile,
+      `<p>${scenarios.get(theaterProfile).identity}</p><p>Our business sells audio and video equipment.</p><a href="${theaterListing}">Partner spotlight</a>`,
+    ],
+    [
+      theater + '/',
+      `<p>We sell home cinema equipment.</p><a href="${theaterListing}">Partner spotlight</a><a href="${studioService}">Independent shades supplier</a>`,
+    ],
+    [theaterListing, '<p>Brook Studio supplies complete motorized roller shades.</p>'],
+  ]);
+  const f = fixture();
+  const evidence = (value, quote, source_url) => ({ value, quote, source_url });
+  const fetchImpl = async (url, options) => {
+    if (url === 'https://api.tavily.com/search') {
+      const { exclude_domains } = JSON.parse(options.body);
+      return json({
+        results: [...scenarios].flatMap(([url, scenario]) =>
+          exclude_domains.includes(new URL(url).hostname.replace(/^www\./, ''))
+            ? []
+            : [{ url, title: scenario.name }],
+        ),
+      });
+    }
+    if (url !== 'https://api.deepseek.com/responses') return f.fetchImpl(url, options);
+    const { pages, sources } = JSON.parse(JSON.parse(options.body).input[1].content);
+    const scenario =
+      pages && scenarios.get(pages[0].source_url === spotlight ? source : pages[0].source_url);
+    const id = pages?.find(
+      (page) => page.source_url === scenario.identityUrl && page.text.includes(scenario.identity),
+    );
+    const operating = pages?.find((page) => page.source_url === scenario.service);
+    const identity = (value) =>
+      id ? evidence(value, scenario.identity, scenario.identityUrl) : null;
+    const data = sources
+      ? { result: 'relevant', sources: sources.map(({ i }) => i), reason: '官网确认经营' }
+      : {
+          company_name: identity(scenario.name),
+          legal_company_name: identity(scenario.name),
+          entity_type: identity('business'),
+          admission_facts: operating?.text.includes(scenario.supply)
+            ? [evidence('complete_supply', scenario.supply, scenario.service)]
+            : [],
+          products: operating?.text.includes(scenario.offering)
+            ? [
+                {
+                  ...evidence(scenario.product, scenario.offering, scenario.service),
+                  window_use: 'window_covering',
+                },
+              ]
+            : [],
+        };
+    return json({
+      status: 'completed',
+      output: [{ content: [{ type: 'output_text', text: JSON.stringify(data) }] }],
+    });
+  };
+  const readUrls = [];
+  const nativeImpl = f.make({
+    fetchImpl,
+    readPage: async ({ href }) => {
+      readUrls.push(href);
+      if (href === source) return { redirect: spotlight };
+      assert.ok(site.has(href), href);
+      return { html: site.get(href) };
+    },
+    readScraplingPage: async () => ({ status: 'unavailable' }),
+  });
+  await withApp({ env, fetchImpl, nativeImpl }, async (url) => {
+    const api = url + '/api/v1';
+    const response = await fetch(api + '/acquisition/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'linked-operating-pages' },
+      body: JSON.stringify({
+        ...input,
+        product: 'window coverings',
+        product_scope: 'all',
+        target_count: 3,
+        research_budget: 3,
+      }),
+    });
+    assert.equal(response.status, 202);
+    const { id } = await response.json();
+    let job;
+    for (let n = 0; n < 200; n++) {
+      job = await (await fetch(api + '/acquisition/jobs/' + id)).json();
+      if (job.status !== 'running') break;
+      await delay(10);
+    }
+    assert.equal(job.admissionVersion, 'website-admission-v1');
+    assert.deepEqual(
+      job.rows.map(({ source_url, result }) => [source_url, result]),
+      [
+        [source, 'inserted'],
+        [studioSource, 'inserted'],
+        [theaterProfile, 'review'],
+      ],
+      job.rows.map(({ reason }) => reason).join('\n'),
+    );
+    const [restrepoRow, studioRow, control] = job.rows;
+    assert.deepEqual(
+      restrepoRow.collection_attempts
+        .filter(({ final_url, method }) => final_url === spotlight && method === 'node')
+        .map(({ requested_url }) => requested_url),
+      [source],
+    );
+    assert.equal(job.inserted, 2);
+    assert.equal(control.record_id, undefined);
+    assert.ok(!readUrls.includes(theaterListing));
+    assert.ok(
+      !control.collection_attempts.some(({ requested_url }) => requested_url === studioService),
+    );
+    for (const [row, scenario] of [
+      [restrepoRow, restrepo],
+      [studioRow, brook],
+    ]) {
+      const nodePages = row.collection_attempts.filter(({ method }) => method === 'node');
+      assert.equal(new Set(nodePages.map(({ final_url }) => final_url)).size, 5);
+      const { lead } = await (await fetch(api + '/leads/real/' + row.record_id)).json();
+      assert.equal(lead.name, scenario.name);
+      assert.equal(lead.companyIdentity.legal_name, scenario.name);
+      assert.equal(
+        lead.companyIdentity.evidence.find(({ field }) => field === 'legal_company_name')
+          ?.source_url,
+        scenario.identityUrl,
+      );
+      assert.deepEqual(
+        lead.facts
+          .filter(({ field }) => field === 'products')
+          .map(({ value, quote, source_url, snapshot_id }) => [
+            value,
+            quote,
+            source_url,
+            snapshot_id,
+          ]),
+        [
+          [
+            scenario.product,
+            scenario.offering,
+            scenario.service,
+            nodePages.find(({ final_url }) => final_url === scenario.service)?.snapshot_id,
+          ],
+        ],
+      );
+    }
+    const { leads } = await (await fetch(api + '/leads/real/list')).json();
+    assert.deepEqual(leads.map(({ name }) => name).sort(), [brook.name, restrepo.name]);
+  });
 });
 test('正常任务按营业登记主体区分同域企业，补证、并发核对和版本复用均只认原主库归属', async (t) => {
   t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2030-02-01T12:00:00Z') });

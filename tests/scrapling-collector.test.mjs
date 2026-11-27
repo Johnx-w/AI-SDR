@@ -5,9 +5,77 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import { createScraplingCgroup } from '../server/scrapling-cgroup.mjs';
 import { collectScraplingPage } from '../server/scrapling-collector.mjs';
 
 const fixture = fileURLToPath(new URL('./fixtures/scrapling-process.py', import.meta.url));
+
+test('delayed cgroup cleanup blocks new workers until the original leaf can be removed', async () => {
+  const parent = '/system.slice/stale-test.service';
+  const path = join(parent, 'scrapling-worker');
+  let populated = true;
+  let generation = 0;
+  let current = 0;
+  let kills = 0;
+  let unreadable = false;
+  const controls = new Map([
+    ['cgroup.subtree_control', 'memory'],
+    ['memory.events', 'oom 0'],
+    ['memory.peak', '4096'],
+  ]);
+  const files = {
+    mkdir(directory) {
+      assert.equal(directory, path);
+      if (current) throw Object.assign(new Error('Leaf already exists'), { code: 'EEXIST' });
+      current = ++generation;
+    },
+    identity(directory) {
+      assert.equal(directory, path);
+      return current;
+    },
+    read(_directory, key) {
+      if (key !== 'cgroup.events') return controls.get(key);
+      if (unreadable) throw Object.assign(new Error('Unreadable'), { code: 'EACCES' });
+      return populated ? 'populated 1' : 'populated 0';
+    },
+    write(_directory, key, value) {
+      if (key === 'cgroup.kill') kills++;
+      controls.set(key, String(value));
+    },
+    access() {},
+    remove(directory) {
+      assert.equal(directory, path);
+      assert.equal(populated, false);
+      current = 0;
+    },
+  };
+
+  const first = createScraplingCgroup(parent, files);
+  await assert.rejects(first.close(), /still populated/);
+  assert.throws(() => createScraplingCgroup(parent, files), /still populated/);
+  populated = false;
+  unreadable = true;
+  assert.throws(() => createScraplingCgroup(parent, files), { code: 'EACCES' });
+  assert.deepEqual([current, generation, kills], [1, 1, 1]);
+
+  unreadable = false;
+  const next = createScraplingCgroup(parent, files);
+  assert.deepEqual([current, generation, kills], [2, 2, 1]);
+  assert.equal(controls.get('memory.max'), '1073741824');
+  assert.deepEqual(await next.close(), {
+    oom: false,
+    resources: { cgroup_limit_bytes: 1073741824, cgroup_peak_bytes: 4096 },
+  });
+  assert.deepEqual([current, generation, kills], [0, 2, 2]);
+
+  const previous = createScraplingCgroup(parent, files);
+  unreadable = true;
+  await assert.rejects(previous.close(), { code: 'EACCES' });
+  current = ++generation;
+  unreadable = false;
+  assert.throws(() => createScraplingCgroup(parent, files), { code: 'EEXIST' });
+  assert.deepEqual([current, generation, kills], [4, 4, 3]);
+});
 
 function liveProcess(pid) {
   try {
