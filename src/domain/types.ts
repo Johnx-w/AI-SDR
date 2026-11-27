@@ -56,6 +56,7 @@ export interface SearchMetric {
   ratings: Record<string, number>;
   source_kind?: 'web';
   family?: string;
+  dispatchEvidence?: { metered: string[]; attempts: string[] };
   usage?: {
     returned_records?: number;
     charged_records?: number;

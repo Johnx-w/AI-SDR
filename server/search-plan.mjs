@@ -82,32 +82,93 @@ export function unifiedSearchPlan(input) {
 }
 
 const lane = ({ country, language }) => JSON.stringify([country, language]);
+function addUsage(total, field, value) {
+  total[field] =
+    total[field] !== null && Number.isFinite(value) && value >= 0
+      ? (total[field] || 0) + value
+      : null;
+}
+
 export function productiveSearch(job, plan, unusedSearch) {
   // Keep two slots in three on the plan cursor even when one market performs well.
   if (job.searches < 8 || job.searches % 3 !== 2) return;
   const totals = new Map();
+  const bySearch = new Map();
   for (const metric of job.searchStats) {
-    if (metric.status !== 'completed') continue;
+    if (!['completed', 'failed'].includes(metric.status)) continue;
     const key = lane(metric);
-    const total = totals.get(key) || { inserted: 0, researched: 0, credits: 0, seconds: 0 };
+    const total = totals.get(key) || { inserted: 0, researched: 0, seconds: 0 };
     total.inserted += metric.inserted;
     total.researched += metric.researched;
-    total.credits += typeof metric.usage?.credits === 'number' ? metric.usage.credits : 1;
+    addUsage(total, 'search_attempts', 1);
+    addUsage(total, 'search_credits', metric.usage?.credits);
     total.seconds += Math.max(
       1,
       (Date.parse(metric.lastProcessedAt || metric.completedAt) - Date.parse(metric.startedAt)) /
         1000,
     );
     totals.set(key, total);
+    bySearch.set(metric.id, total);
   }
-  const score = ({ inserted, researched, credits, seconds }) =>
-    (inserted / Math.max(1, researched)) * (inserted / seconds) * (inserted / Math.max(1, credits));
-  for (const [key, total] of [...totals].sort(([, a], [, b]) => score(b) - score(a))) {
-    if (!total.inserted) break;
+  for (const row of job.rows) {
+    const total = row.operation_id && bySearch.get(row.search_id);
+    if (!total) continue;
+    const models = row.research_usage;
+    const extracts = row.web_usage;
+    addUsage(total, 'model_calls', models?.model_calls);
+    for (const direction of ['input', 'output']) {
+      const field = direction + '_tokens';
+      const value =
+        models?.model_calls === 0
+          ? 0
+          : models?.model_calls === models?.['model_calls_with_' + field]
+            ? models?.[field]
+            : undefined;
+      addUsage(total, field, value);
+    }
+    addUsage(total, 'web_extract_calls', extracts?.web_extract_calls);
+    addUsage(
+      total,
+      'web_extract_credits',
+      extracts?.web_extract_calls === 0 ? 0 : extracts?.web_extract_credits,
+    );
+  }
+  const productive = [...totals].filter(([, total]) => total.inserted > 0);
+  const evidence = { metered: [], attempts: [] };
+  const comparable = (key) => productive.every(([, total]) => Number.isFinite(total[key]));
+  for (const [meter, attempts] of [
+    ['search_credits', 'search_attempts'],
+    ['input_tokens', 'model_calls'],
+    ['output_tokens', 'model_calls'],
+    ['web_extract_credits', 'web_extract_calls'],
+  ]) {
+    if (comparable(meter)) evidence.metered.push(meter);
+    else if (comparable(attempts) && !evidence.attempts.includes(attempts))
+      evidence.attempts.push(attempts);
+  }
+  const units = [...evidence.metered, ...evidence.attempts];
+  const score = (total) => {
+    // Compare use per confirmed customer within each unit before combining ranks.
+    const rank = units.reduce(
+      (sum, unit) =>
+        sum +
+        productive.filter(
+          ([, other]) => other[unit] / other.inserted < total[unit] / total.inserted,
+        ).length,
+      0,
+    );
+    const penalty = 1 + rank / (Math.max(1, units.length) * Math.max(1, productive.length - 1));
+    return (
+      ((total.inserted / Math.max(1, total.researched)) * (total.inserted / total.seconds)) /
+      penalty
+    );
+  };
+  const ranked = productive.map(([key, total]) => [key, score(total)]);
+  for (const [key] of ranked.sort(([, a], [, b]) => b - a)) {
     for (const candidate of plan) {
       if (lane(candidate) !== key) continue;
       const search = unusedSearch(candidate);
-      if (search) return search;
+      if (search) return { ...search, dispatchEvidence: evidence };
     }
   }
 }
