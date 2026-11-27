@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { CustomerArchive } from '../server/customer-archive.mjs';
+import { FeishuClient } from '../server/feishu-direct.mjs';
 import { LeadLibrary } from '../server/lead-library.mjs';
 import { mapFeishuRecord } from '../server/feishu.mjs';
 
@@ -14,6 +15,13 @@ const fields = {
   邮箱: 'buyer@shadeco.com',
   开发状态: '待开发',
 };
+const compactCustomerFields = [
+  { field_name: '客户ID', type: 1005 },
+  { field_name: '公司名称', type: 1 },
+  { field_name: '官网链接', type: 1 },
+  { field_name: '邮箱', type: 1 },
+];
+
 function fixture(t) {
   const path = mkdtempSync(join(tmpdir(), 'customer-archive-'));
   const opened = [];
@@ -166,12 +174,7 @@ test('新增同步响应丢失并重启后先核对飞书，不重复创建，�
 
 test('同一官网的已登记经营主体各自同步，丢失响应后重启核对原镜像', async (t) => {
   const { remote, open } = fixture(t);
-  remote.fields = async () => [
-    { field_name: '客户ID', type: 1005 },
-    { field_name: '公司名称', type: 1 },
-    { field_name: '官网链接', type: 1 },
-    { field_name: '邮箱', type: 1 },
-  ];
+  remote.fields = async () => compactCustomerFields;
   const first = open();
   const north = await registeredCustomer(first.archive, 'North Ltd', '10110001', 'north');
   await first.archive.sync();
@@ -210,6 +213,88 @@ test('同一官网的已登记经营主体各自同步，丢失响应后重启�
   assert.equal(restarted.archive.remoteId(south.record_id), 'rec_2');
   assert.equal(restarted.library.metadata().sync.pendingWrites, 0);
   assert.equal(remote.writes, 2, '重启核对时无需再次发起写入');
+});
+
+test('飞书明确拒绝新增后，重启先核对归属再用原编号重试', async (t) => {
+  const { remote, open } = fixture(t);
+  const calls = [];
+  const feishu = new FeishuClient({
+    env: { FEISHU_APP_TOKEN: 'fixture-app', FEISHU_TABLE_ID: 'fixture-table' },
+    async fetchImpl(url, { method, body }) {
+      const endpoint = new URL(url);
+      const { pathname } = endpoint;
+      const success = (data) => Response.json({ code: 0, data });
+      if (pathname.endsWith('/fields'))
+        return success({ items: compactCustomerFields, has_more: false });
+      if (pathname.endsWith('/records') && method === 'GET') {
+        calls.push('read');
+        return success({ items: await remote.records(), has_more: false });
+      }
+      if (pathname.includes('/records/') && method === 'GET')
+        return success({ record: await remote.record(pathname.split('/').at(-1)) });
+      assert.equal(method, 'POST');
+      const patch = JSON.parse(body).fields;
+      const insert = [patch.公司名称, endpoint.searchParams.get('client_token')];
+      const south = patch.公司名称 === 'South Ltd';
+      const firstSouth = south && !calls.some((call) => call[0] === insert[0]);
+      calls.push(insert);
+      if (firstSouth) return Response.json({ code: 1254607 }, { status: 400 });
+      const record = await remote.write('insert', patch);
+      if (south) throw new Error('response lost after insert');
+      return success({ record });
+    },
+  });
+  feishu.token = { value: 'fixture-token', until: Infinity };
+  const first = open({ remote: feishu });
+  const north = await registeredCustomer(first.archive, 'North Ltd', '10110001', 'north');
+  await first.archive.sync();
+  const south = await registeredCustomer(first.archive, 'South Ltd', '10110002', 'south');
+  await first.archive.sync();
+  assert.deepEqual(calls, [
+    'read',
+    ['North Ltd', 'customer-10110001'],
+    'read',
+    ['South Ltd', 'customer-10110002'],
+  ]);
+  assert.equal(first.library.metadata().sync.pendingWrites, 1);
+  assert.deepEqual(
+    remote.rows.map((row) => row.fields.公司名称),
+    ['North Ltd'],
+  );
+  await first.close();
+
+  const restarted = open({ remote: feishu });
+  const ambiguous = {
+    record_id: 'rec_unknown',
+    fields: { 公司名称: 'South Ltd', 官网链接: sharedWebsite, 邮箱: 'south@shared.example' },
+  };
+  remote.rows.push(structuredClone(ambiguous));
+  await restarted.archive.sync();
+  assert.equal(restarted.archive.remoteId(south.record_id), null);
+  assert.deepEqual(remote.rows.pop(), ambiguous);
+  assert.deepEqual(calls.slice(4), ['read']);
+
+  await restarted.archive.sync();
+  assert.equal(restarted.library.metadata().sync.pendingWrites, 1);
+  const delayed = remote.rows.pop();
+  await restarted.archive.sync();
+  assert.equal(restarted.library.metadata().sync.pendingWrites, 1);
+  remote.rows.push(delayed);
+  await restarted.archive.sync();
+  assert.deepEqual(calls.slice(4), [
+    'read',
+    'read',
+    ['South Ltd', 'customer-10110002'],
+    'read',
+    'read',
+  ]);
+  assert.equal(restarted.archive.remoteId(north.record_id), 'rec_1');
+  assert.equal(restarted.archive.remoteId(south.record_id), 'rec_2');
+  assert.deepEqual(
+    remote.rows.map((row) => row.fields.公司名称),
+    ['North Ltd', 'South Ltd'],
+  );
+  assert.equal(restarted.library.metadata().sync.pendingWrites, 0);
 });
 
 test('飞书没有主体编号时，已存在的同名同官网行仍待核对且不覆盖', async (t) => {

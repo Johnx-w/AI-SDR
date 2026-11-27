@@ -362,6 +362,7 @@ export class CustomerArchive {
     for (const queued of this.entries().filter((entry) => entry.revision > entry.syncedRevision)) {
       checkMirrorMaintenance(this.isMaintaining);
       const id = queued.record.record_id;
+      let insertingRegisteredMirror = false;
       try {
         definitions ??= await this.remote.fields();
         const projected = Object.fromEntries(
@@ -418,6 +419,7 @@ export class CustomerArchive {
               throw fail(409, `客户「${companyName(queued.record)}」的飞书新增结果待核对`);
             // Preserve the projected insert so a compact T2 row can be verified after a lost reply.
             this.put({ ...this.entry(id), mirrorInsert: fields });
+            insertingRegisteredMirror = true;
           }
           const written = await this.remote.write(
             remoteId ? 'update' : 'insert',
@@ -425,6 +427,7 @@ export class CustomerArchive {
             remoteId,
             queued.clientToken,
           );
+          insertingRegisteredMirror = false;
           if (registration && !remoteId && this.mirrorOwner(written.record_id, id))
             throw ownedMirror(queued.record);
           remoteId = written.record_id;
@@ -444,6 +447,9 @@ export class CustomerArchive {
       } catch (error) {
         this.put({
           ...this.entry(id),
+          ...(insertingRegisteredMirror && error.writeNotApplied === true
+            ? { mirrorInsert: undefined }
+            : {}),
           error:
             error.status === 409
               ? error.message
