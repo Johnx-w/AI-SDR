@@ -1,6 +1,7 @@
 import { validateCountryScope } from './search-target.mjs';
 import acquisition from '../src/data/acquisition.json' with { type: 'json' };
 import { automaticSearchPlan } from '../src/domain/search-query.mjs';
+import { WORLDWIDE_COUNTRY } from '../src/domain/country-catalog.ts';
 import { isAllProductScope } from '../src/domain/acquisition-products.mjs';
 
 import { searchRegions } from './search-regions.mjs';
@@ -27,7 +28,8 @@ export function regionalSearchAfter(job) {
 export function searchPlan(input) {
   validateCountryScope(input);
   const country = input.country;
-  if (input.query_mode === 'auto' || isAllProductScope(input)) return automaticSearchPlan(input);
+  if (country === WORLDWIDE_COUNTRY || input.query_mode === 'auto' || isAllProductScope(input))
+    return automaticSearchPlan(input);
   // Quote multi-word product phrases so Tavily matches them as exact phrases
   // instead of scattering generic words (e.g. "awnings") across unrelated sites.
   const products = input.product

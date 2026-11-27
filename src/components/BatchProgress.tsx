@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import type { AcquisitionJob } from '../domain/types';
+import { WORLDWIDE_COUNTRY, WORLDWIDE_LABEL } from '../domain/country-catalog';
 import { acquisitionApi } from '../services/acquisition';
 import { Modal } from './ui';
 
@@ -644,7 +645,12 @@ function BatchProgressDetail({ job, control, busy }: BatchProgressProps) {
                     <td>
                       {metric.query}
                       <small>
-                        官网搜索 · {metric.country} · {metricState[metric.status] || metric.status}
+                        官网搜索 ·{' '}
+                        {metric.country ||
+                          (job.input.country === WORLDWIDE_COUNTRY
+                            ? WORLDWIDE_LABEL
+                            : job.input.country)}{' '}
+                        · {metricState[metric.status] || metric.status}
                         {metric.error ? ` · ${metric.error}` : ''}
                       </small>
                     </td>
