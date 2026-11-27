@@ -1161,16 +1161,16 @@ export function createApp({
               return json(response, 200, reviewJob(manager.stop(suffix[0])));
             if (suffix[1] === 'resume') {
               if (!provider.info.configured) throw new ApiError(503, '获客执行引擎尚未配置');
+              const body = request.headers['content-type']?.includes('application/json')
+                ? await readJson(request)
+                : {};
               return json(
                 response,
                 200,
                 reviewJob(
-                  await manager.resume(
-                    suffix[0],
-                    request.headers['content-type']?.includes('application/json')
-                      ? await readJson(request)
-                      : {},
-                  ),
+                  await manager.resume(suffix[0], {
+                    sourceControlRevision: body.sourceControlRevision,
+                  }),
                 ),
               );
             }
