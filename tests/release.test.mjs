@@ -4,11 +4,57 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { DatabaseSync } from 'node:sqlite';
 import {
   activateRelease,
   assertQuiet,
   validateArchiveEntries,
 } from '../scripts/release-server.mjs';
+
+test('发布切换保留共享身份暂停并阻止旧版恢复自动入库', async (context) => {
+  const directory = mkdtempSync(join(tmpdir(), 'shadeflow-identity-rollback-'));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  const app = join(directory, 'app');
+  const legacy = join(directory, 'releases', 'f'.repeat(40));
+  const aware = join(directory, 'releases', 'a'.repeat(40));
+  mkdirSync(join(app, '.data'), { recursive: true });
+  mkdirSync(legacy, { recursive: true });
+  mkdirSync(join(aware, 'server'), { recursive: true });
+  writeFileSync(join(aware, 'server', 'acquisition-identity-hold.version'), '1\n');
+  const acquisitionDatabase = join(app, '.data', 'acquisition.sqlite');
+  const calls = [];
+  const activate = (candidate) =>
+    activateRelease({
+      directory,
+      candidate,
+      acquisitionDatabase,
+      stop: () => {
+        calls.push('stop');
+        throw new Error('fixture reached stop');
+      },
+      backup: () => 'fixture-backup',
+      configure: () => {},
+      start: () => calls.push('start'),
+      verify: () => {},
+    });
+  await assert.rejects(() => activate(legacy), /fixture reached stop/);
+  const database = new DatabaseSync(acquisitionDatabase);
+  try {
+    database.exec(`CREATE TABLE acquisition_identity_hold(scope TEXT PRIMARY KEY, snapshot_id TEXT, detected_at INTEGER);
+      INSERT INTO acquisition_identity_hold VALUES('fixture-scope','fixture-snapshot',0);`);
+    calls.length = 0;
+    await assert.rejects(() => activate(legacy), /共享身份核验暂停/);
+    assert.deepEqual(calls, []);
+    await assert.rejects(() => activate(aware), /fixture reached stop/);
+    assert.deepEqual(calls, ['stop']);
+    assert.equal(
+      database.prepare('SELECT snapshot_id FROM acquisition_identity_hold').get().snapshot_id,
+      'fixture-snapshot',
+    );
+  } finally {
+    database.close();
+  }
+});
 
 test('Git保留历史文档，云端发布包排除归档并保留运行依赖的现行文档', () => {
   const directory = mkdtempSync(join(tmpdir(), 'shadeflow-archive-test-'));
