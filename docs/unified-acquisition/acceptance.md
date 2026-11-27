@@ -31,6 +31,8 @@ Windows Node 24、Python 3.12.16 与仓库锁定的 Docling 环境中，同步�
 
 同一 API 注入地图错绑、403、429、超时和模型伪造身份引文。错绑暂停本轮地图，后续独立官网仍能收录。403 未重复调用，官网正常入库。429 按短等待提示重试一次，后续可取证的地图候选与官网候选均入库。超时保留请求待核对，官网正常入库。两路发起的候选均无法凭伪造引文写入主库。Google 请求替身核对未启用时零调用，启用编号诊断只请求 `places.id`，回包夹带的名称、官网和原始响应不进入任务或档案。验证入口为 `node --test --test-name-pattern='地图|Google 配置' tests/native-acquisition.test.mjs`。
 
+正常任务详情 API 在同一隔离 SQLite 中交替读取两轮各 200 家、600 条采集尝试的记录，各执行 16 次。地图组包含 60 条双来源记录和三条地图查询。基础详情为 140,743 字节，15 次热读中位数 6.45 ms、最慢 26.11 ms；带地图的详情为 164,246 字节，热读中位数 6.30 ms、最慢 33.54 ms。两组各返回 200 家，地图组正确读回 60 家共同发现，外部调用为 0。云端网络和更大规模任务另随集成验收核对。
+
 开发机与正式环境检查时无有效 Google Places 凭据。真实账号权限、计费、许可下的自动官网定位、同比新增及每家实际成本仍无实测数据。真实地图纳入对照前从授权独立供应商按同市场和品类核对所允许的字段、绑定准确率、实际使用量、账单和维护成本。当前执行继续以官网为主。[Places API 政策](https://developers.google.com/maps/documentation/places/web-service/policies) · [Text Search 字段](https://developers.google.com/maps/documentation/places/web-service/text-search)
 
 ## 目标机采集预检
