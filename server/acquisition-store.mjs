@@ -47,6 +47,29 @@ function modelResponseJson(response) {
   }
 }
 
+function quotedSnapshotIds(operation) {
+  const ids = new Set();
+  const visit = (value) => {
+    if (!value || typeof value !== 'object') return;
+    if (
+      typeof value.snapshot_id === 'string' &&
+      typeof value.quote === 'string' &&
+      value.quote.trim()
+    )
+      ids.add(value.snapshot_id);
+    for (const child of Object.values(value)) visit(child);
+  };
+  for (const value of [
+    operation.research,
+    operation.output?.research,
+    operation.acquisition,
+    operation.assessment,
+    operation.evidence,
+  ])
+    visit(value);
+  return ids;
+}
+
 export class AcquisitionStore {
   constructor(path = ':memory:', scope = '', { snapshotCacheBytes = SNAPSHOT_CACHE_BYTES } = {}) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
@@ -96,6 +119,10 @@ export class AcquisitionStore {
       ) WITHOUT ROWID;
       CREATE INDEX IF NOT EXISTS acquisition_snapshot_refs_operation
         ON acquisition_snapshot_refs(scope,operation_id,snapshot_id);
+      CREATE TABLE IF NOT EXISTS acquisition_snapshot_history_refs (
+        scope TEXT NOT NULL, snapshot_id TEXT NOT NULL,
+        PRIMARY KEY(scope,snapshot_id)
+      ) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS acquisition_identity_hold (
         scope TEXT PRIMARY KEY, snapshot_id TEXT NOT NULL, detected_at TEXT NOT NULL
       )`);
@@ -164,7 +191,11 @@ export class AcquisitionStore {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       this.db
-        .prepare('INSERT OR IGNORE INTO acquisition_page_snapshots VALUES(?,?,?,?,?,?)')
+        .prepare(
+          `INSERT INTO acquisition_page_snapshots VALUES(?,?,?,?,?,?)
+          ON CONFLICT(scope,id) DO UPDATE SET status=excluded.status,data=excluded.data
+          WHERE acquisition_page_snapshots.status='pruned'`,
+        )
         .run(
           this.scope,
           snapshot_id,
@@ -185,6 +216,19 @@ export class AcquisitionStore {
     this.db
       .prepare('INSERT OR IGNORE INTO acquisition_snapshot_refs VALUES(?,?,?)')
       .run(this.scope, snapshotId, operationId);
+  }
+  retainQuotedSnapshots(operation) {
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO acquisition_snapshot_history_refs
+        SELECT scope,snapshot_id FROM acquisition_snapshot_refs WHERE scope=? AND operation_id=?`,
+      )
+      .run(this.scope, operation.id);
+    this.db
+      .prepare('DELETE FROM acquisition_snapshot_refs WHERE scope=? AND operation_id=?')
+      .run(this.scope, operation.id);
+    for (const snapshotId of quotedSnapshotIds(operation))
+      this.referencePageSnapshot(operation.id, snapshotId);
   }
   referencedPageSnapshots(operationId) {
     return this.db
@@ -219,7 +263,7 @@ export class AcquisitionStore {
   prunePageSnapshots({ now = Date.now() } = {}) {
     this.db.exec('BEGIN IMMEDIATE');
     try {
-      const migration = 'snapshot-references-v1';
+      const migration = 'snapshot-references-v2';
       if (
         !this.db
           .prepare('SELECT 1 FROM acquisition_migrations WHERE scope=? AND name=?')
@@ -227,35 +271,55 @@ export class AcquisitionStore {
       ) {
         this.db
           .prepare(
-            `INSERT OR IGNORE INTO acquisition_snapshot_refs
+            `INSERT OR IGNORE INTO acquisition_snapshot_refs(scope,snapshot_id,operation_id)
           SELECT ?, j.atom, o.id FROM acquisition_operations o, json_tree(o.data) j
           WHERE COALESCE(json_extract(o.data,'$.scope'),'')=? AND j.type='text'
             AND (j.key='snapshot_id' OR j.path LIKE '%.snapshot_ids')`,
           )
           .run(this.scope, this.scope);
+        for (const { data } of this.db
+          .prepare(
+            `SELECT data FROM acquisition_operations
+          WHERE COALESCE(json_extract(data,'$.scope'),'')=? AND json_extract(data,'$.state')='completed'`,
+          )
+          .iterate(this.scope))
+          this.retainQuotedSnapshots(JSON.parse(data));
         this.db
           .prepare('INSERT INTO acquisition_migrations(scope,name) VALUES(?,?)')
           .run(this.scope, migration);
       }
-      this.db
-        .prepare(
-          `WITH unreferenced AS (
+      const candidates = `WITH unused AS (
         SELECT id, acquired_at,
           SUM(length(CAST(data AS BLOB))) OVER (ORDER BY acquired_at DESC,rowid DESC) AS total
         FROM acquisition_page_snapshots p
-        WHERE scope=? AND NOT EXISTS (
+        WHERE scope=? AND status<>'pruned' AND NOT EXISTS (
           SELECT 1 FROM acquisition_snapshot_refs r WHERE r.scope=p.scope AND r.snapshot_id=p.id
         )
-      ) DELETE FROM acquisition_page_snapshots WHERE scope=? AND id IN (
-        SELECT id FROM unreferenced WHERE acquired_at<? OR total>?
-      )`,
+      )`;
+      const cutoff = `scope=? AND id IN (SELECT id FROM unused WHERE acquired_at<? OR total>?)`;
+      const recorded = `EXISTS (SELECT 1 FROM acquisition_snapshot_history_refs r
+        WHERE r.scope=p.scope AND r.snapshot_id=p.id)`;
+      const parameters = [
+        this.scope,
+        this.scope,
+        new Date(now - PAGE_SNAPSHOT_RETENTION_MS).toISOString(),
+        this.canPersistPageBodies() ? this.snapshotCacheBytes : 0,
+      ];
+      this.db
+        .prepare(
+          `${candidates}
+        DELETE FROM acquisition_page_snapshots AS p WHERE ${cutoff} AND NOT ${recorded}`,
         )
-        .run(
-          this.scope,
-          this.scope,
-          new Date(now - PAGE_SNAPSHOT_RETENTION_MS).toISOString(),
-          this.canPersistPageBodies() ? this.snapshotCacheBytes : 0,
-        );
+        .run(...parameters);
+      this.db
+        .prepare(
+          `${candidates}
+        UPDATE acquisition_page_snapshots AS p
+        SET status='pruned',
+          data=json_set(json_remove(data,'$.content','$.raw_content','$.links'),'$.body_pruned',json('true'))
+        WHERE ${cutoff} AND ${recorded}`,
+        )
+        .run(...parameters);
       this.db.exec('COMMIT');
     } catch (error) {
       this.db.exec('ROLLBACK');
@@ -526,7 +590,16 @@ export class AcquisitionStore {
     operation.state = 'completed';
     operation.output = output;
     for (const request of Object.values(operation.paid_requests || {})) delete request.response;
-    return this.save(operation);
+    this.db.exec('SAVEPOINT acquisition_settle');
+    try {
+      this.save(operation);
+      this.retainQuotedSnapshots(operation);
+      this.db.exec('RELEASE acquisition_settle');
+      return operation;
+    } catch (error) {
+      this.db.exec('ROLLBACK TO acquisition_settle; RELEASE acquisition_settle');
+      throw error;
+    }
   }
   byAssessment(id) {
     const row = this.db

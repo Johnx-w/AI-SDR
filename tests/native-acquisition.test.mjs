@@ -67,7 +67,7 @@ const definitions = [
 ];
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status });
 
-for (const interruptAt of ['官网正文已保存', '已派模型应答返回'])
+for (const interruptAt of ['官网正文已保存', '已派模型应答返回', '清理已结束轮次的快照原文'])
   test('发布中断后同一轮复用已存官网和原操作：' + interruptAt, async (t) => {
     const dir = mkdtempSync(join(tmpdir(), 'acquisition-recovery-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
@@ -82,6 +82,13 @@ for (const interruptAt of ['官网正文已保存', '已派模型应答返回'])
     const north = 'https://north-recovery.example.org/';
     const south = 'https://south-recovery.example.org/';
     const alias = 'https://north-recovery-alias.example.org/';
+    const pruning = interruptAt === '清理已结束轮次的快照原文';
+    const about = new URL('/about', north).href;
+    const contact = new URL('/contact', north).href;
+    const supplementary =
+      'Our showroom is open on weekdays. Visitor parking is next to the building.';
+    const shell = '<noscript>Enable JavaScript</noscript><!-- transient page with no evidence -->';
+    const supplementalLinks = '<a href="/about">About</a><a href="/contact">Contact</a>';
     const companies = {
       [north]: ['North Recovery Limited', '07123456'],
       [south]: ['South Recovery Limited', '07987654'],
@@ -103,6 +110,7 @@ for (const interruptAt of ['官网正文已保存', '已派模型应答返回'])
           results: Object.keys(companies).map((url) => ({ url, title: companies[url][0] })),
         });
       }
+      if (url === 'https://api.tavily.com/extract') return json({ results: [] });
       if (url !== 'https://api.deepseek.com/responses') throw new Error('Fixture network disabled');
       const { pages, sources } = JSON.parse(JSON.parse(options.body).input[1].content);
       const response = sources
@@ -136,11 +144,19 @@ for (const interruptAt of ['官网正文已保存', '已派模型应答返回'])
       nativeImpl: new NativeAcquisition({
         env: runtimeEnv,
         fetchImpl,
+        readScraplingPage: async () => ({ status: 'unavailable' }),
         readPage: async ({ href }) => {
           pageReads.push(href);
-          if (interrupt && interruptAt === '官网正文已保存' && href === south)
+          const path = new URL(href).pathname;
+          if (pruning && path === '/about') return { html: '<p>' + supplementary + '</p>' };
+          if (pruning && path === '/contact') return { html: shell };
+          if (interrupt && interruptAt !== '已派模型应答返回' && href === south)
             writeFileSync(maintenance, '{}');
-          return { html: `<p>${identity(href)}</p><p>${operating}</p>` };
+          return {
+            html:
+              `<p>${identity(href)}</p><p>${operating}</p>` +
+              (pruning && href !== south ? supplementalLinks : ''),
+          };
         },
       }),
     });
@@ -154,7 +170,8 @@ for (const interruptAt of ['官网正文已保存', '已派模型应答返回'])
       assert.fail(JSON.stringify(result));
     };
     let id;
-    await withApp(options(), async (origin) => {
+    const beforeRestart = options();
+    await withApp(beforeRestart, async (origin) => {
       const response = await fetch(origin + '/api/v1/acquisition/jobs', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'idempotency-key': 'recovery-fixture' },
@@ -171,13 +188,45 @@ for (const interruptAt of ['官网正文已保存', '已派模型应答返回'])
       await waitRead(origin + '/api/v1/ops/maintenance', ({ enabled, quiet }) => enabled && quiet);
       assert.deepEqual(
         pageReads,
-        [north, south],
+        pruning ? [north, contact, about, south] : [north, south],
         'maintenance yields after saving the second page',
       );
-      assert.deepEqual(calls, interruptAt === '官网正文已保存' ? [north] : [north, south]);
+      assert.deepEqual(calls, interruptAt === '已派模型应答返回' ? [north, south] : [north]);
       rmSync(maintenance);
       const paused = await (await fetch(origin + '/api/v1/acquisition/jobs/' + id)).json();
       assert.deepEqual([paused.status, paused.reason], ['paused', 'checkpointed']);
+      if (pruning) {
+        const [northRow] = paused.rows;
+        const { lead } = await (
+          await fetch(origin + '/api/v1/leads/real/' + northRow.record_id)
+        ).json();
+        const citation = lead.acquisitionSources[0].registration.evidence.snapshot_id;
+        const active = paused.currentProgress.collection_attempts[0].snapshot_id;
+        const unused = northRow.collection_attempts.find(
+          ({ requested_url }) => requested_url === about,
+        );
+        const failed = northRow.collection_attempts.find(
+          ({ requested_url, method }) => requested_url === contact && method === 'node',
+        );
+        const store = beforeRestart.nativeImpl.store;
+        assert.equal(
+          store.snapshotById(unused.snapshot_id).content,
+          '<p>' + supplementary + '</p>',
+        );
+        assert.equal(store.snapshotById(failed.snapshot_id).content, shell);
+        store.prunePageSnapshots({ now: Date.parse(unused.acquired_at) + 8 * 86400000 });
+        for (const attempt of [unused, failed]) {
+          const compacted = store.snapshotById(attempt.snapshot_id);
+          assert.equal(compacted.body_pruned, true);
+          assert.equal(compacted.status, attempt.status);
+          assert.equal(compacted.content_hash, attempt.content_hash);
+          assert.equal(compacted.content, undefined);
+          assert.equal(compacted.raw_content, undefined);
+        }
+        assert.match(store.snapshotById(citation).content, /North Recovery Limited/);
+        assert.match(store.snapshotById(active).content, /South Recovery Limited/);
+        assert.deepEqual(store.pageSnapshots(about), []);
+      }
       writeFileSync(maintenance, '{}');
     });
     interrupt = false;
@@ -191,7 +240,20 @@ for (const interruptAt of ['官网正文已保存', '已派模型应答返回'])
       assert.equal(job.remainingTarget, 1);
       assert.equal(job.researched, 3);
       assert.equal(found, 1);
-      assert.deepEqual(pageReads, [north, south, alias]);
+      assert.deepEqual(
+        pageReads,
+        pruning
+          ? [
+              north,
+              contact,
+              about,
+              south,
+              alias,
+              new URL('/contact', alias).href,
+              new URL('/about', alias).href,
+            ]
+          : [north, south, alias],
+      );
       assert.deepEqual(calls, [north, south]);
       assert.deepEqual(
         job.rows.map(({ source_url, result }) => [source_url, result]),
@@ -847,18 +909,35 @@ test('快照保留期和缓存容量只清理未引用页面，保留在途和�
     const active = store.begin('active-fixture-operation', {}).operation;
     const archived = store.begin('archived-fixture-operation', {}).operation;
     const inFlight = snapshot('active', old, active.id);
-    // Reopening a pre-upgrade operation may have its references only in operation evidence.
     const history = snapshot('archive', old);
-    store.complete(archived, { research: { facts: [{ snapshot_id: history.snapshot_id }] } });
+    const legacyPin = snapshot('archive-unquoted', old, archived.id);
+    archived.state = 'completed';
+    archived.collection_attempts = [{ snapshot_id: legacyPin.snapshot_id }];
+    archived.output = {
+      research: {
+        facts: [
+          {
+            snapshot_id: history.snapshot_id,
+            quote: 'independent frozen original website evidence',
+          },
+        ],
+      },
+    };
+    store.save(archived);
     const expired = snapshot('old-unreferenced', old);
     const overflow = snapshot('overflow', '2030-01-31T22:00:00.000Z');
     const latest = snapshot('latest', '2030-01-31T23:00:00.000Z');
     store.prunePageSnapshots({ now });
     assert.equal(store.snapshotById(inFlight.snapshot_id).content, inFlight.content);
     assert.equal(store.snapshotById(history.snapshot_id).content, history.content);
+    assert.equal(store.snapshotById(legacyPin.snapshot_id).body_pruned, true);
+    assert.equal(store.snapshotById(legacyPin.snapshot_id).content, undefined);
     assert.equal(store.snapshotById(expired.snapshot_id), null);
     assert.equal(store.snapshotById(overflow.snapshot_id), null);
     assert.equal(store.snapshotById(latest.snapshot_id).content, latest.content);
+    const explicitlyRefetched = snapshot('archive-unquoted', old, active.id);
+    assert.equal(explicitlyRefetched.snapshot_id, legacyPin.snapshot_id);
+    assert.equal(store.snapshotById(legacyPin.snapshot_id).content, legacyPin.content);
   } finally {
     store.close();
   }
