@@ -1,10 +1,71 @@
 import { spawn } from 'node:child_process';
+import { readdir, readFile } from 'node:fs/promises';
+import { setTimeout as delay } from 'node:timers/promises';
 
 // The shell has no children before joining the leaf and execs only fixed positional arguments.
 const joinCgroup = 'printf "%s\\n" "$$" > "$1/cgroup.procs" || exit 125; shift; exec "$@"';
+let pendingLinuxGroup;
 
-export function runScraplingWorker(executable, args, { env, input, signal, maxBuffer, cgroup }) {
+const linuxGroupControls = {
+  hasGroup(group) {
+    try {
+      process.kill(-group, 0);
+      return true;
+    } catch (error) {
+      if (error.code === 'ESRCH') return false;
+      throw error;
+    }
+  },
+  list: () => readdir('/proc'),
+  stat: (pid) => readFile('/proc/' + pid + '/stat', 'utf8'),
+  now: () => performance.now(),
+  wait: delay,
+};
+
+export async function waitForLinuxProcessGroupExit(group, controls = linuxGroupControls) {
+  const deadline = controls.now() + 2000;
+  const checkDeadline = () => {
+    if (controls.now() >= deadline) throw new Error('Scrapling process group is still active');
+  };
+  while (controls.hasGroup(group)) {
+    let live = false;
+    for (const pid of await controls.list()) {
+      checkDeadline();
+      if (!/^\d+$/.test(pid)) continue;
+      let stat;
+      try {
+        stat = await controls.stat(pid);
+      } catch (error) {
+        if (error.code === 'ENOENT' || error.code === 'ESRCH') continue;
+        throw error;
+      }
+      const [state, , groupId] = stat.slice(stat.lastIndexOf(') ') + 2).split(' ', 4);
+      if (groupId === String(group) && !['Z', 'X', 'x'].includes(state)) {
+        live = true;
+        break;
+      }
+    }
+    if (!live) return;
+    await controls.wait(20);
+  }
+}
+
+export async function runScraplingWorker(
+  executable,
+  args,
+  { env, input, signal, maxBuffer, cgroup },
+) {
   const grouped = process.platform !== 'win32';
+  const linuxFallback = process.platform === 'linux' && !cgroup;
+  if (linuxFallback && pendingLinuxGroup) {
+    try {
+      await waitForLinuxProcessGroupExit(pendingLinuxGroup);
+      pendingLinuxGroup = undefined;
+    } catch {
+      return { status: 'failed', failure_reason: 'worker_cleanup_failed' };
+    }
+    signal.throwIfAborted();
+  }
   return new Promise((resolve) => {
     const child = spawn(
       cgroup ? '/bin/sh' : executable,
@@ -31,7 +92,14 @@ export function runScraplingWorker(executable, args, { env, input, signal, maxBu
     }
     function cleanupTree() {
       killTree();
-      cleanup ??= cgroup?.close().catch(() => {
+      cleanup ??= (
+        cgroup
+          ? cgroup.close()
+          : linuxFallback && child.pid
+            ? waitForLinuxProcessGroupExit(child.pid)
+            : undefined
+      )?.catch(() => {
+        if (linuxFallback) pendingLinuxGroup = child.pid;
         child.stdout.destroy();
         return { failed: true };
       });

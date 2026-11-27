@@ -7,8 +7,55 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { createScraplingCgroup } from '../server/scrapling-cgroup.mjs';
 import { collectScraplingPage } from '../server/scrapling-collector.mjs';
+import { waitForLinuxProcessGroupExit } from '../server/scrapling-process.mjs';
 
 const fixture = fileURLToPath(new URL('./fixtures/scrapling-process.py', import.meta.url));
+
+test('Linux group cleanup waits for a live descendant, ignoring zombies and unrelated groups', async () => {
+  const group = 413;
+  let elapsed = 0;
+  let descendant = 'D';
+  const controls = {
+    hasGroup(pid) {
+      assert.equal(pid, group);
+      return true;
+    },
+    list: async () => ['self', '413', '414', '415', '416'],
+    async stat(pid) {
+      const values = {
+        413: '413 (old leader) Z 1 413',
+        414: `414 (a name) with ) spaces) ${descendant} 1 413`,
+        415: '415 (other group) S 1 415',
+      };
+      if (!values[pid]) throw Object.assign(new Error('Gone'), { code: 'ENOENT' });
+      return values[pid];
+    },
+    now: () => elapsed,
+    async wait(ms) {
+      elapsed += ms;
+      descendant = 'Z';
+    },
+  };
+  await waitForLinuxProcessGroupExit(group, controls);
+  assert.ok(elapsed > 0);
+  assert.equal(descendant, 'Z');
+
+  descendant = 'D';
+  await assert.rejects(
+    waitForLinuxProcessGroupExit(group, {
+      ...controls,
+      async wait(ms) {
+        elapsed += ms;
+      },
+    }),
+    /still active/,
+  );
+  await waitForLinuxProcessGroupExit(group, {
+    ...controls,
+    hasGroup: () => false,
+    list: () => assert.fail('A missing group must not require a process-table scan'),
+  });
+});
 
 test('delayed cgroup cleanup blocks new workers until the original leaf can be removed', async () => {
   const parent = '/system.slice/stale-test.service';
