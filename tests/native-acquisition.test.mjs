@@ -337,7 +337,7 @@ test('正常官网任务忽略 Places 环境配置，重启后可读回两个网
   const { app, atlas, beacon, googleRequests, html } = mapDiscoveryFixture({
     mapSettings: { GOOGLE_PLACES_API_KEY: 'fixture-places-key', GOOGLE_PLACES_IDS_ONLY: 'true' },
     googleResponse: () => json({ places: [{ id: 'unexpected-map-diagnostic' }] }),
-    webResults: ({ atlas, beacon, cedar }) => [atlas, beacon, cedar],
+    webResults: ({ atlas, beacon, cedar }) => [atlas, cedar, beacon],
   });
   app.nativeImpl.close();
   const options = {
@@ -368,8 +368,9 @@ test('正常官网任务忽略 Places 环境配置，重启后可读回两个网
   syncBuiltinESMExports();
   let completedId;
   await withApp(options, async (base) => {
-    const job = await runMapDiscoveryJob(base);
+    const job = await runMapDiscoveryJob(base, 2);
     assert.deepEqual(googleRequests, []);
+    assert.equal(job.status, 'completed');
     assert.equal(job.inserted, 2);
     assert.equal(job.mapComparison, undefined);
     assert.ok(job.searchStats.every(({ maps }) => maps === undefined));
@@ -377,8 +378,8 @@ test('正常官网任务忽略 Places 环境配置，重启后可读回两个网
       job.rows.map(({ source_url, result }) => [source_url, result]),
       [
         [atlas, 'inserted'],
-        [beacon, 'inserted'],
         ['https://cedar-shades.example.org/', 'review'],
+        [beacon, 'inserted'],
       ],
     );
     completedId = job.id;
