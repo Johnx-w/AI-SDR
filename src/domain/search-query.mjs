@@ -1,5 +1,6 @@
 import acquisition from '../data/acquisition.json' with { type: 'json' };
 import { isAllProductScope, productTerms } from './acquisition-products.mjs';
+import { WORLDWIDE_COUNTRY } from './country-catalog.ts';
 
 const quote = (value) => '"' + value.replace(/"/g, '') + '"';
 export const MAX_AUTO_SEARCH_QUERIES = 600;
@@ -41,6 +42,7 @@ const greatestCommonDivisor = (left, right) => {
 };
 
 function broadSearchPlan(input, roleVariants) {
+  const country = input.country === WORLDWIDE_COUNTRY ? '' : input.country;
   const cycle =
     input.environment_preference === 'indoor'
       ? ['indoor', 'general', 'outdoor', 'semifinished', 'indoor', 'components']
@@ -66,7 +68,6 @@ function broadSearchPlan(input, roleVariants) {
     if (lane.cursor >= lane.total) continue;
     let index = (lane.cursor++ * lane.stride) % lane.total;
     remaining--;
-    const country = input.country;
     const term = lane.terms[index % lane.terms.length];
     index = Math.floor(index / lane.terms.length);
     const role = roleVariants[index % roleVariants.length];
@@ -79,6 +80,7 @@ function broadSearchPlan(input, roleVariants) {
 }
 
 export function automaticSearchPlan(input) {
+  const country = input.country === WORLDWIDE_COUNTRY ? '' : input.country;
   const roles = input.customer_types || (input.customer_type ? [input.customer_type] : []);
   const selected = acquisition.customerTypes.filter((type) => roles.includes(type.value));
   const roleVariants = selected.length
@@ -97,7 +99,6 @@ export function automaticSearchPlan(input) {
   // first outer dimension consume the whole budget.
   for (let sample = 0; sample < sampleSize; sample++) {
     let index = total <= sampleSize ? sample : (sample * stride) % total;
-    const country = input.country;
     const product = products[index % products.length];
     index = Math.floor(index / products.length);
     const role = roleVariants[index % roleVariants.length];
@@ -112,7 +113,11 @@ export function automaticSearchPlan(input) {
 }
 
 export function buildSearchQuery(input) {
-  if (input.query_mode === 'auto' || isAllProductScope(input))
+  if (
+    input.country === WORLDWIDE_COUNTRY ||
+    input.query_mode === 'auto' ||
+    isAllProductScope(input)
+  )
     return automaticSearchPlan(input)[0]?.query || '';
   const products = String(input.product || '')
     .split(',')

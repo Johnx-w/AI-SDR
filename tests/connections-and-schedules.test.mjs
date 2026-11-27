@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { ApiConnections } from '../server/api-connections.mjs';
+import { validateInput } from '../server/app.mjs';
 import { createResearchProviders } from '../server/research-providers.mjs';
 import { AcquisitionReviews } from '../server/acquisition-reviews.mjs';
 import {
@@ -213,6 +214,149 @@ test('定时计划 API 保存并读回 25 国的工作日当地时间', async ()
   });
 });
 
+test('搜索预览按范围生成实际查询，全球不把范围标签发给搜索服务', async () => {
+  await withApp({ env: nativeEnv }, async (base) => {
+    const preview = async (country) => {
+      const response = await fetch(base + '/api/v1/acquisition/search-preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ country, product: 'zip screens' }),
+      });
+      assert.equal(response.status, 200);
+      return (await response.json()).queries;
+    };
+    const global = await preview('worldwide');
+    const usa = await preview('United States');
+    assert.deepEqual(global[0], { country: '', query: '"zip screens" supplier' });
+    assert.deepEqual(usa[0], {
+      country: 'United States',
+      query: '"zip screens" supplier United States',
+    });
+    assert.ok(global.every(({ country, query }) => !country && !/worldwide|所有国家/i.test(query)));
+  });
+});
+
+test('旧计划到期时拒绝空值、旧范围及冲突的地区字段', () => {
+  const folder = mkdtempSync(join(tmpdir(), 'shadeflow-legacy-scope-'));
+  const path = join(folder, 'schedules.sqlite');
+  const legacy = harness({ path });
+  for (const [index, scope] of [
+    { country: '' },
+    { country: 'Europe' },
+    { country: 'worldwide', region: 'Texas' },
+    { country: 'worldwide', market_countries: ['United States'] },
+    { country: 'worldwide', target_markets: ['United States'] },
+  ].entries()) {
+    legacy.schedules.create(
+      { name: '旧计划 ' + index, input: { ...input, ...scope }, timing },
+      'legacy-scope-' + index,
+    );
+  }
+  legacy.schedules.close();
+  legacy.jobs.close();
+  const current = harness({ path, checkInput: validateInput });
+  try {
+    current.advance('2030-01-01T09:00:00+08:00');
+    current.schedules.tick();
+    for (const plan of current.schedules.list()) {
+      assert.equal(plan.status, 'paused', `${plan.name}: ${plan.lastError}`);
+      assert.equal(plan.runs, 0);
+      assert.match(plan.lastError, /旧范围需要重新选择/);
+    }
+    assert.deepEqual(current.jobs.list(), []);
+  } finally {
+    current.schedules.close();
+    current.jobs.close();
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test('单国重复计划改为全球后按新范围到期，保留时区及原轮次', async (t) => {
+  t.mock.timers.enable({
+    apis: ['Date', 'setInterval'],
+    now: Date.parse('2030-01-01T13:59:50Z'),
+  });
+  const queries = [];
+  const fetchImpl = async (url, options) => {
+    assert.equal(url, 'https://api.tavily.com/search');
+    queries.push(JSON.parse(options.body).query);
+    return Response.json({ results: [] });
+  };
+  await withApp(
+    { env: { TAVILY_API_KEY: 'test', DEEPSEEK_API_KEY: 'test' }, fetchImpl },
+    async (base) => {
+      const api = async (path, body, method = 'POST') => {
+        const response = await fetch(
+          base + '/api/v1/acquisition/' + path,
+          body && {
+            method,
+            headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'scope-weekly-2030' },
+            body: JSON.stringify(body),
+          },
+        );
+        const data = await response.json();
+        assert.ok(response.ok, JSON.stringify(data));
+        return data;
+      };
+      const request = {
+        name: 'Repeat scope test',
+        input: {
+          country: 'United States',
+          product: 'zip screens',
+          query_mode: 'auto',
+          target_count: 1,
+        },
+        timing: { ...timing, times: ['09:00'], timezone: 'America/New_York' },
+      };
+      const plan = await api('schedules', request);
+      assert.equal(plan.nextRunAt, '2030-01-01T14:00:00.000Z');
+      const run = async () => {
+        t.mock.timers.tick(15000);
+        const {
+          schedules: [plan],
+        } = await api('schedules?summary=1');
+        let job;
+        for (let i = 0; i < 200; i++) {
+          job = await api('jobs/' + plan.lastJobId);
+          if (job.status !== 'running') break;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        assert.equal(job.status, 'partial');
+        return job;
+      };
+      const first = await run();
+      const firstQueries = queries.splice(0);
+      assert.equal(first.input.country, 'United States');
+      assert.ok(
+        firstQueries.length > 0 && firstQueries.every((query) => query.includes('United States')),
+      );
+
+      const edited = await api(
+        'schedules/' + plan.id,
+        {
+          ...request,
+          input: { ...request.input, country: 'worldwide' },
+        },
+        'PUT',
+      );
+      assert.equal(edited.input.country, 'worldwide');
+      assert.equal(edited.timing.timezone, 'America/New_York');
+      assert.equal(edited.nextRunAt, '2030-01-02T14:00:00.000Z');
+      assert.equal(edited.lastJob.input.country, 'United States');
+
+      t.mock.timers.setTime(Date.parse('2030-01-02T13:59:50Z'));
+      const second = await run();
+      assert.notEqual(second.id, first.id);
+      assert.equal(second.input.country, 'worldwide');
+      assert.ok(
+        queries.length > 0 &&
+          queries.every((query) => !/worldwide|所有国家|United States/i.test(query)),
+      );
+      assert.equal((await api('jobs/' + first.id)).input.country, 'United States');
+    },
+  );
+});
+
 test('请求限流时按服务响应重试，超出并发请求数的调用等待', async () => {
   let active = 0;
   let peak = 0;
@@ -319,7 +463,10 @@ test('旧州计划到期时暂停，重新选择国家并恢复后按该国执�
     assert.equal(h.jobs.list().length, 0);
     assert.equal(h.schedules.get(plan.id).status, 'paused');
     assert.equal(h.schedules.get(plan.id).input.region, 'California');
-    assert.throws(() => h.schedules.control(plan.id, 'resume'), /重新选择国家/);
+    assert.throws(() => h.schedules.control(plan.id, 'resume'), {
+      status: 400,
+      code: 'INVALID_COUNTRY_SCOPE',
+    });
     h.schedules.update(plan.id, {
       name: plan.name,
       input: { ...input, country: 'United Kingdom', query_mode: 'auto', search_query: '' },
