@@ -142,12 +142,16 @@ const labels = {
   exhausted: '当前筛选条件下的候选已处理完',
   stopped: '已停止，已入库客户保留',
   interrupted: '服务中断，继续前需核对当前企业',
+  checkpointed: '已保存执行进度，等待继续',
   uncertain: '执行结果待确认，已暂停，未自动重复写入',
+  write_uncertain: '主库写入结果待核对，已保留原操作编号',
   paid_uncertain: '供应商请求结果待核对，已保留原请求编号',
   manual_pause: '已人工暂停，保留执行进度',
   outreach_deleted: '关联触达计划已删除，自动首发已关闭；等待人工继续获客或删除来源',
   source_deleted: '来源任务已删除，执行历史保留',
 };
+const interruptedReason = (job) => (job.batch ? 'checkpointed' : 'interrupted');
+const uncertainReason = (job) => (job.batch ? 'write_uncertain' : 'uncertain');
 const batchCapacity = 200;
 const nextBatch = (job, reason) => ({
   number: (job.batch?.number || 0) + 1,
@@ -216,7 +220,7 @@ export class BatchJobs {
     for (const job of this.activeJobs())
       if (['running', 'stopping'].includes(job.status)) {
         job.status = 'paused';
-        job.reason = 'interrupted';
+        job.reason = interruptedReason(job);
         job.pending = job.current ? 1 : 0;
         delete job.collectionWait;
         for (const metric of job.searchStats || [])
@@ -514,7 +518,7 @@ export class BatchJobs {
             this.finish(j, 'stopped');
           } else if (j.status === 'running') {
             j.status = 'paused';
-            j.reason = j.current ? 'uncertain' : 'interrupted';
+            j.reason = j.current ? uncertainReason(j) : interruptedReason(j);
             j.pending = j.current ? 1 : 0;
             this.save(j);
           }
@@ -526,7 +530,7 @@ export class BatchJobs {
             if (this.closed) return;
             const j = this.get(id);
             j.status = 'paused';
-            j.reason = 'uncertain';
+            j.reason = uncertainReason(j);
             this.save(j);
           })
           .finally(() => this.workPromises.delete(id));
@@ -691,7 +695,7 @@ export class BatchJobs {
       this.save(job, { outreachControl: true });
       if (automatic && this.isMaintaining()) {
         job.status = 'paused';
-        job.reason = 'interrupted';
+        job.reason = interruptedReason(job);
         return this.save(job);
       }
       if (job.input.auto_first_touch) this.onOutreachChange();
@@ -724,7 +728,9 @@ export class BatchJobs {
       this.resuming.has(job.id) ||
       this.provider !== 'native' ||
       job.status !== 'paused' ||
-      !['interrupted', 'uncertain', 'paid_uncertain'].includes(job.reason) ||
+      !['interrupted', 'uncertain', 'checkpointed', 'write_uncertain', 'paid_uncertain'].includes(
+        job.reason,
+      ) ||
       job.provider !== this.provider ||
       job.scope !== this.scope
     )
@@ -1050,7 +1056,7 @@ export class BatchJobs {
         const batch = j.executionVersion === unifiedExecutionVersion && j.batch;
         if (batch && this.isMaintaining()) {
           j.status = 'paused';
-          j.reason = 'interrupted';
+          j.reason = interruptedReason(j);
           j.pending = j.current ? 1 : 0;
           checkpoint(j);
           return;
@@ -1319,10 +1325,10 @@ export class BatchJobs {
           j.status = 'paused';
           j.reason =
             error.code === 'ACQUISITION_INTERRUPTED'
-              ? 'interrupted'
+              ? interruptedReason(j)
               : error.code === 'ACQUISITION_PAID_UNKNOWN'
                 ? 'paid_uncertain'
-                : 'uncertain';
+                : uncertainReason(j);
           j.pending = 1;
           delete j.collectionWait;
           checkpoint(j);
@@ -1338,8 +1344,8 @@ export class BatchJobs {
         error.code === 'ACQUISITION_PAID_UNKNOWN'
           ? 'paid_uncertain'
           : j.current
-            ? 'uncertain'
-            : 'interrupted';
+            ? uncertainReason(j)
+            : interruptedReason(j);
       j.pending = j.current ? 1 : 0;
       checkpoint(j);
     } finally {

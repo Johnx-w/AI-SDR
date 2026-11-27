@@ -174,6 +174,10 @@ for (const interruptAt of ['官网正文已保存', '已派模型应答返回'])
         'maintenance yields after saving the second page',
       );
       assert.deepEqual(calls, interruptAt === '官网正文已保存' ? [north] : [north, south]);
+      rmSync(maintenance);
+      const paused = await (await fetch(origin + '/api/v1/acquisition/jobs/' + id)).json();
+      assert.deepEqual([paused.status, paused.reason], ['paused', 'checkpointed']);
+      writeFileSync(maintenance, '{}');
     });
     interrupt = false;
     rmSync(maintenance);
@@ -458,6 +462,7 @@ test('付费模型应答丢失后继续只核对原请求，取回结果后收�
   };
   const fixture = mapDiscoveryFixture();
   let received;
+  let sentRequestId;
   let extractionCalls = 0;
   let queryCalls = 0;
   const lookups = [];
@@ -467,6 +472,7 @@ test('付费模型应答丢失后继续只核对原请求，取回结果后收�
       const { sources } = JSON.parse(JSON.parse(options.body).input[1].content);
       if (!sources) {
         extractionCalls++;
+        sentRequestId = options.headers['X-Client-Request-Id'];
         received = await (await fixture.app.fetchImpl(url, options)).json();
         throw new Error('供应商已执行，但 HTTP 响应中断');
       }
@@ -520,6 +526,7 @@ test('付费模型应答丢失后继续只核对原请求，取回结果后收�
     assert.equal(pending.remainingTarget, 1);
     [request] = pending.currentProgress.requests.filter(({ status }) => status === 'unknown');
     assert.equal(request.kind, 'model_extraction');
+    assert.equal(request.id, sentRequestId);
     assert.equal(pending.rows.length, 0);
     assert.equal((await fetch(jobs + '/' + id + '/resume', { method: 'POST' })).status, 409);
   });
@@ -557,11 +564,13 @@ test('付费搜索失去应答时恢复保持原游标，供应商核对后消�
   const runtimeEnv = { ...env, BATCH_DB_PATH: join(dir, 'acquisition.sqlite') };
   let queries = 0;
   let providerResult;
+  let sentRequestId;
   let responseAvailable = false;
   const checks = [];
   const fetchImpl = async (url, options) => {
     if (url === 'https://api.tavily.com/search') {
       queries++;
+      sentRequestId = options.headers['X-Client-Request-Id'];
       providerResult = await (await fixture.app.fetchImpl(url, options)).json();
       throw new Error('搜索应答丢失');
     }
@@ -607,6 +616,7 @@ test('付费搜索失去应答时恢复保持原游标，供应商核对后消�
     assert.equal(paused.searches, 1);
     assert.equal(paused.currentProgress.requests[0].kind, 'web_search');
     requestId = paused.currentProgress.requests[0].id;
+    assert.equal(requestId, sentRequestId);
     assert.equal(paused.currentProgress.requests[0].status, 'unknown');
   });
   await withApp(options(), async (origin) => {
@@ -626,89 +636,106 @@ test('付费搜索失去应答时恢复保持原游标，供应商核对后消�
   });
 });
 
-test('资源失败和外部提取未知只延后缺证企业，两个正常官网继续入库', async () => {
-  const shell = 'https://unreadable-recovery.example.org/';
-  const fixture = mapDiscoveryFixture({
-    webResults: ({ atlas, beacon }) => [shell, atlas, beacon],
-  });
-  const extractCalls = [];
-  const fetchImpl = async (url, options) => {
-    if (url === 'https://api.tavily.com/search') {
-      return json({
-        results: [shell, fixture.atlas, fixture.beacon].map((url) => ({ url, title: url })),
-        usage: { credits: 1 },
-      });
-    }
-    if (url === 'https://api.tavily.com/extract') {
-      extractCalls.push(JSON.parse(options.body).urls);
-      throw new Error('外部提取应答丢失');
-    }
-    return fixture.app.fetchImpl(url, options);
-  };
-  const nativeImpl = new NativeAcquisition({
-    env,
-    fetchImpl,
-    readPage: async (url, signal) =>
-      url.href === shell
-        ? { html: '<noscript>Enable JavaScript</noscript>' }
-        : fixture.app.nativeImpl.readPage(url, signal),
-    readScraplingPage: async (url) =>
-      url === shell
-        ? { status: 'memory_limit', failure_reason: 'worker_memory_limit' }
-        : fixture.app.nativeImpl.readScraplingPage(url),
-  });
-  await withApp({ env, fetchImpl, nativeImpl }, async (origin) => {
-    const api = origin + '/api/v1';
-    const response = await fetch(api + '/acquisition/jobs', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'idempotency-key': 'fallback-fixture' },
-      body: JSON.stringify({
-        ...input,
-        product: 'roller blinds',
-        target_count: 2,
-        research_budget: 3,
-      }),
+for (const [browserStatus, browserReason] of [
+  ['failed', 'worker_crashed'],
+  ['timeout', 'page_timeout'],
+  ['memory_limit', 'worker_memory_limit'],
+  ['deferred', 'queue_timeout'],
+])
+  test('资源失败和外部提取未知只延后缺证企业，两个正常官网继续入库：' + browserReason, async () => {
+    const shell = 'https://unreadable-recovery.example.org/';
+    const fixture = mapDiscoveryFixture({
+      webResults: ({ atlas, beacon }) => [shell, atlas, beacon],
     });
-    assert.equal(response.status, 202);
-    const { id } = await response.json();
-    let job;
-    for (let attempt = 0; attempt < 125; attempt++) {
-      job = await (await fetch(api + '/acquisition/jobs/' + id)).json();
-      if (job.status !== 'running') break;
-      await delay(10);
-    }
-    assert.equal(job.status, 'completed');
-    assert.deepEqual(
-      job.rows.map(({ source_url, result }) => [source_url, result]),
-      [
-        [shell, 'review'],
-        [fixture.atlas, 'inserted'],
-        [fixture.beacon, 'inserted'],
-      ],
-    );
-    assert.deepEqual(
-      job.rows[0].collection_attempts.map(({ method, status, failure_reason }) => [
-        method,
-        status,
-        failure_reason ?? null,
-      ]),
-      [
-        ['node', 'empty', null],
-        ['scrapling', 'memory_limit', 'worker_memory_limit'],
-        ['external', 'unknown', 'provider_request_unknown'],
-      ],
-    );
-    const [request] = job.rows[0].paid_requests;
-    assert.deepEqual([request.kind, request.status], ['web_extract', 'unknown']);
-    assert.deepEqual(extractCalls, [[shell]]);
-    assert.deepEqual(
-      (await (await fetch(api + '/leads/real/list')).json()).leads
-        .map(({ website }) => website)
-        .sort(),
-      [fixture.atlas, fixture.beacon],
-    );
+    const extractCalls = [];
+    const fetchImpl = async (url, options) => {
+      if (url === 'https://api.tavily.com/search') {
+        return json({
+          results: [shell, fixture.atlas, fixture.beacon].map((url) => ({ url, title: url })),
+          usage: { credits: 1 },
+        });
+      }
+      if (url === 'https://api.tavily.com/extract') {
+        extractCalls.push(JSON.parse(options.body).urls);
+        throw new Error('外部提取应答丢失');
+      }
+      return fixture.app.fetchImpl(url, options);
+    };
+    const nativeImpl = new NativeAcquisition({
+      env,
+      fetchImpl,
+      readPage: async (url, signal) =>
+        url.href === shell
+          ? { html: '<noscript>Enable JavaScript</noscript>' }
+          : fixture.app.nativeImpl.readPage(url, signal),
+      readScraplingPage: async (url) =>
+        url === shell
+          ? {
+              status: browserStatus,
+              failure_reason: browserReason,
+              ...(browserStatus === 'deferred'
+                ? {
+                    resource_wait: { reason: 'low_memory', wait_ms: 100, end: 'queue_timeout' },
+                  }
+                : {}),
+            }
+          : fixture.app.nativeImpl.readScraplingPage(url),
+    });
+    await withApp({ env, fetchImpl, nativeImpl }, async (origin) => {
+      const api = origin + '/api/v1';
+      const response = await fetch(api + '/acquisition/jobs', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'idempotency-key': 'fallback-fixture' },
+        body: JSON.stringify({
+          ...input,
+          product: 'roller blinds',
+          target_count: 2,
+          research_budget: 3,
+        }),
+      });
+      assert.equal(response.status, 202);
+      const { id } = await response.json();
+      let job;
+      for (let attempt = 0; attempt < 125; attempt++) {
+        job = await (await fetch(api + '/acquisition/jobs/' + id)).json();
+        if (job.status !== 'running') break;
+        await delay(10);
+      }
+      assert.equal(job.status, 'completed');
+      assert.deepEqual(
+        job.rows.map(({ source_url, result }) => [source_url, result]),
+        [
+          [shell, 'review'],
+          [fixture.atlas, 'inserted'],
+          [fixture.beacon, 'inserted'],
+        ],
+      );
+      assert.deepEqual(
+        job.rows[0].collection_attempts.map(({ method, status, failure_reason }) => [
+          method,
+          status,
+          failure_reason ?? null,
+        ]),
+        [
+          ['node', 'empty', null],
+          ['scrapling', browserStatus, browserReason],
+          ['external', 'unknown', 'provider_request_unknown'],
+        ],
+      );
+      const [request] = job.rows[0].paid_requests;
+      assert.deepEqual([request.kind, request.status], ['web_extract', 'unknown']);
+      assert.equal(job.rows[0].collection_attempts[2].paid_request_id, request.id);
+      if (browserStatus === 'deferred')
+        assert.equal(job.rows[0].collection_attempts[1].resource_wait.reason, 'low_memory');
+      assert.deepEqual(extractCalls, [[shell]]);
+      assert.deepEqual(
+        (await (await fetch(api + '/leads/real/list')).json()).leads
+          .map(({ website }) => website)
+          .sort(),
+        [fixture.atlas, fixture.beacon],
+      );
+    });
   });
-});
 
 test('服务正常停止时收回活跃浏览器，重启补抓未保存的网页并保持原候选', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'acquisition-browser-shutdown-'));
@@ -1226,7 +1253,7 @@ test('全球目标跨过六小时和两百家批次，末位只确认一次且�
     }
     assert.deepEqual(
       [job.id, job.status, job.reason, job.inserted, job.pending, job.batch.number],
-      [jobId, 'paused', 'uncertain', 202, 1, 3],
+      [jobId, 'paused', 'write_uncertain', 202, 1, 3],
       '最后一家写入尝试次数：' + finalWrites,
     );
     assert.equal(
