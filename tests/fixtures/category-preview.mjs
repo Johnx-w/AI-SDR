@@ -7,7 +7,7 @@ const modelEnv = {
   RESEARCH_MODEL_API_KEY: 'fixture',
   RESEARCH_MODEL_MODEL: 'fixture',
 };
-export function categoryPreviewFixture(count = 1200, respond) {
+export function categoryPreviewFixture(count = 1200, respond, path = ':memory:') {
   const library = new LeadLibrary({ scope: 'preview-qa' });
   const brands = [
     ['honeybadgerblinds.com', 'Honey Badger Blinds', 'roller blinds'],
@@ -147,6 +147,7 @@ export function categoryPreviewFixture(count = 1200, respond) {
     });
   };
   const service = new OutreachService({
+    path,
     mailboxes: {
       list: () => structuredClone(boxes),
       get: (id) => structuredClone(boxes.find((b) => b.id === id)),

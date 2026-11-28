@@ -1,7 +1,11 @@
 import { personalizationPolicy, templateModelFields } from './sequence-personalization.mjs';
 import { setImmediate } from 'node:timers/promises';
 import { readFileSync } from 'node:fs';
-import { expandTemplate, normalizeTemplate } from '../src/domain/sequence-email.mjs';
+import {
+  defaultTemplate,
+  expandTemplate,
+  normalizeTemplate,
+} from '../src/domain/sequence-email.mjs';
 import {
   writerPolicy,
   normalizeOutreachLead,
@@ -14,7 +18,11 @@ import {
   followUpWritingPolicy,
   checkOutreachScope,
 } from './outreach-follow-ups.mjs';
-import { sequencePolicy, writingInstruction } from './outreach-sequence-policy.mjs';
+import {
+  checkSequenceMailbox,
+  mailboxSequencePolicy,
+  writingInstruction,
+} from './outreach-sequence-policy.mjs';
 import {
   normalizeWritingOptions,
   firstWritingRequirements,
@@ -68,6 +76,7 @@ async function previewContext(service, input) {
   if (!categories.some((c) => c.value === input.category)) throw fail('请选择现有客户类别', 400);
   const mailbox = service.mailboxes.get(input.mailboxId);
   if (!mailbox) throw fail('请选择发件邮箱', 400);
+  checkSequenceMailbox(mailbox.email, input.expectedMailboxEmail);
   const products = service
     .products()
     .filter(
@@ -176,30 +185,38 @@ export async function previewOutreachTemplate(service, input) {
     throw fail('请选择有效的邮件步骤和跟进日', 400);
   const context = await previewContext(service, input);
   const { candidate, mailbox, product, campaign } = context;
-  const policy = sequencePolicy(service.db);
-  const writing = normalizeWritingOptions(input.writing);
-  const template = normalizeTemplate(input.template, firstTouch);
+  const policy = mailboxSequencePolicy(service, mailbox.id);
+  checkSequenceMailbox(policy.mailboxEmail, mailbox.email);
+  const saved = firstTouch ? policy : policy.steps.find((s) => s.day === input.day);
+  const provided =
+    input.template === undefined
+      ? firstTouch
+        ? policy.firstTemplate
+        : saved?.template
+      : input.template;
+  if (!provided) throw fail('请先填写该邮箱当前步骤的话术', 400);
+  const template = normalizeTemplate(provided, firstTouch) ?? defaultTemplate(firstTouch);
+  const writing = normalizeWritingOptions(
+    input.writing ?? (firstTouch ? policy.firstWriting : saved?.writing),
+  );
   const instruction = writingInstruction(
-    input.instruction,
-    firstTouch || !!template || !!(writing?.angle || writing?.reply),
+    input.instruction ?? (firstTouch ? policy.firstInstruction : saved?.instruction) ?? '',
   );
   const signature = renderMailboxSignature(mailbox).text;
   const greeting = 'Hi ' + candidate.companyName + ' team,';
   const requirements = firstWritingRequirements(
-    writingInstruction(
-      firstTouch
-        ? (input.firstBodyInstruction ?? '')
-        : (input.firstBodyInstruction ?? policy.firstBodyInstruction),
-      true,
-    ),
+    writingInstruction(input.firstBodyInstruction ?? policy.firstBodyInstruction),
     firstTouch
       ? instruction
-      : writingInstruction(input.firstInstruction ?? policy.firstInstruction, true),
+      : writingInstruction(input.firstInstruction ?? policy.firstInstruction),
     firstTouch ? writing : normalizeWritingOptions(input.firstWriting ?? policy.firstWriting),
   );
   const firstTemplate = firstTouch
     ? template
-    : normalizeTemplate(input.firstTemplate ?? policy.firstTemplate, true);
+    : normalizeTemplate(
+        input.firstTemplate === undefined ? policy.firstTemplate : input.firstTemplate,
+        true,
+      );
   const priorSteps = firstTouch ? [] : (input.priorSteps ?? policy.steps);
   if (
     !Array.isArray(priorSteps) ||

@@ -19,6 +19,8 @@ import { createResearchProviders } from './research-providers.mjs';
 import {
   initializeSequencePolicy,
   sequencePolicy,
+  freezeSequencePolicy,
+  mailboxTemplate,
   legacyFollowUpStep,
 } from './outreach-sequence-policy.mjs';
 import { renderMailboxSignature, signaturePlainTextHtml } from '../src/domain/mail-signature.mjs';
@@ -220,7 +222,7 @@ export class OutreachFollowUps {
   constructor(service, recordTask) {
     this.service = service;
     this.recordTask = recordTask;
-    initializeSequencePolicy(service.db);
+    service.transaction(() => initializeSequencePolicy(service));
     service.db
       .exec(`CREATE TABLE IF NOT EXISTS outreach_followups(id TEXT PRIMARY KEY,state TEXT NOT NULL,data TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS outreach_followups_state ON outreach_followups(state);
@@ -293,14 +295,22 @@ export class OutreachFollowUps {
             "SELECT 1 FROM outreach_followups WHERE json_extract(data,'$.firstId')=? LIMIT 1",
           )
           .get(first.id));
-    const policy = this.policy(stored.sequencePolicyRevision || (legacyScheduled ? 1 : undefined));
+    const policy =
+      stored.sequencePolicyRevision || legacyScheduled
+        ? this.policy(stored.sequencePolicyRevision || 1)
+        : freezeSequencePolicy(s);
+    const steps = policy.mailboxes
+      ? (mailboxTemplate(policy, { id: first.mailboxId, email: first.from })?.steps ?? []).filter(
+          (s) => policy.activeDays.includes(s.day) && s.template,
+        )
+      : policy.steps;
     if (!stored.sequencePolicyRevision)
       s.db
         .prepare(
           "UPDATE outreach_deliveries SET data=json_set(data,'$.sequencePolicyRevision',?) WHERE id=?",
         )
         .run(policy.revision, first.id);
-    for (const [index, { day, instruction, writing, template }] of policy.steps.entries()) {
+    for (const [index, { day, instruction, writing, template }] of steps.entries()) {
       const id = 'followup-' + first.id + '-' + (index + 1);
       if (this.get(id)) continue;
       this.put({

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { OutreachService } from '../server/outreach-service.mjs';
 import { saveSequencePolicy } from '../server/outreach-sequence-policy.mjs';
+import { defaultTemplate } from '../src/domain/sequence-email.mjs';
 
 test('idle outreach ticks count history without loading historical message bodies', async () => {
   const service = new OutreachService({ mailboxes: { list: () => [] } });
@@ -67,11 +68,20 @@ test('idle outreach ticks count history without loading historical message bodie
 
 test('未来十二步逐客户检查接管和退订，不加载全部跟进记录或发送邮件', async (t) => {
   const now = Date.UTC(2026, 1, 1);
-  const mailbox = { id: 'team', email: 'team@example.org' };
+  const mailbox = {
+    id: 'team',
+    email: 'team@example.org',
+    displayName: 'Team',
+    signature: 'Team sales',
+    configured: true,
+    smtpStatus: 'connected',
+    productIds: ['sample'],
+  };
   const send = t.mock.fn();
   const service = new OutreachService({
     now: () => now,
     mailboxes: { list: () => [mailbox], get: () => mailbox, send },
+    products: () => [{ id: 'sample', status: 'approved' }],
     customerMailState: (id) => ({
       context: { doNotContact: id === 'unsubscribed' },
       conversations: id === 'managed' ? [{ ownership: 'human' }] : [],
@@ -80,9 +90,14 @@ test('未来十二步逐客户检查接管和退订，不加载全部跟进记�
   });
   t.after(() => service.close());
   const policy = saveSequencePolicy(service, {
+    mailboxId: mailbox.id,
     revision: 1,
     name: '十二步',
-    steps: Array.from({ length: 12 }, (_, i) => ({ day: i + 1, instruction: '确认需求' })),
+    steps: Array.from({ length: 12 }, (_, i) => ({
+      day: i + 1,
+      instruction: '确认需求',
+      template: defaultTemplate(false),
+    })),
   });
   const campaign = service.putCampaign({
     id: 'campaign',

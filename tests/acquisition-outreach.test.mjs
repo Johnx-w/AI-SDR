@@ -12,6 +12,8 @@ import { OutreachService } from '../server/outreach-service.mjs';
 import { OutreachMailboxes } from '../server/outreach-mailboxes.mjs';
 import { withApp } from './helpers/http.mjs';
 import { feishuEnv, withFeishuAuth } from './helpers/feishu.mjs';
+import { handleOutreach } from '../server/outreach-api.mjs';
+import { defaultTemplate } from '../src/domain/sequence-email.mjs';
 
 const input = {
   country: 'Australia',
@@ -241,6 +243,202 @@ async function smtpHarness(t) {
   return h;
 }
 
+function sequenceSettings(h, mailboxId, patch) {
+  return handleOutreach({
+    request: { method: patch ? 'PUT' : 'GET' },
+    url: new URL('/api/v1/outreach/sequence-policy?mailboxId=' + mailboxId, 'http://localhost'),
+    service: h.service,
+    readJson: async () => patch,
+  });
+}
+
+async function addSender(h, id, product) {
+  h.products.push({ ...h.products[0], id, name: product, englishName: product });
+  await h.mailboxes.save({
+    id,
+    email: 'sales@' + id + '.example.org',
+    website: 'https://' + id + '.example.org',
+    brandName: id,
+    displayName: id,
+    signature: id + ' sales',
+    productIds: [id],
+    paused: false,
+    dailyLimit: 50,
+    intervalSeconds: 5,
+    clientPassword: 'synthetic-password',
+  });
+  await h.mailboxes.verify(id);
+}
+
+test('获客自动首发使用各自的纯文本话术，第三个邮箱少一轮时等待配齐', async (t) => {
+  const h = await smtpHarness(t);
+  delete h.service.generator;
+  const model = t.mock.fn(() => {
+    throw Error('Unexpected model call');
+  });
+  h.service.fetchImpl = model;
+  await addSender(h, 'roller', 'roller blinds');
+  await addSender(h, 'sheer', 'sheer curtains');
+  for (const [id, product] of [
+    ['box', 'PVC shutters'],
+    ['roller', 'roller blinds'],
+    ['sheer', 'sheer curtains'],
+  ]) {
+    const current = await sequenceSettings(h, id);
+    await sequenceSettings(h, id, {
+      ...current,
+      firstTemplate: { subject: product + ' introduction', body: 'We supply ' + product + '.' },
+      steps: [
+        { day: 3, template: { subject: '', body: 'A short update about ' + product + '.' } },
+        {
+          day: 7,
+          template: id === 'sheer' ? null : { subject: '', body: 'May I send an overview?' },
+        },
+      ],
+    });
+  }
+  const job = h.create({ auto_follow_up: true });
+  for (const [id, product] of [
+    ['shutter-buyer', 'PVC shutters'],
+    ['roller-buyer', 'roller blinds'],
+    ['sheer-buyer', 'sheer curtains'],
+  ]) {
+    await h.capture(job.id, buyer(id, product));
+    await h.pump();
+  }
+  assert.deepEqual(
+    h.state.sent.map((m) => [m.from.address, m.to, m.subject]),
+    [
+      ['sales@brand.example.org', 'info@shutter-buyer.example.org', 'PVC shutters introduction'],
+      ['sales@roller.example.org', 'info@roller-buyer.example.org', 'roller blinds introduction'],
+    ],
+  );
+  assert.equal(
+    h.state.sent[0].text,
+    'Hi Company shutter-buyer team,\n\nWe supply PVC shutters.\n\nBrand sales',
+  );
+  assert.equal(
+    h.state.sent[1].text,
+    'Hi Company roller-buyer team,\n\nWe supply roller blinds.\n\nroller sales',
+  );
+  const current = await sequenceSettings(h, 'sheer');
+  await sequenceSettings(h, 'sheer', {
+    ...current,
+    steps: [
+      current.steps[0],
+      { day: 7, template: { subject: '', body: 'May I send our sheer curtains overview?' } },
+    ],
+  });
+  await h.pump();
+  assert.deepEqual(
+    h.state.sent.map((m) => m.subject),
+    ['PVC shutters introduction', 'roller blinds introduction', 'sheer curtains introduction'],
+  );
+  assert.equal(h.state.sent.at(-1).to, 'info@sheer-buyer.example.org');
+  assert.equal(model.mock.callCount(), 0);
+});
+
+test('新增跟进日在全部参与邮箱配齐后生效，已有首封继续按提交版本在原线程跟进', async (t) => {
+  const h = await smtpHarness(t);
+  delete h.service.generator;
+  h.service.getEnv = () => ({
+    RESEARCH_MODEL_PROVIDER: 'openai_compatible',
+    RESEARCH_MODEL_BASE_URL: 'https://fixture.invalid/v1',
+    RESEARCH_MODEL_API_KEY: 'fixture',
+    RESEARCH_MODEL_MODEL: 'fixture',
+  });
+  const model = t.mock.fn(async (_url, init) => {
+    const request = JSON.parse(init.body);
+    const context = JSON.parse(request.messages[1].content);
+    assert.equal(context.day, 7);
+    assert.equal(context.company, 'Company after');
+    assert.deepEqual(request.response_format.json_schema.schema.required, ['subject']);
+    return Response.json({
+      choices: [
+        { finish_reason: 'stop', message: { content: '{"subject":"Roller blinds next steps"}' } },
+      ],
+    });
+  });
+  h.service.fetchImpl = model;
+  await addSender(h, 'roller', 'roller blinds');
+  const textStep = (day, body, subject = '') => ({ day, template: { subject, body } });
+  for (const [id, product] of [
+    ['box', 'PVC shutters'],
+    ['roller', 'roller blinds'],
+  ]) {
+    await sequenceSettings(h, id, {
+      ...(await sequenceSettings(h, id)),
+      firstTemplate: { subject: product + ' introduction', body: 'We supply ' + product + '.' },
+      steps: [
+        textStep(3, 'First update about ' + product + '.'),
+        textStep(7, 'Second update about ' + product + '.'),
+      ],
+    });
+  }
+  const job = h.create({ auto_follow_up: true });
+  const capture = async (id, product) => {
+    await h.capture(job.id, buyer(id, product));
+    await h.pump();
+  };
+  await capture('before', 'PVC shutters');
+  const pvc = await sequenceSettings(h, 'box');
+  await sequenceSettings(h, 'box', {
+    ...pvc,
+    steps: [
+      textStep(3, 'Revised PVC shutters update.'),
+      pvc.steps[1],
+      textStep(10, 'Final PVC shutters update.'),
+    ],
+  });
+  const roller = await sequenceSettings(h, 'roller');
+  assert.deepEqual(roller.activeDays, [3, 7]);
+  assert.equal(roller.steps.find((s) => s.day === 10).template, undefined);
+  await capture('while-pending', 'PVC shutters');
+  await sequenceSettings(h, 'roller', {
+    ...roller,
+    steps: [
+      roller.steps[0],
+      textStep(7, 'Second update about roller blinds.', '{{ai_subject}}'),
+      textStep(10, 'Final roller blinds update.'),
+    ],
+  });
+  assert.deepEqual((await sequenceSettings(h, 'box')).activeDays, [3, 7, 10]);
+  await capture('after', 'roller blinds');
+  const first = new Map(h.state.sent.map((m) => [m.to, m]));
+  assert.equal(first.size, 3);
+  assert.equal(model.mock.callCount(), 0);
+  const latest = h.state.now;
+  for (const day of [3, 7, 10]) {
+    h.state.now = latest + day * 86400000;
+    await h.pump(0);
+    await h.pump(10);
+    if (day === 3) assert.equal(model.mock.callCount(), 0);
+  }
+  const observed = h.state.sent
+    .slice(3)
+    .map((mail) => {
+      const original = first.get(mail.to);
+      assert.equal(mail.from.address, original.from.address);
+      assert.equal(mail.inReplyTo, original.messageId);
+      assert.ok(mail.references.includes(original.messageId));
+      return [mail.to, mail.subject, mail.text.split('\n\n')[1]].join('|');
+    })
+    .sort();
+  assert.deepEqual(
+    observed,
+    [
+      'info@before.example.org|Re: PVC shutters introduction|First update about PVC shutters.',
+      'info@before.example.org|Re: PVC shutters introduction|Second update about PVC shutters.',
+      'info@while-pending.example.org|Re: PVC shutters introduction|Revised PVC shutters update.',
+      'info@while-pending.example.org|Re: PVC shutters introduction|Second update about PVC shutters.',
+      'info@after.example.org|Re: roller blinds introduction|First update about roller blinds.',
+      'info@after.example.org|Roller blinds next steps|Second update about roller blinds.',
+      'info@after.example.org|Re: roller blinds introduction|Final roller blinds update.',
+    ].sort(),
+  );
+  assert.equal(model.mock.callCount(), 1);
+});
+
 for (const action of ['单次暂停', '单次取消', '计划暂停', '关闭首发', '关闭计划']) {
   test(`A06 SMTP连接准备期间${action}，尚未提交的邮件必须停止`, { timeout: 5000 }, async (t) => {
     const h = await smtpHarness(t);
@@ -319,14 +517,20 @@ test('首封在 SMTP 提交边界冻结跟进策略，准备连接及等待应�
   h.state.beforeTransport = () => {
     h.state.beforeTransport = null;
     saveSequencePolicy(h.service, {
+      mailboxId: 'box',
       revision: 1,
       name: '提交前生效',
-      steps: [{ day: 2, instruction: '询问应用场景' }],
+      steps: [{ day: 2, instruction: '询问应用场景', template: defaultTemplate(false) }],
     });
   };
   h.state.afterSubmit = () => {
     h.state.afterSubmit = null;
-    saveSequencePolicy(h.service, { revision: 2, name: '下一封首信生效', steps: [] });
+    saveSequencePolicy(h.service, {
+      mailboxId: 'box',
+      revision: 2,
+      name: '下一封首信生效',
+      steps: [],
+    });
   };
   await h.pump();
   const [first] = h.service.deliveries(undefined, ['accepted']);
@@ -521,6 +725,13 @@ for (const change of ['已回复', '勿联系', '产品撤回审核', '发件身
         clientPassword: 'synthetic-password',
       });
       await h.mailboxes.verify('box');
+      const sequence = await sequenceSettings(h, 'box');
+      assert.equal(sequence.ready, false);
+      await sequenceSettings(h, 'box', {
+        ...sequence,
+        firstTemplate: defaultTemplate(true),
+        steps: sequence.steps.map((step) => ({ ...step, template: defaultTemplate(false) })),
+      });
     }
     if (change === '邮箱产品授权撤回') await h.mailboxes.save({ id: 'box', productIds: [] });
     await h.pump();
@@ -658,6 +869,12 @@ test('同轮新增产品与邮箱只接纳新客户，已跳过客户不恢复�
       id: 'new-box',
       email: 'sales@new-brand.example.org',
       productIds: ['aaa', 'roller'],
+    });
+    const newPolicy = await sequenceSettings(h, 'new-box');
+    await sequenceSettings(h, 'new-box', {
+      ...newPolicy,
+      firstTemplate: defaultTemplate(true),
+      steps: newPolicy.steps.map((s) => ({ ...s, template: defaultTemplate(false) })),
     });
     await h.capture(first.id, buyer('next-customer', 'roller blinds'));
     await h.pump();
@@ -1071,7 +1288,7 @@ test('自动获客首发与跟进只在当前步骤需要 AI 时调用，真人�
     });
   };
   saveSequencePolicy(h.service, {
-    ...h.service.followUps.policy(),
+    ...(await sequenceSettings(h, 'box')),
     firstTemplate: {
       subject: 'Introduction | {{company}}',
       body: 'At {{brand}}, we supply {{product}}.',
@@ -1169,8 +1386,8 @@ test('定时获客自然换轮仍按原首封的自定义日期同线程跟进�
     const plan = h.plan();
     h.plans.save({ ...h.plans.get(plan.id), input: { ...input, auto_follow_up: true } });
     const rule = saveSequencePolicy(h.service, {
-      ...h.service.followUps.policy(),
-      steps: [{ day: 2, instruction: '确认采购需求' }],
+      ...(await sequenceSettings(h, 'box')),
+      steps: [{ day: 2, instruction: '确认采购需求', template: defaultTemplate(false) }],
     });
     const first = h.create({}, plan.id);
     await h.capture(first.id, buyer('retained'));

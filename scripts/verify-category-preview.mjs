@@ -29,14 +29,16 @@ page.on('request', (r) => {
 });
 try {
   await page.goto('http://127.0.0.1:14419/inbox?tab=sequences');
-  await page.getByRole('button', { name: '编辑序列', exact: true }).click();
   const dialog = page.getByRole('dialog');
-  const boxes = page.getByLabel('预览发件邮箱'),
+  const boxes = page.getByRole('region', { name: '未回复跟进规则' }).getByLabel('发件邮箱'),
     category = page.getByLabel('预览客户大类');
+  const edit = () => page.getByRole('button', { name: '编辑序列', exact: true }).click();
+  const cancel = () => dialog.getByRole('button', { name: '取消', exact: true }).click();
   await boxes.locator('option').nth(2).waitFor({ state: 'attached' });
   const times = [];
   for (const box of h.boxes) {
     await boxes.selectOption(box.id);
+    await edit();
     for (const role of ['manufacturer', 'distributor']) {
       const start = performance.now();
       await category.selectOption(role);
@@ -67,9 +69,11 @@ try {
     await category.selectOption('contractor');
     await dialog.getByRole('alert').filter({ hasText: '没有合格样本' }).waitFor();
     assert.equal(await dialog.locator('.preview-paper article').count(), 0);
+    await cancel();
   }
   // Editing a template must invalidate previous AI results; stale responses cannot restore them.
   await boxes.selectOption('box-0');
+  await edit();
   await category.selectOption('distributor');
   await page.getByRole('button', { name: '首封开发信', exact: true }).click();
   await page.getByRole('button', { name: /^(生成预览|刷新预览)$/ }).click();
@@ -136,6 +140,7 @@ try {
   assert.equal(await page.getByRole('button', { name: '采用建议', exact: true }).count(), 0);
   const apiTimes = [];
   for (const path of [
+    '/sequence-policy?mailboxId=box-0',
     '/sequence-policy/preview-options',
     '/sequence-policy/sample?category=manufacturer&mailboxId=box-0',
     '/sequence-policy/sample?category=distributor&mailboxId=box-1',
@@ -181,6 +186,56 @@ try {
   assert.deepEqual(errors, []);
   assert.ok(requests.every((r) => /\/sequence-policy\/(preview|assist)$/.test(r.url)));
   assert.equal(h.sends, 0);
+  await cancel();
+  const purePreview = dialog.locator('.preview-paper article');
+  const getTemplate = (label) => dialog.getByLabel(label);
+  const callCount = h.requests.length;
+  for (const [id, subject, body] of [
+    ['box-0', 'Roller blinds introduction', 'Our range includes roller blinds.'],
+    ['box-1', 'PVC shutters introduction', 'Our range includes PVC shutters.'],
+  ]) {
+    if (id === 'box-1') {
+      const lead = h.leads.find((l) => l.id === 'z1-distributor-0');
+      h.library.db
+        .prepare(
+          'INSERT INTO lead_library_customers(scope,record_id,position,summary,detail,version) VALUES(?,?,?,?,?,?)',
+        )
+        .run(
+          'preview-qa',
+          lead.id,
+          0,
+          JSON.stringify({ developmentEligible: true }),
+          JSON.stringify(lead),
+          'v1',
+        );
+    }
+    await boxes.selectOption(id);
+    await edit();
+    await getTemplate('邮件主题模板').fill(subject);
+    await getTemplate('邮件正文模板').fill(body);
+    await dialog.getByRole('button', { name: '保存序列', exact: true }).click();
+    await page.getByText('序列已保存', { exact: true }).waitFor();
+    await edit();
+    assert.equal(await getTemplate('邮件主题模板').inputValue(), subject);
+    assert.equal(await getTemplate('邮件正文模板').inputValue(), body);
+    await dialog.getByRole('button', { name: '生成预览', exact: true }).click();
+    assert.match(await purePreview.innerText(), new RegExp(body.replace('.', '\\.')));
+    await cancel();
+  }
+  await boxes.selectOption('box-0');
+  await edit();
+  assert.equal(await getTemplate('邮件主题模板').inputValue(), 'Roller blinds introduction');
+  await cancel();
+  h.boxes.push({ ...h.boxes[0], id: 'new-sender', email: 'new@honeybadgerblinds.com' });
+  await page.reload();
+  await boxes.selectOption('new-sender');
+  await page.getByText('该邮箱配齐首封和各轮话术后才可自动首发。', { exact: true }).waitFor();
+  await edit();
+  assert.equal(await getTemplate('邮件正文模板').inputValue(), '');
+  assert.ok(await dialog.getByRole('button', { name: '生成预览', exact: true }).isDisabled());
+  assert.equal(h.requests.length, callCount);
+  assert.equal(h.sends, 0);
+  assert.deepEqual(errors, []);
   console.log(
     JSON.stringify({
       dossiers: h.leads.length,

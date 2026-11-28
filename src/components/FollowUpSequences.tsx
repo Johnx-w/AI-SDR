@@ -298,14 +298,20 @@ export function CampaignFollowUps({
     </div>
   );
 }
-export function FollowUpSequences({ refreshToken }: { refreshToken: number }) {
+export function FollowUpSequences({
+  refreshToken,
+  mailboxes,
+}: {
+  refreshToken: number;
+  mailboxes: { id: string; email: string }[];
+}) {
   return (
     <section className="sequence-page">
       <div className="outreach-section-heading">
         <h2>开发信与跟进信</h2>
         <Link to="/inbox?tab=campaigns">打开触达计划</Link>
       </div>
-      <SequencePolicyPanel refreshToken={refreshToken} />
+      <SequencePolicyPanel refreshToken={refreshToken} mailboxes={mailboxes} />
     </section>
   );
 }

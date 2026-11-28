@@ -1,6 +1,18 @@
 .sequence-policy {
   padding: 20px;
 }
+.sequence-mailbox {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 16px;
+  width: min(100%, 360px);
+  font-size: 13px;
+  font-weight: 600;
+}
+.sequence-policy .sequence-mailbox select {
+  min-width: 0;
+  width: 100%;
+}
 .sequence-policy header,
 .sequence-policy footer,
 .sequence-edit-row,

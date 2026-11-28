@@ -68,6 +68,7 @@ const modes: Record<Mode, string> = {
 };
 const errorText = (e: unknown) => (e instanceof Error ? e.message : '操作失败，请重试');
 type Props = {
+  mailboxId: string;
   stepKey: string;
   library: CustomVariable[];
   first: boolean;
@@ -80,6 +81,7 @@ type Props = {
 };
 
 export function SequenceEmailComposer({
+  mailboxId,
   stepKey,
   first,
   library,
@@ -131,7 +133,6 @@ export function SequenceEmailComposer({
     [previewError, setPreviewError] = useState('');
   const [optionsError, setOptionsError] = useState('');
   const [options, setOptions] = useState<Options>({ categories: [], mailboxes: [] });
-  const [mailboxId, setMailboxId] = useState('');
   const [productId, setProductId] = useState('');
   const [representative, setRepresentative] = useState<Sample | null>(null);
   const [sampleError, setSampleError] = useState('');
@@ -185,7 +186,6 @@ export function SequenceEmailComposer({
       const data = await outreachApi<Options>('/sequence-policy/preview-options', { signal });
       if (signal?.aborted) return;
       setOptions(data);
-      setMailboxId(data.mailboxes[0]?.id ?? '');
     } catch (e) {
       if (!signal?.aborted) setOptionsError(errorText(e));
     }
@@ -407,10 +407,11 @@ export function SequenceEmailComposer({
         <label>
           主题
           <input
+            aria-label="邮件主题模板"
             ref={subjectRef}
             maxLength={150}
             value={template.subject}
-            placeholder={first ? undefined : '留空则回复上一封邮件'}
+            placeholder={first ? undefined : '留空则沿用首封主题'}
             onFocus={() => setField('subject')}
             onChange={(e) => onChange({ ...template, subject: e.target.value })}
           />
@@ -479,23 +480,6 @@ export function SequenceEmailComposer({
             </button>
           </p>
         )}
-        <label>
-          发件邮箱
-          <select
-            aria-label="预览发件邮箱"
-            value={mailboxId}
-            onChange={(e) => {
-              setMailboxId(e.target.value);
-              setProductId('');
-            }}
-          >
-            {options.mailboxes.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.email} · {b.brand}
-              </option>
-            ))}
-          </select>
-        </label>
         <label>
           客户大类
           <select
@@ -566,7 +550,13 @@ export function SequenceEmailComposer({
         <button
           type="button"
           className="preview-trigger"
-          disabled={!representative || loading || sampling}
+          disabled={
+            !representative ||
+            loading ||
+            sampling ||
+            !template.body.trim() ||
+            (first && !template.subject.trim())
+          }
           onClick={() => void generatePreview()}
         >
           <RefreshCw size={13} />

@@ -11,7 +11,7 @@ import {
   previewOptions,
   previewSample,
 } from './outreach-template-preview.mjs';
-import { sequencePolicy, saveSequencePolicy } from './outreach-sequence-policy.mjs';
+import { mailboxSequencePolicy, saveSequencePolicy } from './outreach-sequence-policy.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
@@ -52,9 +52,10 @@ export async function handleOutreach({
     return suggestSequenceText(service, await readJson(request));
   if (path === '/sequence-policy/preview' && method === 'POST')
     return previewOutreachTemplate(service, await readJson(request));
-  if (path === '/sequence-policy' && method === 'GET') return sequencePolicy(service.db);
+  if (path === '/sequence-policy' && method === 'GET')
+    return mailboxSequencePolicy(service, url.searchParams.get('mailboxId'));
   if (path === '/sequence-policy' && method === 'PUT')
-    return saveSequencePolicy(service, await readJson(request));
+    return saveSequencePolicy(service, await readJson(request), url.searchParams.get('mailboxId'));
   if (path === '/sequences' && method === 'GET') return listSequences(service.db, url.searchParams);
   const sequence = path.match(/^\/sequences\/([\w-]+)$/);
   if (sequence && method === 'GET')

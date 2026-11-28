@@ -84,7 +84,7 @@ export function sequenceDetail(db, id, params) {
       FROM outreach_followups WHERE json_extract(data,'$.campaignId')=? ORDER BY day`,
         )
         .all(legacyFollowUpStep(1).day, legacyFollowUpStep(2).day, id)
-    : sequencePolicy(db).steps;
+    : sequencePolicy(db).activeDays.map((day) => ({ day }));
   return {
     ...result,
     sequence,

@@ -1956,7 +1956,9 @@ export function OutreachCommunication({
                       onExitReview={() => setSearchParams({ tab: 'inbox' })}
                     />
                   )}
-                  {tab === 'sequences' && <FollowUpSequences refreshToken={inboxRefresh} />}
+                  {tab === 'sequences' && (
+                    <FollowUpSequences refreshToken={inboxRefresh} mailboxes={mailboxes} />
+                  )}
                   {tab === 'campaigns' && state && (
                     <>
                       <div className="outreach-metrics">

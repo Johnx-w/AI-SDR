@@ -5,14 +5,14 @@ import { Modal } from './ui';
 import './sequence-policy.css';
 
 import { SequenceEmailComposer } from './SequenceEmailComposer';
-import {
-  defaultTemplate,
-  normalizeTemplate,
-  type EmailTemplate,
-} from '../domain/sequence-email.mjs';
+import { normalizeTemplate, type EmailTemplate } from '../domain/sequence-email.mjs';
 import choices from '../domain/mail-writing-options.json';
 type Writing = Partial<Record<keyof typeof choices, string>>;
 interface Policy {
+  mailboxId: string;
+  mailboxEmail: string;
+  activeDays: number[];
+  ready: boolean;
   firstTemplate?: EmailTemplate;
   firstWriting?: Writing;
   name: string;
@@ -21,28 +21,45 @@ interface Policy {
   firstBodyInstruction: string;
   steps: { day: number; instruction: string; writing?: Writing; template?: EmailTemplate }[];
 }
+type Sender = { id: string; email: string };
+type DraftStep = Omit<Policy['steps'][number], 'day'> & {
+  id: string;
+  day: string;
+  previousDay?: number;
+};
+const emptyTemplate: EmailTemplate = { subject: '', body: '' };
+const hasText = (template?: EmailTemplate) =>
+  Boolean(template?.body.trim() || template?.subject.trim());
+const policyPath = (mailboxId: string) => '/sequence-policy?' + new URLSearchParams({ mailboxId });
 const issue = (error: unknown) =>
   error instanceof Error ? error.message : '读取或保存失败，请重试。';
 
 function PolicyEditor({
   policy,
+  mailbox,
   close,
   onSave,
 }: {
   policy: Policy;
+  mailbox: Sender;
   close: () => void;
   onSave: (next: Policy) => void;
 }) {
   const [active, setActive] = useState('first');
   const [customer, setCustomer] = useState('distributor');
-  const [firstTemplate, setFirstTemplate] = useState(policy.firstTemplate ?? defaultTemplate(true));
+  const [firstTemplate, setFirstTemplate] = useState(policy.firstTemplate ?? emptyTemplate);
   const [firstWriting, setFirstWriting] = useState<Writing>(policy.firstWriting ?? {});
   const [revision, setRevision] = useState(policy.revision);
   const [firstBodyInstruction, setFirstBodyInstruction] = useState(policy.firstBodyInstruction);
   const [firstInstruction, setFirstInstruction] = useState(policy.firstInstruction);
   const [name, setName] = useState(policy.name);
-  const draftRows = (steps: Policy['steps']) =>
-    steps.map((step) => ({ ...step, day: String(step.day), id: crypto.randomUUID() }));
+  const draftRows = (steps: Policy['steps']): DraftStep[] =>
+    steps.map((step) => ({
+      ...step,
+      day: String(step.day),
+      previousDay: step.day,
+      id: crypto.randomUUID(),
+    }));
   const [rows, setRows] = useState(() => draftRows(policy.steps));
   const chronologicalSteps = [...rows].sort((a, b) => Number(a.day) - Number(b.day));
   const [busy, setBusy] = useState(false);
@@ -56,9 +73,11 @@ function PolicyEditor({
   async function reload() {
     setBusy(true);
     try {
-      const current = await outreachApi<Policy>('/sequence-policy');
+      const current = await outreachApi<Policy>(policyPath(mailbox.id));
+      if (current.mailboxEmail !== policy.mailboxEmail)
+        throw new Error('发件地址已变更，请关闭编辑器，刷新后重新选择邮箱');
       setActive('first');
-      setFirstTemplate(current.firstTemplate ?? defaultTemplate(true));
+      setFirstTemplate(current.firstTemplate ?? emptyTemplate);
       setFirstWriting(current.firstWriting ?? {});
       setName(current.name);
       setFirstInstruction(current.firstInstruction);
@@ -76,10 +95,10 @@ function PolicyEditor({
   async function save(event: React.FormEvent) {
     event.preventDefault();
     try {
-      normalizeTemplate(firstTemplate, true);
+      if (hasText(firstTemplate)) normalizeTemplate(firstTemplate, true);
       for (const r of rows) {
         try {
-          normalizeTemplate(r.template, false);
+          if (hasText(r.template)) normalizeTemplate(r.template, false);
         } catch (e) {
           setActive(r.id);
           setError(issue(e));
@@ -92,25 +111,19 @@ function PolicyEditor({
       return;
     }
     const invalid = rows.find(
-      (r) =>
-        !Number.isInteger(Number(r.day)) ||
-        Number(r.day) < 1 ||
-        Number(r.day) > 365 ||
-        (!r.instruction.trim() &&
-          !r.writing?.angle &&
-          !r.writing?.reply &&
-          !normalizeTemplate(r.template, false)),
+      (r) => !Number.isInteger(Number(r.day)) || Number(r.day) < 1 || Number(r.day) > 365,
     );
     if (invalid) {
       setActive(invalid.id);
-      setError('请填写有效跟进日，并选择写法或填写写作要求。');
+      setError('请填写 1 至 365 天内的有效跟进日。');
       return;
     }
     const steps = rows.map((row) => ({
       day: Number(row.day),
+      previousDay: row.previousDay,
       instruction: row.instruction.trim(),
       writing: row.writing ?? {},
-      template: row.template ?? defaultTemplate(false),
+      template: hasText(row.template) ? row.template : null,
     }));
     if (new Set(steps.map((step) => step.day)).size !== steps.length) {
       setError('同一天只能安排一封跟进信，请修改跟进日。');
@@ -119,15 +132,16 @@ function PolicyEditor({
     setBusy(true);
     setError('');
     try {
-      const next = await outreachApi<Policy>('/sequence-policy', {
+      const next = await outreachApi<Policy>(policyPath(mailbox.id), {
         method: 'PUT',
         body: JSON.stringify({
           name: name.trim(),
+          expectedMailboxEmail: policy.mailboxEmail,
           revision,
           firstInstruction,
           firstBodyInstruction,
           firstWriting,
-          firstTemplate,
+          firstTemplate: hasText(firstTemplate) ? firstTemplate : null,
           steps,
         }),
       });
@@ -147,7 +161,7 @@ function PolicyEditor({
       while (days.includes(day)) day++;
     }
     const id = crypto.randomUUID();
-    setRows([...rows, { id, day: String(day), instruction: '' }]);
+    setRows([...rows, { id, day: String(day), previousDay: undefined, instruction: '' }]);
     setActive(id);
   }
   return (
@@ -160,6 +174,7 @@ function PolicyEditor({
     >
       <form className="sequence-form" onSubmit={save}>
         <div className="modal-body sequence-form-body">
+          <p>发件邮箱 {mailbox.email}。序列名称和跟进天数由各邮箱共用。</p>
           <label>
             序列名称
             <input
@@ -218,9 +233,10 @@ function PolicyEditor({
             </div>
           )}
           <SequenceEmailComposer
+            mailboxId={mailbox.id}
             stepKey={active}
             first={!row}
-            template={row ? (row.template ?? defaultTemplate(false)) : firstTemplate}
+            template={row ? (row.template ?? emptyTemplate) : firstTemplate}
             onChange={(next) => (row ? changeRow({ template: next }) : setFirstTemplate(next))}
             library={[
               ...(firstTemplate.variables ?? []),
@@ -229,14 +245,18 @@ function PolicyEditor({
             customer={customer}
             onCustomer={setCustomer}
             previewInput={{
+              expectedMailboxEmail: policy.mailboxEmail,
               step: row ? chronologicalSteps.indexOf(row) + 1 : 0,
               day: row ? Number(row.day) : undefined,
               instruction: row ? row.instruction : firstInstruction,
               firstBodyInstruction,
               firstInstruction,
-              firstTemplate,
+              firstTemplate: hasText(firstTemplate) ? firstTemplate : null,
               firstWriting,
-              priorSteps: chronologicalSteps.map((r) => ({ ...r, day: Number(r.day) })),
+              priorSteps: chronologicalSteps.map((r) => ({
+                day: Number(r.day),
+                template: hasText(r.template) ? r.template : null,
+              })),
               writing,
             }}
             settings={
@@ -334,16 +354,28 @@ function PolicyEditor({
   );
 }
 
-export function SequencePolicyPanel({ refreshToken }: { refreshToken: number }) {
-  const [policy, setPolicy] = useState<Policy | null>(null),
+export function SequencePolicyPanel({
+  refreshToken,
+  mailboxes,
+}: {
+  refreshToken: number;
+  mailboxes: Sender[];
+}) {
+  const [mailboxId, setMailboxId] = useState('');
+  const mailbox = mailboxes.find((m) => m.id === mailboxId);
+  const mailboxEmail = mailbox?.email;
+  const [loaded, setPolicy] = useState<Policy | null>(null),
     [draft, setDraft] = useState<Policy | null>(null);
+  const policy =
+    loaded?.mailboxId === mailboxId && loaded.mailboxEmail === mailboxEmail ? loaded : null;
   const [retry, setRetry] = useState(0),
     [error, setError] = useState(''),
     [saved, setSaved] = useState(false);
   useEffect(() => {
+    if (!mailboxId || !mailboxEmail) return;
     const controller = new AbortController();
     setError('');
-    outreachApi<Policy>('/sequence-policy', { signal: controller.signal })
+    outreachApi<Policy>(policyPath(mailboxId), { signal: controller.signal })
       .then((next) => {
         if (!controller.signal.aborted) setPolicy(next);
       })
@@ -351,9 +383,31 @@ export function SequencePolicyPanel({ refreshToken }: { refreshToken: number }) 
         if (!controller.signal.aborted) setError(issue(e));
       });
     return () => controller.abort();
-  }, [refreshToken, retry]);
+  }, [mailboxId, mailboxEmail, refreshToken, retry]);
   return (
     <section className="panel sequence-policy" aria-label="未回复跟进规则">
+      <label className="sequence-mailbox">
+        发件邮箱
+        <select
+          aria-label="发件邮箱"
+          value={mailbox?.id ?? ''}
+          onChange={(e) => {
+            if (e.target.value === mailboxId) return;
+            setMailboxId(e.target.value);
+            setPolicy(null);
+            setError('');
+            setSaved(false);
+          }}
+        >
+          <option value="">选择发件邮箱</option>
+          {mailboxes.map((sender) => (
+            <option key={sender.id} value={sender.id}>
+              {sender.email}
+            </option>
+          ))}
+        </select>
+      </label>
+      {!mailboxes.length && <p>请先在邮箱管理添加发件邮箱。</p>}
       {error && (
         <div role="alert" className="outreach-alert error">
           {error}
@@ -367,9 +421,8 @@ export function SequencePolicyPanel({ refreshToken }: { refreshToken: number }) 
           <header>
             <div>
               <h3>{policy.name}</h3>
-              <p>
-                启用自动跟进的计划共用此序列。修改对之后提交的首封生效，已排期的邮件按原安排执行。
-              </p>
+              <p>各邮箱独立保存话术，共用跟进天数。已排期的邮件沿用首封提交时的版本。</p>
+              {!policy.ready && <p>该邮箱配齐首封和各轮话术后才可自动首发。</p>}
             </div>
             <button
               className="btn primary"
@@ -389,9 +442,7 @@ export function SequencePolicyPanel({ refreshToken }: { refreshToken: number }) 
               <div>
                 <small>起点</small>
                 <strong>首封开发信</strong>
-                {(policy.firstTemplate || policy.firstBodyInstruction) && (
-                  <p>{policy.firstTemplate?.subject || policy.firstBodyInstruction}</p>
-                )}
+                <p>{policy.firstTemplate?.subject || '待填写话术'}</p>
               </div>
             </li>
             {policy.steps.map((step, i) => (
@@ -402,19 +453,8 @@ export function SequencePolicyPanel({ refreshToken }: { refreshToken: number }) 
                 <div>
                   <small>首封后第 {step.day} 天</small>
                   <strong>跟进 {i + 1}</strong>
-                  <p>
-                    {step.template?.body ||
-                      step.instruction ||
-                      Object.entries(step.writing ?? {})
-                        .map(
-                          ([k, v]) =>
-                            Object.entries(choices[k as keyof typeof choices]).find(
-                              ([key]) => key === v,
-                            )?.[1][0],
-                        )
-                        .filter(Boolean)
-                        .join(' · ')}
-                  </p>
+                  <p>{step.template?.body || '待填写话术'}</p>
+                  {!policy.activeDays.includes(step.day) && <small>待参与邮箱全部配齐后生效</small>}
                 </div>
               </li>
             ))}
@@ -429,11 +469,12 @@ export function SequencePolicyPanel({ refreshToken }: { refreshToken: number }) 
           </footer>
         </>
       ) : (
-        !error && <p role="status">正在读取规则…</p>
+        mailbox && !error && <p role="status">正在读取规则…</p>
       )}
-      {draft && (
+      {draft && mailbox && draft.mailboxEmail === mailbox.email && (
         <PolicyEditor
           policy={draft}
+          mailbox={mailbox}
           close={() => setDraft(null)}
           onSave={(next) => {
             setPolicy(next);
