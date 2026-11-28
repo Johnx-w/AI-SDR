@@ -1,4 +1,8 @@
-import { sequencePolicy, legacyFollowUpStep } from './outreach-sequence-policy.mjs';
+import {
+  currentSequencePolicy,
+  sequencePolicy,
+  legacyFollowUpStep,
+} from './outreach-sequence-policy.mjs';
 
 const production = "json_extract(c.data,'$.mode')='production'";
 const fields = `c.id,json_extract(c.data,'$.name') AS name,json_extract(c.data,'$.status') AS status,
@@ -32,7 +36,8 @@ export function listSequences(db, params) {
     .all(result.pageSize, (result.page - 1) * result.pageSize);
   return { ...result, items: rows.map(summary) };
 }
-export function sequenceDetail(db, id, params) {
+export function sequenceDetail(service, id, params) {
+  const { db } = service;
   const row = db
     .prepare(`SELECT ${fields} FROM outreach_campaigns c WHERE c.id=? AND ${production}`)
     .get(id);
@@ -84,7 +89,7 @@ export function sequenceDetail(db, id, params) {
       FROM outreach_followups WHERE json_extract(data,'$.campaignId')=? ORDER BY day`,
         )
         .all(legacyFollowUpStep(1).day, legacyFollowUpStep(2).day, id)
-    : sequencePolicy(db).activeDays.map((day) => ({ day }));
+    : currentSequencePolicy(service).activeDays.map((day) => ({ day }));
   return {
     ...result,
     sequence,

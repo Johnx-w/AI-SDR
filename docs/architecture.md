@@ -50,7 +50,7 @@
 
 `POST /api/v1/outreach/sequence-policy/assist` 生成写作建议，由业务员选择是否采用。`GET /api/v1/outreach/sequence-policy/preview-options` 返回客户经营角色、邮箱及其获准产品。`GET /api/v1/outreach/sequence-policy/sample` 按 `category`、`mailboxId` 和可选 `productId` 从当前 SQLite 客户库取代表客户，`after` 用于更换样本，`sampleId` 精确重验已选样本。数据库按作用域、编号及角色事实筛选，每批最多 50 份档案。预览 `POST /api/v1/outreach/sequence-policy/preview` 传相同范围、样本编号和步骤，首封传 `step: 0`，跟进传排期顺序及跟进日，提供 `template` 时预览未保存话术，省略时取对应邮箱的已保存话术。模型只生成当前邮件引用的 AI 内容。详见[分类预览验收](mail-automation/category-preview.md)。
 
-邮箱话术和共用排期版本保存在 `outreach_mailbox_sequence_policies`，首封草稿记录生成时的 `firstTemplateRevision`。SMTP 提交时把所选邮箱的已生效步骤按旧版可读结构冻结到 `outreach_sequence_policies` 的负编号记录，首封保存该编号。相同快照复用记录。确认成功后在同一事务写入 `outreach_followups`。执行使用排期记录中的话术，沿用固定邮箱和原线程。已完成首封目标的计划可继续追信，后续发送与首封共用邮箱限额。发送前再次完整收信核对。
+邮箱话术和共用排期版本保存在 `outreach_mailbox_sequence_policies`。保留初始排期中仍存在的日期，按当前计划授权、产品资格和邮箱话术完整度重新核对新增日期。手动计划以保存的产品范围为准，获客计划读取当前有效产品，复用首封的产品资格与邮箱覆盖校验。页面读取和 SMTP 提交采用同一生效判定。首封草稿记录生成时的 `firstTemplateRevision`，SMTP 提交时把所选邮箱的已生效步骤按旧版可读结构冻结到 `outreach_sequence_policies` 的负编号记录，首封保存该编号。相同快照复用记录。确认成功后在同一事务写入 `outreach_followups`。执行使用排期记录中的话术，沿用固定邮箱和原线程。已完成首封目标的计划可继续追信，后续发送与首封共用邮箱限额。发送前再次完整收信核对。
 
 代码回退到旧版时，旧版读取原表最高正编号的共享策略处理回退期间新提交的首封。已提交首封按自身保存的编号读取冻结快照，已有跟进任务继续使用原记录。回退期间保存的共享配置留在旧表，重新升级沿用各邮箱已有的独立配置。若隔离环境曾运行过本功能的初版，启动迁移会把初版策略移入独立表，并为引用初版策略的首封补写兼容快照。保留两张表和现有邮件记录，按标准代码回退流程核对。
 

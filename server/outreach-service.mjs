@@ -745,13 +745,15 @@ export class OutreachService {
       )
     );
   }
-  followUpSenderScope() {
+  followUpSenders() {
     const scope = this.getScope();
     const plans = this.db
       .prepare(
         `
       SELECT json_extract(data,'$.acquisitionSource') AS source,
-             json_extract(data,'$.mailboxIds') AS mailboxIds
+             json_extract(data,'$.mailboxIds') AS mailboxIds,
+             json_extract(data,'$.filters.products') AS productIds,
+             json_extract(data,'$.productScopes') AS productScopes
       FROM outreach_campaigns
       WHERE json_extract(data,'$.mode')='production'
         AND json_extract(data,'$.scope')=?
@@ -762,9 +764,23 @@ export class OutreachService {
     `,
       )
       .all(scope);
-    const manual = new Set(
-      plans.filter((plan) => !plan.source).flatMap((plan) => JSON.parse(plan.mailboxIds || '[]')),
-    );
+    if (!plans.length) return [];
+    const now = new Date(this.now());
+    const products = this.salesProducts();
+    const manual = plans
+      .filter((plan) => !plan.source)
+      .map((plan) => {
+        const productIds = JSON.parse(plan.productIds || '[]');
+        const campaign = { productScopes: JSON.parse(plan.productScopes || '[]') };
+        return {
+          mailboxIds: JSON.parse(plan.mailboxIds || '[]'),
+          products: products.filter(
+            (product) =>
+              productIds.includes(product.id) &&
+              eligibleOutreachFacts(product, campaign, now).length,
+          ),
+        };
+      });
     const authorizedSources = new Set(
       plans
         .filter((plan) => plan.source)
@@ -781,7 +797,26 @@ export class OutreachService {
           ['active', 'paused'].includes(status) &&
           authorizedSources.has(JSON.stringify([jobId, generation || 0])),
       );
-    return { manual, acquisition };
+    const acquisitionProducts = acquisition
+      ? products.filter(
+          (product) =>
+            eligibleOutreachFacts(product, { productScopes: [outreachProductScope(product)] }, now)
+              .length,
+        )
+      : [];
+    const covers = (box, product) =>
+      box.productIds?.includes(product.id) && siteAllowsProduct(product, box);
+    return this.mailboxes
+      .list()
+      .filter(
+        (box) =>
+          acquisitionProducts.some((product) => covers(box, product)) ||
+          manual.some(
+            (plan) =>
+              plan.mailboxIds.includes(box.id) &&
+              plan.products.some((product) => covers(box, product)),
+          ),
+      );
   }
   identities(candidate) {
     return [

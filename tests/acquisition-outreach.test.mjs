@@ -520,6 +520,154 @@ test('新增跟进日在全部参与邮箱配齐后生效，已有首封继续�
   assert.equal(model.mock.callCount(), 1);
 });
 
+test('恢复产品授权时暂缓缺话术的第十天，两邮箱继续首发及原轮次', async (t) => {
+  const h = await smtpHarness(t);
+  delete h.service.generator;
+  h.service.fetchImpl = () => assert.fail('纯文本话术不应调用模型');
+  await addSender(h, 'roller', 'roller blinds');
+  const step = (day, body) => ({ day, template: { subject: '', body } });
+  for (const [id, product] of [
+    ['box', 'PVC shutters'],
+    ['roller', 'roller blinds'],
+  ]) {
+    await sequenceSettings(h, id, {
+      ...(await sequenceSettings(h, id)),
+      firstTemplate: { subject: product, body: 'We supply ' + product + '.' },
+      steps: [
+        step(3, 'Original note about ' + product + '.'),
+        step(7, 'More about ' + product + '.'),
+      ],
+    });
+  }
+  const job = h.create({ auto_follow_up: true });
+  const capture = async (id, product) => {
+    await h.capture(job.id, buyer(id, product));
+    await h.pump();
+  };
+  await capture('original', 'PVC shutters');
+  await h.mailboxes.save({ id: 'roller', productIds: [] });
+  const pvc = await sequenceSettings(h, 'box');
+  await sequenceSettings(h, 'box', {
+    ...pvc,
+    steps: [
+      step(3, 'Updated PVC shutters note.'),
+      pvc.steps[1],
+      step(10, 'Final PVC shutters note.'),
+    ],
+  });
+  await capture('already-scheduled', 'PVC shutters');
+  await h.mailboxes.save({ id: 'roller', productIds: ['roller'] });
+  assert.deepEqual((await sequenceSettings(h, 'box')).activeDays, [3, 7]);
+  assert.equal((await sequenceSettings(h, 'roller')).ready, true);
+  await capture('waiting-pvc', 'PVC shutters');
+  await capture('waiting-roller', 'roller blinds');
+  const roller = await sequenceSettings(h, 'roller');
+  await sequenceSettings(h, 'roller', {
+    ...roller,
+    steps: [...roller.steps.slice(0, 2), step(10, 'Final roller blinds note.')],
+  });
+  await capture('complete-roller', 'roller blinds');
+  const first = new Map(h.state.sent.map((mail) => [mail.to, mail]));
+  assert.equal(first.size, 5);
+  const latest = h.state.now;
+  for (const day of [3, 7, 10]) {
+    h.state.now = latest + day * 86400000;
+    await h.pump(0);
+    await h.pump(10);
+    await h.pump(10);
+  }
+  const received = new Map();
+  for (const mail of h.state.sent.slice(5)) {
+    const initial = first.get(mail.to);
+    assert.equal(mail.inReplyTo, initial.messageId);
+    assert.equal(mail.from.address, initial.from.address);
+    assert.equal(mail.subject, 'Re: ' + initial.subject);
+    const contact = mail.to.split('@')[1].split('.')[0];
+    const subject = initial.subject;
+    const bodies = received.get(contact) || [];
+    bodies.push(mail.text.split('\n\n')[1]);
+    received.set(contact, bodies);
+    assert.equal(subject, contact.endsWith('roller') ? 'roller blinds' : 'PVC shutters');
+  }
+  assert.deepEqual(Object.fromEntries(received), {
+    original: ['Original note about PVC shutters.', 'More about PVC shutters.'],
+    'already-scheduled': [
+      'Updated PVC shutters note.',
+      'More about PVC shutters.',
+      'Final PVC shutters note.',
+    ],
+    'waiting-pvc': ['Updated PVC shutters note.', 'More about PVC shutters.'],
+    'waiting-roller': ['Original note about roller blinds.', 'More about roller blinds.'],
+    'complete-roller': [
+      'Original note about roller blinds.',
+      'More about roller blinds.',
+      'Final roller blinds note.',
+    ],
+  });
+});
+
+for (const kind of ['手动计划', '获客计划']) {
+  test(kind + '的无可发送产品邮箱不阻止有效邮箱按第 3、7、10 天跟进', async (t) => {
+    const h = await smtpHarness(t);
+    delete h.service.generator;
+    h.service.fetchImpl = () => assert.fail('纯文本话术不应调用模型');
+    await addSender(h, 'roller', 'roller blinds');
+    if (kind === '获客计划') h.products.find((p) => p.id === 'roller').effectiveDate = '2027-01-01';
+    const step = (day, body) => ({ day, template: { subject: '', body } });
+    for (const [id, product] of [
+      ['box', 'PVC shutters'],
+      ['roller', 'roller blinds'],
+    ]) {
+      await sequenceSettings(h, id, {
+        ...(await sequenceSettings(h, id)),
+        firstTemplate: { subject: product, body: 'We supply ' + product + '.' },
+        steps: [
+          step(3, 'Checking in about ' + product + '.'),
+          step(7, 'More about ' + product + '.'),
+        ],
+      });
+    }
+    const pvc = await sequenceSettings(h, 'box');
+    await sequenceSettings(h, 'box', {
+      ...pvc,
+      steps: [...pvc.steps, step(10, 'Final PVC shutters note.')],
+    });
+    const leads = [buyer('covered', 'PVC shutters'), buyer('outside', 'roller blinds')];
+    if (kind === '手动计划') {
+      h.state.leads.push(...leads);
+      const plan = h.service.saveCampaign({
+        name: 'PVC only',
+        mailboxIds: ['box', 'roller'],
+        filters: { products: ['pvc'] },
+        followUpEnabled: true,
+      });
+      h.service.activate(plan.id, plan.revision);
+    } else {
+      const job = h.create({ auto_follow_up: true });
+      for (const lead of leads) await h.capture(job.id, lead);
+    }
+    await h.pump();
+    await h.pump();
+    assert.equal(h.state.sent.length, 1);
+    const [first] = h.state.sent;
+    assert.equal(first.to, 'info@covered.example.org');
+    assert.equal(first.from.address, 'sales@brand.example.org');
+    assert.deepEqual((await sequenceSettings(h, 'box')).activeDays, [3, 7, 10]);
+    for (const day of [3, 7, 10]) {
+      h.state.now = first.submittedAt + day * 86400000;
+      await h.pump(0);
+    }
+    assert.deepEqual(
+      h.state.sent.slice(1).map((mail) => [mail.to, mail.inReplyTo, mail.text.split('\n\n')[1]]),
+      [
+        [first.to, first.messageId, 'Checking in about PVC shutters.'],
+        [first.to, first.messageId, 'More about PVC shutters.'],
+        [first.to, first.messageId, 'Final PVC shutters note.'],
+      ],
+    );
+  });
+}
+
 for (const action of ['单次暂停', '单次取消', '计划暂停', '关闭首发', '关闭计划']) {
   test(`A06 SMTP连接准备期间${action}，尚未提交的邮件必须停止`, { timeout: 5000 }, async (t) => {
     const h = await smtpHarness(t);

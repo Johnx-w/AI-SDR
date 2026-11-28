@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { OutreachService } from '../server/outreach-service.mjs';
 import { saveSequencePolicy } from '../server/outreach-sequence-policy.mjs';
 import { defaultTemplate } from '../src/domain/sequence-email.mjs';
+import { outreachProductScope } from '../server/outreach-content.mjs';
 
 test('idle outreach ticks count history without loading historical message bodies', async () => {
   const service = new OutreachService({ mailboxes: { list: () => [] } });
@@ -78,10 +79,11 @@ test('未来十二步逐客户检查接管和退订，不加载全部跟进记�
     productIds: ['sample'],
   };
   const send = t.mock.fn();
+  const product = { id: 'sample', status: 'approved', englishName: 'Roller blinds' };
   const service = new OutreachService({
     now: () => now,
     mailboxes: { list: () => [mailbox], get: () => mailbox, send },
-    products: () => [{ id: 'sample', status: 'approved' }],
+    products: () => [product],
     customerMailState: (id) => ({
       context: { doNotContact: id === 'unsubscribed' },
       conversations: id === 'managed' ? [{ ownership: 'human' }] : [],
@@ -95,6 +97,8 @@ test('未来十二步逐客户检查接管和退订，不加载全部跟进记�
     mode: 'production',
     status: 'active',
     mailboxIds: [mailbox.id],
+    filters: { products: [product.id] },
+    productScopes: [outreachProductScope(product)],
     revision: 1,
     approvedRevision: 1,
     followUpEnabled: true,

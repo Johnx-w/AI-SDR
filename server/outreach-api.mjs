@@ -58,8 +58,7 @@ export async function handleOutreach({
     return saveSequencePolicy(service, await readJson(request), url.searchParams.get('mailboxId'));
   if (path === '/sequences' && method === 'GET') return listSequences(service.db, url.searchParams);
   const sequence = path.match(/^\/sequences\/([\w-]+)$/);
-  if (sequence && method === 'GET')
-    return sequenceDetail(service.db, sequence[1], url.searchParams);
+  if (sequence && method === 'GET') return sequenceDetail(service, sequence[1], url.searchParams);
   const tagRoute = path.match(/^\/mailbox-tags(?:\/([\w-]+)(\/merge)?)?$/);
   if (tagRoute) {
     const [, id, merge] = tagRoute;

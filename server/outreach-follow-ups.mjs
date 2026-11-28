@@ -19,6 +19,7 @@ import { createResearchProviders } from './research-providers.mjs';
 import {
   initializeSequencePolicy,
   sequencePolicy,
+  currentSequencePolicy,
   freezeSequencePolicy,
   legacyFollowUpStep,
 } from './outreach-sequence-policy.mjs';
@@ -272,7 +273,9 @@ export class OutreachFollowUps {
     return result.changes ? updated : this.get(item.id);
   }
   policy(revision) {
-    return sequencePolicy(this.service.db, revision);
+    return revision === undefined
+      ? currentSequencePolicy(this.service)
+      : sequencePolicy(this.service.db, revision);
   }
   schedule(first, campaign) {
     if (

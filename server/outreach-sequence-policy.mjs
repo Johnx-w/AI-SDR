@@ -1,7 +1,6 @@
 import { defaultTemplate, normalizeTemplate } from '../src/domain/sequence-email.mjs';
 import { mailboxAccountKey } from './mail-conversations.mjs';
 import { normalizeWritingOptions } from './mail-writing-options.mjs';
-import { siteAllowsProduct } from '../src/domain/mail-site.mjs';
 const defaults = {
   name: '首封未回复跟进',
   steps: [
@@ -25,7 +24,10 @@ export function initializeSequencePolicy({ db, mailboxes }) {
     CREATE UNIQUE INDEX IF NOT EXISTS outreach_frozen_sequence_snapshot
       ON outreach_sequence_policies(data) WHERE revision < 0;
   `);
-  if (readSequencePolicy(db)) return;
+  if (readSequencePolicy(db)) {
+    initializeBaseDays(db);
+    return;
+  }
   const current = db
     .prepare('SELECT revision,data FROM outreach_sequence_policies ORDER BY revision DESC LIMIT 1')
     .get();
@@ -69,6 +71,7 @@ export function initializeSequencePolicy({ db, mailboxes }) {
     db.prepare('INSERT OR IGNORE INTO outreach_sequence_policies VALUES(1,?)').run(
       JSON.stringify(defaults),
     );
+    initializeBaseDays(db);
     return;
   }
   const {
@@ -86,11 +89,31 @@ export function initializeSequencePolicy({ db, mailboxes }) {
   appendPolicy(db, revision + 1, {
     name,
     steps: steps.map(({ day }) => ({ day })),
+    baseDays: steps.map(({ day }) => day),
     activeDays: steps.map(({ day }) => day),
     mailboxes: Object.fromEntries(
       mailboxes.list().map((box) => [mailboxAccountKey(box), template]),
     ),
   });
+}
+
+function initializeBaseDays(db) {
+  const current = readSequencePolicy(db);
+  if (current.baseDays) return;
+  // For earlier builds, retain only original days present throughout the saved schedule history.
+  const history = db
+    .prepare(
+      "SELECT json_extract(data,'$.steps') AS steps FROM outreach_mailbox_sequence_policies ORDER BY revision",
+    )
+    .all();
+  let baseDays = JSON.parse(history[0].steps).map(({ day }) => day);
+  for (const { steps } of history.slice(1)) {
+    const days = new Set(JSON.parse(steps).map(({ day }) => day));
+    baseDays = baseDays.filter((day) => days.has(day));
+  }
+  db.prepare(
+    "UPDATE outreach_mailbox_sequence_policies SET data=json_set(data,'$.baseDays',json(?)) WHERE revision=?",
+  ).run(JSON.stringify(baseDays), current.revision);
 }
 
 function appendPolicy(db, revision, policy) {
@@ -141,13 +164,14 @@ export function mailboxSequencePolicy(service, mailboxId, policy = sequencePolic
   const mailbox = typeof mailboxId === 'string' && service.mailboxes.get(mailboxId);
   if (!mailbox) throw fail(400, '请选择发件邮箱');
   const template = mailboxTemplate(policy, mailbox);
+  const activeDays = activatableDays(service, policy);
   return {
     mailboxId,
     mailboxEmail: mailbox.email,
     revision: policy.revision,
     name: policy.name,
-    ready: sequenceReady(policy, mailbox),
-    activeDays: policy.activeDays,
+    ready: sequenceReady({ ...policy, activeDays }, mailbox),
+    activeDays,
     firstInstruction: template?.firstInstruction ?? '',
     firstBodyInstruction: template?.firstBodyInstruction ?? '',
     firstTemplate: template?.firstTemplate,
@@ -165,27 +189,24 @@ export function checkSequenceMailbox(email, expectedEmail) {
 }
 
 function activatableDays(service, policy) {
-  if (policy.steps.length === policy.activeDays.length) return policy.activeDays;
-  const { manual, acquisition } = service.followUpSenderScope();
-  const products = acquisition
-    ? service.salesProducts().filter((p) => p.status === 'approved')
-    : [];
-  const participants = service.mailboxes.list().flatMap((box) => {
-    const template = mailboxTemplate(policy, box);
-    const authorized =
-      manual.has(box.id) ||
-      (acquisition &&
-        products.some((p) => box.productIds?.includes(p.id) && siteAllowsProduct(p, box)));
-    return authorized && template?.readyOnce ? [template] : [];
-  });
-  if (!participants.length) return policy.activeDays;
+  if (policy.steps.length === policy.baseDays.length) return policy.baseDays;
+  const participants = service
+    .followUpSenders()
+    .map((box) => mailboxTemplate(policy, box))
+    .filter((template) => template?.readyOnce);
   return policy.steps
     .map((s) => s.day)
     .filter(
       (day) =>
-        policy.activeDays.includes(day) ||
-        participants.every((t) => t.steps.some((s) => s.day === day && s.template)),
+        policy.baseDays.includes(day) ||
+        (participants.length > 0 &&
+          participants.every((t) => t.steps.some((s) => s.day === day && s.template))),
     );
+}
+
+export function currentSequencePolicy(service) {
+  const policy = sequencePolicy(service.db);
+  return { ...policy, activeDays: activatableDays(service, policy) };
 }
 
 // Old code reads positive revisions as settings and looks up submitted revisions by exact key.
@@ -211,7 +232,8 @@ export function freezeSequencePolicy(service, mailbox) {
   const { revision, ...policy } = readSequencePolicy(service.db);
   const activeDays = activatableDays(service, policy);
   const current =
-    activeDays.length === policy.activeDays.length
+    activeDays.length === policy.activeDays.length &&
+    activeDays.every((day, index) => day === policy.activeDays[index])
       ? { revision, ...policy }
       : appendPolicy(service.db, revision + 1, { ...policy, activeDays });
   return freezeMailbox(service.db, current, mailbox);
@@ -329,9 +351,7 @@ export function saveSequencePolicy(service, input, mailboxId = input?.mailboxId)
     const policy = {
       name,
       steps: days.map((day) => ({ day })),
-      activeDays: days.filter(
-        (day) => sourceDays.get(day) === day && current.activeDays.includes(day),
-      ),
+      baseDays: days.filter((day) => sourceDays.get(day) === day && current.baseDays.includes(day)),
       mailboxes,
     };
     policy.activeDays = activatableDays(service, policy);

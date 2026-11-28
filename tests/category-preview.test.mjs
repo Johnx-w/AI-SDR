@@ -132,6 +132,8 @@ test('未授权自动跟进的邮箱不阻止其他计划启用新增天数', as
       revision: 1,
       approvedRevision,
       mailboxIds: [id],
+      filters: { products: [h.boxes.find((box) => box.id === id).productIds[0]] },
+      productScopes: h.products.map(outreachProductScope),
       followUpEnabled,
     });
   }
@@ -142,6 +144,11 @@ test('未授权自动跟进的邮箱不阻止其他计划启用新增天数', as
     steps: [...current.steps, { day: 10, template: { subject: '', body: 'A final note.' } }],
   });
   assert.deepEqual(saved.activeDays, [3, 7, 10]);
+  await api(h, '/campaigns/box-1/follow-ups', 'POST', { action: 'enable' });
+  assert.deepEqual((await api(h, path)).activeDays, [3, 7]);
+  assert.equal((await api(h, '/sequence-policy?mailboxId=box-1')).ready, true);
+  await api(h, '/campaigns/box-1/follow-ups', 'POST', { action: 'disable' });
+  assert.deepEqual((await api(h, path)).activeDays, [3, 7, 10]);
 });
 
 test('编辑期间发件地址被替换时，旧话术不能保存或预览到新地址', async (t) => {

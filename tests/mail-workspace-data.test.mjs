@@ -4,7 +4,9 @@ import { OutreachService } from '../server/outreach-service.mjs';
 import { handleOutreach } from '../server/outreach-api.mjs';
 import { siteAllowsProduct } from '../src/domain/mail-site.mjs';
 import { defaultTemplate } from '../src/domain/sequence-email.mjs';
+import { outreachProductScope } from '../server/outreach-content.mjs';
 const sequencePath = '/sequence-policy?mailboxId=box';
+const sampleProduct = { id: 'sample', status: 'approved', englishName: 'Roller blinds' };
 function api(t) {
   const mailbox = {
     id: 'box',
@@ -19,7 +21,7 @@ function api(t) {
   };
   const service = new OutreachService({
     mailboxes: { list: () => [mailbox], get: (id) => (id === mailbox.id ? mailbox : undefined) },
-    products: () => [{ id: 'sample', status: 'approved' }],
+    products: () => [sampleProduct],
   });
   t.after(() => service.close());
   const call = (path, method = 'GET', body) =>
@@ -183,6 +185,8 @@ test('同一计划的不同首封沿用各自版本，零步和旧格式记录�
     name: '采购团队',
     scope: service.getScope(),
     mailboxIds: ['box'],
+    filters: { products: [sampleProduct.id] },
+    productScopes: [outreachProductScope(sampleProduct)],
     revision: 1,
     approvedRevision: 1,
     mode: 'production',
