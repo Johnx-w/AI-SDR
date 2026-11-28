@@ -28,6 +28,7 @@ import {
   WORLDWIDE_LABEL,
 } from '../domain/country-catalog';
 import { SearchableLocation } from '../components/SearchableLocation';
+import { Modal } from '../components/ui';
 import type {
   AcquisitionJob,
   AcquisitionSchedule,
@@ -66,9 +67,10 @@ type Submission = {
   timing: ScheduleTiming;
 };
 const submissionStorage = 'shadeflow:pending-acquisition-v2';
+const acquisitionOnly = { auto_first_touch: false, auto_follow_up: false };
 const initialInput: WorkflowInput = {
   query_mode: 'auto',
-  auto_first_touch: false,
+  ...acquisitionOnly,
   customer_types: [],
   country: WORLDWIDE_COUNTRY,
   region: '',
@@ -152,6 +154,7 @@ export function Automation() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [pending, setPending] = useState<Submission | null>(restored);
+  const [sendConfirmation, setSendConfirmation] = useState<'submit' | 'retry' | null>(null);
   const [editing, setEditing] = useState<AcquisitionSchedule | null>(null);
   const [editError, setEditError] = useState('');
   const editPlan = editing?.id === editId ? editing : null;
@@ -183,7 +186,7 @@ export function Automation() {
         if (!alive) return;
         if (job.sourceDeletedAt || job.scheduleId || !['completed', 'partial'].includes(job.status))
           throw new Error('只有已结束的单次来源可以重新执行');
-        setInput(editableInput(job.input));
+        setInput({ ...editableInput(job.input), ...acquisitionOnly });
         setTargetCount(job.target);
         setRunMode('now');
         setEditError('');
@@ -366,13 +369,13 @@ export function Automation() {
     !(runMode === 'now' && active) &&
     (!editId || (!!editPlan && !editError)) &&
     (!rerunId || !editError);
-  async function submit(retry = false) {
+  async function submit(retry = false, confirmedSending = false) {
     if (submissionRef.current || (!retry && (!canSubmit || locked))) return;
     const request = retry
       ? pending
       : {
           key: crypto.randomUUID(),
-          input,
+          input: input.auto_first_touch ? input : { ...input, ...acquisitionOnly },
           target: targetCount,
           mode: runMode,
           name: scheduleName,
@@ -387,6 +390,10 @@ export function Automation() {
         setError((error as Error).message);
         return;
       }
+    }
+    if (request.input.auto_first_touch && !confirmedSending) {
+      setSendConfirmation(retry ? 'retry' : 'submit');
+      return;
     }
     submissionRef.current = true;
     setSubmitting(true);
@@ -404,6 +411,7 @@ export function Automation() {
           request.target,
           request.timing,
           editPlan.sourceControlRevision || 0,
+          confirmedSending,
         );
         notify('定时计划已更新');
         setParams({ tab: 'schedules' });
@@ -414,15 +422,23 @@ export function Automation() {
           request.target,
           request.timing,
           request.key,
+          confirmedSending,
         );
         setPending(null);
         remember(null);
+        patch(acquisitionOnly);
         notify('定时计划已创建并启用');
         setParams({ tab: 'schedules' });
       } else {
-        const job = await acquisitionApi.createJob(request.input, request.target, request.key);
+        const job = await acquisitionApi.createJob(
+          request.input,
+          request.target,
+          request.key,
+          confirmedSending,
+        );
         setPending(null);
         remember(null);
+        patch(acquisitionOnly);
         setActive(job);
         notify('获客任务已开始');
         setParams({ tab: 'runs', job: job.id });
@@ -599,10 +615,35 @@ export function Automation() {
       title="获客任务"
       icon={Zap}
       selected={tab}
-      onSelect={(value) => setParams(value === 'new' ? {} : { tab: value })}
+      onSelect={(value) => {
+        if (value === 'new' && tab !== 'new' && !pending) patch(acquisitionOnly);
+        setParams(value === 'new' ? {} : { tab: value });
+      }}
       sections={[{ items: taskViews }]}
     >
       <div className="acq-page section-page">
+        {sendConfirmation && (
+          <Modal title="确认自动发信" onClose={() => setSendConfirmation(null)}>
+            <p>获客后，系统会向符合条件的客户自动发送首封开发邮件。</p>
+            {(sendConfirmation === 'retry' ? pending?.input : input)?.auto_follow_up && (
+              <p>首封未回复时，系统也会按跟进序列发送邮件。</p>
+            )}
+            <div className="modal-actions">
+              <button className="btn secondary" onClick={() => setSendConfirmation(null)}>
+                返回修改
+              </button>
+              <button
+                className="btn primary"
+                onClick={() => {
+                  setSendConfirmation(null);
+                  void submit(sendConfirmation === 'retry', true);
+                }}
+              >
+                确认授权自动发信
+              </button>
+            </div>
+          </Modal>
+        )}
         <PageHeading eyebrow="ACQUISITION" title={taskViews.find((view) => view.id === tab)!.label}>
           <button className="btn secondary" onClick={() => setRevision((n) => n + 1)}>
             <RefreshCw size={15} />
@@ -695,6 +736,9 @@ export function Automation() {
                               changeZone(marketTimeZone(country) ?? 'Asia/Shanghai');
                           }}
                         />
+                        {input.country === WORLDWIDE_COUNTRY && (
+                          <small>覆盖下拉菜单列出的国家。</small>
+                        )}
                         {!input.country && (
                           <small role="status">
                             原获客范围
@@ -1087,7 +1131,7 @@ export function Automation() {
                           type="radio"
                           name="acquisition-followup"
                           checked={!input.auto_first_touch}
-                          onChange={() => patch({ auto_first_touch: false })}
+                          onChange={() => patch(acquisitionOnly)}
                         />
                         <span>
                           <strong>仅获客</strong>
@@ -1099,12 +1143,7 @@ export function Automation() {
                           type="radio"
                           name="acquisition-followup"
                           checked={input.auto_first_touch === true}
-                          onChange={() =>
-                            patch({
-                              auto_first_touch: true,
-                              auto_follow_up: input.auto_follow_up ?? true,
-                            })
-                          }
+                          onChange={() => patch({ auto_first_touch: true })}
                         />
                         <span>
                           <strong>获客后自动首发</strong>

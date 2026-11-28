@@ -112,6 +112,23 @@ let browser;
 try {
   browser = await chromium.launch({ executablePath, headless: true });
   const page = await browser.newPage();
+  jobs.save({ ...jobs.get(a.id), status: 'completed' });
+  await page.goto(base + '/automation?rerun=' + a.id);
+  await page
+    .getByRole('complementary', { name: '任务摘要' })
+    .getByText(/United States/)
+    .waitFor();
+  assert.equal(await page.getByRole('radio', { name: /仅获客/ }).isChecked(), true);
+  jobs.save({ ...jobs.get(a.id), status: 'paused' });
+  await page.goto(base + '/automation');
+  const followUp = page.getByRole('checkbox', { name: /首封未回复时/ });
+  const send = page.getByRole('radio', { name: /获客后自动首发/ });
+  await send.check();
+  assert.equal(await followUp.isChecked(), false);
+  await followUp.check();
+  await page.getByRole('radio', { name: /仅获客/ }).check();
+  await send.check();
+  assert.equal(await followUp.isChecked(), false);
   page.on('response', async (r) => {
     if (r.status() >= 400) console.log(r.status(), r.url(), await r.text());
   });
@@ -172,12 +189,35 @@ try {
   await page.waitForURL(/rerun=/);
   await page.reload();
   const submit = page.getByRole('button', { name: /开始获客/ });
+  const jobRequests = [];
+  page.on('request', (request) => {
+    if (
+      request.method() === 'POST' &&
+      new URL(request.url()).pathname === '/api/v1/acquisition/jobs'
+    )
+      jobRequests.push(request.postDataJSON());
+  });
+  await send.check();
+  await submit.click();
+  const confirm = page.getByRole('dialog', { name: '确认自动发信' });
+  await confirm.getByRole('button', { name: '返回修改' }).click();
+  assert.deepEqual(jobRequests, []);
+  await page.getByRole('radio', { name: /仅获客/ }).check();
   await submit.click();
   await page.waitForURL(/tab=runs.*job=/);
   const nextId = new URL(page.url()).searchParams.get('job');
   assert.notEqual(nextId, a.id);
   const next = await (await fetch(base + '/api/v1/acquisition/jobs/' + nextId)).json();
   assert.equal(next.input.auto_first_touch, false);
+  assert.equal(next.input.auto_follow_up, false);
+  assert.deepEqual(
+    jobRequests.map((request) => [
+      request.auto_first_touch,
+      request.auto_follow_up,
+      request.confirmed_auto_first_touch,
+    ]),
+    [[false, false, false]],
+  );
   console.log(
     JSON.stringify({
       old,

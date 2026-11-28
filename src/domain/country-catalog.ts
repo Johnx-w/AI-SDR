@@ -41,7 +41,7 @@ const aliases: Record<string, string[]> = {
   AE: ['UAE', '阿拉伯联合酋长国', 'Dubai', '迪拜'],
   KR: ['Republic of Korea', 'Korea, Republic of'],
   VN: ['Viet Nam'],
-  CN: ['PRC'],
+  CN: ['PRC', 'Mainland China', 'China Mainland', '中国大陆', '中华人民共和国'],
   TR: ['Turkey'],
   HK: ['Hong Kong', '香港', '中国香港'],
   MO: ['Macao', 'Macau', '澳门', '中国澳门'],
@@ -91,6 +91,7 @@ export const acquisitionMarkets = targetCountries.map((c) => ({
   value: c.name,
   keywords: [c.code, c.iso3, ...(aliases[c.code] || [])].join(' '),
 }));
+export const acquisitionCountryNames = acquisitionMarkets.map(({ value }) => value);
 export const WORLDWIDE_COUNTRY = 'worldwide';
 export const WORLDWIDE_LABEL = '所有国家';
 export const acquisitionScopes = [

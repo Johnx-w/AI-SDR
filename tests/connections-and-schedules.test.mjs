@@ -16,7 +16,7 @@ import {
 import { validateTarget } from '../server/search-target.mjs';
 import { BatchJobs } from '../server/batch-jobs.mjs';
 import { withApp } from './helpers/http.mjs';
-import { acquisitionMarkets, marketTimeZone } from '../src/domain/country-catalog.ts';
+import { acquisitionMarkets, countryFor, marketTimeZone } from '../src/domain/country-catalog.ts';
 import { scheduleRepeatLabel } from '../src/domain/schedule-timing.mjs';
 
 const input = {
@@ -227,16 +227,76 @@ test('搜索预览按范围生成实际查询，全球不把范围标签发给�
     };
     const global = await preview('worldwide');
     const usa = await preview('United States');
-    assert.deepEqual(global[0], { country: '', query: '"zip screens" supplier', language: 'en' });
+    assert.deepEqual(global[0], {
+      country: 'United States',
+      query: '"zip screens" supplier United States',
+      language: 'en',
+    });
     assert.deepEqual(usa[0], {
       country: 'United States',
       query: '"zip screens" supplier United States',
       language: 'en',
     });
-    assert.ok(global.some(({ country, language }) => country === 'France' && language === 'fr'));
+    const supported =
+      'US AU CA GB SG MY NZ TH VN AE ZA GH PH PL NL DE IT BE BR CL AR CO MX KR JP'.split(' ');
+    assert.deepEqual(
+      [...new Set(global.map(({ country }) => countryFor(country)?.code))].sort(),
+      supported.sort(),
+    );
     assert.ok(global.every(({ query }) => !/worldwide|所有国家/i.test(query)));
     assert.ok(usa.every(({ country }) => country === 'United States'));
   });
+});
+
+test('新建的首发授权需明确确认，仅获客关闭自动跟进', async () => {
+  await withApp(
+    {
+      env: nativeEnv,
+      nativeImpl: {
+        discover: async () => ({ candidates: [] }),
+        decorateLeads: (value) => value,
+        close() {},
+      },
+    },
+    async (base) => {
+      const post = (route, key, body) =>
+        fetch(base + '/api/v1/acquisition/' + route, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+          body: JSON.stringify(body),
+        });
+      const withoutConsent = { ...input, auto_first_touch: true, auto_follow_up: true };
+      assert.equal((await post('jobs', 'stale-job-direct', withoutConsent)).status, 400);
+      assert.equal(
+        (
+          await post('schedules', 'stale-new-plan', {
+            name: '旧页面',
+            input: withoutConsent,
+            timing,
+          })
+        ).status,
+        400,
+      );
+      const accepted = await post('jobs', 'only-acquisition', {
+        ...input,
+        auto_first_touch: false,
+        auto_follow_up: true,
+      });
+      assert.equal(accepted.status, 202);
+      const saved = await accepted.json();
+      assert.equal(saved.input.auto_first_touch, false);
+      assert.equal(saved.input.auto_follow_up, false);
+      const approved = await post('schedules', 'confirmed-plan', {
+        name: '首发计划',
+        input: { ...withoutConsent, auto_follow_up: false, confirmed_auto_first_touch: true },
+        timing,
+      });
+      assert.equal(approved.status, 201);
+      assert.equal((await approved.json()).input.auto_follow_up, false);
+      const campaign = await fetch(base + '/api/v1/outreach/campaigns/acquisition-' + saved.id);
+      assert.equal(campaign.status, 404);
+    },
+  );
 });
 
 test('旧计划到期时拒绝空值、旧范围及冲突的地区字段', () => {
@@ -351,7 +411,13 @@ test('单国重复计划改为全球后按新范围到期，保留时区及原�
       const second = await run();
       assert.notEqual(second.id, first.id);
       assert.equal(second.input.country, 'worldwide');
-      assert.doesNotMatch(queries[0], /United States/i);
+      assert.match(queries[0], /United States/i);
+      assert.ok(second.searchStats.some(({ country }) => country === 'Canada'));
+      assert.ok(
+        second.searchStats.every(({ country }) =>
+          acquisitionMarkets.some(({ value }) => value === country),
+        ),
+      );
       assert.ok(queries.every((query) => !/worldwide|所有国家/i.test(query)));
       assert.equal((await api('jobs/' + first.id)).input.country, 'United States');
     },

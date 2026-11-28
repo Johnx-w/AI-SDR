@@ -67,12 +67,19 @@ const types = {
 const maxJsonBytes = 32768;
 const compress = promisify(gzip);
 const brotli = promisify(brotliCompress);
-export function validateInput(input) {
+export function validateInput(input, { requireOutreachConfirmation = false } = {}) {
   const target = validateTarget(input);
   if (input.auto_first_touch !== undefined)
     target.auto_first_touch = validateAutoFirstTouch(input.auto_first_touch);
+  if (
+    requireOutreachConfirmation &&
+    target.auto_first_touch &&
+    input.confirmed_auto_first_touch !== true
+  )
+    throw new ApiError(400, '请在提交窗口明确确认自动发信');
   if (input.auto_follow_up !== undefined)
-    target.auto_follow_up = validateAutoFirstTouch(input.auto_follow_up);
+    target.auto_follow_up =
+      validateAutoFirstTouch(input.auto_follow_up) && target.auto_first_touch === true;
   if (input.research_budget !== undefined)
     target.research_budget = validateResearchBudget(input.research_budget);
   if (target.query_mode === 'auto') return { ...target, search_query: searchPlan(target)[0].query };
@@ -839,7 +846,7 @@ export function createApp({
                 name: body.name,
                 timing: body.timing,
                 input: {
-                  ...validateInput(body.input),
+                  ...validateInput(body.input, { requireOutreachConfirmation: true }),
                   target_count: validateCount(body.input?.target_count),
                 },
               },
@@ -860,7 +867,7 @@ export function createApp({
                   timing: body.timing,
                   sourceControlRevision: body.sourceControlRevision,
                   input: {
-                    ...validateInput(body.input),
+                    ...validateInput(body.input, { requireOutreachConfirmation: true }),
                     target_count: validateCount(body.input?.target_count),
                   },
                 }),
@@ -1076,7 +1083,7 @@ export function createApp({
             if (running) throw new ApiError(409, '单次任务正在执行');
             const body = await readJson(request);
             const input = {
-              ...validateInput(body),
+              ...validateInput(body, { requireOutreachConfirmation: true }),
               target_count: validateCount(body.target_count),
             };
             const job = manager.create(input, request.headers['idempotency-key']);

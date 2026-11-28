@@ -54,10 +54,11 @@ import {
   websiteAdmissionResearchSchema,
 } from './company-research.mjs';
 import { websiteAdmissionVersion } from './customer-eligibility.mjs';
-import { pageRelevance } from './relevance.mjs';
+import { countryMatches, pageRelevance } from './relevance.mjs';
 import { validateTarget } from './search-target.mjs';
 import {
   acquisitionMarkets,
+  acquisitionCountryNames,
   countryFor,
   WORLDWIDE_COUNTRY,
 } from '../src/domain/country-catalog.ts';
@@ -604,11 +605,12 @@ export class NativeAcquisition {
     input = { ...input, ...validateTarget(input) };
     const conditionsKey = exclusionConditionsKey(input);
     this.store.backfillExclusions();
-    const globalTerritory =
-      input.country === WORLDWIDE_COUNTRY &&
-      search?.scope === WORLDWIDE_COUNTRY &&
-      countryFor(search.country);
-    if (search?.country && !globalTerritory && !input.market_countries.includes(search.country))
+    const markets =
+      input.country === WORLDWIDE_COUNTRY ? acquisitionCountryNames : input.market_countries;
+    if (
+      (search?.country || input.country === WORLDWIDE_COUNTRY) &&
+      !markets.includes(search?.country)
+    )
       throw Object.assign(new Error('搜索国家不在当前支持的市场范围内'), { status: 400 });
     this.ensureConfigured();
     const byUrl = identityVersion === acquisitionIdentityVersion;
@@ -1636,6 +1638,7 @@ export class NativeAcquisition {
         Boolean(research.company_name) &&
         Boolean(identityVerified) &&
         research.product_match === 'matched' &&
+        (input.country !== WORLDWIDE_COUNTRY || research.country_match === 'matched') &&
         !hardMismatch &&
         (!unified || research.eligibility?.status === 'eligible');
       if (
@@ -2377,6 +2380,24 @@ export class NativeAcquisition {
     return this.writePreparedAssessment(op);
   }
   async writePreparedAssessment(op) {
+    // Older paused rounds may have prepared an insert under the former unrestricted scope.
+    if (op.action === 'insert' && op.input.input?.country === WORLDWIDE_COUNTRY) {
+      const market = countryMatches(
+        op.research?.actual_country || op.research?.address?.country,
+        acquisitionCountryNames,
+      );
+      if (market === 'not_matched')
+        return this.rejectNewCandidate(op, '官网所在国家与目标市场不符');
+      if (market === 'unknown')
+        return this.store.complete(
+          op,
+          this.output(op, {
+            research: op.research,
+            outcome: 'review',
+            reason: '官网未核实企业位于获客筛选栏支持的国家',
+          }),
+        ).output;
+    }
     if (
       op.action === 'insert' &&
       op.admission_version === websiteAdmissionVersion &&

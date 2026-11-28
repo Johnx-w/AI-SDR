@@ -420,11 +420,11 @@ for (const reportAllModelUsage of [true, false])
     const localEnv = { TAVILY_API_KEY: 'fixture-search', DEEPSEEK_API_KEY: 'fixture-model' };
     const scopes = [
       ['American Screens', 'United States', 900, 100],
-      ['Mexican Screens', 'Mexico', 180, 30],
-      ['French Screens', 'France', 40, 10],
-      ['French Personal Blog', 'France', 15, 5],
-      ['French Personal Diary', 'France', 15, 5],
-      ['Exploration Screens', 'Germany', 200, 30],
+      ['German Screens', 'Germany', 180, 30],
+      ['Japanese Screens', 'Japan', 40, 10],
+      ['Japanese Personal Blog', 'Japan', 15, 5],
+      ['Japanese Personal Diary', 'Japan', 15, 5],
+      ['Exploration Screens', 'Australia', 200, 30],
     ].map(([name, country, input, output], index) => {
       const individual = index === 3 || index === 4;
       const url = 'https://scope-business-' + index + '.example.org/';
@@ -441,11 +441,11 @@ for (const reportAllModelUsage of [true, false])
       if (url === 'https://api.tavily.com/search') {
         searches.push(request.query);
         const matched =
-          searches.length === 2
+          searches.length === 1
             ? [scopes[0]]
-            : searches.length === 4
+            : searches.length === 2
               ? [scopes[1]]
-              : searches.length === 6
+              : searches.length === 3
                 ? scopes.slice(2, 5)
                 : searches.length === 11
                   ? [scopes[5]]
@@ -535,21 +535,21 @@ for (const reportAllModelUsage of [true, false])
       assert.equal(job?.status, 'completed', JSON.stringify(job));
       job = await (await fetch(api + '/jobs/' + job.id)).json();
       assert.deepEqual(
-        [1, 3, 5].map((i) => {
+        [0, 1, 2].map((i) => {
           const metric = job.searchStats[i];
           return [metric.country, metric.inserted, metric.researched, metric.rejected];
         }),
         [
           ['United States', 1, 1, 0],
-          ['Mexico', 1, 1, 0],
-          ['France', 1, 3, 2],
+          ['Germany', 1, 1, 0],
+          ['Japan', 1, 3, 2],
         ],
       );
-      assert.equal(job.searchStats[8].country, 'Mexico');
-      assert.match(searches[8], /México/);
+      assert.equal(job.searchStats[8].country, 'Germany');
+      assert.match(searches[8], /Deutschland/);
       assert.deepEqual(
         job.searchStats.slice(9).map(({ country }) => country),
-        ['', 'Japan'],
+        ['Mexico', 'Australia'],
       );
       assert.deepEqual(job.searchStats[8].dispatchEvidence, {
         metered: [
@@ -2144,7 +2144,7 @@ test('全球目标跨过六小时和两百家批次，末位只确认一次且�
     const name = 'Sample Window Business ' + (index + 100);
     const url = 'https://sample-' + (index + 100) + '.example.org/';
     const retailer = index === 19;
-    const country = index === 0 ? 'France' : '';
+    const country = index === 0 ? 'Canada' : 'United States';
     const quote =
       index === 2
         ? name + ' is my personal blog about choosing roller blinds for the windows in my own home.'
@@ -2153,7 +2153,9 @@ test('全球目标跨过六小时和两百家批次，末位只确认一次且�
             ? ' is a window covering retailer. We sell and install '
             : ' imports and distributes ') +
           'made-to-measure roller blinds for building windows' +
-          (country ? ' across France.' : '.');
+          ' across ' +
+          country +
+          '.';
     return { url, name, quote, country, retailer, individual: index === 2 };
   });
   const fixtureByUrl = new Map(sites.map((row) => [row.url, row]));
@@ -2289,10 +2291,10 @@ test('全球目标跨过六小时和两百家批次，末位只确认一次且�
     assert.equal(job.admissionVersion, 'website-admission-v1');
     assert.equal(job.identityVersion, 'registered-operator-v1');
     assert.equal(job.batch.number, 3);
-    assert.deepEqual(job.coverage.languages.slice(0, 2), ['en', 'es']);
-    assert.ok(job.coverage.countries.includes('France'));
+    assert.deepEqual(job.coverage.languages.slice(0, 2), ['en', 'de']);
+    assert.ok(job.coverage.countries.includes('Canada'));
     assert.match(paidQueries[0], /manufacturer/);
-    assert.ok(paidQueries.some((query) => /persianas|estores/.test(query)));
+    assert.ok(paidQueries.some((query) => /Deutschland/.test(query)));
     assert.equal(job.rows.filter((row) => row.result === 'rejected').length, 1);
     assert.equal(
       new Set(job.rows.filter((row) => row.capture).map((row) => row.capture.record_id)).size,
@@ -2307,19 +2309,12 @@ test('全球目标跨过六小时和两百家批次，末位只确认一次且�
       leads.map(({ website }) => website).sort(),
       expected.map(({ url }) => url).sort(),
     );
-    const french = leads.find(({ website }) => website === sites[0].url);
-    const unknown = leads.find(({ website }) => website === sites[19].url);
-    const unknownRow = job.rows.find(({ source_url }) => source_url === sites[19].url);
-    assert.equal(
-      job.searchStats.find(({ id }) => id === unknownRow.search_id).country,
-      'United States',
-    );
-    assert.equal(french.market, 'France');
-    assert.equal(unknown.market, '待核实');
+    assert.equal(leads.find(({ website }) => website === sites[0].url).market, 'Canada');
+    assert.equal(leads.find(({ website }) => website === sites[19].url).market, 'United States');
   });
 });
 
-test('到期的全球计划收录美国和法国的窗饰商，同样输入的美国计划只收录美国企业', async (t) => {
+test('到期的全部市场计划收录美国和澳大利亚窗饰商，排除目录外和待核实企业', async (t) => {
   t.mock.timers.enable({
     apis: ['Date', 'setInterval'],
     now: Date.parse('2030-01-01T08:59:50+08:00'),
@@ -2335,14 +2330,26 @@ test('到期的全球计划收录美国和法国的窗饰商，同样输入的�
       },
     ],
     [
-      'https://lyon-window.example.org/',
+      'https://perth-window.example.org/',
       {
-        name: 'Lyon Window Supply',
-        country: 'France',
+        name: 'Perth Window Supply',
+        country: 'Australia',
         quote:
-          'Lyon Window Supply imports and supplies complete outdoor zip screens for building windows to dealers across France.',
+          'Perth Window Supply imports and supplies complete outdoor zip screens for building windows to dealers across Australia.',
       },
     ],
+    ...[
+      ['shenzhen', 'Mainland China'],
+      ['lyon', 'France'],
+      ['unlocated', null],
+    ].map(([region, country]) => [
+      `https://${region}-window.example.org/`,
+      {
+        name: region + ' Window Supply',
+        country,
+        quote: `${region} Window Supply supplies complete outdoor zip screens for building windows${country ? ' in ' + country : ''}.`,
+      },
+    ]),
     [
       'https://coast-tours.example.org/',
       {
@@ -2353,11 +2360,16 @@ test('到期的全球计划收录美国和法国的窗饰商，同样输入的�
   ]);
   const localEnv = { TAVILY_API_KEY: 'fixture-search', DEEPSEEK_API_KEY: 'fixture-model' };
   const expectedByScope = [
-    ['worldwide', 'Asia/Shanghai', ['France', 'United States'], '"zip screens" supplier'],
+    [
+      'worldwide',
+      'Asia/Shanghai',
+      ['Australia', 'United States'],
+      '"zip screens" supplier United States',
+    ],
     [
       'United States',
       'America/New_York',
-      ['United States'],
+      ['United States', '待核实'],
       '"zip screens" supplier United States',
     ],
   ];
@@ -2388,13 +2400,18 @@ test('到期的全球计划收录美国和法国的窗饰商，同样输入的�
         output = {
           company_name: fact(name),
           entity_type: fact('business'),
-          actual_country: fact(country),
+          actual_country: country ? fact(country) : null,
           customer_type: fact('distributor'),
           production_model: fact('no_own_factory'),
           operating_model: fact('beyond_local'),
           main_product_preference: fact('户外窗用卷帘'),
-          products: country ? [{ ...fact('zip screens'), window_use: 'window_covering' }] : [],
-          admission_facts: [fact(country ? 'complete_supply' : 'unrelated_operator')],
+          products:
+            name === 'Coast Tours'
+              ? []
+              : [{ ...fact('zip screens'), window_use: 'window_covering' }],
+          admission_facts: [
+            fact(name === 'Coast Tours' ? 'unrelated_operator' : 'complete_supply'),
+          ],
         };
       }
       return json({
@@ -2462,14 +2479,19 @@ test('到期的全球计划收录美国和法国的窗饰商，同样输入的�
       assert.equal(job.status, 'partial', JSON.stringify(job.rows));
       assert.equal(job.input.country, country);
       assert.equal(job.reason, 'exhausted');
-      assert.equal(job.remainingTarget, country === 'worldwide' ? 201 : 2);
+      assert.equal(job.remainingTarget, country === 'worldwide' ? 201 : 1);
       assert.equal(job.admissionVersion, 'website-admission-v1');
       assert.equal(job.inserted, expected.length, JSON.stringify(job.rows));
       assert.equal(job.searchStats[0].query, firstQuery);
       assert.equal(queries[0], firstQuery);
       if (country === 'worldwide') {
-        assert.doesNotMatch(queries[0], /United States|France/i);
-        assert.ok(queries.some((query) => /United States|France/i.test(query)));
+        assert.ok(queries.some((query) => /Australia/i.test(query)));
+        assert.ok(queries.every((query) => !/France|China/i.test(query)));
+        for (const region of ['shenzhen', 'lyon', 'unlocated'])
+          assert.equal(
+            job.rows.find(({ source_url }) => source_url.includes(region)).result,
+            region === 'unlocated' ? 'review' : 'rejected',
+          );
         assert.ok(queries.every((query) => !/worldwide|所有国家/i.test(query)));
       }
       const { leads } = await request(archivePath);
@@ -2477,7 +2499,11 @@ test('到期的全球计划收录美国和法国的窗饰商，同样输入的�
       assert.deepEqual(
         leads.map(({ name, website }) => [name, website]).sort(),
         [...fixtures]
-          .filter(([, item]) => expected.includes(item.country))
+          .filter(
+            ([, item]) =>
+              expected.includes(item.country) ||
+              (country === 'United States' && item.name === 'unlocated Window Supply'),
+          )
           .map(([url, { name }]) => [name, url])
           .sort(),
       );
@@ -2886,7 +2912,6 @@ test('精简后的中部经营证据贯通研究、初评、模拟写入及读�
 for (const [product_scope, country] of [
   ['all', 'United States'],
   ['specific', 'United States'],
-  ['all', 'worldwide'],
 ]) {
   test(`${country} 的 ${product_scope} 范围内，相关企业国家未知仍入库，核实后归入实际市场`, async () => {
     const modelOverrides = { actual_country: null };
@@ -4417,7 +4442,9 @@ test('正常任务按营业登记主体区分同域企业，补证、并发核�
         address: data.registeredOffice ? evidence(data.registeredOffice, office(data)) : null,
         actual_country: data.registeredOffice
           ? evidence(data.registeredOffice.country, office(data))
-          : null,
+          : data.registration
+            ? evidence('United Kingdom', identity(data))
+            : null,
         entity_type: evidence('business', identity(data)),
         admission_facts:
           data.manual || data.omitActivity ? [] : [evidence('complete_supply', currentSupply)],
