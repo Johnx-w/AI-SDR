@@ -19,12 +19,64 @@ const defaults = {
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
 export function initializeSequencePolicy({ db, mailboxes }) {
-  db.exec(
-    'CREATE TABLE IF NOT EXISTS outreach_sequence_policies(revision INTEGER PRIMARY KEY, data TEXT NOT NULL)',
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS outreach_sequence_policies(revision INTEGER PRIMARY KEY, data TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS outreach_mailbox_sequence_policies(revision INTEGER PRIMARY KEY, data TEXT NOT NULL);
+    CREATE UNIQUE INDEX IF NOT EXISTS outreach_frozen_sequence_snapshot
+      ON outreach_sequence_policies(data) WHERE revision < 0;
+  `);
+  if (readSequencePolicy(db)) return;
+  const current = db
+    .prepare('SELECT revision,data FROM outreach_sequence_policies ORDER BY revision DESC LIMIT 1')
+    .get();
+  db.prepare('INSERT OR IGNORE INTO outreach_sequence_policies VALUES(1,?)').run(
+    JSON.stringify(defaults),
   );
-  const current = readSequencePolicy(db);
-  if (current?.mailboxes) return;
-  const { revision = 0, name, steps, ...writing } = current || defaults;
+  const provisional = db
+    .prepare(
+      "SELECT revision,data FROM outreach_sequence_policies WHERE revision > 0 AND json_type(data,'$.mailboxes')='object'",
+    )
+    .all();
+  if (provisional.length) {
+    const policies = new Map();
+    for (const row of provisional) {
+      policies.set(row.revision, { revision: row.revision, ...JSON.parse(row.data) });
+      db.prepare('INSERT INTO outreach_mailbox_sequence_policies VALUES(?,?)').run(
+        row.revision,
+        row.data,
+      );
+      db.prepare('DELETE FROM outreach_sequence_policies WHERE revision=?').run(row.revision);
+    }
+    const deliveries = db
+      .prepare(
+        `
+      SELECT d.id, p.revision, json_extract(d.data,'$.mailboxId') AS mailboxId,
+             json_extract(d.data,'$.from') AS email
+      FROM outreach_deliveries d JOIN outreach_mailbox_sequence_policies p
+        ON p.revision=json_extract(d.data,'$.sequencePolicyRevision')
+    `,
+      )
+      .all();
+    for (const first of deliveries) {
+      const frozen = freezeMailbox(db, policies.get(first.revision), {
+        id: first.mailboxId,
+        email: first.email,
+      });
+      db.prepare(
+        "UPDATE outreach_deliveries SET data=json_set(data,'$.sequencePolicyRevision',?) WHERE id=?",
+      ).run(frozen.revision, first.id);
+    }
+    db.prepare('INSERT OR IGNORE INTO outreach_sequence_policies VALUES(1,?)').run(
+      JSON.stringify(defaults),
+    );
+    return;
+  }
+  const {
+    revision = 0,
+    name,
+    steps,
+    ...writing
+  } = current ? { revision: current.revision, ...JSON.parse(current.data) } : defaults;
   const template = {
     ...writing,
     readyOnce: true,
@@ -42,7 +94,7 @@ export function initializeSequencePolicy({ db, mailboxes }) {
 }
 
 function appendPolicy(db, revision, policy) {
-  db.prepare('INSERT INTO outreach_sequence_policies VALUES(?,?)').run(
+  db.prepare('INSERT INTO outreach_mailbox_sequence_policies VALUES(?,?)').run(
     revision,
     JSON.stringify(policy),
   );
@@ -54,7 +106,7 @@ function readSequencePolicy(db, revision) {
     revision === undefined
       ? db
           .prepare(
-            'SELECT revision,data FROM outreach_sequence_policies ORDER BY revision DESC LIMIT 1',
+            'SELECT revision,data FROM outreach_mailbox_sequence_policies ORDER BY revision DESC LIMIT 1',
           )
           .get()
       : db
@@ -114,20 +166,18 @@ export function checkSequenceMailbox(email, expectedEmail) {
 
 function activatableDays(service, policy) {
   if (policy.steps.length === policy.activeDays.length) return policy.activeDays;
-  const products = service.salesProducts().filter((p) => p.status === 'approved');
-  const participants = service.mailboxes
-    .list()
-    .filter(
-      (box) =>
-        box.configured &&
-        !box.paused &&
-        box.smtpStatus === 'connected' &&
-        box.displayName?.trim() &&
-        box.signature?.trim() &&
-        sequenceReady(policy, box) &&
-        products.some((p) => box.productIds?.includes(p.id) && siteAllowsProduct(p, box)),
-    )
-    .map((box) => mailboxTemplate(policy, box));
+  const { manual, acquisition } = service.followUpSenderScope();
+  const products = acquisition
+    ? service.salesProducts().filter((p) => p.status === 'approved')
+    : [];
+  const participants = service.mailboxes.list().flatMap((box) => {
+    const template = mailboxTemplate(policy, box);
+    const authorized =
+      manual.has(box.id) ||
+      (acquisition &&
+        products.some((p) => box.productIds?.includes(p.id) && siteAllowsProduct(p, box)));
+    return authorized && template?.readyOnce ? [template] : [];
+  });
   if (!participants.length) return policy.activeDays;
   return policy.steps
     .map((s) => s.day)
@@ -138,12 +188,33 @@ function activatableDays(service, policy) {
     );
 }
 
-// A submission pins an immutable revision even if eligible mailboxes changed since the editor saved.
-export function freezeSequencePolicy(service) {
+// Old code reads positive revisions as settings and looks up submitted revisions by exact key.
+function freezeMailbox(db, policy, mailbox) {
+  const steps = (mailboxTemplate(policy, mailbox)?.steps ?? []).filter(
+    (step) => policy.activeDays.includes(step.day) && step.template,
+  );
+  const snapshot = { name: policy.name, mailboxPolicyRevision: policy.revision, steps };
+  const data = JSON.stringify(snapshot);
+  const existing = db
+    .prepare('SELECT revision FROM outreach_sequence_policies WHERE revision < 0 AND data=?')
+    .get(data);
+  const revision =
+    existing?.revision ??
+    db.prepare('SELECT min(0, min(revision)) - 1 AS revision FROM outreach_sequence_policies').get()
+      .revision;
+  if (!existing)
+    db.prepare('INSERT INTO outreach_sequence_policies VALUES(?,?)').run(revision, data);
+  return { revision, ...snapshot };
+}
+
+export function freezeSequencePolicy(service, mailbox) {
   const { revision, ...policy } = readSequencePolicy(service.db);
   const activeDays = activatableDays(service, policy);
-  if (activeDays.length === policy.activeDays.length) return { revision, ...policy };
-  return appendPolicy(service.db, revision + 1, { ...policy, activeDays });
+  const current =
+    activeDays.length === policy.activeDays.length
+      ? { revision, ...policy }
+      : appendPolicy(service.db, revision + 1, { ...policy, activeDays });
+  return freezeMailbox(service.db, current, mailbox);
 }
 
 export function writingInstruction(value) {

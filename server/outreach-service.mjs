@@ -745,6 +745,44 @@ export class OutreachService {
       )
     );
   }
+  followUpSenderScope() {
+    const scope = this.getScope();
+    const plans = this.db
+      .prepare(
+        `
+      SELECT json_extract(data,'$.acquisitionSource') AS source,
+             json_extract(data,'$.mailboxIds') AS mailboxIds
+      FROM outreach_campaigns
+      WHERE json_extract(data,'$.mode')='production'
+        AND json_extract(data,'$.scope')=?
+        AND json_extract(data,'$.status') IN ('active','paused')
+        AND json_extract(data,'$.approvedRevision')=json_extract(data,'$.revision')
+        AND json_extract(data,'$.followUpEnabled')=1
+        AND json_extract(data,'$.deleteRequestedAt') IS NULL
+    `,
+      )
+      .all(scope);
+    const manual = new Set(
+      plans.filter((plan) => !plan.source).flatMap((plan) => JSON.parse(plan.mailboxIds || '[]')),
+    );
+    const authorizedSources = new Set(
+      plans
+        .filter((plan) => plan.source)
+        .map(({ source }) => {
+          const { jobId, generation } = JSON.parse(source);
+          return JSON.stringify([jobId, generation || 0]);
+        }),
+    );
+    const acquisition =
+      authorizedSources.size > 0 &&
+      this.acquisitionSources().some(
+        ({ jobId, generation, status, scope: sourceScope }) =>
+          sourceScope === scope &&
+          ['active', 'paused'].includes(status) &&
+          authorizedSources.has(JSON.stringify([jobId, generation || 0])),
+      );
+    return { manual, acquisition };
+  }
   identities(candidate) {
     return [
       `company:${candidate.customerId}`,
@@ -2045,7 +2083,7 @@ export class OutreachService {
               pending.followUpAtSubmission =
                 campaign.mode === 'production' && campaign.followUpEnabled === true;
               if (pending.followUpAtSubmission)
-                pending.sequencePolicyRevision = freezeSequencePolicy(this).revision;
+                pending.sequencePolicyRevision = freezeSequencePolicy(this, m).revision;
               this.putDelivery(pending);
             });
           },

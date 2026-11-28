@@ -181,6 +181,10 @@ test('同一计划的不同首封沿用各自版本，零步和旧格式记录�
   const plan = {
     id: 'plan',
     name: '采购团队',
+    scope: service.getScope(),
+    mailboxIds: ['box'],
+    revision: 1,
+    approvedRevision: 1,
     mode: 'production',
     status: 'active',
     followUpEnabled: true,

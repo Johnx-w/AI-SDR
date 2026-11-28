@@ -1616,11 +1616,12 @@ test('自定义三步在首封提交时冻结规则，重启后将各步要求�
     policy: { name: '采购沟通', steps },
   });
   try {
-    assert.equal(h.first.sequencePolicyRevision, h.policy.revision);
+    const frozen = h.service.followUps.policy(h.first.sequencePolicyRevision);
+    assert.equal(frozen.mailboxPolicyRevision, h.policy.revision + 1);
     saveSequencePolicy(h.service, {
       name: '仅首封',
       mailboxId: h.first.mailboxId,
-      revision: h.policy.revision,
+      revision: frozen.mailboxPolicyRevision,
       steps: [],
     });
     await h.service.close();
@@ -1672,7 +1673,7 @@ test('自定义三步在首封提交时冻结规则，重启后将各步要求�
     assert.ok(
       h.service.followUps
         .all()
-        .every((s) => s.status === 'accepted' && s.policyRevision === h.policy.revision),
+        .every((s) => s.status === 'accepted' && s.policyRevision === frozen.mailboxPolicyRevision),
     );
     assert.equal(h.service.followUps.policy().steps.length, 0);
   } finally {

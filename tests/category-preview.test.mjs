@@ -116,6 +116,34 @@ test('按发件邮箱保存并预览各自话术，共用天数，新邮箱没�
   await settings(roller, 'PUT', { ...removing, steps: removing.steps.slice(0, 1) });
   assert.equal((await settings(pendingSender)).ready, true);
 });
+test('未授权自动跟进的邮箱不阻止其他计划启用新增天数', async (t) => {
+  const h = categoryPreviewFixture(0);
+  t.after(h.close);
+  for (const [id, followUpEnabled, status, approvedRevision] of [
+    ['box-0', true, 'active', 1],
+    ['box-1', false, 'active', 1],
+    ['box-2', true, 'paused', null],
+  ]) {
+    h.service.putCampaign({
+      id,
+      mode: 'production',
+      scope: 'preview-qa',
+      status,
+      revision: 1,
+      approvedRevision,
+      mailboxIds: [id],
+      followUpEnabled,
+    });
+  }
+  const path = '/sequence-policy?mailboxId=box-0';
+  const current = await api(h, path);
+  const saved = await api(h, path, 'PUT', {
+    ...current,
+    steps: [...current.steps, { day: 10, template: { subject: '', body: 'A final note.' } }],
+  });
+  assert.deepEqual(saved.activeDays, [3, 7, 10]);
+});
+
 test('编辑期间发件地址被替换时，旧话术不能保存或预览到新地址', async (t) => {
   const h = categoryPreviewFixture(0);
   t.after(h.close);

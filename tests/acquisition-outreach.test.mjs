@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { BatchJobs, validateAutoFirstTouch } from '../server/batch-jobs.mjs';
 import { AcquisitionSchedules } from '../server/acquisition-schedules.mjs';
 import { acquisitionOutreachSources } from '../server/acquisition-outreach.mjs';
@@ -338,6 +339,81 @@ test('获客自动首发使用各自的纯文本话术，第三个邮箱少一�
   assert.equal(model.mock.callCount(), 0);
 });
 
+test('代码回退期间仍读取旧共享策略，重新升级保留邮箱话术和原排期', async (t) => {
+  const h = await smtpHarness(t);
+  delete h.service.generator;
+  h.service.fetchImpl = () => assert.fail('固定话术不应调用模型');
+  await addSender(h, 'roller', 'roller blinds');
+  for (const [id, subject, body] of [
+    ['box', 'PVC catalogue', 'We supply PVC shutters.'],
+    ['roller', 'Roller catalogue', 'We supply roller blinds.'],
+  ]) {
+    const policy = await sequenceSettings(h, id);
+    await sequenceSettings(h, id, {
+      ...policy,
+      firstTemplate: { subject, body },
+      steps: [3, 7].map((day) => ({ day, template: { subject: '', body } })),
+    });
+  }
+  const job = h.create({ auto_follow_up: true });
+  await h.capture(job.id, buyer('before-rollback'));
+  await h.pump();
+  const pvc = await sequenceSettings(h, 'box');
+  await sequenceSettings(h, 'box', {
+    ...pvc,
+    steps: [...pvc.steps, { day: 10, template: { subject: '', body: 'Final PVC note.' } }],
+  });
+  h.state.smtpResult = { accepted: [], rejected: [] };
+  await h.capture(job.id, buyer('smtp-unknown'));
+  await h.pump();
+  const [unknown] = h.service.deliveries(undefined, ['unknown']);
+  assert.ok(unknown);
+  await h.service.close();
+  {
+    using db = new DatabaseSync(h.options.path);
+    // main still reads the latest row for settings and an exact revision when reconciling SMTP.
+    const legacy = db
+      .prepare('SELECT * FROM outreach_sequence_policies ORDER BY revision DESC LIMIT 1')
+      .get();
+    const shared = JSON.parse(legacy.data);
+    assert.deepEqual(
+      shared.steps.map((step) => step.day),
+      [3, 7],
+    );
+    const row = db
+      .prepare('SELECT data FROM outreach_sequence_policies WHERE revision=?')
+      .get(unknown.sequencePolicyRevision);
+    const frozen = JSON.parse(row.data);
+    assert.deepEqual(
+      frozen.steps.map((step) => [step.day, step.template.body]),
+      [
+        [3, 'We supply PVC shutters.'],
+        [7, 'We supply PVC shutters.'],
+      ],
+    );
+    db.prepare('INSERT INTO outreach_sequence_policies VALUES(?,?)').run(
+      legacy.revision + 1,
+      JSON.stringify({
+        ...shared,
+        firstTemplate: { subject: 'Rollback edit', body: 'Shared text.' },
+        steps: [],
+      }),
+    );
+  }
+  h.service = new OutreachService(h.options);
+  h.state.smtpResult = null;
+  assert.equal((await sequenceSettings(h, 'box')).firstTemplate.subject, 'PVC catalogue');
+  assert.equal((await sequenceSettings(h, 'roller')).firstTemplate.subject, 'Roller catalogue');
+  assert.deepEqual((await sequenceSettings(h, 'box')).activeDays, [3, 7]);
+  const first = h.state.sent[0];
+  h.state.now = first.submittedAt + 3 * 86400000;
+  await h.pump(0);
+  assert.deepEqual(
+    h.state.sent.slice(2).map((mail) => [mail.to, mail.inReplyTo, mail.text.split('\n\n')[1]]),
+    [[first.to, first.messageId, 'We supply PVC shutters.']],
+  );
+});
+
 test('新增跟进日在全部参与邮箱配齐后生效，已有首封继续按提交版本在原线程跟进', async (t) => {
   const h = await smtpHarness(t);
   delete h.service.generator;
@@ -381,6 +457,8 @@ test('新增跟进日在全部参与邮箱配齐后生效，已有首封继续�
     await h.pump();
   };
   await capture('before', 'PVC shutters');
+  await h.mailboxes.save({ id: 'roller', clientPassword: 'synthetic-password' });
+  assert.notEqual(h.mailboxes.get('roller').smtpStatus, 'connected');
   const pvc = await sequenceSettings(h, 'box');
   await sequenceSettings(h, 'box', {
     ...pvc,
@@ -394,6 +472,9 @@ test('新增跟进日在全部参与邮箱配齐后生效，已有首封继续�
   assert.deepEqual(roller.activeDays, [3, 7]);
   assert.equal(roller.steps.find((s) => s.day === 10).template, undefined);
   await capture('while-pending', 'PVC shutters');
+  await h.mailboxes.verify('roller');
+  assert.equal((await sequenceSettings(h, 'roller')).ready, true);
+  assert.deepEqual((await sequenceSettings(h, 'roller')).activeDays, [3, 7]);
   await sequenceSettings(h, 'roller', {
     ...roller,
     steps: [
@@ -535,7 +616,7 @@ test('首封在 SMTP 提交边界冻结跟进策略，准备连接及等待应�
   await h.pump();
   const [first] = h.service.deliveries(undefined, ['accepted']);
   assert.equal(h.state.sent.length, 1);
-  assert.equal(first.sequencePolicyRevision, 2);
+  assert.equal(h.service.followUps.policy(first.sequencePolicyRevision).mailboxPolicyRevision, 2);
   assert.equal(h.service.followUps.policy().revision, 3);
   assert.deepEqual(
     h.service.followUps.all().map(({ day, policyRevision }) => ({ day, policyRevision })),
@@ -1411,7 +1492,9 @@ test('定时获客自然换轮仍按原首封的自定义日期同线程跟进�
     await h.pump(60);
     assert.equal(h.state.sent.length, 2, JSON.stringify(h.service.followUps.all()));
     assert.equal(h.state.sent[1].inReplyTo, sent.messageId);
-    assert.equal(h.service.followUps.all()[0].policyRevision, rule.revision);
+    const frozen = h.service.followUps.policy(sent.sequencePolicyRevision);
+    assert.equal(frozen.mailboxPolicyRevision, rule.revision + 1);
+    assert.equal(h.service.followUps.all()[0].policyRevision, frozen.mailboxPolicyRevision);
   } finally {
     await h.close();
   }

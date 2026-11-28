@@ -89,7 +89,17 @@ test('未来十二步逐客户检查接管和退订，不加载全部跟进记�
     }),
   });
   t.after(() => service.close());
-  const policy = saveSequencePolicy(service, {
+  const campaign = service.putCampaign({
+    id: 'campaign',
+    scope: 'local',
+    mode: 'production',
+    status: 'active',
+    mailboxIds: [mailbox.id],
+    revision: 1,
+    approvedRevision: 1,
+    followUpEnabled: true,
+  });
+  saveSequencePolicy(service, {
     mailboxId: mailbox.id,
     revision: 1,
     name: '十二步',
@@ -98,13 +108,6 @@ test('未来十二步逐客户检查接管和退订，不加载全部跟进记�
       instruction: '确认需求',
       template: defaultTemplate(false),
     })),
-  });
-  const campaign = service.putCampaign({
-    id: 'campaign',
-    scope: 'local',
-    mode: 'production',
-    status: 'completed',
-    followUpEnabled: true,
   });
   for (const customerId of ['interested', 'managed', 'unsubscribed']) {
     const to = customerId + '@buyer.example';
@@ -119,7 +122,6 @@ test('未来十二步逐客户检查接管和退订，不加载全部跟进记�
       to,
       messageId: '<' + customerId + '@example.org>',
       sentAt: new Date(now).toISOString(),
-      sequencePolicyRevision: policy.revision,
       candidate: { customerId, to },
       subject: 'Specifications',
       bodyText: 'Here are the specifications.',

@@ -20,7 +20,6 @@ import {
   initializeSequencePolicy,
   sequencePolicy,
   freezeSequencePolicy,
-  mailboxTemplate,
   legacyFollowUpStep,
 } from './outreach-sequence-policy.mjs';
 import { renderMailboxSignature, signaturePlainTextHtml } from '../src/domain/mail-signature.mjs';
@@ -298,19 +297,14 @@ export class OutreachFollowUps {
     const policy =
       stored.sequencePolicyRevision || legacyScheduled
         ? this.policy(stored.sequencePolicyRevision || 1)
-        : freezeSequencePolicy(s);
-    const steps = policy.mailboxes
-      ? (mailboxTemplate(policy, { id: first.mailboxId, email: first.from })?.steps ?? []).filter(
-          (s) => policy.activeDays.includes(s.day) && s.template,
-        )
-      : policy.steps;
+        : freezeSequencePolicy(s, { id: first.mailboxId, email: first.from });
     if (!stored.sequencePolicyRevision)
       s.db
         .prepare(
           "UPDATE outreach_deliveries SET data=json_set(data,'$.sequencePolicyRevision',?) WHERE id=?",
         )
         .run(policy.revision, first.id);
-    for (const [index, { day, instruction, writing, template }] of steps.entries()) {
+    for (const [index, { day, instruction, writing, template }] of policy.steps.entries()) {
       const id = 'followup-' + first.id + '-' + (index + 1);
       if (this.get(id)) continue;
       this.put({
@@ -326,7 +320,7 @@ export class OutreachFollowUps {
         day,
         ...(template && { template }),
         instruction: followWritingRequirement(instruction, writing),
-        policyRevision: policy.revision,
+        policyRevision: policy.mailboxPolicyRevision ?? policy.revision,
         policyName: policy.name,
         status: 'pending',
         reason: '',
