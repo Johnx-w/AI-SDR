@@ -265,6 +265,7 @@ export class BatchJobs {
       ])
         job[key] = latest[key];
       job.input.auto_first_touch = latest.input.auto_first_touch;
+      job.input.auto_follow_up = latest.input.auto_follow_up;
       job.autoFirstTouchPaused = latest.autoFirstTouchPaused;
     }
     if (job.manualPaused && ['running', 'stopping', 'paused'].includes(job.status)) {

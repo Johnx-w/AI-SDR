@@ -57,6 +57,7 @@ export class AcquisitionSchedules {
             else delete current[key];
           }
           current.input.auto_first_touch = job.input.auto_first_touch;
+          current.input.auto_follow_up = job.input.auto_follow_up;
           manager.db
             .prepare('UPDATE jobs SET data=? WHERE id=?')
             .run(JSON.stringify(current), job.id);
@@ -100,6 +101,7 @@ export class AcquisitionSchedules {
       ])
         plan[key] = latest[key];
       plan.input.auto_first_touch = latest.input.auto_first_touch;
+      plan.input.auto_follow_up = latest.input.auto_follow_up;
     }
     plan.updatedAt = new Date(this.now()).toISOString();
     this.db.prepare('UPDATE schedules SET data=? WHERE id=?').run(JSON.stringify(plan), plan.id);

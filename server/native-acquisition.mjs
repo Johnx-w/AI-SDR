@@ -1638,6 +1638,7 @@ export class NativeAcquisition {
         Boolean(research.company_name) &&
         Boolean(identityVerified) &&
         research.product_match === 'matched' &&
+        !research.market_conflict &&
         (input.country !== WORLDWIDE_COUNTRY || research.country_match === 'matched') &&
         !hardMismatch &&
         (!unified || research.eligibility?.status === 'eligible');
@@ -2382,21 +2383,28 @@ export class NativeAcquisition {
     return this.writePreparedAssessment(op);
   }
   async writePreparedAssessment(op) {
-    // Older paused rounds may have prepared an insert under the former unrestricted scope.
-    if (op.action === 'insert' && op.input.input?.country === WORLDWIDE_COUNTRY) {
-      const market = countryMatches(
-        canonicalCustomerFields(op.fields)['国家'] || op.research?.actual_country,
-        acquisitionCountryNames,
-      );
-      if (market === 'not_matched')
+    // An old paused operation may contain both a researched and a different prepared country.
+    if (op.action === 'insert') {
+      const country = op.input?.input?.country;
+      const allMarkets = country === WORLDWIDE_COUNTRY;
+      const markets = allMarkets ? acquisitionCountryNames : [country];
+      const preparedCountry = canonicalCustomerFields(op.fields)['国家'];
+      const storedMarket = countryFor(typeof preparedCountry === 'string' ? preparedCountry : null);
+      const researchMarket = countryFor(op.research?.actual_country);
+      const conflict = storedMarket && researchMarket && storedMarket.code !== researchMarket.code;
+      const market = countryMatches((storedMarket || researchMarket)?.name, markets);
+      if (!conflict && market === 'not_matched')
         return this.rejectNewCandidate(op, '官网所在国家与目标市场不符');
-      if (market === 'unknown')
+      if (conflict || op.research?.market_conflict || (allMarkets && !storedMarket))
         return this.store.complete(
           op,
           this.output(op, {
             research: op.research,
             outcome: 'review',
-            reason: '官网未核实企业位于获客筛选栏支持的国家',
+            reason:
+              conflict || op.research?.market_conflict
+                ? '官网的经营国家与地址证据不一致'
+                : '官网未核实企业位于获客筛选栏支持的国家',
           }),
         ).output;
     }

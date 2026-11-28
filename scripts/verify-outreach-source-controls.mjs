@@ -133,7 +133,10 @@ try {
     if (r.status() >= 400) console.log(r.status(), r.url(), await r.text());
   });
   await page.goto(base + '/inbox?tab=campaigns&campaignId=' + old);
-  await page.getByRole('button', { name: '删除计划', exact: true }).last().click();
+  await page
+    .getByRole('dialog', { name: /自动首发/ })
+    .getByRole('button', { name: '删除计划', exact: true })
+    .click();
   await page
     .getByRole('dialog', { name: '删除触达计划', exact: true })
     .getByText(/来源及定时安排的获客后自动首发将关闭/)

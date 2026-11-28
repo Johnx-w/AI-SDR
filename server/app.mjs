@@ -34,6 +34,7 @@ import { followupDesk, setFollowupPriority } from './followup-desk.mjs';
 import { listFollowupTasks, readFollowupTask } from './followup-task-view.mjs';
 import { readCustomerTimeline, timelineOriginal } from './customer-timeline.mjs';
 import { searchPlan, unifiedSearchPlan } from './search-plan.mjs';
+import { buildSearchQuery } from '../src/domain/search-query.mjs';
 import { OutreachMailboxes } from './outreach-mailboxes.mjs';
 import { OutreachService } from './outreach-service.mjs';
 import { handleOutreach } from './outreach-api.mjs';
@@ -82,7 +83,8 @@ export function validateInput(input, { requireOutreachConfirmation = false } = {
       validateAutoFirstTouch(input.auto_follow_up) && target.auto_first_touch === true;
   if (input.research_budget !== undefined)
     target.research_budget = validateResearchBudget(input.research_budget);
-  if (target.query_mode === 'auto') return { ...target, search_query: searchPlan(target)[0].query };
+  // The saved seed participates in request idempotency; dispatch has its own scoped plan.
+  if (target.query_mode === 'auto') return { ...target, search_query: buildSearchQuery(target) };
   if (
     typeof input.search_query !== 'string' ||
     !input.search_query.trim() ||

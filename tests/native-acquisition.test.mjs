@@ -2342,13 +2342,14 @@ test('到期的全部市场计划收录美国和澳大利亚窗饰商，排除�
       ['shenzhen', 'Mainland China'],
       ['lyon', 'France'],
       ['unlocated', null],
-      ['conflicting', 'Canada'],
+      ['conflicting', 'United States'],
+      ['china-address', null],
     ].map(([region, country]) => [
       `https://${region}-window.example.org/`,
       {
         name: region + ' Window Supply',
         country,
-        quote: `${region} Window Supply supplies complete outdoor zip screens for building windows${country ? ' in ' + country : ''}.`,
+        quote: `${region} Window Supply supplies complete outdoor zip screens for building windows${country ? ' in ' + country : ''}.${region === 'conflicting' ? ' Showroom: 1 Sample Road, Shenzhen.' : ''}`,
       },
     ]),
     [
@@ -2402,6 +2403,20 @@ test('到期的全部市场计划收录美国和澳大利亚窗饰商，排除�
           company_name: fact(name),
           entity_type: fact('business'),
           actual_country: country ? fact(country) : null,
+          address:
+            name === 'conflicting Window Supply'
+              ? {
+                  value: {
+                    street: '1 Sample Road',
+                    city: 'Shenzhen',
+                    country: null,
+                    region: null,
+                    postal_code: null,
+                  },
+                  quote: '1 Sample Road, Shenzhen',
+                  source_url,
+                }
+              : null,
           customer_type: fact('distributor'),
           production_model: fact('no_own_factory'),
           operating_model: fact('beyond_local'),
@@ -2426,7 +2441,7 @@ test('到期的全部市场计划收录美国和澳大利亚窗饰商，排除�
       readPage: async (url) => ({
         html:
           `<p>${fixtures.get(url.href).quote}</p>` +
-          (url.hostname.startsWith('conflicting-')
+          (/^(conflicting|china-address)-window/.test(url.hostname)
             ? '<script type="application/ld+json">{"@context":"https://schema.org","@type":"LocalBusiness","address":{"@type":"PostalAddress","streetAddress":"1 Sample Road","addressLocality":"Shenzhen","addressCountry":"CN"}}</script>'
             : ''),
       }),
@@ -2464,6 +2479,7 @@ test('到期的全部市场计划收录美国和澳大利亚窗饰商，排除�
       } = await request(schedulesPath + '?summary=1');
       assert.equal(plan.id, saved.id);
       assert.equal(plan.input.country, country);
+      if (country === 'worldwide') assert.equal(plan.input.search_query, '"zip screens" supplier');
       assert.deepEqual(
         plan.input.market_countries,
         country === 'worldwide' ? [] : ['United States'],
@@ -2494,13 +2510,21 @@ test('到期的全部市场计划收录美国和澳大利亚窗饰商，排除�
       if (country === 'worldwide') {
         assert.ok(queries.some((query) => /Australia/i.test(query)));
         assert.ok(queries.every((query) => !/France|China/i.test(query)));
-        for (const region of ['shenzhen', 'lyon', 'unlocated', 'conflicting'])
+        for (const region of ['shenzhen', 'lyon', 'unlocated'])
           assert.equal(
             job.rows.find(({ source_url }) => source_url.includes(region)).result,
-            ['unlocated', 'conflicting'].includes(region) ? 'review' : 'rejected',
+            region === 'unlocated' ? 'review' : 'rejected',
           );
         assert.ok(queries.every((query) => !/worldwide|所有国家/i.test(query)));
       }
+      assert.equal(
+        job.rows.find(({ source_url }) => source_url.includes('conflicting')).result,
+        'review',
+      );
+      assert.equal(
+        job.rows.find(({ source_url }) => source_url.includes('china-address')).result,
+        'rejected',
+      );
       const { leads } = await request(archivePath);
       assert.deepEqual(leads.map((lead) => lead.market).sort(), expected);
       assert.deepEqual(
@@ -2508,7 +2532,7 @@ test('到期的全部市场计划收录美国和澳大利亚窗饰商，排除�
         [...fixtures]
           .filter(
             ([, item]) =>
-              expected.includes(item.country) ||
+              (item.name !== 'conflicting Window Supply' && expected.includes(item.country)) ||
               (country === 'United States' && item.name === 'unlocated Window Supply'),
           )
           .map(([url, { name }]) => [name, url])
