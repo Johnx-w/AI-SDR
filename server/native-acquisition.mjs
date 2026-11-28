@@ -54,10 +54,11 @@ import {
   websiteAdmissionResearchSchema,
 } from './company-research.mjs';
 import { websiteAdmissionVersion } from './customer-eligibility.mjs';
-import { pageRelevance } from './relevance.mjs';
+import { countryMatches, pageRelevance } from './relevance.mjs';
 import { validateTarget } from './search-target.mjs';
 import {
   acquisitionMarkets,
+  acquisitionCountryNames,
   countryFor,
   WORLDWIDE_COUNTRY,
 } from '../src/domain/country-catalog.ts';
@@ -604,11 +605,12 @@ export class NativeAcquisition {
     input = { ...input, ...validateTarget(input) };
     const conditionsKey = exclusionConditionsKey(input);
     this.store.backfillExclusions();
-    const globalTerritory =
-      input.country === WORLDWIDE_COUNTRY &&
-      search?.scope === WORLDWIDE_COUNTRY &&
-      countryFor(search.country);
-    if (search?.country && !globalTerritory && !input.market_countries.includes(search.country))
+    const markets =
+      input.country === WORLDWIDE_COUNTRY ? acquisitionCountryNames : input.market_countries;
+    if (
+      (search?.country || input.country === WORLDWIDE_COUNTRY) &&
+      !markets.includes(search?.country)
+    )
       throw Object.assign(new Error('搜索国家不在当前支持的市场范围内'), { status: 400 });
     this.ensureConfigured();
     const byUrl = identityVersion === acquisitionIdentityVersion;
@@ -1636,6 +1638,8 @@ export class NativeAcquisition {
         Boolean(research.company_name) &&
         Boolean(identityVerified) &&
         research.product_match === 'matched' &&
+        !research.market_conflict &&
+        (input.country !== WORLDWIDE_COUNTRY || research.country_match === 'matched') &&
         !hardMismatch &&
         (!unified || research.eligibility?.status === 'eligible');
       if (
@@ -1800,6 +1804,8 @@ export class NativeAcquisition {
           首次发现时间: Date.now(),
           开发状态: '待开发',
         });
+      if (!old && !item.target_record_id && input.country === WORLDWIDE_COUNTRY)
+        raw['国家'] = research.actual_country;
       if (item.phone_only) {
         if (!old) throw new Error('仅更新电话需要明确的已有记录');
         raw = raw['电话'] ? { 电话: raw['电话'] } : {};
@@ -2377,6 +2383,31 @@ export class NativeAcquisition {
     return this.writePreparedAssessment(op);
   }
   async writePreparedAssessment(op) {
+    // An old paused operation may contain both a researched and a different prepared country.
+    if (op.action === 'insert') {
+      const country = op.input?.input?.country;
+      const allMarkets = country === WORLDWIDE_COUNTRY;
+      const markets = allMarkets ? acquisitionCountryNames : [country];
+      const preparedCountry = canonicalCustomerFields(op.fields)['国家'];
+      const storedMarket = countryFor(typeof preparedCountry === 'string' ? preparedCountry : null);
+      const researchMarket = countryFor(op.research?.actual_country);
+      const conflict = storedMarket && researchMarket && storedMarket.code !== researchMarket.code;
+      const market = countryMatches((storedMarket || researchMarket)?.name, markets);
+      if (!conflict && market === 'not_matched')
+        return this.rejectNewCandidate(op, '官网所在国家与目标市场不符');
+      if (conflict || op.research?.market_conflict || (allMarkets && !storedMarket))
+        return this.store.complete(
+          op,
+          this.output(op, {
+            research: op.research,
+            outcome: 'review',
+            reason:
+              conflict || op.research?.market_conflict
+                ? '官网的经营国家与地址证据不一致'
+                : '官网未核实企业位于获客筛选栏支持的国家',
+          }),
+        ).output;
+    }
     if (
       op.action === 'insert' &&
       op.admission_version === websiteAdmissionVersion &&

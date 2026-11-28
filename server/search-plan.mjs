@@ -1,8 +1,8 @@
 import { validateCountryScope } from './search-target.mjs';
 import acquisition from '../src/data/acquisition.json' with { type: 'json' };
-import { automaticSearchPlan } from '../src/domain/search-query.mjs';
+import { automaticSearchPlan, MAX_AUTO_SEARCH_QUERIES } from '../src/domain/search-query.mjs';
 import {
-  acquisitionMarkets,
+  acquisitionCountryNames,
   countryFor,
   WORLDWIDE_COUNTRY,
 } from '../src/domain/country-catalog.ts';
@@ -13,9 +13,7 @@ import { searchRegions } from './search-regions.mjs';
 export const unifiedExecutionVersion = 'unified-batches-v1';
 
 const localizedTerritories = {
-  FR: ['fr', 'France'],
   DE: ['de', 'Deutschland'],
-  ES: ['es', 'España'],
   MX: ['es', 'México'],
   AR: ['es', 'Argentina'],
   CL: ['es', 'Chile'],
@@ -25,7 +23,6 @@ const localizedTerritories = {
   NL: ['nl', 'Nederland'],
 };
 const localizedWords = {
-  fr: ['fournisseur', 'stores', 'rideaux', 'stores extérieurs', 'composants pour stores'],
   de: ['Anbieter', 'Fensterrollos', 'Gardinen', 'Markisen', 'Rollo Zubehör'],
   es: ['proveedor', 'persianas', 'cortinas', 'toldos', 'componentes para persianas'],
   pt: ['fornecedor', 'persianas', 'cortinas', 'toldos', 'acessórios para persianas'],
@@ -39,46 +36,40 @@ export function unifiedSearchPlan(input) {
     language: input.query_mode !== 'auto' && entry.query === input.search_query ? 'und' : 'en',
   }));
   const worldwide = input.country === WORLDWIDE_COUNTRY;
-  const territories = worldwide
-    ? [
-        ...new Set([
-          'United States',
-          'Mexico',
-          'France',
-          ...acquisitionMarkets.map(({ value }) => value),
-          'Spain',
-        ]),
-      ]
-    : [input.country];
+  const territories = worldwide ? acquisitionCountryNames : [input.country];
   const broad = isAllProductScope(input);
   const products = broad ? [] : productTerms(input);
   const markets = [];
   for (let round = 0; round < 4; round++) {
     for (const country of territories) {
-      const [language, place] = localizedTerritories[countryFor(country)?.code] || ['en', country];
-      const original = plan[(round + 1) % plan.length];
+      const [language, place] = localizedTerritories[countryFor(country)?.code] || [];
+      if (!language) continue;
       const words = localizedWords[language];
       const product = broad ? words?.[round + 1] : products[round % products.length];
-      const query =
-        product && words
-          ? `"${product}" ${words[0]} ${place}`
-          : worldwide
-            ? `${place} ${original.query}`
-            : original.query;
+      if (!product) continue;
       markets.push({
         country,
-        query: query.slice(0, 395),
+        query: `"${product}" ${words[0]} ${place}`.slice(0, 395),
         language,
-        ...(worldwide ? { scope: WORLDWIDE_COUNTRY } : {}),
       });
     }
   }
-  const interleaved = [plan[0]];
-  for (let index = 0; index < Math.max(markets.length, plan.length - 1); index++) {
+  const firstPass = worldwide ? Math.max(acquisitionCountryNames.length, products.length) : 1;
+  const interleaved = plan
+    .slice(0, firstPass)
+    .map(
+      (entry) =>
+        (worldwide && broad ? markets.find(({ country }) => country === entry.country) : null) ||
+        entry,
+    );
+  for (let index = 0; index < Math.max(markets.length, plan.length - firstPass); index++) {
     if (markets[index]) interleaved.push(markets[index]);
-    if (plan[index + 1]) interleaved.push(plan[index + 1]);
+    if (plan[index + firstPass]) interleaved.push(plan[index + firstPass]);
   }
-  return [...new Map(interleaved.map((entry) => [entry.query, entry])).values()];
+  return [...new Map(interleaved.map((entry) => [entry.query, entry])).values()].slice(
+    0,
+    MAX_AUTO_SEARCH_QUERIES,
+  );
 }
 
 const lane = ({ country, language }) => JSON.stringify([country, language]);
@@ -201,8 +192,17 @@ export function regionalSearchAfter(job) {
 export function searchPlan(input) {
   validateCountryScope(input);
   const country = input.country;
-  if (country === WORLDWIDE_COUNTRY || input.query_mode === 'auto' || isAllProductScope(input))
-    return automaticSearchPlan(input);
+  if (country === WORLDWIDE_COUNTRY) {
+    const plan = automaticSearchPlan(input);
+    const count = Math.min(MAX_AUTO_SEARCH_QUERIES, plan.length * acquisitionCountryNames.length);
+    const queries = Array.from({ length: count }, (_, index) => {
+      const country = acquisitionCountryNames[index % acquisitionCountryNames.length];
+      const { query } = plan[(index + Math.floor(index / plan.length)) % plan.length];
+      return { country, query: query.slice(0, 394 - country.length) + ' ' + country };
+    });
+    return [...new Map(queries.map((entry) => [entry.query, entry])).values()];
+  }
+  if (input.query_mode === 'auto' || isAllProductScope(input)) return automaticSearchPlan(input);
   // Quote multi-word product phrases so Tavily matches them as exact phrases
   // instead of scattering generic words (e.g. "awnings") across unrelated sites.
   const products = input.product

@@ -74,11 +74,16 @@ export const acquisitionApi = {
     target_count: number,
     timing: ScheduleTiming,
     key: string,
+    confirmed_auto_first_touch: boolean,
   ) =>
     request<AcquisitionSchedule>('/schedules', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
-      body: JSON.stringify({ name, input: { ...input, target_count }, timing }),
+      body: JSON.stringify({
+        name,
+        input: { ...input, target_count, confirmed_auto_first_touch },
+        timing,
+      }),
     }),
   updateSchedule: (
     id: string,
@@ -87,13 +92,14 @@ export const acquisitionApi = {
     target_count: number,
     timing: ScheduleTiming,
     sourceControlRevision?: number,
+    confirmed_auto_first_touch?: boolean,
   ) =>
     request<AcquisitionSchedule>(`/schedules/${encodeURIComponent(id)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name,
-        input: { ...input, target_count },
+        input: { ...input, target_count, confirmed_auto_first_touch },
         timing,
         sourceControlRevision,
       }),
@@ -140,11 +146,16 @@ export const acquisitionApi = {
         body: JSON.stringify({ source_url: sourceUrl, actor, decision }),
       },
     ),
-  createJob: (input: WorkflowInput, target_count: number, requestId: string) =>
+  createJob: (
+    input: WorkflowInput,
+    target_count: number,
+    requestId: string,
+    confirmed_auto_first_touch: boolean,
+  ) =>
     request<AcquisitionJob>('/jobs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Idempotency-Key': requestId },
-      body: JSON.stringify({ ...input, target_count }),
+      body: JSON.stringify({ ...input, target_count, confirmed_auto_first_touch }),
     }),
   controlJob: (
     id: string,

@@ -13,6 +13,7 @@ import {
 } from './search-plan.mjs';
 import { exclusionConditionsKey } from './exclusion-conditions.mjs';
 import { validateCountryScope } from './search-target.mjs';
+import { acquisitionCountryNames, WORLDWIDE_COUNTRY } from '../src/domain/country-catalog.ts';
 import { websiteAdmissionVersion } from './customer-eligibility.mjs';
 import {
   acquisitionUrl,
@@ -264,6 +265,7 @@ export class BatchJobs {
       ])
         job[key] = latest[key];
       job.input.auto_first_touch = latest.input.auto_first_touch;
+      job.input.auto_follow_up = latest.input.auto_follow_up;
       job.autoFirstTouchPaused = latest.autoFirstTouchPaused;
     }
     if (job.manualPaused && ['running', 'stopping', 'paused'].includes(job.status)) {
@@ -400,6 +402,7 @@ export class BatchJobs {
         job.outreachGeneration = (job.outreachGeneration || 0) + 1;
         job.outreachAuthorizationRevision = revision;
       }
+      if (!enabled || !job.input.auto_first_touch) job.input.auto_follow_up = false;
       job.input.auto_first_touch = enabled;
       job.sourceControlRevision = revision + 1;
       job.autoFirstTouchPaused = !enabled;
@@ -589,7 +592,10 @@ export class BatchJobs {
   async reconcile(job) {
     if (job.batch && job.pendingSearch && this.discoveryReady) {
       const id = job.searchStats.at(-1)?.discoveryRequestId;
-      if (!id || !(await this.discoveryReady(id)))
+      const retired =
+        job.input.country === WORLDWIDE_COUNTRY &&
+        !acquisitionCountryNames.includes(job.pendingSearch.country);
+      if ((!id && !retired) || (id && !(await this.discoveryReady(id))))
         throw fail(409, '当前搜索请求结果待供应商核对，暂未开启下一次搜索');
     }
     if (!job.current) return;
@@ -696,6 +702,21 @@ export class BatchJobs {
         throw fail(409, '来源控制已变化，请刷新后继续');
       // Reconcile any prior write first, then forbid new work in retired markets.
       validateCountryScope(job.input);
+      if (job.input.country === WORLDWIDE_COUNTRY) {
+        if (job.pendingSearch && !acquisitionCountryNames.includes(job.pendingSearch.country)) {
+          const metric = job.searchStats.at(-1);
+          if (metric) {
+            metric.status = 'failed';
+            metric.error = '该搜索已超出当前获客范围，未再次派发';
+            metric.completedAt ||= new Date(this.now()).toISOString();
+          }
+          job.pendingSearch = null;
+        }
+        if (job.queryPlan?.some(({ country }) => !acquisitionCountryNames.includes(country))) {
+          job.queryPlan = job.batch ? unifiedSearchPlan(job.input) : searchPlan(job.input);
+          job.cursor = 0;
+        }
+      }
       job.status = job.stopRequested ? 'stopping' : 'running';
       job.reason = '';
       job.manualPaused = false;

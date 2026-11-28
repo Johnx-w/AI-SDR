@@ -14,6 +14,11 @@ import {
 } from './customer-eligibility.mjs';
 import acquisition from '../src/data/acquisition.json' with { type: 'json' };
 import { isAllProductScope } from '../src/domain/acquisition-products.mjs';
+import {
+  acquisitionCountryNames,
+  countryFor,
+  WORLDWIDE_COUNTRY,
+} from '../src/domain/country-catalog.ts';
 import { RESEARCH_GAP, researchEvidencePages } from './research-text.mjs';
 import { verifyCompanyIdentity } from './company-identity.mjs';
 import { canonicalCustomerFields } from './customer-fields.mjs';
@@ -512,7 +517,28 @@ export function parseCompanyResearch(
       ? { status: 'not_matched', kind: null }
       : businessProductRelation(eligibleProducts, target);
   const product_match = product_relation.status;
-  const country_match = countryMatches(scalar('actual_country'), target.market_countries);
+  const allMarkets = target.country === WORLDWIDE_COUNTRY;
+  const reportedCountry = scalar('actual_country');
+  const statedMarket = countryFor(reportedCountry) || countryFor(address?.country);
+  const addresses = [address, ...(page.website_metadata?.addresses || [])]
+    .map((entry) => countryFor(entry?.country))
+    .filter(Boolean);
+  const evidenceMarket = statedMarket || addresses[0];
+  const conflictingMarket =
+    (allMarkets || target.market_countries?.length > 0) &&
+    addresses.some(({ code }) => code !== evidenceMarket.code);
+  const actual_country = allMarkets
+    ? (statedMarket?.name ?? null)
+    : reportedCountry || evidenceMarket?.name || null;
+  const candidateMarket = countryMatches(
+    evidenceMarket?.name || actual_country,
+    allMarkets ? acquisitionCountryNames : target.market_countries,
+  );
+  const country_match =
+    conflictingMarket || (allMarkets && !statedMarket && candidateMarket !== 'not_matched')
+      ? 'unknown'
+      : candidateMarket;
+  const marketUnverified = allMarkets && country_match === 'unknown';
   const entity_type = scalar('entity_type', 'unknown');
   const production_model = scalar('production_model', 'unknown');
   const operating_model = scalar('operating_model', 'unknown');
@@ -544,21 +570,25 @@ export function parseCompanyResearch(
       ? '官网产品与本次搜索目标不相关'
       : country_match === 'not_matched'
         ? '官网所在国家与目标市场不符'
-        : customer_type_match === 'not_matched'
-          ? '官网客户类型与本次筛选不符'
-          : profile_match === 'not_matched'
-            ? '官网业务画像与本次筛选不符'
-            : eligibility.status === 'rejected'
-              ? eligibility.reason
-              : company_identity.status === 'identity_conflict'
-                ? '官网存在多个经营主体名称，主体身份待核实'
-                : product_match === 'unknown'
-                  ? '官网未能核实与目标产品相关的产品线'
-                  : customer_type_match === 'unknown'
-                    ? '官网未能核实本次指定的客户类型'
-                    : profile_match === 'unknown'
-                      ? '官网未能核实本次指定的客户画像'
-                      : eligibility.reason;
+        : conflictingMarket
+          ? '官网的经营国家与地址证据不一致'
+          : marketUnverified
+            ? '官网未核实企业位于获客筛选栏支持的国家'
+            : customer_type_match === 'not_matched'
+              ? '官网客户类型与本次筛选不符'
+              : profile_match === 'not_matched'
+                ? '官网业务画像与本次筛选不符'
+                : eligibility.status === 'rejected'
+                  ? eligibility.reason
+                  : company_identity.status === 'identity_conflict'
+                    ? '官网存在多个经营主体名称，主体身份待核实'
+                    : product_match === 'unknown'
+                      ? '官网未能核实与目标产品相关的产品线'
+                      : customer_type_match === 'unknown'
+                        ? '官网未能核实本次指定的客户类型'
+                        : profile_match === 'unknown'
+                          ? '官网未能核实本次指定的客户画像'
+                          : eligibility.reason;
   return {
     ok: !reason,
     stage: 'done',
@@ -566,7 +596,7 @@ export function parseCompanyResearch(
     source_url: page.source_url,
     company_name: company_identity.name,
     company_identity,
-    actual_country: scalar('actual_country'),
+    actual_country,
     customer_type,
     customer_types,
     review_required:
@@ -575,11 +605,14 @@ export function parseCompanyResearch(
       ![product_match, country_match, customer_type_match, profile_match].includes('not_matched') &&
       (!company_identity.name ||
         company_identity.status === 'identity_conflict' ||
+        conflictingMarket ||
+        marketUnverified ||
         customer_type_match === 'unknown' ||
         product_match === 'unknown' ||
         eligibility.status === 'insufficient_evidence'),
     customer_type_match,
     country_match,
+    ...(conflictingMarket ? { market_conflict: true } : {}),
     product_match,
     product_relation,
     entity_type,
