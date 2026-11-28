@@ -2342,6 +2342,7 @@ test('到期的全部市场计划收录美国和澳大利亚窗饰商，排除�
       ['shenzhen', 'Mainland China'],
       ['lyon', 'France'],
       ['unlocated', null],
+      ['conflicting', 'Canada'],
     ].map(([region, country]) => [
       `https://${region}-window.example.org/`,
       {
@@ -2422,7 +2423,13 @@ test('到期的全部市场计划收录美国和澳大利亚窗饰商，排除�
     const native = new NativeAcquisition({
       env: localEnv,
       fetchImpl,
-      readPage: async (url) => ({ html: `<p>${fixtures.get(url.href).quote}</p>` }),
+      readPage: async (url) => ({
+        html:
+          `<p>${fixtures.get(url.href).quote}</p>` +
+          (url.hostname.startsWith('conflicting-')
+            ? '<script type="application/ld+json">{"@context":"https://schema.org","@type":"LocalBusiness","address":{"@type":"PostalAddress","streetAddress":"1 Sample Road","addressLocality":"Shenzhen","addressCountry":"CN"}}</script>'
+            : ''),
+      }),
     });
     await withApp({ env: localEnv, nativeImpl: native, fetchImpl }, async (base) => {
       const request = async (path, body) => {
@@ -2487,10 +2494,10 @@ test('到期的全部市场计划收录美国和澳大利亚窗饰商，排除�
       if (country === 'worldwide') {
         assert.ok(queries.some((query) => /Australia/i.test(query)));
         assert.ok(queries.every((query) => !/France|China/i.test(query)));
-        for (const region of ['shenzhen', 'lyon', 'unlocated'])
+        for (const region of ['shenzhen', 'lyon', 'unlocated', 'conflicting'])
           assert.equal(
             job.rows.find(({ source_url }) => source_url.includes(region)).result,
-            region === 'unlocated' ? 'review' : 'rejected',
+            ['unlocated', 'conflicting'].includes(region) ? 'review' : 'rejected',
           );
         assert.ok(queries.every((query) => !/worldwide|所有国家/i.test(query)));
       }

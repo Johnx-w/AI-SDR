@@ -1803,6 +1803,8 @@ export class NativeAcquisition {
           首次发现时间: Date.now(),
           开发状态: '待开发',
         });
+      if (!old && !item.target_record_id && input.country === WORLDWIDE_COUNTRY)
+        raw['国家'] = research.actual_country;
       if (item.phone_only) {
         if (!old) throw new Error('仅更新电话需要明确的已有记录');
         raw = raw['电话'] ? { 电话: raw['电话'] } : {};
@@ -2383,7 +2385,7 @@ export class NativeAcquisition {
     // Older paused rounds may have prepared an insert under the former unrestricted scope.
     if (op.action === 'insert' && op.input.input?.country === WORLDWIDE_COUNTRY) {
       const market = countryMatches(
-        op.research?.actual_country || op.research?.address?.country,
+        canonicalCustomerFields(op.fields)['国家'] || op.research?.actual_country,
         acquisitionCountryNames,
       );
       if (market === 'not_matched')

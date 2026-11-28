@@ -54,12 +54,13 @@ export function unifiedSearchPlan(input) {
       });
     }
   }
-  const firstPass = worldwide ? acquisitionCountryNames.length : 1;
+  const firstPass = worldwide ? Math.max(acquisitionCountryNames.length, products.length) : 1;
   const interleaved = plan
     .slice(0, firstPass)
     .map(
       (entry) =>
-        (worldwide ? markets.find(({ country }) => country === entry.country) : null) || entry,
+        (worldwide && broad ? markets.find(({ country }) => country === entry.country) : null) ||
+        entry,
     );
   for (let index = 0; index < Math.max(markets.length, plan.length - firstPass); index++) {
     if (markets[index]) interleaved.push(markets[index]);
@@ -191,16 +192,16 @@ export function regionalSearchAfter(job) {
 export function searchPlan(input) {
   validateCountryScope(input);
   const country = input.country;
-  if (country === WORLDWIDE_COUNTRY)
-    return automaticSearchPlan(input)
-      .slice(0, Math.ceil(MAX_AUTO_SEARCH_QUERIES / acquisitionCountryNames.length))
-      .flatMap(({ query }) =>
-        acquisitionCountryNames.map((country) => ({
-          country,
-          query: query.slice(0, 394 - country.length) + ' ' + country,
-        })),
-      )
-      .slice(0, MAX_AUTO_SEARCH_QUERIES);
+  if (country === WORLDWIDE_COUNTRY) {
+    const plan = automaticSearchPlan(input);
+    const count = Math.min(MAX_AUTO_SEARCH_QUERIES, plan.length * acquisitionCountryNames.length);
+    const queries = Array.from({ length: count }, (_, index) => {
+      const country = acquisitionCountryNames[index % acquisitionCountryNames.length];
+      const { query } = plan[(index + Math.floor(index / plan.length)) % plan.length];
+      return { country, query: query.slice(0, 394 - country.length) + ' ' + country };
+    });
+    return [...new Map(queries.map((entry) => [entry.query, entry])).values()];
+  }
   if (input.query_mode === 'auto' || isAllProductScope(input)) return automaticSearchPlan(input);
   // Quote multi-word product phrases so Tavily matches them as exact phrases
   // instead of scattering generic words (e.g. "awnings") across unrelated sites.

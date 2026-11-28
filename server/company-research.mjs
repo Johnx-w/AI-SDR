@@ -520,11 +520,12 @@ export function parseCompanyResearch(
   const allMarkets = target.country === WORLDWIDE_COUNTRY;
   const reportedCountry = scalar('actual_country');
   const reportedMarket = countryFor(reportedCountry);
-  const addressMarket = allMarkets && countryFor(address?.country);
+  const addressMarket =
+    allMarkets && countryFor((address || page.website_metadata?.addresses?.[0])?.country);
   const conflictingMarket =
     reportedMarket && addressMarket && reportedMarket.code !== addressMarket.code;
   const actual_country = allMarkets
-    ? ((reportedMarket || addressMarket)?.name ?? null)
+    ? ((reportedMarket || countryFor(address?.country))?.name ?? null)
     : reportedCountry;
   const country_match = conflictingMarket
     ? 'unknown'

@@ -18,6 +18,7 @@ import { BatchJobs } from '../server/batch-jobs.mjs';
 import { withApp } from './helpers/http.mjs';
 import { acquisitionMarkets, countryFor, marketTimeZone } from '../src/domain/country-catalog.ts';
 import { scheduleRepeatLabel } from '../src/domain/schedule-timing.mjs';
+import { builtinProducts } from '../src/domain/acquisition-products.mjs';
 
 const input = {
   country: 'United States',
@@ -216,11 +217,11 @@ test('定时计划 API 保存并读回 25 国的工作日当地时间', async ()
 
 test('搜索预览按范围生成实际查询，全球不把范围标签发给搜索服务', async () => {
   await withApp({ env: nativeEnv }, async (base) => {
-    const preview = async (country) => {
+    const preview = async (country, fields = {}) => {
       const response = await fetch(base + '/api/v1/acquisition/search-preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ country, product: 'zip screens' }),
+        body: JSON.stringify({ country, product: 'zip screens', ...fields }),
       });
       assert.equal(response.status, 200);
       return (await response.json()).queries;
@@ -245,6 +246,14 @@ test('搜索预览按范围生成实际查询，全球不把范围标签发给�
     );
     assert.ok(global.every(({ query }) => !/worldwide|所有国家/i.test(query)));
     assert.ok(usa.every(({ country }) => country === 'United States'));
+    const products = builtinProducts.slice(0, 30);
+    assert.equal(products.length, 30);
+    const specific = await preview('worldwide', { product_scope: 'specific', products });
+    for (const product of products)
+      assert.ok(
+        specific.some(({ query }) => query.includes(`"${product.value}"`)),
+        product.value,
+      );
   });
 });
 

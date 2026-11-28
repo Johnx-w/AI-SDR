@@ -8,7 +8,7 @@ T12 自动同步随本次版本交付，使用运行环境有效飞书连接和�
 
 ## 当前业务与运行入口
 
-全球获客计划、官网准入、跨批累计新增和 Scrapling 排队补抓已有本地实现。正式发布范围为官网，地图发现保留隔离测试。生产获客由用户启动。见[实施规格](unified-acquisition/spec.md)、[实施任务](unified-acquisition/tasks.md)及[统一验收与发布报告](unified-acquisition/release-acceptance.md)。
+获客计划、官网准入、跨批累计新增和 Scrapling 排队补抓已有本地实现。「所有国家」覆盖筛选栏中的 25 个出口市场，新任务及重跑默认仅获客。正式发布范围为官网，地图发现保留隔离测试。生产获客由用户启动。见[现行获客规则](acquisition.md)、[实施规格](unified-acquisition/spec.md)、[实施任务](unified-acquisition/tasks.md)及[统一验收与发布报告](unified-acquisition/release-acceptance.md)。
 
 陌生供应商的 PDF、Excel、Word 和 Markdown 报价表接入、人工校对及按邮箱起草见[图文报价清单](mail-automation/README.md#图文报价清单)。
 

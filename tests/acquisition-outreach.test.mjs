@@ -846,6 +846,25 @@ test('发送前异步读取期间暂停，即使尚未同步触达状态也不�
   }
 });
 
+test('开启旧仅获客计划的首发不会继承隐藏的跟进开关', async () => {
+  const h = harness();
+  try {
+    const plan = h.plan();
+    h.plans.save({
+      ...plan,
+      input: { ...plan.input, auto_first_touch: false, auto_follow_up: true },
+    });
+    const enabled = h.plans.controlOutreach(plan.id, true);
+    assert.equal(enabled.input.auto_first_touch, true);
+    assert.equal(enabled.input.auto_follow_up, false);
+    const job = h.create(enabled.input, enabled.id);
+    h.service.syncAcquisition();
+    assert.equal(h.service.campaign('acquisition-' + job.id).followUpEnabled, false);
+  } finally {
+    await h.close();
+  }
+});
+
 test('HTTP开关校验、查询及原计划控制贯通，未开启的历史计划不纳入自动首发', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'automatic-first-touch-api-'));
   try {
@@ -891,7 +910,7 @@ test('HTTP开关校验、查询及原计划控制贯通，未开启的历史计�
           '开启原计划不回扫历史库',
         );
         assert.equal((await post('/jobs', { ...input, auto_first_touch: 'true' })).status, 400);
-        const response = await post('/jobs', input);
+        const response = await post('/jobs', { ...input, confirmed_auto_first_touch: true });
         assert.equal(response.status, 202);
         let job = await response.json();
         assert.equal(job.input.auto_first_touch, true);

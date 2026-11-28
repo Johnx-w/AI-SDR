@@ -285,6 +285,8 @@ export class AcquisitionSchedules {
           notify: false,
         });
       if (changes) Object.assign(plan, changes);
+      if (!enabled || (!changes && !original.input.auto_first_touch))
+        plan.input.auto_follow_up = false;
       plan.input.auto_first_touch = validateAutoFirstTouch(enabled);
       this.save(plan);
       this.db.prepare('DELETE FROM outreach_authorizations WHERE id=?').run(id);

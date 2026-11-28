@@ -58,6 +58,69 @@ function harness(extra = {}) {
   return { manager, leads };
 }
 
+test('旧全球任务继续前核对原搜索，并改用筛选栏市场查询', async () => {
+  const retired = { country: '', query: '"zip screens" supplier' };
+  const seen = [];
+  const reconciled = [];
+  const leads = [];
+  const { manager } = harness({
+    identityVersion: 'registered-operator-v1',
+    discoveryReady: async (id) => {
+      reconciled.push(id);
+      return true;
+    },
+    discover: async (_target, search) => {
+      seen.push(search.country);
+      return { candidates: [{ source_url: 'https://candidate.example.org/' }] };
+    },
+    readLeads: async () => leads,
+    research: async (_target, item) => {
+      leads.push({ id: 'new-lead', name: 'Verified lead', website: item.source_url });
+      return {
+        新增: 1,
+        明细: [
+          {
+            result: 'inserted',
+            source_url: item.source_url,
+            record_id: 'new-lead',
+            capture: {
+              operation_id: item.operation_id,
+              record_id: 'new-lead',
+              mode: 'automatic',
+              job_id: item.job_id,
+              confirmed_at: new Date().toISOString(),
+            },
+          },
+        ],
+      };
+    },
+  });
+  try {
+    const job = manager.create(
+      { ...input, country: 'worldwide', target_count: 1 },
+      'retired-search',
+    );
+    manager.save({
+      ...job,
+      status: 'paused',
+      pendingSearch: retired,
+      queryPlan: [retired],
+      searches: 1,
+      searchStats: [{ ...retired, status: 'uncertain', discoveryRequestId: 'old-paid-search' }],
+    });
+    await manager.resume(job.id);
+    await manager.work(job.id);
+    const record = manager.get(job.id);
+    assert.deepEqual(reconciled, ['old-paid-search']);
+    assert.deepEqual(seen, ['United States']);
+    assert.equal(record.status, 'completed');
+    assert.equal(record.inserted, 1);
+    assert.equal(record.searchStats[0].discoveryRequestId, 'old-paid-search');
+  } finally {
+    await manager.close();
+  }
+});
+
 test('同一计划重启后先研究剩余候选，消费完才从下一条查询接续', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'batch-continuation-'));
   const path = join(dir, 'jobs.sqlite');
