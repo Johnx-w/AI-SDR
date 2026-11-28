@@ -4,6 +4,10 @@ import { renderMailboxSignature } from '../src/domain/mail-signature.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { handleOutreach } from '../server/outreach-api.mjs';
 import { categoryPreviewFixture } from './fixtures/category-preview.mjs';
 function api(h, path, method = 'GET', body) {
@@ -14,6 +18,230 @@ function api(h, path, method = 'GET', body) {
     readJson: async () => body,
   });
 }
+test('按发件邮箱保存并预览各自话术，共用天数，新邮箱没有共享话术', async (t) => {
+  const h = categoryPreviewFixture(0);
+  t.after(h.close);
+  const [roller, shutter] = h.boxes;
+  h.boxes.push({
+    ...roller,
+    id: 'new-sender',
+    email: 'new@honeybadgerblinds.com',
+  });
+  const settings = (box, method, body) =>
+    api(h, '/sequence-policy?mailboxId=' + box.id, method, body);
+  for (const [box, subject, intro, follow] of [
+    [roller, 'Roller blinds', 'We supply roller blinds.', 'May I send our roller blinds brochure?'],
+    [shutter, 'PVC shutters', 'We supply PVC shutters.', 'May I send our PVC shutters brochure?'],
+  ]) {
+    const current = await settings(box);
+    await settings(box, 'PUT', {
+      ...current,
+      firstTemplate: { subject, body: intro },
+      steps: [
+        { day: 3, template: { subject: '', body: follow } },
+        { day: 7, template: { subject: '', body: 'Happy to answer any questions.' } },
+      ],
+    });
+  }
+  for (const [box, category, subject, intro, follow] of [
+    [
+      roller,
+      'manufacturer',
+      'Roller blinds',
+      'We supply roller blinds.',
+      'May I send our roller blinds brochure?',
+    ],
+    [
+      shutter,
+      'distributor',
+      'PVC shutters',
+      'We supply PVC shutters.',
+      'May I send our PVC shutters brochure?',
+    ],
+  ]) {
+    const saved = await settings(box);
+    assert.deepEqual(saved.firstTemplate, { subject, body: intro });
+    assert.deepEqual(
+      saved.steps.map((s) => s.day),
+      [3, 7],
+    );
+    const preview = (step, day) =>
+      api(h, '/sequence-policy/preview', 'POST', { mailboxId: box.id, category, step, day });
+    const first = await preview(0, 0);
+    const followUp = await preview(1, 3);
+    assert.equal(first.subject, subject);
+    assert.equal(first.body, [first.greeting, intro, box.signature].join('\n\n'));
+    assert.equal(followUp.subject, 'Re: ' + subject);
+    assert.equal(followUp.body, [followUp.greeting, follow, box.signature].join('\n\n'));
+  }
+  const empty = await settings(h.boxes.at(-1));
+  assert.equal(empty.firstTemplate, undefined);
+  assert.deepEqual(empty.steps, [
+    { day: 3, instruction: '' },
+    { day: 7, instruction: '' },
+  ]);
+  await assert.rejects(
+    api(h, '/sequence-policy/preview', 'POST', {
+      mailboxId: empty.mailboxId,
+      category: 'manufacturer',
+      step: 0,
+    }),
+    /填写.*话术/,
+  );
+  assert.equal(h.requests.length, 0);
+  assert.equal(h.sends, 0);
+  const updated = await settings(roller);
+  await settings(roller, 'PUT', {
+    ...updated,
+    steps: [{ ...updated.steps[0], day: 4, previousDay: 3 }, updated.steps[1]],
+  });
+  const other = await settings(shutter);
+  assert.deepEqual(
+    other.steps.map((s) => s.day),
+    [4, 7],
+  );
+  assert.equal(other.steps[0].template?.body, 'May I send our PVC shutters brochure?');
+  const pendingSender = h.boxes.at(-1);
+  const pending = await settings(pendingSender);
+  await settings(pendingSender, 'PUT', {
+    ...pending,
+    firstTemplate: { subject: 'Window coverings', body: 'Our range includes roller blinds.' },
+    steps: [
+      { day: 4, template: { subject: '', body: 'Would more details help?' } },
+      pending.steps[1],
+    ],
+  });
+  assert.equal((await settings(pendingSender)).ready, false);
+  const removing = await settings(roller);
+  await settings(roller, 'PUT', { ...removing, steps: removing.steps.slice(0, 1) });
+  assert.equal((await settings(pendingSender)).ready, true);
+});
+test('未授权自动跟进的邮箱不阻止其他计划启用新增天数', async (t) => {
+  const h = categoryPreviewFixture(0);
+  t.after(h.close);
+  for (const [id, followUpEnabled, status, approvedRevision] of [
+    ['box-0', true, 'active', 1],
+    ['box-1', false, 'active', 1],
+    ['box-2', true, 'paused', null],
+  ]) {
+    h.service.putCampaign({
+      id,
+      mode: 'production',
+      scope: 'preview-qa',
+      status,
+      revision: 1,
+      approvedRevision,
+      mailboxIds: [id],
+      filters: { products: [h.boxes.find((box) => box.id === id).productIds[0]] },
+      productScopes: h.products.map(outreachProductScope),
+      followUpEnabled,
+    });
+  }
+  const path = '/sequence-policy?mailboxId=box-0';
+  const current = await api(h, path);
+  const saved = await api(h, path, 'PUT', {
+    ...current,
+    steps: [...current.steps, { day: 10, template: { subject: '', body: 'A final note.' } }],
+  });
+  assert.deepEqual(saved.activeDays, [3, 7, 10]);
+  await api(h, '/campaigns/box-1/follow-ups', 'POST', { action: 'enable' });
+  assert.deepEqual((await api(h, path)).activeDays, [3, 7]);
+  assert.equal((await api(h, '/sequence-policy?mailboxId=box-1')).ready, true);
+  await api(h, '/campaigns/box-1/follow-ups', 'POST', { action: 'disable' });
+  assert.deepEqual((await api(h, path)).activeDays, [3, 7, 10]);
+});
+
+test('编辑期间发件地址被替换时，旧话术不能保存或预览到新地址', async (t) => {
+  const h = categoryPreviewFixture(0);
+  t.after(h.close);
+  const path = '/sequence-policy?mailboxId=box-0';
+  const editor = await api(h, path);
+  h.boxes[0].email = 'replacement@honeybadgerblinds.com';
+  const template = {
+    subject: 'Old sender introduction',
+    body: 'Our range includes roller blinds.',
+  };
+  const expectedMailboxEmail = 'sales@honeybadgerblinds.com';
+  await assert.rejects(
+    api(h, path, 'PUT', { ...editor, expectedMailboxEmail, firstTemplate: template }),
+    { status: 409 },
+  );
+  await assert.rejects(
+    api(h, '/sequence-policy/preview', 'POST', {
+      mailboxId: 'box-0',
+      expectedMailboxEmail,
+      category: 'distributor',
+      step: 0,
+      template,
+    }),
+    { status: 409 },
+  );
+  assert.equal((await api(h, path)).firstTemplate, undefined);
+  assert.equal(h.requests.length, 0);
+});
+
+test('旧库共享话术各复制一份，独立保存后重启仍保留各自模板', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'outreach-sequence-migration-'));
+  const path = join(dir, 'outreach.sqlite');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const old = {
+    name: '采购回访',
+    firstTemplate: { subject: 'Catalogue', body: 'May I send our catalogue?' },
+    steps: [
+      { day: 3, instruction: '', template: { subject: '', body: 'Did you see our note?' } },
+      { day: 7, instruction: 'Ask if they need more information.' },
+    ],
+  };
+  {
+    using db = new DatabaseSync(path);
+    db.exec(
+      'CREATE TABLE outreach_sequence_policies(revision INTEGER PRIMARY KEY, data TEXT NOT NULL)',
+    );
+    db.prepare('INSERT INTO outreach_sequence_policies VALUES(1,?)').run(JSON.stringify(old));
+  }
+  let h = categoryPreviewFixture(0, undefined, path);
+  const settings = (box, method, body) =>
+    api(h, '/sequence-policy?mailboxId=box-' + box, method, body);
+  try {
+    for (const id of [0, 1]) {
+      const actual = await settings(id);
+      assert.deepEqual(actual.firstTemplate, old.firstTemplate);
+      assert.deepEqual(actual.steps[0], old.steps[0]);
+      assert.deepEqual(actual.steps[1], {
+        ...old.steps[1],
+        template: { subject: '', body: '{{ai_body}}' },
+      });
+      assert.deepEqual(actual.activeDays, [3, 7]);
+    }
+    const first = await settings(0);
+    await settings(0, 'PUT', {
+      ...first,
+      firstTemplate: { subject: 'Roller blinds', body: 'We supply roller blinds.' },
+    });
+    const second = await settings(1);
+    await settings(1, 'PUT', {
+      ...second,
+      steps: [
+        { day: 3, template: { subject: '', body: 'May I send our PVC shutters catalogue?' } },
+        second.steps[1],
+      ],
+    });
+  } finally {
+    await h.close();
+  }
+  h = categoryPreviewFixture(0, undefined, path);
+  try {
+    assert.equal((await settings(0)).firstTemplate.subject, 'Roller blinds');
+    assert.deepEqual((await settings(0)).steps[0], old.steps[0]);
+    assert.deepEqual((await settings(1)).firstTemplate, old.firstTemplate);
+    assert.equal(
+      (await settings(1)).steps[0].template.body,
+      'May I send our PVC shutters catalogue?',
+    );
+  } finally {
+    await h.close();
+  }
+});
 test('固定首封与跟进预览不调用模型，AI 步骤只生成当前邮件', async (t) => {
   const h = categoryPreviewFixture(0);
   t.after(h.close);

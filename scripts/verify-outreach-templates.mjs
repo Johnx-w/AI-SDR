@@ -52,6 +52,8 @@ try {
   await page.goto(base + '/demo');
   assert.equal(page.url(), base + '/inbox?tab=sequences');
   const policy = page.getByRole('region', { name: '未回复跟进规则' });
+  const sender = policy.getByLabel('发件邮箱', { exact: true });
+  await sender.selectOption('demo-box');
 
   for (const label of ['起点', '首封后第 3 天', '首封后第 7 天'])
     await policy.getByText(label, { exact: true }).waitFor();
@@ -103,7 +105,7 @@ try {
   await button('生成建议').click();
   await button('采用建议').click();
   assert.equal(
-    await page.getByLabel('主题', { exact: true }).inputValue(),
+    await page.getByLabel('邮件主题模板', { exact: true }).inputValue(),
     '{{product}} for {{company}}',
   );
   assert.equal(await emailBody.inputValue(), 'Would a brief overview help?');
@@ -188,6 +190,7 @@ try {
   await settings();
   await page.getByLabel('跟进 3 天数').fill('1');
   await page.getByLabel('跟进 3 写作要求').fill(follow);
+  await emailBody.fill('{{ai_body}}');
   const previewRequest = page.waitForRequest((r) => r.url().endsWith('/sequence-policy/preview'));
   await preview();
   assert.equal((await previewRequest).postDataJSON().step, 1);
@@ -201,6 +204,7 @@ try {
   await button('保存序列').click();
   await page.getByText('序列已保存').waitFor();
   await page.reload();
+  await sender.selectOption('demo-box');
   await button('编辑序列').click();
   await settings();
   assert.equal(await page.getByLabel('希望客户回什么').inputValue(), 'sourcing');

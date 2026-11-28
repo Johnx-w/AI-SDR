@@ -46,7 +46,13 @@
 
 新增业务操作使用持久幂等编号；编辑核对当前版本。旧评估历史重试返回 410；旧固定邮箱试点 /api/v1/mail/\*、已移除搜索词生成接口返回 404。查看收件箱只读取缓存。正常业务服务同步新来信后按邮箱策略登记接待、生成草稿或自动回复，人工发送走 reply 入口。实数查看实例使用独立的只读 IMAP 同步路径，停用发信及自动接待。
 
-`POST /api/v1/outreach/campaigns/:id/follow-ups` 接受 enable、disable、pause、resume，在所属计划控制追信。`GET /api/v1/outreach/sequence-policy` 读取工作区默认策略，`PUT` 携带当前版本、规则名、首封正文（`firstBodyInstruction`）和结尾（`firstInstruction`）写作要求，以及各跟进步的天数和要求。省略首封字段时保留现值，空字符串恢复默认。首封与各步可保存主题／正文模板和带写作指引的自定义 AI 变量，按当前收件人的已核实资料展开。`POST /api/v1/outreach/sequence-policy/assist` 生成整封、主题、片段或选区改写建议，业务员采用后写入模板。`GET /api/v1/outreach/sequence-policy/preview-options` 返回现有客户经营角色、邮箱及其获准产品，不返回客户名单。`GET /api/v1/outreach/sequence-policy/sample` 按 `category`、`mailboxId` 和可选 `productId` 从当前 SQLite 客户库取一个真实代表客户；`after` 用于更换同类样本，`sampleId` 精确重验已选样本。数据库按作用域、编号及角色事实筛选，每批最多 50 份档案，完整遍历而不依赖列表第一页。`POST /api/v1/outreach/sequence-policy/preview` 传相同范围和样本编号，以及未保存模板、步骤和写作规则；只调用正式生成器，不创建业务任务或发送邮件。首封传 `step: 0`，跟进传排期顺序及跟进日，使用相同样本生成首封与之前各步作为上下文。返回完整主题、正文、签名、样本证据及实际规则，缺证或产品不适用时报错。详见[分类预览验收](mail-automation/category-preview.md)。新首封草稿记录生成时的 `firstTemplateRevision`。`outreach_sequence_policies` 保留各版配置，首封提交 SMTP 时记录版本。首封成功入账时，同一事务按实际发送时间在 `outreach_followups` 生成该版本的步骤，默认在第 3、7 天各发一次。首封目标已完成的计划仍可继续追信，后续发送与首封共用邮箱限额。每分钟后台收信，发送前再次完整核对，记录失败只补记录；旧人工任务不进入执行器。
+`POST /api/v1/outreach/campaigns/:id/follow-ups` 接受 enable、disable、pause、resume，在所属计划控制追信。`GET /api/v1/outreach/sequence-policy?mailboxId=…` 从本地 SQLite 读取所选邮箱的话术、共用日期、已生效日期及首发话术的配齐状态。对应 `PUT` 携带当前版本、名称、首封字段和完整跟进日期列表。话术字段省略时保留，`template: null` 清空该步，`previousDay` 将各邮箱同一步的话术移到新的日期。页面保存和预览携带打开时的 `expectedMailboxEmail`，若发件地址已更换则返回 409。过期修改也返回 409。首次升级按当时邮箱身份（编号与发件地址）复制最新共享模板，历史策略版本继续可读。
+
+`POST /api/v1/outreach/sequence-policy/assist` 生成写作建议，由业务员选择是否采用。`GET /api/v1/outreach/sequence-policy/preview-options` 返回客户经营角色、邮箱及其获准产品。`GET /api/v1/outreach/sequence-policy/sample` 按 `category`、`mailboxId` 和可选 `productId` 从当前 SQLite 客户库取代表客户，`after` 用于更换样本，`sampleId` 精确重验已选样本。数据库按作用域、编号及角色事实筛选，每批最多 50 份档案。预览 `POST /api/v1/outreach/sequence-policy/preview` 传相同范围、样本编号和步骤，首封传 `step: 0`，跟进传排期顺序及跟进日，提供 `template` 时预览未保存话术，省略时取对应邮箱的已保存话术。模型只生成当前邮件引用的 AI 内容。详见[分类预览验收](mail-automation/category-preview.md)。
+
+邮箱话术和共用排期版本保存在 `outreach_mailbox_sequence_policies`。保留初始排期中仍存在的日期，按当前计划授权、产品资格和邮箱话术完整度重新核对新增日期。手动计划以保存的产品范围为准，获客计划读取当前有效产品，复用首封的产品资格与邮箱覆盖校验。页面读取和 SMTP 提交采用同一生效判定。首封草稿记录生成时的 `firstTemplateRevision`，SMTP 提交时把所选邮箱的已生效步骤按旧版可读结构冻结到 `outreach_sequence_policies` 的负编号记录，首封保存该编号。相同快照复用记录。确认成功后在同一事务写入 `outreach_followups`。执行使用排期记录中的话术，沿用固定邮箱和原线程。已完成首封目标的计划可继续追信，后续发送与首封共用邮箱限额。发送前再次完整收信核对。
+
+代码回退到旧版时，旧版读取原表最高正编号的共享策略处理回退期间新提交的首封。已提交首封按自身保存的编号读取冻结快照，已有跟进任务继续使用原记录。回退期间保存的共享配置留在旧表，重新升级沿用各邮箱已有的独立配置。若隔离环境曾运行过本功能的初版，启动迁移会把初版策略移入独立表，并为引用初版策略的首封补写兼容快照。保留两张表和现有邮件记录，按标准代码回退流程核对。
 
 T1/T3 与独立 T4 目标分别同步，共享同一份去重日志，避免多个实例覆盖映射；单独配置或同步 T4 失败不跳过 T1/T3。自动需求提取先本地保存，不以飞书可用为前提。
 

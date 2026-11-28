@@ -598,7 +598,12 @@ export function selectOutreachCandidates({
       reject('sender_identity_incomplete', '请先填写可用邮箱的发件人名称和固定签名');
       continue;
     }
-    const availableSenders = readySenders.filter(
+    const configuredSenders = readySenders.filter((mailbox) => mailbox.sequenceReady !== false);
+    if (!configuredSenders.length) {
+      reject('mailbox_sequence_incomplete', '请先配齐该产品对应发件邮箱的首封和各轮跟进话术');
+      continue;
+    }
+    const availableSenders = configuredSenders.filter(
       (mailbox) =>
         previewOnly ||
         (Number.isSafeInteger(mailbox.dailyLimit) && mailbox.dailyLimit > workload(mailbox)),

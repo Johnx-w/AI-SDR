@@ -9,7 +9,8 @@ import { createApp } from '../server/app.mjs';
 import { OutreachService } from '../server/outreach-service.mjs';
 import { createOutreachGenerator } from '../server/outreach-content.mjs';
 import { generateFollowUp } from '../server/outreach-follow-ups.mjs';
-import { saveSequencePolicy } from '../server/outreach-sequence-policy.mjs';
+import { mailboxSequencePolicy, saveSequencePolicy } from '../server/outreach-sequence-policy.mjs';
+import { defaultTemplate } from '../src/domain/sequence-email.mjs';
 
 let port = Number(process.argv[2] || 14374);
 const dir = mkdtempSync(join(tmpdir(), 'ai-sdr-template-demo-'));
@@ -257,8 +258,12 @@ async function submit(plan) {
   assert.equal(service.deliveries(plan.id, ['accepted']).length, plan.targetCount);
 }
 function revision(firstInstruction, steps) {
-  const policy = service.followUps.policy();
-  return saveSequencePolicy(service, { ...policy, firstInstruction, steps });
+  const policy = mailboxSequencePolicy(service, box.id);
+  return saveSequencePolicy(service, {
+    ...policy,
+    firstInstruction,
+    steps: steps.map((step) => ({ ...step, template: step.template ?? defaultTemplate(false) })),
+  });
 }
 const dayThree = [{ day: 3, instruction: follow }];
 function groups(batch) {
@@ -272,7 +277,7 @@ function groups(batch) {
   );
   return [pool.slice(0, 2), pool.slice(2)];
 }
-const initialPolicy = service.followUps.policy();
+const initialPolicy = mailboxSequencePolicy(service, box.id);
 const [a7, b7] = groups('07'),
   [a8, b8] = groups('08');
 revision('', dayThree);
@@ -340,7 +345,7 @@ revision(initialPolicy.firstInstruction, initialPolicy.steps);
 
 if (process.env.SEQUENCE_SCROLL_PROTOTYPE) {
   saveSequencePolicy(service, {
-    ...service.followUps.policy(),
+    ...mailboxSequencePolicy(service, box.id),
     firstTemplate: {
       subject: '{{product}} supply for {{company}}',
       body: [

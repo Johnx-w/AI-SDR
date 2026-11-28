@@ -50,6 +50,7 @@ function harness(t, { path = ':memory:', loadLeads = async () => [], recordAccep
   let response = batch([]);
   const mailboxes = {
     list: () => [mailbox],
+    get: (id) => (id === mailbox.id ? mailbox : undefined),
     readMailbox: async (id) => {
       reads.push(id);
       return structuredClone(response);
@@ -134,6 +135,7 @@ test('首封结果未知时等待已发件证据，追信到期相对于实际�
   await h.service.reconcileDelivery('unknown');
   assert.equal(h.service.followUps.all().length, 0);
   saveSequencePolicy(h.service, {
+    mailboxId: mailbox.id,
     revision: 1,
     name: '之后的首封',
     steps: [{ day: 11, instruction: '确认需求' }],

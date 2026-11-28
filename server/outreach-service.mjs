@@ -1,6 +1,11 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { firstWritingRequirements } from './mail-writing-options.mjs';
 import { templateModelFields } from './sequence-personalization.mjs';
+import {
+  freezeSequencePolicy,
+  mailboxTemplate,
+  sequenceReady,
+} from './outreach-sequence-policy.mjs';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -740,6 +745,79 @@ export class OutreachService {
       )
     );
   }
+  followUpSenders() {
+    const scope = this.getScope();
+    const plans = this.db
+      .prepare(
+        `
+      SELECT json_extract(data,'$.acquisitionSource') AS source,
+             json_extract(data,'$.mailboxIds') AS mailboxIds,
+             json_extract(data,'$.filters.products') AS productIds,
+             json_extract(data,'$.productScopes') AS productScopes
+      FROM outreach_campaigns
+      WHERE json_extract(data,'$.mode')='production'
+        AND json_extract(data,'$.scope')=?
+        AND json_extract(data,'$.status') IN ('active','paused')
+        AND json_extract(data,'$.approvedRevision')=json_extract(data,'$.revision')
+        AND json_extract(data,'$.followUpEnabled')=1
+        AND json_extract(data,'$.deleteRequestedAt') IS NULL
+    `,
+      )
+      .all(scope);
+    if (!plans.length) return [];
+    const now = new Date(this.now());
+    const products = this.salesProducts();
+    const manual = plans
+      .filter((plan) => !plan.source)
+      .map((plan) => {
+        const productIds = JSON.parse(plan.productIds || '[]');
+        const campaign = { productScopes: JSON.parse(plan.productScopes || '[]') };
+        return {
+          mailboxIds: JSON.parse(plan.mailboxIds || '[]'),
+          products: products.filter(
+            (product) =>
+              productIds.includes(product.id) &&
+              eligibleOutreachFacts(product, campaign, now).length,
+          ),
+        };
+      });
+    const authorizedSources = new Set(
+      plans
+        .filter((plan) => plan.source)
+        .map(({ source }) => {
+          const { jobId, generation } = JSON.parse(source);
+          return JSON.stringify([jobId, generation || 0]);
+        }),
+    );
+    const acquisition =
+      authorizedSources.size > 0 &&
+      this.acquisitionSources().some(
+        ({ jobId, generation, status, scope: sourceScope }) =>
+          sourceScope === scope &&
+          ['active', 'paused'].includes(status) &&
+          authorizedSources.has(JSON.stringify([jobId, generation || 0])),
+      );
+    const acquisitionProducts = acquisition
+      ? products.filter(
+          (product) =>
+            eligibleOutreachFacts(product, { productScopes: [outreachProductScope(product)] }, now)
+              .length,
+        )
+      : [];
+    const covers = (box, product) =>
+      box.productIds?.includes(product.id) && siteAllowsProduct(product, box);
+    return this.mailboxes
+      .list()
+      .filter(
+        (box) =>
+          acquisitionProducts.some((product) => covers(box, product)) ||
+          manual.some(
+            (plan) =>
+              plan.mailboxIds.includes(box.id) &&
+              plan.products.some((product) => covers(box, product)),
+          ),
+      );
+  }
   identities(candidate) {
     return [
       `company:${candidate.customerId}`,
@@ -1018,8 +1096,10 @@ export class OutreachService {
     const { identities, blocked: stopped } = this.contactState(ignoreDelivery);
     const identityValues = (keys) =>
       [...keys].map((key) => key.replace(/^(company|domain|email):/, ''));
+    const policy = this.followUps.policy();
     const mailboxes = this.mailboxes.list().map((m) => ({
       ...m,
+      sequenceReady: sequenceReady(policy, m),
       workload: history.filter(
         (d) =>
           d.mailboxId === m.id &&
@@ -1095,7 +1175,8 @@ export class OutreachService {
     if (!this.acquisitionAllowed(c)) throw fail(409, '获客自动首发已暂停或关闭');
     this.validateProductSelection(c);
     if (
-      templateModelFields(this.followUps.policy().firstTemplate, true).needed &&
+      !c.acquisitionSource &&
+      this.firstTouchNeedsModel(c.mailboxIds) &&
       !this.generatorClient().configured
     )
       throw fail(503, '请先在API连接中配置模型');
@@ -1267,9 +1348,15 @@ export class OutreachService {
           }
           continue;
         }
-        const template = this.followUps.policy();
+        const policy = this.followUps.policy();
+        const template = mailboxTemplate(policy, mailbox);
+        if (!sequenceReady(policy, mailbox)) {
+          const reason = '请先配齐发件邮箱的首封和各轮跟进话术';
+          configurationIssues.set(reason, (configurationIssues.get(reason) || 0) + 1);
+          continue;
+        }
         const d = {
-          firstTemplateRevision: template.revision,
+          firstTemplateRevision: policy.revision,
           id: unfinished?.id || randomUUID(),
           campaignId: id,
           mode: 'production',
@@ -1442,6 +1529,17 @@ export class OutreachService {
       });
     }
   }
+  firstTouchNeedsModel(mailboxIds) {
+    const policy = this.followUps.policy();
+    const templates = mailboxIds.flatMap((id) => {
+      const box = this.mailboxes.get(id);
+      return box && sequenceReady(policy, box) ? [mailboxTemplate(policy, box).firstTemplate] : [];
+    });
+    return (
+      templates.length > 0 &&
+      templates.every((template) => templateModelFields(template, true).needed)
+    );
+  }
   activate(id, revision) {
     const c = this.campaign(id);
     if (
@@ -1452,10 +1550,7 @@ export class OutreachService {
     )
       throw fail(409, '计划已更新或正在处理，请刷新后启动');
     this.validateProductSelection(c);
-    if (
-      templateModelFields(this.followUps.policy().firstTemplate, true).needed &&
-      !this.generatorClient().configured
-    )
+    if (this.firstTouchNeedsModel(c.mailboxIds) && !this.generatorClient().configured)
       throw fail(503, '请先配置邮件生成模型');
     if (
       !c.mailboxIds.length ||
@@ -1789,7 +1884,13 @@ export class OutreachService {
       for (const d of this.deliveries(c.id, ['queued'])) {
         if (used.has(d.mailboxId)) continue;
         const m = this.mailboxes.get(d.mailboxId);
-        if (!this.canDispatch(c, d, m)) continue;
+        if (
+          !this.canDispatch(c, d, m) ||
+          (c.mode === 'production' &&
+            matchesSender(m, d.senderVersion) &&
+            !sequenceReady(this.followUps.policy(), m))
+        )
+          continue;
         used.add(d.mailboxId);
         await this.dispatch(c, d, m);
       }
@@ -2007,13 +2108,17 @@ export class OutreachService {
                 : '');
             if (reason)
               throw Object.assign(fail(409, reason), { code: 'OUTREACH_PRE_SEND_BLOCKED' });
+            if (campaign.mode === 'production' && !sequenceReady(this.followUps.policy(), m))
+              throw Object.assign(fail(409, '请先配齐发件邮箱的话术'), {
+                code: 'OUTREACH_SEQUENCE_INCOMPLETE',
+              });
             // Freeze the policy immediately before SMTP handoff, after transport setup.
             this.transaction(() => {
               pending.submittedAt = iso(this.now);
               pending.followUpAtSubmission =
                 campaign.mode === 'production' && campaign.followUpEnabled === true;
               if (pending.followUpAtSubmission)
-                pending.sequencePolicyRevision = this.followUps.policy().revision;
+                pending.sequencePolicyRevision = freezeSequencePolicy(this, m).revision;
               this.putDelivery(pending);
             });
           },
@@ -2057,7 +2162,7 @@ export class OutreachService {
         }
       }
     } catch (error) {
-      if (error.code === 'OUTREACH_MAINTENANCE') {
+      if (['OUTREACH_MAINTENANCE', 'OUTREACH_SEQUENCE_INCOMPLETE'].includes(error.code)) {
         this.putDelivery(d);
         return;
       }

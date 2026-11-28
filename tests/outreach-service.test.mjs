@@ -7,6 +7,7 @@ import { previewOutreachTemplate } from '../server/outreach-template-preview.mjs
 import { OutreachService } from '../server/outreach-service.mjs';
 import { eligibleOutreachFacts } from '../server/outreach-content.mjs';
 import { saveSequencePolicy } from '../server/outreach-sequence-policy.mjs';
+import { defaultTemplate } from '../src/domain/sequence-email.mjs';
 
 function buyer(id = 'buyer-one', product = 'PVC shutters') {
   const domain = `${id}.example.org`;
@@ -1449,7 +1450,19 @@ test('首次生成失败时发生资料变化，仍保留待重做状态与原�
 
 async function followUpHarness(options) {
   const h = harness(options);
-  if (options?.policy) saveSequencePolicy(h.service, { revision: 1, ...options.policy });
+  if (options?.policy) {
+    for (const box of h.boxes) {
+      h.policy = saveSequencePolicy(h.service, {
+        ...options.policy,
+        mailboxId: box.id,
+        revision: h.service.followUps.policy().revision,
+        steps: options.policy.steps.map((step) => ({
+          ...step,
+          template: step.template ?? defaultTemplate(false),
+        })),
+      });
+    }
+  }
   h.service.mailboxes.readMailbox = async () => ({ folders: [], hasMore: false });
   h.service.generator.generateFollowUp = async ({ step }) =>
     step === 1
@@ -1603,8 +1616,14 @@ test('自定义三步在首封提交时冻结规则，重启后将各步要求�
     policy: { name: '采购沟通', steps },
   });
   try {
-    assert.equal(h.first.sequencePolicyRevision, 2);
-    saveSequencePolicy(h.service, { name: '仅首封', revision: 2, steps: [] });
+    const frozen = h.service.followUps.policy(h.first.sequencePolicyRevision);
+    assert.equal(frozen.mailboxPolicyRevision, h.policy.revision + 1);
+    saveSequencePolicy(h.service, {
+      name: '仅首封',
+      mailboxId: h.first.mailboxId,
+      revision: frozen.mailboxPolicyRevision,
+      steps: [],
+    });
     await h.service.close();
     h.service = new OutreachService(h.serviceOptions);
     delete h.service.generator.generateFollowUp;
@@ -1652,7 +1671,9 @@ test('自定义三步在首封提交时冻结规则，重启后将各步要求�
         );
     }
     assert.ok(
-      h.service.followUps.all().every((s) => s.status === 'accepted' && s.policyRevision === 2),
+      h.service.followUps
+        .all()
+        .every((s) => s.status === 'accepted' && s.policyRevision === frozen.mailboxPolicyRevision),
     );
     assert.equal(h.service.followUps.policy().steps.length, 0);
   } finally {

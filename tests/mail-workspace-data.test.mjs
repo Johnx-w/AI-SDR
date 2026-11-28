@@ -3,14 +3,26 @@ import assert from 'node:assert/strict';
 import { OutreachService } from '../server/outreach-service.mjs';
 import { handleOutreach } from '../server/outreach-api.mjs';
 import { siteAllowsProduct } from '../src/domain/mail-site.mjs';
+import { defaultTemplate } from '../src/domain/sequence-email.mjs';
+import { outreachProductScope } from '../server/outreach-content.mjs';
+const sequencePath = '/sequence-policy?mailboxId=box';
+const sampleProduct = { id: 'sample', status: 'approved', englishName: 'Roller blinds' };
 function api(t) {
   const mailbox = {
     id: 'box',
     website: 'https://dealer.test',
     brandName: 'Dealer',
     email: 'sales@dealer.test',
+    configured: true,
+    smtpStatus: 'connected',
+    displayName: 'Dealer',
+    signature: 'Dealer sales',
+    productIds: ['sample'],
   };
-  const service = new OutreachService({ mailboxes: { list: () => [mailbox] } });
+  const service = new OutreachService({
+    mailboxes: { list: () => [mailbox], get: (id) => (id === mailbox.id ? mailbox : undefined) },
+    products: () => [sampleProduct],
+  });
   t.after(() => service.close());
   const call = (path, method = 'GET', body) =>
     handleOutreach({
@@ -60,7 +72,7 @@ test('预览选项只读本地配置且不返回联系人清单', async (t) => {
 
 test('保存、重读及重试均保留模板和自定义变量，步骤之间独立', async (t) => {
   const { call } = api(t);
-  const initial = await call('/sequence-policy');
+  const initial = await call(sequencePath);
   const custom = {
     key: 'custom_Opening',
     label: 'Opening',
@@ -74,12 +86,12 @@ test('保存、重读及重试均保留模板和自定义变量，步骤之间�
       { day: 5, instruction: 'Ask one new question.' },
     ],
   };
-  const saved = await call('/sequence-policy', 'PUT', input);
+  const saved = await call(sequencePath, 'PUT', input);
   assert.deepEqual(saved.steps, input.steps);
-  assert.deepEqual((await call('/sequence-policy')).firstTemplate, input.firstTemplate);
-  assert.deepEqual(await call('/sequence-policy', 'PUT', input), saved);
+  assert.deepEqual((await call(sequencePath)).firstTemplate, input.firstTemplate);
+  assert.deepEqual(await call(sequencePath, 'PUT', input), saved);
   await assert.rejects(
-    call('/sequence-policy', 'PUT', {
+    call(sequencePath, 'PUT', {
       ...saved,
       firstTemplate: { subject: '{{unknown}}', body: 'Draft' },
     }),
@@ -100,6 +112,8 @@ test('跟进序列分页读取正式首封与该客户的两次跟进，不取�
   for (let i = 0; i < 24; i++) {
     const d = {
       id: 'mail' + i,
+      mailboxId: 'box',
+      from: 'sales@dealer.test',
       campaignId: 'plan',
       mode: 'production',
       companyName: 'Company ' + i,
@@ -130,7 +144,7 @@ test('跟进序列分页读取正式首封与该客户的两次跟进，不取�
 
 test('工作区无计划时可发布跟进策略，重复保存幂等，并发过期写入不会覆盖', async (t) => {
   const { call } = api(t),
-    initial = await call('/sequence-policy');
+    initial = await call(sequencePath);
   assert.deepEqual(
     initial.steps.map((s) => s.day),
     [3, 7],
@@ -144,21 +158,21 @@ test('工作区无计划时可发布跟进策略，重复保存幂等，并发�
       { day: 1, instruction: '确认选型' },
     ],
   };
-  const changed = await call('/sequence-policy', 'PUT', input);
+  const changed = await call(sequencePath, 'PUT', input);
   assert.deepEqual(
     changed.steps.map((s) => s.day),
     [1, 6],
   );
-  assert.deepEqual(await call('/sequence-policy', 'PUT', input), changed);
+  assert.deepEqual(await call(sequencePath, 'PUT', input), changed);
   for (const steps of [
     [{ day: 0, instruction: 'x' }],
     [{ day: 366, instruction: 'x' }],
-    [{ day: 1, instruction: ' ' }],
+    [{ day: 1, template: { subject: '', body: ' ' } }],
     [changed.steps[0], changed.steps[0]],
   ])
-    await assert.rejects(call('/sequence-policy', 'PUT', { ...changed, steps }), { status: 400 });
+    await assert.rejects(call(sequencePath, 'PUT', { ...changed, steps }), { status: 400 });
   const writes = await Promise.allSettled(
-    ['A', 'B'].map((name) => call('/sequence-policy', 'PUT', { ...changed, name })),
+    ['A', 'B'].map((name) => call(sequencePath, 'PUT', { ...changed, name })),
   );
   assert.equal(writes.filter((w) => w.status === 'fulfilled').length, 1);
   assert.equal(writes.find((w) => w.status === 'rejected').reason.status, 409);
@@ -169,6 +183,12 @@ test('同一计划的不同首封沿用各自版本，零步和旧格式记录�
   const plan = {
     id: 'plan',
     name: '采购团队',
+    scope: service.getScope(),
+    mailboxIds: ['box'],
+    filters: { products: [sampleProduct.id] },
+    productScopes: [outreachProductScope(sampleProduct)],
+    revision: 1,
+    approvedRevision: 1,
     mode: 'production',
     status: 'active',
     followUpEnabled: true,
@@ -177,6 +197,8 @@ test('同一计划的不同首封沿用各自版本，零步和旧格式记录�
   const enroll = (id) => {
     const d = {
       id,
+      mailboxId: 'box',
+      from: 'sales@dealer.test',
       campaignId: plan.id,
       mode: 'production',
       status: 'accepted',
@@ -190,13 +212,13 @@ test('同一计划的不同首封沿用各自版本，零步和旧格式记录�
   service.db.exec(
     "UPDATE outreach_followups SET data=json_remove(data,'$.day','$.instruction','$.policyRevision','$.policyName'); UPDATE outreach_deliveries SET data=json_remove(data,'$.sequencePolicyRevision')",
   );
-  const initial = await call('/sequence-policy');
+  const initial = await call(sequencePath);
   const update = async (steps) =>
-    call('/sequence-policy', 'PUT', { ...(await call('/sequence-policy')), name: '新版', steps });
+    call(sequencePath, 'PUT', { ...(await call(sequencePath)), name: '新版', steps });
   const custom = await update([
-    { day: 2, instruction: '核对用途' },
-    { day: 8, instruction: '询问联系人' },
-    { day: 12, instruction: '请求确认' },
+    { day: 2, instruction: '核对用途', template: defaultTemplate(false) },
+    { day: 8, instruction: '询问联系人', template: defaultTemplate(false) },
+    { day: 12, instruction: '请求确认', template: defaultTemplate(false) },
   ]);
   enroll('custom');
   await update([]);
@@ -263,12 +285,12 @@ test('收件箱可翻过第两百段会话，正文搜索及来信筛选使用�
 
 test('首封模板经保存后可读回，旧客户端编辑跟进时保留首封模板', async (t) => {
   const { call } = api(t);
-  const base = await call('/sequence-policy');
+  const base = await call(sequencePath);
   const firstInstruction = 'Would a one-page product list be helpful?';
-  const next = await call('/sequence-policy', 'PUT', { ...base, firstInstruction });
+  const next = await call(sequencePath, 'PUT', { ...base, firstInstruction });
   assert.equal(next.revision, base.revision + 1);
-  assert.equal((await call('/sequence-policy')).firstInstruction, firstInstruction);
-  const legacyEdit = await call('/sequence-policy', 'PUT', {
+  assert.equal((await call(sequencePath)).firstInstruction, firstInstruction);
+  const legacyEdit = await call(sequencePath, 'PUT', {
     name: '仅首封',
     revision: next.revision,
     steps: [],
@@ -278,30 +300,35 @@ test('首封模板经保存后可读回，旧客户端编辑跟进时保留首�
 
 test('首封和各跟进独立保存写法，旧格式更新保留选择，显式清空恢复默认', async (t) => {
   const { call } = api(t);
-  const base = await call('/sequence-policy');
+  const base = await call(sequencePath);
   const input = {
     ...base,
     firstWriting: { tone: 'warm' },
     steps: [
-      { day: 3, instruction: '', writing: { angle: 'installation' } },
+      {
+        day: 3,
+        instruction: '',
+        writing: { angle: 'installation' },
+        template: defaultTemplate(false),
+      },
       { day: 8, instruction: '确认采购方式', writing: { reply: 'sourcing' } },
       { day: 10, instruction: '确认是否方便联系' },
     ],
   };
-  const saved = await call('/sequence-policy', 'PUT', input);
-  assert.deepEqual((await call('/sequence-policy')).steps, input.steps);
+  const saved = await call(sequencePath, 'PUT', input);
+  assert.deepEqual((await call(sequencePath)).steps, input.steps);
   assert.deepEqual(saved.firstWriting, input.firstWriting);
-  const oldClient = await call('/sequence-policy', 'PUT', {
+  const oldClient = await call(sequencePath, 'PUT', {
     revision: saved.revision,
     name: '新版',
     steps: input.steps.map(({ day, instruction }) => ({ day, instruction })),
   });
   assert.deepEqual(oldClient.steps, saved.steps);
   await assert.rejects(
-    call('/sequence-policy', 'PUT', { ...oldClient, firstWriting: { tone: 'unrecognized' } }),
+    call(sequencePath, 'PUT', { ...oldClient, firstWriting: { tone: 'unrecognized' } }),
     { status: 400 },
   );
-  const cleared = await call('/sequence-policy', 'PUT', {
+  const cleared = await call(sequencePath, 'PUT', {
     ...oldClient,
     firstWriting: {},
     steps: oldClient.steps.map((s, i) => (i === 1 ? { ...s, writing: {} } : s)),

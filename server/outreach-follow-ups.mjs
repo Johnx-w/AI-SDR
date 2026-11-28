@@ -19,6 +19,8 @@ import { createResearchProviders } from './research-providers.mjs';
 import {
   initializeSequencePolicy,
   sequencePolicy,
+  currentSequencePolicy,
+  freezeSequencePolicy,
   legacyFollowUpStep,
 } from './outreach-sequence-policy.mjs';
 import { renderMailboxSignature, signaturePlainTextHtml } from '../src/domain/mail-signature.mjs';
@@ -220,7 +222,7 @@ export class OutreachFollowUps {
   constructor(service, recordTask) {
     this.service = service;
     this.recordTask = recordTask;
-    initializeSequencePolicy(service.db);
+    service.transaction(() => initializeSequencePolicy(service));
     service.db
       .exec(`CREATE TABLE IF NOT EXISTS outreach_followups(id TEXT PRIMARY KEY,state TEXT NOT NULL,data TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS outreach_followups_state ON outreach_followups(state);
@@ -271,7 +273,9 @@ export class OutreachFollowUps {
     return result.changes ? updated : this.get(item.id);
   }
   policy(revision) {
-    return sequencePolicy(this.service.db, revision);
+    return revision === undefined
+      ? currentSequencePolicy(this.service)
+      : sequencePolicy(this.service.db, revision);
   }
   schedule(first, campaign) {
     if (
@@ -293,7 +297,10 @@ export class OutreachFollowUps {
             "SELECT 1 FROM outreach_followups WHERE json_extract(data,'$.firstId')=? LIMIT 1",
           )
           .get(first.id));
-    const policy = this.policy(stored.sequencePolicyRevision || (legacyScheduled ? 1 : undefined));
+    const policy =
+      stored.sequencePolicyRevision || legacyScheduled
+        ? this.policy(stored.sequencePolicyRevision || 1)
+        : freezeSequencePolicy(s, { id: first.mailboxId, email: first.from });
     if (!stored.sequencePolicyRevision)
       s.db
         .prepare(
@@ -316,7 +323,7 @@ export class OutreachFollowUps {
         day,
         ...(template && { template }),
         instruction: followWritingRequirement(instruction, writing),
-        policyRevision: policy.revision,
+        policyRevision: policy.mailboxPolicyRevision ?? policy.revision,
         policyName: policy.name,
         status: 'pending',
         reason: '',
